@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "name": "PS3 (PSL1GHT)",
+            "includePath": [
+                "${workspaceFolder}/source",
+                "/home/Monty/ps3toolchain/PSL1GHT/ppu/include"
+            ],
+            "defines": [
+                "__PPU__"
+            ],
+            "cStandard": "c11",
+            "cppStandard": "c++11",
+            "intelliSenseMode": "gcc-x64"
+        }
+    ],
+    "version": 4
+}
