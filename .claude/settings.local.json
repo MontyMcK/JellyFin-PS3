@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/Monty/ps3toolchain/PSL1GHT/samples/audio/audiosync/source/**)"
+    ]
+  }
+}
