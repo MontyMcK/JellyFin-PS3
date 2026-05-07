@@ -1,19 +1,34 @@
 video.o: /home/Monty/Desktop/jellyfin-ps3/source/video.cpp \
  /home/Monty/Desktop/jellyfin-ps3/source/video.h \
- /usr/local/ps3dev/ppu/include/ppu-types.h \
+ /home/Monty/ps3toolchain/PSL1GHT/ppu/include/ppu-types.h \
+ /home/Monty/ps3toolchain/PSL1GHT/ppu/include/sys/mutex.h \
+ /home/Monty/ps3toolchain/PSL1GHT/ppu/include/ppu-lv2.h \
+ /home/Monty/ps3toolchain/PSL1GHT/ppu/include/lv2/mutex.h \
+ /home/Monty/Desktop/jellyfin-ps3/source/adec.h \
  /home/Monty/Desktop/jellyfin-ps3/source/plog.h \
- /usr/local/ps3dev/ppu/include/ppu-asm.h \
- /usr/local/ps3dev/ppu/include/sysmodule/sysmodule.h \
- /usr/local/ps3dev/ppu/include/codec/vdec.h
+ /home/Monty/Desktop/jellyfin-ps3/source/timing.h \
+ /home/Monty/ps3toolchain/PSL1GHT/ppu/include/ppu-asm.h \
+ /home/Monty/ps3toolchain/PSL1GHT/ppu/include/sysmodule/sysmodule.h \
+ /home/Monty/ps3toolchain/PSL1GHT/ppu/include/codec/vdec.h
 
 /home/Monty/Desktop/jellyfin-ps3/source/video.h:
 
-/usr/local/ps3dev/ppu/include/ppu-types.h:
+/home/Monty/ps3toolchain/PSL1GHT/ppu/include/ppu-types.h:
+
+/home/Monty/ps3toolchain/PSL1GHT/ppu/include/sys/mutex.h:
+
+/home/Monty/ps3toolchain/PSL1GHT/ppu/include/ppu-lv2.h:
+
+/home/Monty/ps3toolchain/PSL1GHT/ppu/include/lv2/mutex.h:
+
+/home/Monty/Desktop/jellyfin-ps3/source/adec.h:
 
 /home/Monty/Desktop/jellyfin-ps3/source/plog.h:
 
-/usr/local/ps3dev/ppu/include/ppu-asm.h:
+/home/Monty/Desktop/jellyfin-ps3/source/timing.h:
 
-/usr/local/ps3dev/ppu/include/sysmodule/sysmodule.h:
+/home/Monty/ps3toolchain/PSL1GHT/ppu/include/ppu-asm.h:
 
-/usr/local/ps3dev/ppu/include/codec/vdec.h:
+/home/Monty/ps3toolchain/PSL1GHT/ppu/include/sysmodule/sysmodule.h:
+
+/home/Monty/ps3toolchain/PSL1GHT/ppu/include/codec/vdec.h:

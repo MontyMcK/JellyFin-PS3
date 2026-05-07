@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "adec.h"
 #include "plog.h"
 
 #include <stdio.h>
@@ -16,21 +17,30 @@ static u32               s_data_start      = 0;
 static u32               s_num_blocks      = 0;
 
 // Total audio blocks consumed since port start.  Incremented once per
-// sysEventQueueReceive success in audio_silence().  Each block = 256 samples
+// sysEventQueueReceive success in audio_write_pcm().  Each block = 256 samples
 // at 48 kHz = 5.333 ms.  Useful for A/V sync diagnostics.
 static volatile u64 s_audio_blocks = 0;
 
 u64 audio_block_count(void) { return s_audio_blocks; }
 
 void audio_open(void) {
-    if (audioInit() != 0) return;
+    int rc;
+    char buf[128];
+
+    rc = audioInit();
+    snprintf(buf, sizeof(buf), "audio: sysAudioInit rc=0x%x", rc);
+    plog(buf);
+    if (rc != 0) return;
 
     audioPortParam p;
     p.numChannels = AUDIO_PORT_2CH;
     p.numBlocks   = AUDIO_BLOCK_8;
     p.attrib      = 0;
     p.level       = 1.0f;
-    if (audioPortOpen(&p, &s_audio_port) != 0) { audioQuit(); return; }
+    rc = audioPortOpen(&p, &s_audio_port);
+    snprintf(buf, sizeof(buf), "audio: sysAudioPortOpen rc=0x%x port=%u", rc, s_audio_port);
+    plog(buf);
+    if (rc != 0) { audioQuit(); return; }
 
     // Per PSL1GHT docs the correct sequence is:
     //   Open → GetPortConfig → CreateEventQueue → SetEventQueue → Start
@@ -38,7 +48,20 @@ void audio_open(void) {
     // as soon as the port is opened.
     audioPortConfig cfg;
     memset(&cfg, 0, sizeof(cfg));
-    if (audioGetPortConfig(s_audio_port, &cfg) == 0 && cfg.audioDataStart) {
+    rc = audioGetPortConfig(s_audio_port, &cfg);
+    snprintf(buf, sizeof(buf), "audio: sysAudioGetPortConfig rc=0x%x", rc);
+    plog(buf);
+    snprintf(buf, sizeof(buf),
+             "audio: cfg readIndex=0x%x status=0x%x",
+             (unsigned)cfg.readIndex, (unsigned)cfg.status);
+    plog(buf);
+    snprintf(buf, sizeof(buf),
+             "audio: cfg channelCount=0x%x portSize=0x%x portAddr=0x%x",
+             (unsigned)cfg.channelCount, (unsigned)cfg.portSize,
+             (unsigned)cfg.audioDataStart);
+    plog(buf);
+
+    if (rc == 0 && cfg.audioDataStart) {
         u32 nb = (u32)p.numBlocks;  // known value — don't trust cfg.numBlocks yet
         s_read_index_addr = cfg.readIndex;   // address of live SPU read-position u32
         s_data_start      = cfg.audioDataStart;
@@ -46,7 +69,6 @@ void audio_open(void) {
         // Zero the entire DMA ring.  Hardware reads zeros → digital silence.
         memset((void*)(uintptr_t)cfg.audioDataStart, 0,
                nb * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float));
-        char buf[96];
         snprintf(buf, sizeof(buf),
                  "audio: pre-filled %u blocks start=0x%x ri_addr=0x%x",
                  nb, cfg.audioDataStart, cfg.readIndex);
@@ -58,9 +80,13 @@ void audio_open(void) {
     if (audioCreateNotifyEventQueue(&s_audio_eq, &s_audio_key) != 0) {
         audioPortClose(s_audio_port); audioQuit(); return;
     }
-    audioSetNotifyEventQueue(s_audio_key);
+    rc = audioSetNotifyEventQueue(s_audio_key);
+    snprintf(buf, sizeof(buf), "audio: audioSetNotifyEventQueue rc=0x%x", rc);
+    plog(buf);
 
-    audioPortStart(s_audio_port);
+    rc = audioPortStart(s_audio_port);
+    snprintf(buf, sizeof(buf), "audio: sysAudioPortStart rc=0x%x", rc);
+    plog(buf);
 
     // Drain any spurious events that may have queued before Start completed.
     { sys_event_t ev; while (sysEventQueueReceive(s_audio_eq, &ev, 1) == 0) { } }
@@ -68,23 +94,38 @@ void audio_open(void) {
     s_audio_ok = true;
 }
 
-// Called once per displayed frame.  Drains the audio event queue with a 1 µs
-// poll so the kernel queue never overflows.  Counts consumed blocks so callers
-// can track elapsed audio time without additional syscalls.
-// Must not call plog() — plog() flushes to HDD and stalls the PPU.
-void audio_silence(void) {
+// Called from the dedicated audio thread.  Drains the audio event queue and
+// fills each DMA block with decoded PCM from the adec ring, or silence.
+void audio_write_pcm(void) {
     if (!s_audio_ok) return;
+    static int s_clock_zero_count = 0;
     sys_event_t ev;
     while (sysEventQueueReceive(s_audio_eq, &ev, 1) == 0) {
         if (s_read_index_addr && s_data_start) {
-            // readIndex holds an ADDRESS to a u64 counter the SPU increments.
-            // Read as u64* — on big-endian PS3, a u32* read would return the
-            // high 32 bits (always 0 for block indices 0-7), giving blk=0 always.
-            volatile u64 *ri_ptr  = (volatile u64 *)(uintptr_t)s_read_index_addr;
-            u32           blk     = (u32)((*ri_ptr + 1) % s_num_blocks);
-            float        *block   = (float *)(uintptr_t)(s_data_start +
-                                    blk * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float));
-            memset(block, 0, 2 * AUDIO_BLOCK_SAMPLES * sizeof(float));
+            // readIndex holds an ADDRESS to a u32 block index the SPU increments.
+            volatile u32 *ri_ptr = (volatile u32 *)(uintptr_t)s_read_index_addr;
+            u32 clk = *ri_ptr;
+            if (clk == 0) {
+                s_clock_zero_count++;
+                if (s_clock_zero_count > 2) {
+                    char buf[64];
+                    snprintf(buf, sizeof(buf),
+                        "WARN audio: clock stalled %d frames", s_clock_zero_count);
+                    plog(buf);
+                }
+            } else {
+                s_clock_zero_count = 0;
+            }
+            u32  blk   = (clk + 1) % s_num_blocks;
+            u32  addr  = s_data_start + blk * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float);
+            float *blk_buf = (float *)(uintptr_t)addr;
+            float interleaved[AUDIO_BLOCK_SAMPLES * 2];
+            int got = adec_read_pcm(interleaved, AUDIO_BLOCK_SAMPLES);
+            // Deinterleave: PS3 expects all L samples then all R samples
+            for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
+                blk_buf[i]                      = (i < got) ? interleaved[i * 2]     : 0.0f;  // L
+                blk_buf[AUDIO_BLOCK_SAMPLES + i] = (i < got) ? interleaved[i * 2 + 1] : 0.0f;  // R
+            }
         }
         s_audio_blocks++;
     }

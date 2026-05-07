@@ -138,8 +138,7 @@ void waitflip()
 
 void flip()
 {
-	if(!first_fb) waitflip();
-	else gcmResetFlipStatus();
+	if(first_fb) gcmResetFlipStatus();
 
 	gcmSetFlip(context,curr_fb);
 	rsxFlushBuffer(context);

@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Read(//home/Monty/ps3toolchain/PSL1GHT/samples/audio/audiosync/source/**)"
+      "Read(//home/Monty/ps3toolchain/PSL1GHT/samples/audio/audiosync/source/**)",
+      "Read(//home/Monty/ps3toolchain/**)",
+      "Bash(PSL1GHT=/home/Monty/ps3toolchain/PSL1GHT PS3DEV=/run/host/usr/local/ps3dev make)",
+      "Read(//run/host/**)"
     ]
   }
 }
