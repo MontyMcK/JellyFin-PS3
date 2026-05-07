@@ -28,7 +28,7 @@ A native PS3 homebrew Jellyfin client written in C++ using PSL1GHT, targeting Ev
 make clean && make
 ```
 
-Output: `jellyfin-ps3.elf`
+Output: `jellyfin-ps3.self`
 
 Transfer to PS3 via FTP or USB and launch through webMAN or multiMAN.
 
