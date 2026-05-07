@@ -18,7 +18,7 @@ A native PS3 homebrew Jellyfin client written in C++ using PSL1GHT, targeting Ev
 
 ## Requirements
 
-- PS3 with Evilnat CFW (CEX)
+- PS3 with Evilnat CFW or HEN (CEX)
 - PSL1GHT toolchain (`ppu-g++` at `/usr/local/ps3dev/ppu/bin/`)
 - Jellyfin server accessible on local network
 
