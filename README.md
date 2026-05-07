@@ -64,7 +64,7 @@ jellyfin-ps3/
 
 ## Status
 
-Work in progress. Video playback (work in progress), library browsing, and login are functional. Audio playback active development.
+Work in progress. library browsing, and login are functional. Audio playback and Video playback active development.
 
 ## License
 
