@@ -39,6 +39,7 @@ Transfer to PS3 via FTP or USB and launch through webMAN or multiMAN.
 | X | Select |
 | O | Back |
 | Start | Exit media player |
+| D-pad| Navigate Menus |
 
 ## File Structure
 
