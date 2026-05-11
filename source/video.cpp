@@ -330,7 +330,6 @@ static void vdec_submit(const u8 *data, int len, u64 pts) {
             retries++;
         }
     } while (dret == (s32)VDEC_ERROR_BUSY && retries < 200);
-    usleep(5000);  // TEST ONLY: slow AU submission to confirm SPU race
 
     if (dret != 0) {
         char buf[64];
@@ -397,23 +396,22 @@ bool vdec_pull_frame(void) {
     if (full) return false;
     if (s_frames_ready <= 0) return false;
 
-    // Peek at actual decoded frame dimensions before consuming.
-    // VDEC may write fewer rows than s_jbuf_fh (e.g. 1280×534 for 2.35:1 content);
-    // using the wrong height makes the centering treat black rows as picture rows.
     u32 pic_addr = 0;
-    if (vdecGetPicItem(s_vdec, &pic_addr) == 0 && pic_addr != 0) {
-        const vdecPicture  *pic = (const vdecPicture*)(uintptr_t)pic_addr;
-        if (pic->codec_specific_addr) {
-            const vdecH264Info *h = (const vdecH264Info*)(uintptr_t)pic->codec_specific_addr;
-            if (h->width > 0 && h->height > 0 &&
-                (h->width != s_jbuf_fw || h->height != s_jbuf_fh)) {
-                char buf[80];
-                snprintf(buf, sizeof(buf), "vdec: actual %ux%u (alloc %ux%u)",
-                         h->width, h->height, s_jbuf_fw, s_jbuf_fh);
-                plog(buf);
-                s_jbuf_fw = h->width;
-                s_jbuf_fh = h->height;
-            }
+    if (vdecGetPicItem(s_vdec, &pic_addr) != 0 || pic_addr == 0)
+        return false;
+
+    const vdecPicture *pic = (const vdecPicture*)(uintptr_t)pic_addr;
+    if (pic->codec_specific_addr) {
+        const vdecH264Info *h =
+            (const vdecH264Info*)(uintptr_t)pic->codec_specific_addr;
+        if (h->width > 0 && h->height > 0 &&
+            (h->width != s_jbuf_fw || h->height != s_jbuf_fh)) {
+            char buf[80];
+            snprintf(buf, sizeof(buf), "vdec: actual %ux%u (alloc %ux%u)",
+                     h->width, h->height, s_jbuf_fw, s_jbuf_fh);
+            plog(buf);
+            s_jbuf_fw = h->width;
+            s_jbuf_fh = h->height;
         }
     }
 
