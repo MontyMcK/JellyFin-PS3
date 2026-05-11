@@ -386,6 +386,7 @@ void      jbuf_pop(void)   { s_jb_rd = (s_jb_rd + 1) % JBUF_SIZE; s_jb_n--; }
 u32       jbuf_fw(void)    { return s_jbuf_fw; }
 u32       jbuf_fh(void)    { return s_jbuf_fh; }
 int       jbuf_count(void) { return s_jb_n; }
+int       jbuf_rd(void)    { return s_jb_rd; }
 
 // Pull one decoded frame into the next free jitter buffer slot.
 // Called only from the decode thread; s_jbuf_mtx guards s_jb_n.
@@ -420,13 +421,6 @@ bool vdec_pull_frame(void) {
     vfmt.format_type  = VDEC_PICFMT_ARGB32;
     vfmt.color_matrix = VDEC_COLOR_MATRIX_BT709;
     vfmt.alpha        = 0xFF;
-    if (s_jb_wr == s_jb_rd) {
-        char buf[128];
-        snprintf(buf, sizeof(buf),
-            "CORRUPT: wr==rd collision wr=%d rd=%d frames_ready=%d",
-            s_jb_wr, s_jb_rd, (int)s_frames_ready);
-        plog(buf);
-    }
     s32 gpret = vdecGetPicture(s_vdec, &vfmt, s_jbuf_data[s_jb_wr]);
     if (gpret != 0) {
         char buf[128];
@@ -434,6 +428,17 @@ bool vdec_pull_frame(void) {
             (unsigned)gpret, s_jb_wr);
         plog(buf);
         return false;
+    }
+    {
+        static int s_sw_count = 0;
+        if (s_sw_count < 60) {
+            u32 centre_px = ((u32*)s_jbuf_data[s_jb_wr])[(408/2) * 960 + (960/2)];
+            char buf[64];
+            snprintf(buf, sizeof(buf), "slot_write: slot=%d px=0x%08x",
+                s_jb_wr, centre_px);
+            plog(buf);
+            s_sw_count++;
+        }
     }
     s_frames_ready--;
     sysMutexLock(s_jbuf_mtx, 0);

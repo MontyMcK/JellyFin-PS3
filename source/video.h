@@ -26,6 +26,7 @@ void         jbuf_pop(void);
 u32          jbuf_fw(void);
 u32          jbuf_fh(void);
 int          jbuf_count(void);
+int          jbuf_rd(void);
 
 // ---- Jitter buffer mutex (guards s_jb_n; lock before jbuf_peek/pop) ----
 extern sys_mutex_t s_jbuf_mtx;

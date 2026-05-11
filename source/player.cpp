@@ -517,6 +517,18 @@ void show_player(const JFItem *item) {
                     s_cpx[3] = cx;
                 }
 
+                {
+                    static int s_sr_count = 0;
+                    if (s_sr_count < 60) {
+                        u32 centre_px = ((u32*)rslot)[(408/2) * 960 + (960/2)];
+                        char buf[64];
+                        snprintf(buf, sizeof(buf), "slot_read: slot=%d px=0x%08x",
+                            jbuf_rd(), centre_px);
+                        plog(buf);
+                        s_sr_count++;
+                    }
+                }
+
                 // Precompute source-X and source-Y lookup tables.
                 // One 64-bit divide per output column/row instead of per pixel —
                 // eliminates all software-emulated divides from the inner blit loop.

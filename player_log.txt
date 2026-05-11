@@ -1,189 +1,130 @@
-[2026-05-04 12:36:23] show_player: enter
-[2026-05-04 12:36:23] http://101.100.137.246:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&VideoProfile=baseline&VideoLevel=30&MaxWidth=960&MaxHeight=540&VideoBitrate=4000000&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000&MaxAudioChannels=2&MaxFramerate=30&DeviceId=ps3&Static=false&MediaSourceId=a135c559926c4f9075fb7b99d3d7624a&PlaySessionId=ps3-1777898183
-[2026-05-04 12:36:23] show_player: vdec_open
-[2026-05-04 12:36:23] vdec_open: load VDEC base
-[2026-05-04 12:36:23] vdec_open: load VDEC_H264
-[2026-05-04 12:36:23] vdec_open: mod_ret base=0 h264=0
-[2026-05-04 12:36:23] vdec_open: queryAttr
-[2026-05-04 12:36:23] vdec_open: mem_size=33368829
-[2026-05-04 12:36:23] vdec_open: memalign vdec_mem
-[2026-05-04 12:36:23] vdec_open: memalign au_bufs
-[2026-05-04 12:36:23] cfg: addr=0x52200000 size=33554432(33368829) prio=1000 stack=0x40000 spu_prio=250 spus=1
-[2026-05-04 12:36:23] vdec_cb_opd32: code=0x0001aa90 toc=0x0006f290 fn=0x100d4598
-[2026-05-04 12:36:23] vdec_open: vdecOpen
-[2026-05-04 12:36:23] vdec_open: startSequence
-[2026-05-04 12:36:23] vdec_open: startSequence ret=0
-[2026-05-04 12:36:23] vdec_open: done
-[2026-05-04 12:36:23] show_player: vdec_open OK
-[2026-05-04 12:36:23] show_player: audio_open
-[2026-05-04 12:36:23] audio: sysAudioInit rc=0x0
-[2026-05-04 12:36:23] audio: sysAudioPortOpen rc=0x0 port=0
-[2026-05-04 12:36:23] audio: sysAudioGetPortConfig rc=0x0
-[2026-05-04 12:36:23] audio: cfg readIndex=0x40010010 status=0x1
-[2026-05-04 12:36:23] audio: cfg channelCount=0x2 portSize=0x4000 portAddr=0x40020000
-[2026-05-04 12:36:23] audio: pre-filled 8 blocks start=0x40020000 ri_addr=0x40010010
-[2026-05-04 12:36:23] audio: audioSetNotifyEventQueue rc=0x0
-[2026-05-04 12:36:23] audio: sysAudioPortStart rc=0x0
-[2026-05-04 12:36:23] show_player: audio_open done
-[2026-05-04 12:36:23] show_player: stream_open
-[2026-05-04 12:36:24] stream_open: status=200 OK
+[2026-05-11 12:17:27] show_player: enter
+[2026-05-11 12:17:27] color_buffer[0]=0xce215fc0
+[2026-05-11 12:17:27] color_buffer[1]=0xcda2cf80
+[2026-05-11 12:17:27] http://101.100.137.246:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&VideoProfile=baseline&VideoLevel=30&MaxWidth=960&MaxHeight=540&VideoBitrate=4000000&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000&MaxAudioChannels=2&MaxFramerate=30&DeviceId=ps3&Static=false&MediaSourceId=a135c559926c4f9075fb7b99d3d7624a&PlaySessionId=ps3-1778501847
+[2026-05-11 12:17:27] show_player: vdec_open
+[2026-05-11 12:17:27] vdec_open: load VDEC base
+[2026-05-11 12:17:27] vdec_open: load VDEC_H264
+[2026-05-11 12:17:27] vdec_open: mod_ret base=0 h264=0
+[2026-05-11 12:17:27] vdec_open: queryAttr
+[2026-05-11 12:17:27] vdec_open: mem_size=33368829
+[2026-05-11 12:17:27] vdec_open: memalign vdec_mem
+[2026-05-11 12:17:28] vdec_open: memalign au_bufs
+[2026-05-11 12:17:28] cfg: addr=0x52200000 size=100663296(33368829) prio=500 stack=0x40000 spu_prio=250 spus=3
+[2026-05-11 12:17:28] vdec_cb_opd32: code=0x0001b368 toc=0x0006f2f0 fn=0x101145b8
+[2026-05-11 12:17:28] vdec_open: vdecOpen
+[2026-05-11 12:17:28] vdec_open: startSequence
+[2026-05-11 12:17:28] vdec_open: startSequence ret=0
+[2026-05-11 12:17:28] vdec_open: done
+[2026-05-11 12:17:28] show_player: vdec_open OK
+[2026-05-11 12:17:28] show_player: audio_open
+[2026-05-11 12:17:28] audio: sysAudioInit rc=0x0
+[2026-05-11 12:17:28] audio: sysAudioPortOpen rc=0x0 port=0
+[2026-05-11 12:17:28] audio: sysAudioGetPortConfig rc=0x0
+[2026-05-11 12:17:28] audio: cfg readIndex=0x40010010 status=0x1
+[2026-05-11 12:17:28] audio: cfg channelCount=0x2 portSize=0x4000 portAddr=0x40020000
+[2026-05-11 12:17:28] audio: pre-filled 8 blocks start=0x40020000 ri_addr=0x40010010
+[2026-05-11 12:17:28] audio: audioSetNotifyEventQueue rc=0x0
+[2026-05-11 12:17:28] audio: sysAudioPortStart rc=0x0
+[2026-05-11 12:17:28] show_player: audio_open done
+[2026-05-11 12:17:28] show_player: stream_open
+[2026-05-11 12:17:29] stream_open: status=200 OK
 Conn chunked=1
-[2026-05-04 12:36:24] show_player: stream_open OK
-[2026-05-04 12:36:24] jbuf: 16 slots 960x540 ~2025 KB each
-[2026-05-04 12:36:24] jbuf: pre-fill start
-[2026-05-04 12:36:24] show_player: first pkt byte=0x47
-[2026-05-04 12:36:24] BUSY#1: au_done=1 frames=0
-[2026-05-04 12:36:24] vdec: actual 960x408 (alloc 960x540)
-[2026-05-04 12:36:24] jbuf: pre-fill done — starting decode thread
-[2026-05-04 12:36:24] FI: 0ms / 13ms
-[2026-05-04 12:36:25] FI: 16ms / 13ms
-[2026-05-04 12:36:25] FI: 13ms / 17ms
-[2026-05-04 12:36:26] FI: 14ms / 18ms
-[2026-05-04 12:36:26] FI: 14ms / 13ms
-[2026-05-04 12:36:26] FI: 16ms / 14ms
-[2026-05-04 12:36:27] hb: fr=168 q=2 au=173 ab=336 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:27] FI: 15ms / 21ms
-[2026-05-04 12:36:27] FI: 31ms / 16ms
-[2026-05-04 12:36:28] FI: 18ms / 14ms
-[2026-05-04 12:36:28] FI: 18ms / 14ms
-[2026-05-04 12:36:29] FI: 15ms / 13ms
-[2026-05-04 12:36:29] hb: fr=323 q=2 au=327 ab=647 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:29] FI: 13ms / 13ms
-[2026-05-04 12:36:30] FI: 17ms / 13ms
-[2026-05-04 12:36:30] FI: 13ms / 17ms
-[2026-05-04 12:36:31] FI: 17ms / 13ms
-[2026-05-04 12:36:31] FI: 14ms / 16ms
-[2026-05-04 12:36:32] FI: 16ms / 13ms
-[2026-05-04 12:36:32] hb: fr=487 q=3 au=492 ab=976 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:32] FI: 17ms / 14ms
-[2026-05-04 12:36:33] FI: 17ms / 17ms
-[2026-05-04 12:36:33] FI: 13ms / 13ms
-[2026-05-04 12:36:34] FI: 14ms / 13ms
-[2026-05-04 12:36:34] FI: 15ms / 18ms
-[2026-05-04 12:36:34] hb: fr=651 q=2 au=656 ab=1307 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:34] FI: 17ms / 14ms
-[2026-05-04 12:36:35] FI: 23ms / 16ms
-[2026-05-04 12:36:35] FI: 18ms / 13ms
-[2026-05-04 12:36:36] FI: 13ms / 17ms
-[2026-05-04 12:36:36] FI: 12ms / 16ms
-[2026-05-04 12:36:37] hb: fr=807 q=3 au=813 ab=1619 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:37] FI: 14ms / 15ms
-[2026-05-04 12:36:37] FI: 13ms / 24ms
-[2026-05-04 12:36:38] FI: 16ms / 16ms
-[2026-05-04 12:36:38] FI: 14ms / 16ms
-[2026-05-04 12:36:39] FI: 13ms / 13ms
-[2026-05-04 12:36:39] FI: 14ms / 16ms
-[2026-05-04 12:36:39] hb: fr=963 q=2 au=968 ab=1933 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:40] FI: 14ms / 16ms
-[2026-05-04 12:36:40] FI: 13ms / 13ms
-[2026-05-04 12:36:41] FI: 22ms / 18ms
-[2026-05-04 12:36:41] FI: 16ms / 13ms
-[2026-05-04 12:36:42] FI: 15ms / 15ms
-[2026-05-04 12:36:42] hb: fr=1117 q=3 au=1121 ab=2242 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:42] FI: 16ms / 13ms
-[2026-05-04 12:36:43] FI: 22ms / 13ms
-[2026-05-04 12:36:43] FI: 16ms / 13ms
-[2026-05-04 12:36:44] FI: 14ms / 12ms
-[2026-05-04 12:36:44] FI: 14ms / 14ms
-[2026-05-04 12:36:44] hb: fr=1268 q=3 au=1273 ab=2545 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:45] FI: 23ms / 18ms
-[2026-05-04 12:36:45] FI: 14ms / 14ms
-[2026-05-04 12:36:46] FI: 15ms / 17ms
-[2026-05-04 12:36:46] FI: 13ms / 13ms
-[2026-05-04 12:36:47] FI: 27ms / 14ms
-[2026-05-04 12:36:47] hb: fr=1422 q=3 au=1426 ab=2853 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:47] FI: 13ms / 16ms
-[2026-05-04 12:36:48] FI: 18ms / 13ms
-[2026-05-04 12:36:48] FI: 13ms / 17ms
-[2026-05-04 12:36:49] FI: 13ms / 13ms
-[2026-05-04 12:36:49] FI: 13ms / 13ms
-[2026-05-04 12:36:49] hb: fr=1577 q=2 au=1584 ab=3166 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:50] FI: 17ms / 14ms
-[2026-05-04 12:36:50] FI: 16ms / 13ms
-[2026-05-04 12:36:51] FI: 16ms / 14ms
-[2026-05-04 12:36:51] FI: 23ms / 13ms
-[2026-05-04 12:36:52] FI: 13ms / 13ms
-[2026-05-04 12:36:52] hb: fr=1730 q=3 au=1737 ab=3473 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:52] FI: 14ms / 13ms
-[2026-05-04 12:36:53] FI: 13ms / 16ms
-[2026-05-04 12:36:53] FI: 13ms / 16ms
-[2026-05-04 12:36:54] FI: 17ms / 14ms
-[2026-05-04 12:36:54] FI: 16ms / 14ms
-[2026-05-04 12:36:54] hb: fr=1884 q=3 au=1891 ab=3782 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:55] FI: 14ms / 13ms
-[2026-05-04 12:36:55] FI: 14ms / 26ms
-[2026-05-04 12:36:56] FI: 18ms / 13ms
-[2026-05-04 12:36:56] FI: 13ms / 13ms
-[2026-05-04 12:36:57] FI: 15ms / 15ms
-[2026-05-04 12:36:57] hb: fr=2036 q=3 au=2043 ab=4087 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:36:57] FI: 13ms / 16ms
-[2026-05-04 12:36:58] FI: 15ms / 17ms
-[2026-05-04 12:36:58] FI: 17ms / 17ms
-[2026-05-04 12:36:59] FI: 24ms / 16ms
-[2026-05-04 12:36:59] FI: 13ms / 12ms
-[2026-05-04 12:36:59] hb: fr=2185 q=2 au=2192 ab=4386 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:00] FI: 16ms / 15ms
-[2026-05-04 12:37:00] FI: 13ms / 17ms
-[2026-05-04 12:37:01] FI: 13ms / 16ms
-[2026-05-04 12:37:01] FI: 24ms / 13ms
-[2026-05-04 12:37:02] FI: 18ms / 16ms
-[2026-05-04 12:37:02] hb: fr=2332 q=3 au=2338 ab=4680 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:02] FI: 14ms / 15ms
-[2026-05-04 12:37:03] FI: 18ms / 22ms
-[2026-05-04 12:37:03] FI: 13ms / 15ms
-[2026-05-04 12:37:04] FI: 17ms / 14ms
-[2026-05-04 12:37:04] FI: 14ms / 13ms
-[2026-05-04 12:37:05] hb: fr=2486 q=2 au=2491 ab=4988 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:05] FI: 13ms / 16ms
-[2026-05-04 12:37:05] FI: 13ms / 12ms
-[2026-05-04 12:37:06] FI: 16ms / 29ms
-[2026-05-04 12:37:06] FI: 13ms / 16ms
-[2026-05-04 12:37:07] FI: 14ms / 14ms
-[2026-05-04 12:37:07] hb: fr=2640 q=2 au=2648 ab=5299 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:07] FI: 25ms / 13ms
-[2026-05-04 12:37:08] FI: 15ms / 22ms
-[2026-05-04 12:37:08] FI: 13ms / 17ms
-[2026-05-04 12:37:09] FI: 13ms / 14ms
-[2026-05-04 12:37:09] FI: 15ms / 15ms
-[2026-05-04 12:37:10] hb: fr=2790 q=2 au=2800 ab=5600 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:10] FI: 16ms / 14ms
-[2026-05-04 12:37:10] FI: 16ms / 17ms
-[2026-05-04 12:37:11] FI: 12ms / 15ms
-[2026-05-04 12:37:11] FI: 17ms / 14ms
-[2026-05-04 12:37:12] FI: 13ms / 16ms
-[2026-05-04 12:37:12] hb: fr=2941 q=1 au=2949 ab=5902 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:12] FI: 14ms / 17ms
-[2026-05-04 12:37:13] FI: 14ms / 13ms
-[2026-05-04 12:37:13] FI: 16ms / 13ms
-[2026-05-04 12:37:14] FI: 16ms / 23ms
-[2026-05-04 12:37:14] FI: 17ms / 16ms
-[2026-05-04 12:37:15] hb: fr=3091 q=3 au=3098 ab=6202 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:15] FI: 14ms / 26ms
-[2026-05-04 12:37:15] FI: 15ms / 14ms
-[2026-05-04 12:37:16] FI: 15ms / 15ms
-[2026-05-04 12:37:16] FI: 14ms / 18ms
-[2026-05-04 12:37:17] FI: 16ms / 14ms
-[2026-05-04 12:37:17] FI: 17ms / 15ms
-[2026-05-04 12:37:17] hb: fr=3249 q=1 au=3255 ab=6519 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:18] FI: 14ms / 12ms
-[2026-05-04 12:37:18] FI: 15ms / 15ms
-[2026-05-04 12:37:18] FI: 14ms / 13ms
-[2026-05-04 12:37:19] FI: 21ms / 16ms
-[2026-05-04 12:37:19] FI: 14ms / 13ms
-[2026-05-04 12:37:20] hb: fr=3401 q=3 au=3409 ab=6823 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:20] FI: 14ms / 17ms
-[2026-05-04 12:37:20] FI: 16ms / 14ms
-[2026-05-04 12:37:21] FI: 13ms / 14ms
-[2026-05-04 12:37:21] FI: 15ms / 24ms
-[2026-05-04 12:37:22] FI: 17ms / 14ms
-[2026-05-04 12:37:22] hb: fr=3551 q=1 au=3559 ab=7123 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:23] FI: 25ms / 13ms
-[2026-05-04 12:37:23] FI: 16ms / 14ms
-[2026-05-04 12:37:24] FI: 15ms / 26ms
-[2026-05-04 12:37:24] FI: 18ms / 15ms
-[2026-05-04 12:37:24] FI: 13ms / 13ms
-[2026-05-04 12:37:25] hb: fr=3703 q=2 au=3712 ab=7428 stalls=0 max=0ms avg=0ms
-[2026-05-04 12:37:25] FI: 13ms / 14ms
-[2026-05-04 12:37:25] FI: 13ms / 12ms
-[2026-05-04 12:37:26] show_player: loop exit running=1 playing=0 vdec_err=0 fr=3768
-[2026-05-04 12:37:26] show_player: decode thread joined
+[2026-05-11 12:17:29] show_player: stream_open OK
+[2026-05-11 12:17:29] jbuf: 16 slots 960x540 ~2025 KB each
+[2026-05-11 12:17:29] jbuf: pre-fill start
+[2026-05-11 12:17:29] show_player: first pkt byte=0x47
+[2026-05-11 12:17:29] vdec: actual 960x408 (alloc 960x540)
+[2026-05-11 12:17:29] CORRUPT: wr==rd collision wr=0 rd=0 frames_ready=1
+[2026-05-11 12:17:29] fps_detect: hardcoded 30fps
+[2026-05-11 12:17:29] jbuf: pre-fill done — starting threads
+[2026-05-11 12:17:29] WARN audio: clock stalled 3 frames
+[2026-05-11 12:17:29] blit[0]: curr_fb=0 dst=0xce215fc0 src=0x58300180 fw=960 fh=408
+[2026-05-11 12:17:29] blit[0]: src[0]=0xff000000
+[2026-05-11 12:17:29] blit[0]: dst[0]=0x00000000
+[2026-05-11 12:17:31] frame_interval: fr=60 gap1=31691us gap2=33466us
+[2026-05-11 12:17:31] hb: fr=73 q=16 au=91 ab=472 stalls=0 max=0ms avg=0ms fps=29.1 netq=1394
+[2026-05-11 12:17:32] WARN audio: clock stalled 500 frames
+[2026-05-11 12:17:33] frame_interval: fr=120 gap1=31366us gap2=34793us
+[2026-05-11 12:17:34] hb: fr=147 q=15 au=164 ab=941 stalls=0 max=0ms avg=0ms fps=29.6 netq=1362
+[2026-05-11 12:17:34] WARN audio: clock stalled 1000 frames
+[2026-05-11 12:17:35] frame_interval: fr=180 gap1=34133us gap2=34374us
+[2026-05-11 12:17:36] hb: fr=223 q=16 au=240 ab=1416 stalls=0 max=0ms avg=0ms fps=30.0 netq=1394
+[2026-05-11 12:17:37] playing=0 reason=user_stop
+[2026-05-11 12:17:37] audio_thread: exit
+[2026-05-11 12:17:37] show_player: loop exit running=1 playing=0 vdec_err=0 fr=226
+[2026-05-11 12:17:37] show_player: network thread joined
+[2026-05-11 12:17:37] show_player: decode thread joined
+[2026-05-11 12:17:37] show_player: audio thread joined
+[2026-05-11 12:17:37] network_thread: exit
+[2026-05-11 12:17:37] show_player: done
+[2026-05-11 12:17:41] show_player: enter
+[2026-05-11 12:17:41] http://101.100.137.246:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&VideoProfile=baseline&VideoLevel=30&MaxWidth=960&MaxHeight=540&VideoBitrate=4000000&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000&MaxAudioChannels=2&MaxFramerate=30&DeviceId=ps3&Static=false&MediaSourceId=a135c559926c4f9075fb7b99d3d7624a&PlaySessionId=ps3-1778501861
+[2026-05-11 12:17:41] show_player: vdec_open
+[2026-05-11 12:17:41] vdec_open: load VDEC base
+[2026-05-11 12:17:41] vdec_open: load VDEC_H264
+[2026-05-11 12:17:41] vdec_open: mod_ret base=0 h264=0
+[2026-05-11 12:17:41] vdec_open: queryAttr
+[2026-05-11 12:17:41] vdec_open: mem_size=33368829
+[2026-05-11 12:17:41] vdec_open: memalign vdec_mem
+[2026-05-11 12:17:41] vdec_open: memalign au_bufs
+[2026-05-11 12:17:41] cfg: addr=0x52200000 size=100663296(33368829) prio=500 stack=0x40000 spu_prio=250 spus=3
+[2026-05-11 12:17:41] vdec_cb_opd32: code=0x0001b368 toc=0x0006f2f0 fn=0x101145b8
+[2026-05-11 12:17:41] vdec_open: vdecOpen
+[2026-05-11 12:17:41] vdec_open: startSequence
+[2026-05-11 12:17:41] vdec_open: startSequence ret=0
+[2026-05-11 12:17:41] vdec_open: done
+[2026-05-11 12:17:41] show_player: vdec_open OK
+[2026-05-11 12:17:41] show_player: audio_open
+[2026-05-11 12:17:41] audio: sysAudioInit rc=0x0
+[2026-05-11 12:17:41] audio: sysAudioPortOpen rc=0x0 port=0
+[2026-05-11 12:17:41] audio: sysAudioGetPortConfig rc=0x0
+[2026-05-11 12:17:41] audio: cfg readIndex=0x40010010 status=0x1
+[2026-05-11 12:17:41] audio: cfg channelCount=0x2 portSize=0x4000 portAddr=0x40020000
+[2026-05-11 12:17:41] audio: pre-filled 8 blocks start=0x40020000 ri_addr=0x40010010
+[2026-05-11 12:17:41] audio: audioSetNotifyEventQueue rc=0x0
+[2026-05-11 12:17:41] audio: sysAudioPortStart rc=0x0
+[2026-05-11 12:17:41] show_player: audio_open done
+[2026-05-11 12:17:41] show_player: stream_open
+[2026-05-11 12:17:42] stream_open: status=200 OK
+Conn chunked=1
+[2026-05-11 12:17:42] show_player: stream_open OK
+[2026-05-11 12:17:42] jbuf: 16 slots 960x540 ~2025 KB each
+[2026-05-11 12:17:42] jbuf: pre-fill start
+[2026-05-11 12:17:42] show_player: first pkt byte=0x47
+[2026-05-11 12:17:42] vdec: actual 960x408 (alloc 960x540)
+[2026-05-11 12:17:42] CORRUPT: wr==rd collision wr=0 rd=0 frames_ready=1
+[2026-05-11 12:17:42] fps_detect: hardcoded 30fps
+[2026-05-11 12:17:42] jbuf: pre-fill done — starting threads
+[2026-05-11 12:17:43] WARN audio: clock stalled 1500 frames
+[2026-05-11 12:17:44] frame_interval: fr=60 gap1=34166us gap2=36693us
+[2026-05-11 12:17:44] CORRUPT: suspicious centre pixel fr=63 px=0xffffffff
+[2026-05-11 12:17:45] hb: fr=73 q=15 au=90 ab=1906 stalls=0 max=0ms avg=0ms fps=29.2 netq=1266
+[2026-05-11 12:17:45] WARN audio: clock stalled 2000 frames
+[2026-05-11 12:17:46] frame_interval: fr=120 gap1=33759us gap2=33798us
+[2026-05-11 12:17:47] hb: fr=147 q=15 au=163 ab=2375 stalls=0 max=0ms avg=0ms fps=29.6 netq=1275
+[2026-05-11 12:17:48] WARN audio: clock stalled 2500 frames
+[2026-05-11 12:17:48] frame_interval: fr=180 gap1=34024us gap2=32107us
+[2026-05-11 12:17:50] hb: fr=220 q=16 au=238 ab=2846 stalls=0 max=0ms avg=0ms fps=29.1 netq=1394
+[2026-05-11 12:17:50] frame_interval: fr=240 gap1=33748us gap2=32408us
+[2026-05-11 12:17:51] WARN audio: clock stalled 3000 frames
+[2026-05-11 12:17:52] hb: fr=295 q=16 au=313 ab=3321 stalls=0 max=0ms avg=0ms fps=29.6 netq=1394
+[2026-05-11 12:17:52] frame_interval: fr=300 gap1=34866us gap2=32646us
+[2026-05-11 12:17:53] WARN audio: clock stalled 3500 frames
+[2026-05-11 12:17:55] frame_interval: fr=360 gap1=32692us gap2=34548us
+[2026-05-11 12:17:55] hb: fr=368 q=16 au=387 ab=3791 stalls=0 max=0ms avg=0ms fps=29.2 netq=1394
+[2026-05-11 12:17:56] WARN audio: clock stalled 4000 frames
+[2026-05-11 12:17:57] frame_interval: fr=420 gap1=33867us gap2=33563us
+[2026-05-11 12:17:57] hb: fr=441 q=16 au=458 ab=4260 stalls=0 max=0ms avg=0ms fps=29.2 netq=1394
+[2026-05-11 12:17:59] WARN audio: clock stalled 4500 frames
+[2026-05-11 12:17:59] frame_interval: fr=480 gap1=35168us gap2=32757us
+[2026-05-11 12:18:00] hb: fr=516 q=16 au=535 ab=4729 stalls=0 max=0ms avg=0ms fps=30.0 netq=1394
+[2026-05-11 12:18:01] frame_interval: fr=540 gap1=34540us gap2=31439us
+[2026-05-11 12:18:01] playing=0 reason=user_stop
+[2026-05-11 12:18:01] audio_thread: exit
+[2026-05-11 12:18:01] show_player: loop exit running=1 playing=0 vdec_err=0 fr=547
+[2026-05-11 12:18:01] show_player: network thread joined
+[2026-05-11 12:18:01] network_thread: exit
+[2026-05-11 12:18:01] show_player: decode thread joined
+[2026-05-11 12:18:01] show_player: audio thread joined
+[2026-05-11 12:18:01] show_player: done
