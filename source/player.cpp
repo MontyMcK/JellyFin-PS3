@@ -65,64 +65,13 @@ static void show_error(const char *line1, const char *line2) {
 }
 
 // -------------------------------------------------------
-// Network ring buffer  (Step 5a)
-// 256 KB / TS_PACKET_SIZE (188) = 1394 packet slots
-// -------------------------------------------------------
-
-#define NET_RING_PKTS  1394
-static u8           s_netbuf[NET_RING_PKTS][TS_PACKET_SIZE];
-static int          s_net_wr = 0, s_net_rd = 0;
-static volatile int s_net_n  = 0;
-static sys_mutex_t  s_net_mtx;
-
-// -------------------------------------------------------
-// Network thread  (Step 5b)
-// -------------------------------------------------------
-
-struct NetworkCtx {
-    int           sock;
-    volatile bool *playing;
-};
-
-static void network_thread_fn(void *arg) {
-    NetworkCtx    *ctx     = (NetworkCtx*)arg;
-    int            sock    = ctx->sock;
-    volatile bool *playing = ctx->playing;
-
-    u8 pkt[TS_PACKET_SIZE];
-
-    while (running && *playing && !s_vdec_error) {
-        int rd = stream_read(sock, pkt, TS_PACKET_SIZE);
-        if (rd < 0) {
-            plog("playing=0 reason=stream_eof");
-            *playing = false;
-            break;
-        }
-        if (rd == 0) continue;
-
-        sysMutexLock(s_net_mtx, 0);
-        if (s_net_n >= NET_RING_PKTS) {
-            sysMutexUnlock(s_net_mtx);
-            usleep(1000);
-            continue;
-        }
-        memcpy(s_netbuf[s_net_wr], pkt, TS_PACKET_SIZE);
-        s_net_wr = (s_net_wr + 1) % NET_RING_PKTS;
-        s_net_n++;
-        sysMutexUnlock(s_net_mtx);
-    }
-
-    plog("network_thread: exit");
-    sysThreadExit(0);
-}
-
-// -------------------------------------------------------
 // Decode thread  (Steps 2, 5c, 8b)
 // -------------------------------------------------------
 
 struct DecodeCtx {
     volatile bool *playing;
     int           *frame_count;  // read-only for heartbeat (benign race)
+    int            sock;
 };
 
 static void decode_thread_fn(void *arg) {
@@ -146,23 +95,13 @@ static void decode_thread_fn(void *arg) {
         }
 
         for (int batch = 0; batch < 128 && jbuf_count() < JBUF_SIZE; batch++) {
-            u64 t0 = timing_get_us();
-
-            // Read one packet from the network ring buffer (Step 5c)
-            sysMutexLock(s_net_mtx, 0);
-            bool have_pkt = (s_net_n > 0);
-            if (have_pkt) {
-                memcpy(ts_pkt, s_netbuf[s_net_rd], TS_PACKET_SIZE);
-                s_net_rd = (s_net_rd + 1) % NET_RING_PKTS;
-                s_net_n--;
-            }
-            sysMutexUnlock(s_net_mtx);
-
-            if (!have_pkt) {
-                if (!in_stall) { in_stall = true; stall_ep_start_us = t0; }
-                usleep(1000);
+            int rd = stream_read(ctx->sock, ts_pkt, TS_PACKET_SIZE);
+            if (rd < 0) {
+                plog("playing=0 reason=stream_eof");
+                *ctx->playing = false;
                 break;
             }
+            if (rd == 0) { usleep(1000); continue; }
 
             if (in_stall) {
                 in_stall = false;
@@ -194,7 +133,7 @@ static void decode_thread_fn(void *arg) {
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
-                display_fps, s_net_n);
+                display_fps, 0);
             plog(buf);
             stall_ep_count = stall_ep_dur_max_us = stall_ep_dur_total_us = 0;
         }
@@ -324,16 +263,6 @@ void show_player(const JFItem *item) {
     { struct { u32 sec; u32 usec; } tv = { 0, 5000 };
       setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
 
-    // Initialise network ring buffer mutex
-    s_net_wr = s_net_rd = 0; s_net_n = 0;
-    {
-        sys_mutex_attr_t mattr;
-        memset(&mattr, 0, sizeof(mattr));
-        mattr.attr_protocol  = SYS_LWMUTEX_ATTR_PROTOCOL;
-        mattr.attr_recursive = SYS_MUTEX_ATTR_RECURSIVE;
-        sysMutexCreate(&s_net_mtx, &mattr);
-    }
-
     u8            ts_pkt[TS_PACKET_SIZE];
     volatile bool playing    = true;
     bool          first_pkt  = true;
@@ -361,7 +290,6 @@ void show_player(const JFItem *item) {
     }
 
     if (!playing) {
-        sysMutexDestroy(s_net_mtx);
         jbuf_free();
         netClose(sock);
         audio_close();
@@ -372,24 +300,8 @@ void show_player(const JFItem *item) {
     plog("jbuf: pre-fill done — starting threads");
     timing_init(30, 1);   // placeholder; overwritten by fps detection (Step 1/7)
 
-    // ---- Spawn network thread (Step 5d) ----
-    NetworkCtx       net_ctx = { sock, &playing };
-    sys_ppu_thread_t net_tid = 0;
-    {
-        int trc = sysThreadCreate(&net_tid, network_thread_fn,
-                                  (void *)&net_ctx,
-                                  600, 64 * 1024,
-                                  0, "jf_network");
-        if (trc != 0) {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "show_player: net thread_create FAILED rc=%d", trc);
-            plog(buf);
-            playing = false;
-        }
-    }
-
     // ---- Spawn decode thread (Step 2) ----
-    DecodeCtx        dec_ctx = { &playing, &frame_count };
+    DecodeCtx        dec_ctx = { &playing, &frame_count, sock };
     sys_ppu_thread_t dec_tid = 0;
     if (playing) {
         int trc = sysThreadCreate(&dec_tid, decode_thread_fn,
@@ -566,6 +478,7 @@ void show_player(const JFItem *item) {
                     }
                 }
 
+                __asm__ volatile("sync" ::: "memory");
                 sysMutexLock(s_jbuf_mtx, 0);
                 jbuf_pop();
                 sysMutexUnlock(s_jbuf_mtx);
@@ -610,11 +523,6 @@ void show_player(const JFItem *item) {
     // Signal all threads to stop, join in order: network → decode → audio (Steps 5e, 6d)
     playing = false;
 
-    if (net_tid) {
-        u64 tret;
-        sysThreadJoin(net_tid, &tret);
-        plog("show_player: network thread joined");
-    }
     if (dec_tid) {
         u64 tret;
         sysThreadJoin(dec_tid, &tret);
@@ -626,7 +534,6 @@ void show_player(const JFItem *item) {
         plog("show_player: audio thread joined");
     }
 
-    sysMutexDestroy(s_net_mtx);
     jbuf_free();
     netClose(sock);
     audio_close();
