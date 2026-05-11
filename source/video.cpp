@@ -330,6 +330,7 @@ static void vdec_submit(const u8 *data, int len, u64 pts) {
             retries++;
         }
     } while (dret == (s32)VDEC_ERROR_BUSY && retries < 200);
+    usleep(5000);  // TEST ONLY: slow AU submission to confirm SPU race
 
     if (dret != 0) {
         char buf[64];
@@ -345,10 +346,6 @@ static void vdec_submit(const u8 *data, int len, u64 pts) {
 // -------------------------------------------------------
 
 volatile bool s_timing_ready = false;
-
-static u64  s_det_ts[8];
-static int  s_det_count = 0;
-static bool s_det_done  = false;
 
 // -------------------------------------------------------
 // Jitter buffer
@@ -423,40 +420,31 @@ bool vdec_pull_frame(void) {
     vfmt.format_type  = VDEC_PICFMT_ARGB32;
     vfmt.color_matrix = VDEC_COLOR_MATRIX_BT709;
     vfmt.alpha        = 0xFF;
-    if (vdecGetPicture(s_vdec, &vfmt, s_jbuf_data[s_jb_wr]) != 0) return false;
+    if (s_jb_wr == s_jb_rd) {
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+            "CORRUPT: wr==rd collision wr=%d rd=%d frames_ready=%d",
+            s_jb_wr, s_jb_rd, (int)s_frames_ready);
+        plog(buf);
+    }
+    s32 gpret = vdecGetPicture(s_vdec, &vfmt, s_jbuf_data[s_jb_wr]);
+    if (gpret != 0) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "CORRUPT: vdecGetPicture failed rc=0x%x slot=%d",
+            (unsigned)gpret, s_jb_wr);
+        plog(buf);
+        return false;
+    }
     s_frames_ready--;
     sysMutexLock(s_jbuf_mtx, 0);
     s_jb_wr = (s_jb_wr + 1) % JBUF_SIZE;
     s_jb_n++;
     sysMutexUnlock(s_jbuf_mtx);
 
-    // Step 7a-7c: record timestamps for the first 8 frames, then detect fps.
-    if (!s_det_done) {
-        s_det_ts[s_det_count] = timing_get_us();
-        s_det_count++;
-        if (s_det_count >= 8) {
-            s_det_done = true;
-            u64 avg_us = (s_det_ts[7] - s_det_ts[0]) / 7;
-            u32 detected = 24;
-            if (avg_us > 0) {
-                u32 raw = (u32)(1000000ULL / avg_us);
-                static const u32 std_fps[] = {24, 25, 30, 50, 60};
-                u32 best_diff = (raw > 24) ? (raw - 24) : (24 - raw);
-                for (int i = 1; i < 5; i++) {
-                    u32 d = (raw > std_fps[i]) ? (raw - std_fps[i]) : (std_fps[i] - raw);
-                    if (d < best_diff) { best_diff = d; detected = std_fps[i]; }
-                }
-                char buf[96];
-                snprintf(buf, sizeof(buf),
-                    "fps_detect: avg_us=%llu raw=%u -> %u fps",
-                    (unsigned long long)avg_us, raw, detected);
-                plog(buf);
-            } else {
-                plog("fps_detect: avg_us=0, fallback 24fps");
-            }
-            timing_init(detected, 1);
-            s_timing_ready = true;
-        }
+    if (!s_timing_ready) {
+        timing_init(30, 1);
+        s_timing_ready = true;
+        plog("fps_detect: hardcoded 30fps");
     }
 
     return true;
@@ -479,8 +467,6 @@ void video_reset(void) {
     s_au_done      = 0;
     s_vdec_error   = false;
     s_timing_ready = false;
-    s_det_count    = 0;
-    s_det_done     = false;
 }
 
 bool video_feed_ts(const u8 *pkt) {

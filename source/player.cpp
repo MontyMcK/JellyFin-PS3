@@ -229,6 +229,17 @@ static void audio_thread_fn(void *arg) {
 
 void show_player(const JFItem *item) {
     plog("show_player: enter");
+    {
+        static bool s_logged_cbufs = false;
+        if (!s_logged_cbufs) {
+            s_logged_cbufs = true;
+            char buf[128];
+            snprintf(buf, sizeof(buf), "color_buffer[0]=%p", (void*)color_buffer[0]);
+            plog(buf);
+            snprintf(buf, sizeof(buf), "color_buffer[1]=%p", (void*)color_buffer[1]);
+            plog(buf);
+        }
+    }
 
     char session_id[32];
     snprintf(session_id, sizeof(session_id), "ps3-%u", (unsigned)time(NULL));
@@ -359,7 +370,7 @@ void show_player(const JFItem *item) {
     }
 
     plog("jbuf: pre-fill done — starting threads");
-    timing_init(24, 1);   // placeholder; overwritten by fps detection (Step 1/7)
+    timing_init(30, 1);   // placeholder; overwritten by fps detection (Step 1/7)
 
     // ---- Spawn network thread (Step 5d) ----
     NetworkCtx       net_ctx = { sock, &playing };
@@ -433,8 +444,8 @@ void show_player(const JFItem *item) {
             // Let frames accumulate until fps detection completes (Step 7d)
             if (det_timeout_start == 0) det_timeout_start = timing_get_us();
             if (timing_get_us() - det_timeout_start >= 5000000ULL) {
-                plog("fps_detect: timeout, fallback to 24fps");
-                timing_init(24, 1);
+                plog("fps_detect: timeout, fallback 30fps");
+                timing_init(30, 1);
                 s_timing_ready = true;
             }
         } else if (timing_frame_due()) {
@@ -443,6 +454,17 @@ void show_player(const JFItem *item) {
             sysMutexUnlock(s_jbuf_mtx);
 
             if (rslot) {
+                {
+                    static const u8 *s_prev_rslot = NULL;
+                    if (s_prev_rslot != NULL && rslot == s_prev_rslot) {
+                        char buf[128];
+                        snprintf(buf, sizeof(buf),
+                            "CORRUPT: same slot displayed twice fr=%d ptr=%p",
+                            frame_count, (void*)rslot);
+                        plog(buf);
+                    }
+                    s_prev_rslot = rslot;
+                }
                 u32 fw = jbuf_fw(), fh = jbuf_fh();
 
                 // Fit into display preserving aspect ratio, center with black bars.
@@ -461,6 +483,39 @@ void show_player(const JFItem *item) {
 
                 const u32 *src = (const u32*)rslot;
                 u32       *dst = color_buffer[curr_fb];
+
+                {
+                    static bool s_logged_blit_pre = false;
+                    if (!s_logged_blit_pre) {
+                        s_logged_blit_pre = true;
+                        char buf[128];
+                        snprintf(buf, sizeof(buf),
+                            "blit[0]: curr_fb=%u dst=%p src=%p fw=%u fh=%u",
+                            curr_fb, (void*)dst, (void*)rslot, fw, fh);
+                        plog(buf);
+                        snprintf(buf, sizeof(buf), "blit[0]: src[0]=0x%08x", src[0]);
+                        plog(buf);
+                    }
+                }
+
+                {
+                    static u32 s_cpx[4] = {1u, 1u, 1u, 1u};
+                    u32 cx = src[(fh / 2) * fw + (fw / 2)];
+                    if ((cx == 0x00000000u || cx == 0xFFFFFFFFu) &&
+                        (s_cpx[1] != 0x00000000u && s_cpx[1] != 0xFFFFFFFFu) &&
+                        (s_cpx[2] != 0x00000000u && s_cpx[2] != 0xFFFFFFFFu) &&
+                        (s_cpx[3] != 0x00000000u && s_cpx[3] != 0xFFFFFFFFu)) {
+                        char buf[128];
+                        snprintf(buf, sizeof(buf),
+                            "CORRUPT: suspicious centre pixel fr=%d px=0x%08x",
+                            frame_count, cx);
+                        plog(buf);
+                    }
+                    s_cpx[0] = s_cpx[1];
+                    s_cpx[1] = s_cpx[2];
+                    s_cpx[2] = s_cpx[3];
+                    s_cpx[3] = cx;
+                }
 
                 // Precompute source-X and source-Y lookup tables.
                 // One 64-bit divide per output column/row instead of per pixel —
@@ -489,11 +544,44 @@ void show_player(const JFItem *item) {
                 // Black bottom bar
                 if (oy0 > 0) memset(dst + (oy0 + sh) * display_width, 0, oy0 * display_width * 4);
 
+                {
+                    static bool s_logged_blit_post = false;
+                    if (!s_logged_blit_post) {
+                        s_logged_blit_post = true;
+                        char buf[128];
+                        snprintf(buf, sizeof(buf), "blit[0]: dst[0]=0x%08x", dst[0]);
+                        plog(buf);
+                    }
+                }
+
                 sysMutexLock(s_jbuf_mtx, 0);
                 jbuf_pop();
                 sysMutexUnlock(s_jbuf_mtx);
                 frame_count++;
                 timing_frame_shown();
+                {
+                    static u64 s_fi_last_us  = 0;
+                    static u64 s_fi_gaps[2]  = {0, 0};
+                    u64 now_us = timing_get_us();
+                    if (s_fi_last_us != 0) {
+                        s_fi_gaps[0] = s_fi_gaps[1];
+                        s_fi_gaps[1] = now_us - s_fi_last_us;
+                    }
+                    s_fi_last_us = now_us;
+                    if (frame_count % 60 == 0) {
+                        char buf[128];
+                        snprintf(buf, sizeof(buf),
+                            "frame_interval: fr=%d gap1=%lluus gap2=%lluus",
+                            frame_count,
+                            (unsigned long long)s_fi_gaps[0],
+                            (unsigned long long)s_fi_gaps[1]);
+                        plog(buf);
+                    }
+                }
+            } else {
+                char buf[128];
+                snprintf(buf, sizeof(buf), "CORRUPT: jbuf empty at fr=%d", frame_count);
+                plog(buf);
             }
         }
         flip();

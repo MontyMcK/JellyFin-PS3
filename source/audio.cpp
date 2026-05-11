@@ -107,7 +107,7 @@ void audio_write_pcm(void) {
             u32 clk = *ri_ptr;
             if (clk == 0) {
                 s_clock_zero_count++;
-                if (s_clock_zero_count > 2) {
+                if (s_clock_zero_count == 3 || s_clock_zero_count % 500 == 0) {
                     char buf[64];
                     snprintf(buf, sizeof(buf),
                         "WARN audio: clock stalled %d frames", s_clock_zero_count);
