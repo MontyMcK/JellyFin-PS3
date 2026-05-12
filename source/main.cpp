@@ -13,6 +13,7 @@
 #include "ui.h"
 #include "http.h"
 #include "jellyfin_api.h"
+#include "plog.h"
 
 SYS_PROCESS_PARAM(1001, 0x100000);
 
@@ -69,6 +70,7 @@ int main(int argc, const char *argv[]) {
 
     crash_log("6 ui_init");
     ui_init();
+    plog_start();
 
     crash_log("7 splash");
     drawHeader();
@@ -123,5 +125,6 @@ int main(int argc, const char *argv[]) {
     crash_log("14 done");
     http_end();
     ui_cleanup();
+    plog_stop();
     return 0;
 }

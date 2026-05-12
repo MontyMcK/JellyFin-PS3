@@ -24,5 +24,6 @@ void setRenderTarget(u32 index);
 void init_screen(void *host_addr,u32 size);
 void waitflip();
 void flip();
+void rsxSync(void); // flush + stall until RSX has finished all queued commands
 
 #endif

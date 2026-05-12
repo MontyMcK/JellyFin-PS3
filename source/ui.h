@@ -14,6 +14,19 @@ typedef struct {
     u8 l1, r1;
 } ButtonState;
 
+// -------------------------------------------------------
+// Extended item for the XMB list view
+// -------------------------------------------------------
+typedef struct {
+    char id[64];
+    char name[128];
+    char type[32];
+    char year_str[8];       // "2014"
+    char duration_str[16];  // "2h 49m"
+    char genre[32];         // "Sci-Fi"
+    char codec[12];         // "H.264"
+} XMBItem;
+
 // Defined in main.cpp; every input loop reads this.
 extern u32 running;
 
@@ -30,15 +43,36 @@ void update_buttons(padData *pad);
 // from a previous screen don't fire as new presses.
 void init_btns(void);
 
-// Drawing
+// -------------------------------------------------------
+// RSX drawing — all write into color_buffer[curr_fb] via
+// the RSX command buffer (runs after rsxSync + CPU writes).
+// -------------------------------------------------------
 void clearScreen(u32 color);
 void drawChar(u32 x, u32 y, char c);
 void drawText(u32 x, u32 y, const char *text);
 void drawTextf(u32 x, u32 y, const char *fmt, ...);
+void drawTextScaled(u32 x, u32 y, const char *text, int px);
 void drawHeader(void);
 void decode_unicode_escapes(char *str);
 
-// On-screen keyboard. Returns 1 = confirmed, -1 = cancelled.
+// -------------------------------------------------------
+// CPU drawing — write directly to color_buffer[curr_fb].
+// Must only be called AFTER rsxSync() and BEFORE any RSX
+// draw commands are queued for the current frame.
+// color is 0x00RRGGBB (X8R8G8B8 framebuffer format).
+// -------------------------------------------------------
+void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color);
+void cpuClearFb(u32 color);   // clear entire framebuffer
+
+// -------------------------------------------------------
+// XMB main screen — replaces the old show_main_menu().
+// -------------------------------------------------------
+void ui_run_xmb(void);
+
+// -------------------------------------------------------
+// Legacy on-screen keyboard (used by login flow).
+// Returns 1 = confirmed, -1 = cancelled.
+// -------------------------------------------------------
 int  get_input(char *out, int max_len, const char *prompt, bool is_password);
 
 // One-time setup: upload font bitmap, configure RSX blend.

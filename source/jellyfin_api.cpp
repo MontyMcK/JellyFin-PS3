@@ -441,40 +441,5 @@ void show_search(void) {
 }
 
 void show_main_menu(void) {
-    char url[512], server_name[128] = "Unknown", version[32] = "";
-    snprintf(url, sizeof(url), "%s/System/Info/Public", g_server);
-    int status = http_request(0, url, NULL, NULL, responseBuffer, RESPONSE_SIZE);
-    if (status == 200) {
-        json_get_string(responseBuffer, "ServerName", server_name, sizeof(server_name));
-        json_get_string(responseBuffer, "Version",    version,     sizeof(version));
-        decode_unicode_escapes(server_name);
-    }
-
-    init_btns();
-    padInfo padinfo; padData paddata;
-    while (running) {
-        drawHeader();
-        drawText(40,  90, "Main Menu");
-        drawText(40,  90+LINE_HEIGHT, "---------");
-        drawTextf(40, 130, "Server:  %s", server_name);
-        drawTextf(40, 155, "Version: %s", version);
-        drawTextf(40, 180, "User:    %s", g_username);
-        drawText(40,  220, "X: Browse Library");
-        drawText(40,  245, "Tri: Search");
-        drawText(40,  270, "O: Exit    SELECT: Log out");
-        drawText(40,  670, "Jellyfin PS3 v0.1");
-        flip();
-
-        sysUtilCheckCallback();
-        ioPadGetInfo(&padinfo);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!padinfo.status[i]) continue;
-            ioPadGetData(i, &paddata);
-            update_buttons(&paddata);
-            if (BTN_PRESSED(cross))    { show_library_browser(); init_btns(); }
-            if (BTN_PRESSED(triangle)) { show_search();          init_btns(); }
-            if (BTN_PRESSED(circle))   { running = 0; return; }
-            if (BTN_PRESSED(select))   { g_token[0]='\0'; g_userid[0]='\0'; save_config(); return; }
-        }
-    }
+    ui_run_xmb();
 }

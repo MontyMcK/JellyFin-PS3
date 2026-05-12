@@ -136,6 +136,15 @@ void waitflip()
 	gcmResetFlipStatus();
 }
 
+void rsxSync(void)
+{
+	rsxSetWriteBackendLabel(context, GCM_LABEL_INDEX, sLabelVal);
+	rsxFlushBuffer(context);
+	while (*(vu32*)gcmGetLabelAddress(GCM_LABEL_INDEX) != sLabelVal)
+		usleep(30);
+	++sLabelVal;
+}
+
 void flip()
 {
 	if(first_fb) gcmResetFlipStatus();
