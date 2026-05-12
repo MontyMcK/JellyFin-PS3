@@ -4,7 +4,7 @@
 
 # JellyFin PS3 Client
 
-A native PS3 homebrew Jellyfin client written in C++ using PSL1GHT, targeting Evilnat CFW.
+A native PS3 homebrew Jellyfin client written in C++ using PSL1GHT, targeting Evilnat CFW or HEN.
 
 ## Features
 
