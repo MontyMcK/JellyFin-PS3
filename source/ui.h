@@ -52,6 +52,8 @@ void drawChar(u32 x, u32 y, char c);
 void drawText(u32 x, u32 y, const char *text);
 void drawTextf(u32 x, u32 y, const char *fmt, ...);
 void drawTextScaled(u32 x, u32 y, const char *text, int px);
+void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold = false);
+void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color);
 void drawHeader(void);
 void decode_unicode_escapes(char *str);
 

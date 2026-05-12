@@ -14,8 +14,31 @@
 #include "jellyfin_api.h"
 #include "player.h"
 #include "timing.h"
+#include "opensans_regular.h"
+#include "opensans_bold.h"
+#include "material_icons.h"
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#pragma GCC diagnostic ignored "-Wsign-compare"
+#endif
+#include "stb_truetype.h"
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif
 
 static Bitmap fontBitmap;
+
+// TTF font state
+static stbtt_fontinfo  s_font;
+static unsigned char  *s_font_buf = NULL;
+static bool            s_ttf_ok   = false;
+static stbtt_fontinfo  s_font_bold;
+static bool            s_ttf_bold_ok = false;
+static stbtt_fontinfo  s_icons;
+static bool            s_icons_ok    = false;
 
 ButtonState btn_cur  = {0};
 ButtonState btn_prev = {0};
@@ -158,8 +181,8 @@ void drawTextScaled(u32 x, u32 y, const char *text, int px) {
 
 void drawHeader(void) {
     clearScreen(0x0d0d1a);
-    drawText(40, 30, "JELLYFIN PS3");
-    drawText(40, 30+LINE_HEIGHT, "------------");
+    rsxSync();
+    drawTTF(40, 30, "JELLYFIN PS3", 16, 0x00FFFFFF);
 }
 
 void decode_unicode_escapes(char *str) {
@@ -200,6 +223,115 @@ void cpuClearFb(u32 color) {
 }
 
 // -------------------------------------------------------
+// TTF text rendering (CPU write — call after rsxSync, before flip)
+// color: 0x00RRGGBB.  Falls back to drawTextScaled if font not loaded.
+// -------------------------------------------------------
+
+void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
+    if (!s_ttf_ok) {
+        drawTextScaled(x, y, text, (int)px);
+        return;
+    }
+
+    stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
+
+    float scale = stbtt_ScaleForPixelHeight(fi, px);
+    int ascent;
+    stbtt_GetFontVMetrics(fi, &ascent, NULL, NULL);
+    int baseline = (int)((float)ascent * scale);
+
+    u32 r_fg = (color >> 16) & 0xFF;
+    u32 g_fg = (color >>  8) & 0xFF;
+    u32 b_fg =  color        & 0xFF;
+
+    float xf     = (float)x;
+    int   prev_cp = 0;
+
+    while (*text) {
+        int cp = (unsigned char)*text;
+
+        if (prev_cp)
+            xf += stbtt_GetCodepointKernAdvance(fi, prev_cp, cp) * scale;
+
+        int w, h, xoff, yoff;
+        unsigned char *bm = stbtt_GetCodepointBitmap(
+            fi, scale, scale, cp, &w, &h, &xoff, &yoff);
+
+        if (bm) {
+            int draw_x0 = (int)xf + xoff;
+            int draw_y0 = (int)y + baseline + yoff;
+
+            for (int gy = 0; gy < h; gy++) {
+                int sy = draw_y0 + gy;
+                if (sy < 0 || (u32)sy >= display_height) continue;
+                u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
+                for (int gx = 0; gx < w; gx++) {
+                    int sx = draw_x0 + gx;
+                    if (sx < 0 || (u32)sx >= display_width) continue;
+                    u32 a = bm[gy * w + gx];
+                    if (a == 0) continue;
+                    if (a == 255) { row[sx] = color; continue; }
+                    u32 bg   = row[sx];
+                    u32 r_bg = (bg >> 16) & 0xFF;
+                    u32 g_bg = (bg >>  8) & 0xFF;
+                    u32 b_bg =  bg        & 0xFF;
+                    u32 r_out = (a * r_fg + (255 - a) * r_bg) / 255;
+                    u32 g_out = (a * g_fg + (255 - a) * g_bg) / 255;
+                    u32 b_out = (a * b_fg + (255 - a) * b_bg) / 255;
+                    row[sx] = (r_out << 16) | (g_out << 8) | b_out;
+                }
+            }
+            stbtt_FreeBitmap(bm, NULL);
+        }
+
+        int advance;
+        stbtt_GetCodepointHMetrics(fi, cp, &advance, NULL);
+        xf += (float)advance * scale;
+
+        prev_cp = cp;
+        text++;
+    }
+}
+
+void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
+    if (!s_icons_ok) return;
+    float scale = stbtt_ScaleForPixelHeight(&s_icons, px);
+    int ascent;
+    stbtt_GetFontVMetrics(&s_icons, &ascent, NULL, NULL);
+    int baseline = (int)((float)ascent * scale);
+    int w, h, xoff, yoff;
+    unsigned char *bm = stbtt_GetCodepointBitmap(
+        &s_icons, scale, scale, codepoint, &w, &h, &xoff, &yoff);
+    if (!bm) return;
+    u32 r_fg = (color >> 16) & 0xFF;
+    u32 g_fg = (color >>  8) & 0xFF;
+    u32 b_fg =  color        & 0xFF;
+    int draw_x0 = (int)x + xoff;
+    int draw_y0 = (int)y + baseline + yoff;
+    for (int gy = 0; gy < h; gy++) {
+        int sy = draw_y0 + gy;
+        if (sy < 0 || (u32)sy >= display_height) continue;
+        u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
+        for (int gx = 0; gx < w; gx++) {
+            int sx = draw_x0 + gx;
+            if (sx < 0 || (u32)sx >= display_width) continue;
+            u32 a = bm[gy * w + gx];
+            if (a == 0) continue;
+            if (a == 255) { row[sx] = color; continue; }
+            u32 bg   = row[sx];
+            u32 r_bg = (bg >> 16) & 0xFF;
+            u32 g_bg = (bg >>  8) & 0xFF;
+            u32 b_bg =  bg        & 0xFF;
+            u32 r_out = (a * r_fg + (255 - a) * r_bg) / 255;
+            u32 g_out = (a * g_fg + (255 - a) * g_bg) / 255;
+            u32 b_out = (a * b_fg + (255 - a) * b_bg) / 255;
+            row[sx] = (r_out << 16) | (g_out << 8) | b_out;
+        }
+    }
+    stbtt_FreeBitmap(bm, NULL);
+}
+
+// -------------------------------------------------------
 // Legacy on-screen keyboard (used by login / server-url screens)
 // -------------------------------------------------------
 
@@ -237,7 +369,7 @@ static char current_key_value(void) {
 
 static void draw_keyboard(const char *prompt, const char *input, bool is_password) {
     drawHeader();
-    drawTextf(40, 85, "%s", prompt);
+    drawTTF(40, 85, prompt, 14, 0x00FFFFFF);
 
     char display[256] = "";
     int ilen = strlen(input);
@@ -248,9 +380,10 @@ static void draw_keyboard(const char *prompt, const char *input, bool is_passwor
         if (ilen > 34) strncpy(display, input + ilen - 34, 35);
         else           strncpy(display, input, 255);
     }
-    drawTextf(40, 115, "> %s_", display);
-    drawText(40, 115+LINE_HEIGHT, "----------------------------------------");
-    if (kb_caps) drawText(40, 115+LINE_HEIGHT*2, "CAPS ON");
+    char input_line[260];
+    snprintf(input_line, sizeof(input_line), "> %s_", display);
+    drawTTF(40, 115, input_line, 14, 0x00FFFFFF);
+    if (kb_caps) drawTTF(40, 115+LINE_HEIGHT*2, "CAPS ON", 14, 0x00FFFFFF);
 
     int kb_x = 50, kb_y = 175;
     int key_h = LINE_HEIGHT + 8;
@@ -277,14 +410,14 @@ static void draw_keyboard(const char *prompt, const char *input, bool is_passwor
             if (sel) {
                 char sel_buf[12];
                 snprintf(sel_buf, sizeof(sel_buf), "[%s]", label);
-                drawText(xk - CHAR_SIZE, yk, sel_buf);
+                drawTTF((u32)(xk - CHAR_SIZE), (u32)yk, sel_buf, 14, 0x00FFFFFF);
             } else {
-                drawText(xk, yk, label);
+                drawTTF((u32)xk, (u32)yk, label, 14, 0x00FFFFFF);
             }
         }
     }
 
-    drawText(40, 660, "Dpad:move  X:type  Tri:caps  Sq:del  START:done  SEL:cancel");
+    drawTTF(40, 660, "Dpad:move  X:type  Tri:caps  Sq:del  START:done  SEL:cancel", 12, 0x00FFFFFF);
     flip();
 }
 
@@ -439,6 +572,26 @@ static bool    g_items_loaded[XMB_TAB_COUNT];
 static int  g_active_tab = XMB_TAB_MOVIES;
 static int  g_sel        = 0;
 static int  g_scroll_top = 0;
+
+// TV sub-screen state (Series→Seasons→Episodes)
+static int  g_tv_depth       = 0;  // 0=series list, 1=season list, 2=episode list
+static char g_tv_series_id[64];
+static char g_tv_series_name[128];
+static char g_tv_season_id[64];
+static char g_tv_season_name[64];
+static XMBItem g_tv_sub_items[XMB_ITEMS_MAX];
+static int     g_tv_sub_count  = 0;
+static int     g_tv_sub_sel    = 0;
+static int     g_tv_sub_scroll = 0;
+
+// Collections sub-screen state (Collection→Movies)
+static int  g_col_depth      = 0;
+static char g_col_id[64];
+static char g_col_name[128];
+static XMBItem g_col_sub_items[XMB_ITEMS_MAX];
+static int     g_col_sub_count  = 0;
+static int     g_col_sub_sel    = 0;
+static int     g_col_sub_scroll = 0;
 
 // Search OSK state
 #define OSK_ROWS_N 4
@@ -721,6 +874,43 @@ static void xmb_do_search(void) {
         g_search_results_count = parse_xmb_items(responseBuffer, g_search_results, XMB_ITEMS_MAX);
 }
 
+static int xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max) {
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Shows/%s/Seasons?userId=%s&Fields=ProductionYear,RunTimeTicks",
+        g_server, series_id, g_userid);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return 0;
+    return parse_xmb_items(responseBuffer, arr, max);
+}
+
+static int xmb_fetch_episodes(const char *series_id, const char *season_id,
+                               XMBItem *arr, int max) {
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Shows/%s/Episodes?seasonId=%s&userId=%s"
+        "&Fields=ProductionYear,RunTimeTicks,Genres,Container",
+        g_server, series_id, season_id, g_userid);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return 0;
+    int count = parse_xmb_items(responseBuffer, arr, max);
+    for (int i = 0; i < count; i++)
+        strncpy(arr[i].type, "Episode", sizeof(arr[i].type)-1);
+    return count;
+}
+
+static int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, int max) {
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Users/%s/Items?ParentId=%s"
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Container"
+        "&SortBy=SortName&SortOrder=Ascending",
+        g_server, g_userid, collection_id);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return 0;
+    return parse_xmb_items(responseBuffer, arr, max);
+}
+
 // -------------------------------------------------------
 // XMB rendering helpers
 // -------------------------------------------------------
@@ -730,22 +920,31 @@ static int xmb_tab_cx(int t) {
     return (int)(((t + 0.5f) * display_width) / XMB_TAB_COUNT);
 }
 
+static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
+    0xE8B6,  // XMB_TAB_SEARCH      (search/magnifier)
+    0xE54D,  // XMB_TAB_MOVIES      (movie/film)
+    0xE333,  // XMB_TAB_TV          (TV)
+    0xE3A1,  // XMB_TAB_MUSIC       (music note)
+    0xE8EF,  // XMB_TAB_COLLECTIONS (collections/four squares)
+    0xE8B8,  // XMB_TAB_SETTINGS    (settings/gear)
+};
+
 static void xmb_draw_tabs(void) {
     for (int t = 0; t < XMB_TAB_COUNT; t++) {
         if (!g_tabs[t].enabled) continue;
 
-        int cx = xmb_tab_cx(t);
-        int dist = (t == g_active_tab) ? 0 : abs(t - g_active_tab);
-        int icon_px = (dist == 0) ? 24 : (dist == 1) ? 16 : 8;
+        int cx      = xmb_tab_cx(t);
+        bool active = (t == g_active_tab);
+        int icon_px = active ? 48 : 32;
         int icon_x  = cx - icon_px / 2;
         int icon_y  = XMB_TOPBAR_H + (XMB_TABBAR_H - icon_px) / 2 - 8;
 
-        drawTextScaled((u32)icon_x, (u32)icon_y, g_tabs[t].icon, icon_px);
+        drawIcon((u32)icon_x, (u32)icon_y, TAB_CODEPOINTS[t], (float)icon_px, 0x007C3CEA);
 
-        if (t == g_active_tab) {
+        if (active) {
             int lx = cx - (int)(strlen(g_tabs[t].label) * 8) / 2;
             int ly = XMB_TOPBAR_H + XMB_TABBAR_H - 18;
-            drawTextScaled((u32)(lx > 0 ? lx : 0), (u32)ly, g_tabs[t].label, 8);
+            drawTTF((u32)(lx > 0 ? lx : 0), (u32)ly, g_tabs[t].label, 14, 0x00FFFFFF);
         }
     }
 }
@@ -762,7 +961,7 @@ static void xmb_draw_meta(u32 x, u32 y, const XMBItem *it) {
         if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
         strncat(meta, it->genre, sizeof(meta)-strlen(meta)-1);
     }
-    if (meta[0]) drawTextScaled(x, y, meta, 8);
+    if (meta[0]) drawTTF(x, y, meta, 14, 0x00FFFFFF);
 }
 
 static void xmb_draw_item_list(int tab) {
@@ -776,9 +975,9 @@ static void xmb_draw_item_list(int tab) {
 
         int iy = XMB_CONTENT_Y + i * XMB_ITEM_H;
 
-        // Title  (16px font)
+        // Title  (22px font)
         int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
-        drawTextScaled((u32)tx, (u32)(iy + 8), it->name, 16);
+        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
 
         // Meta line (8px font)
         xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
@@ -786,14 +985,14 @@ static void xmb_draw_item_list(int tab) {
         // Codec badge text
         if (it->codec[0]) {
             int bx = (int)display_width - XMB_ITEM_PAD - 60;
-            drawTextScaled((u32)bx, (u32)(iy + 10), it->codec, 8);
+            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
         }
 
         // Scroll indicator dots on right edge when there are more items
         if (i == 0 && g_scroll_top > 0)
-            drawTextScaled(display_width - 20, (u32)iy, "^", 8);
+            drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
         if (i == vis-1 && g_scroll_top + vis < count)
-            drawTextScaled(display_width - 20, (u32)iy, "v", 8);
+            drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
     }
 }
 
@@ -826,6 +1025,90 @@ static void xmb_cpu_draw_items(int tab) {
         // Codec badge background
         drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6),
                  66, 22, XMB_BADGE_BG);
+    }
+}
+
+// CPU draws for the TV sub-item list (seasons or episodes)
+static void xmb_cpu_draw_sub(void) {
+    int vis = XMB_ITEMS_VIS;
+    int W   = (int)display_width;
+    int y0  = XMB_CONTENT_Y + 26; // leaves room for breadcrumb
+    for (int i = 0; i < vis; i++) {
+        int idx = g_tv_sub_scroll + i;
+        if (idx >= g_tv_sub_count) break;
+        int iy = y0 + i * XMB_ITEM_H;
+        if (idx == g_tv_sub_sel) {
+            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
+                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2), XMB_HIGHLIGHT);
+            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy, 4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
+        }
+        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6), 66, 22, XMB_BADGE_BG);
+    }
+}
+
+// TTF draws for the TV sub-item list
+static void xmb_draw_sub_list(void) {
+    int vis = XMB_ITEMS_VIS;
+    int y0  = XMB_CONTENT_Y + 26;
+    for (int i = 0; i < vis; i++) {
+        int idx = g_tv_sub_scroll + i;
+        if (idx >= g_tv_sub_count) break;
+        const XMBItem *it = &g_tv_sub_items[idx];
+        int iy = y0 + i * XMB_ITEM_H;
+        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
+        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
+        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
+        if (it->codec[0]) {
+            int bx = (int)display_width - XMB_ITEM_PAD - 60;
+            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
+        }
+        if (i == 0 && g_tv_sub_scroll > 0)
+            drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
+        if (i == vis-1 && g_tv_sub_scroll + vis < g_tv_sub_count)
+            drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
+    }
+}
+
+// CPU draws for the Collections sub-item list (movies inside a collection)
+static void xmb_cpu_draw_col_sub(void) {
+    int vis = XMB_ITEMS_VIS;
+    int W   = (int)display_width;
+    int y0  = XMB_CONTENT_Y + 26;
+    for (int i = 0; i < vis; i++) {
+        int idx = g_col_sub_scroll + i;
+        if (idx >= g_col_sub_count) break;
+        int iy = y0 + i * XMB_ITEM_H;
+        if (idx == g_col_sub_sel) {
+            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
+                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2), XMB_HIGHLIGHT);
+            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy, 4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
+        }
+        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6), 66, 22, XMB_BADGE_BG);
+    }
+}
+
+// TTF draws for the Collections sub-item list
+static void xmb_draw_col_sub_list(void) {
+    int vis = XMB_ITEMS_VIS;
+    int y0  = XMB_CONTENT_Y + 26;
+    for (int i = 0; i < vis; i++) {
+        int idx = g_col_sub_scroll + i;
+        if (idx >= g_col_sub_count) break;
+        const XMBItem *it = &g_col_sub_items[idx];
+        int iy = y0 + i * XMB_ITEM_H;
+        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
+        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
+        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
+        if (it->codec[0]) {
+            int bx = (int)display_width - XMB_ITEM_PAD - 60;
+            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
+        }
+        if (i == 0 && g_col_sub_scroll > 0)
+            drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
+        if (i == vis-1 && g_col_sub_scroll + vis < g_col_sub_count)
+            drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
     }
 }
 
@@ -918,7 +1201,7 @@ static void xmb_rsx_draw_osk(void) {
     // Input bar text
     char disp[68];
     snprintf(disp, sizeof(disp), "%s%s", g_search_buf, cursor ? "_" : " ");
-    drawTextScaled((u32)(XMB_ITEM_PAD + 12), (u32)(XMB_CONTENT_Y + 18), disp, 14);
+    drawTTF((u32)(XMB_ITEM_PAD + 12), (u32)(XMB_CONTENT_Y + 18), disp, 14, 0x00FFFFFF);
 
     // Keyboard labels
     for (int r = 0; r <= OSK_ROWS_N; r++) {
@@ -927,13 +1210,13 @@ static void xmb_rsx_draw_osk(void) {
             int space_w = 5 * OSK_STEP_X - OSK_GAP;
             int sy = OSK_Y0 + r * OSK_STEP_Y + (OSK_KEY_H - 8) / 2;
             int cx_space = osk_x0 + space_w / 2 - 20;
-            drawTextScaled((u32)(cx_space > 0 ? cx_space : 0), (u32)sy, "SPACE", 8);
+            drawTTF((u32)(cx_space > 0 ? cx_space : 0), (u32)sy, "SPACE", 16, 0x00FFFFFF);
 
             int bsx = osk_x0 + space_w + OSK_GAP;
-            drawTextScaled((u32)(bsx + (OSK_KEY_W - 8) / 2), (u32)sy, "<", 8);
+            drawTTF((u32)(bsx + (OSK_KEY_W - 8) / 2), (u32)sy, "<", 16, 0x00FFFFFF);
 
             int clx = bsx + OSK_KEY_W + OSK_GAP;
-            drawTextScaled((u32)(clx + (OSK_KEY_W - 40) / 2), (u32)sy, "CLEAR", 8);
+            drawTTF((u32)(clx + (OSK_KEY_W - 40) / 2), (u32)sy, "CLEAR", 16, 0x00FFFFFF);
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
             const char  *row  = rows[r];
@@ -943,13 +1226,13 @@ static void xmb_rsx_draw_osk(void) {
             for (int c = 0; c < base_len; c++) {
                 char label[3] = { row[c], '\0', '\0' };
                 int kx = osk_x0 + c * OSK_STEP_X + (OSK_KEY_W - 8) / 2;
-                drawTextScaled((u32)kx, (u32)ry, label, 8);
+                drawTTF((u32)kx, (u32)ry, label, 16, 0x00FFFFFF);
             }
             // Toggle key
             {
                 const char *toggle_lbl = g_osk_sym ? "ABC" : "#+=";
                 int kx = osk_x0 + base_len * OSK_STEP_X + (OSK_KEY_W - 24) / 2;
-                drawTextScaled((u32)(kx > 0 ? kx : 0), (u32)ry, toggle_lbl, 8);
+                drawTTF((u32)(kx > 0 ? kx : 0), (u32)ry, toggle_lbl, 16, 0x00FFFFFF);
             }
         }
     }
@@ -962,11 +1245,11 @@ static void xmb_rsx_draw_osk(void) {
     for (int i = 0; i < vis_r && i < count; i++) {
         const XMBItem *it = &g_search_results[i];
         int iy = results_y + i * XMB_ITEM_H;
-        drawTextScaled((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 8), it->name, 14);
+        drawTTF((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 8), it->name, 14, 0x00FFFFFF);
         xmb_draw_meta((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 30), it);
     }
     if (count == 0 && g_search_buf[0]) {
-        drawTextScaled((u32)XMB_ITEM_PAD, (u32)results_y, "No results.", 8);
+        drawTTF((u32)XMB_ITEM_PAD, (u32)results_y, "No results.", 8, 0x00FFFFFF);
     }
 }
 
@@ -992,7 +1275,8 @@ static void xmb_switch_tab(int new_tab) {
     g_active_tab = new_tab;
     g_sel = 0;
     g_scroll_top = 0;
-    // Reset search state when entering Search tab
+    g_tv_depth = 0; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+    g_col_depth = 0; g_col_sub_sel = 0; g_col_sub_scroll = 0;
     if (new_tab == XMB_TAB_SEARCH) {
         g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
     }
@@ -1010,13 +1294,90 @@ static int xmb_next_enabled(int start, int dir) {
 
 // Returns true if we should exit the XMB loop
 static bool xmb_handle_input_browse(void) {
-    int tab   = g_active_tab;
-    int count = g_item_count[tab];
-    int vis   = XMB_ITEMS_VIS;
+    int tab = g_active_tab;
+    int vis = XMB_ITEMS_VIS;
 
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
+
+    // TV sub-screen (depth > 0): seasons or episodes list
+    if (tab == XMB_TAB_TV && g_tv_depth > 0) {
+        if (BTN_PRESSED(circle)) {
+            g_tv_depth--;
+            g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+            return false;
+        }
+        if (BTN_PRESSED(up)) {
+            if (g_tv_sub_sel > 0) {
+                g_tv_sub_sel--;
+                if (g_tv_sub_sel < g_tv_sub_scroll) g_tv_sub_scroll = g_tv_sub_sel;
+            }
+        }
+        if (BTN_PRESSED(down)) {
+            if (g_tv_sub_sel < g_tv_sub_count - 1) {
+                g_tv_sub_sel++;
+                if (g_tv_sub_sel >= g_tv_sub_scroll + vis)
+                    g_tv_sub_scroll = g_tv_sub_sel - vis + 1;
+            }
+        }
+        if (BTN_PRESSED(cross) && g_tv_sub_count > 0 && g_tv_sub_sel < g_tv_sub_count) {
+            const XMBItem *it = &g_tv_sub_items[g_tv_sub_sel];
+            if (g_tv_depth == 1) {
+                // Season selected → fetch episodes
+                strncpy(g_tv_season_id,   it->id,   sizeof(g_tv_season_id)-1);
+                strncpy(g_tv_season_name, it->name, sizeof(g_tv_season_name)-1);
+                g_tv_sub_count = xmb_fetch_episodes(g_tv_series_id, g_tv_season_id,
+                                                     g_tv_sub_items, XMB_ITEMS_MAX);
+                g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+            } else {
+                // Episode selected → play
+                JFItem jf; memset(&jf, 0, sizeof(jf));
+                strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
+                strncpy(jf.name, it->name, sizeof(jf.name)-1);
+                strncpy(jf.type, it->type, sizeof(jf.type)-1);
+                show_player(&jf);
+                init_btns();
+            }
+        }
+        return false;
+    }
+
+    // Collections sub-screen (depth > 0): movies inside a collection
+    if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
+        if (BTN_PRESSED(circle)) {
+            g_col_depth = 0;
+            g_col_sub_sel = 0; g_col_sub_scroll = 0;
+            return false;
+        }
+        if (BTN_PRESSED(up)) {
+            if (g_col_sub_sel > 0) {
+                g_col_sub_sel--;
+                if (g_col_sub_sel < g_col_sub_scroll) g_col_sub_scroll = g_col_sub_sel;
+            }
+        }
+        if (BTN_PRESSED(down)) {
+            if (g_col_sub_sel < g_col_sub_count - 1) {
+                g_col_sub_sel++;
+                if (g_col_sub_sel >= g_col_sub_scroll + vis)
+                    g_col_sub_scroll = g_col_sub_sel - vis + 1;
+            }
+        }
+        if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
+            const XMBItem *it = &g_col_sub_items[g_col_sub_sel];
+            JFItem jf; memset(&jf, 0, sizeof(jf));
+            strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
+            strncpy(jf.name, it->name, sizeof(jf.name)-1);
+            strncpy(jf.type, it->type, sizeof(jf.type)-1);
+            show_player(&jf);
+            init_btns();
+        }
+        return false;
+    }
+
+    // Normal browse (depth 0)
     if (BTN_PRESSED(circle)) return true; // exit
+
+    int count = g_item_count[tab];
 
     if (BTN_PRESSED(up)) {
         if (g_sel > 0) {
@@ -1033,12 +1394,26 @@ static bool xmb_handle_input_browse(void) {
 
     if (BTN_PRESSED(cross) && count > 0 && g_sel < count) {
         const XMBItem *it = &g_items[tab][g_sel];
-        JFItem jf; memset(&jf, 0, sizeof(jf));
-        strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
-        strncpy(jf.name, it->name, sizeof(jf.name)-1);
-        strncpy(jf.type, it->type, sizeof(jf.type)-1);
-        show_player(&jf);
-        init_btns();
+        if (tab == XMB_TAB_TV && strcmp(it->type, "Series") == 0) {
+            // Series selected → fetch seasons
+            strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
+            strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
+            g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items, XMB_ITEMS_MAX);
+            g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+        } else if (tab == XMB_TAB_COLLECTIONS) {
+            // Collection selected → fetch movies inside it
+            strncpy(g_col_id,   it->id,   sizeof(g_col_id)-1);
+            strncpy(g_col_name, it->name, sizeof(g_col_name)-1);
+            g_col_sub_count = xmb_fetch_collection_items(g_col_id, g_col_sub_items, XMB_ITEMS_MAX);
+            g_col_depth = 1; g_col_sub_sel = 0; g_col_sub_scroll = 0;
+        } else {
+            JFItem jf; memset(&jf, 0, sizeof(jf));
+            strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
+            strncpy(jf.name, it->name, sizeof(jf.name)-1);
+            strncpy(jf.type, it->type, sizeof(jf.type)-1);
+            show_player(&jf);
+            init_btns();
+        }
     }
 
     if (BTN_PRESSED(triangle) && count > 0 && g_sel < count) {
@@ -1046,6 +1421,7 @@ static bool xmb_handle_input_browse(void) {
         const XMBItem *it = &g_items[tab][g_sel];
         init_btns();
         while (running) {
+            waitflip();
             sysUtilCheckCallback();
             padInfo pi; padData pd;
             ioPadGetInfo(&pi);
@@ -1054,14 +1430,12 @@ static bool xmb_handle_input_browse(void) {
                 ioPadGetData(i, &pd); update_buttons(&pd);
                 if (BTN_PRESSED(circle) || BTN_PRESSED(triangle)) goto info_done;
             }
-            // Render info screen (CPU clear + RSX text)
+            clearScreen(XMB_BG);
             rsxSync();
-            cpuClearFb(XMB_BG);
-            //wave_draw();
-            drawTextScaled(XMB_ITEM_PAD, XMB_TOPBAR_H + 10, it->name, 24);
-            drawTextScaled(XMB_ITEM_PAD, XMB_TOPBAR_H + 46, it->year_str, 14);
+            drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 10, it->name, 24, 0x00FFFFFF);
+            drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 46, it->year_str, 14, 0x00FFFFFF);
             xmb_draw_meta(XMB_ITEM_PAD, XMB_TOPBAR_H + 68, it);
-            drawTextScaled(XMB_ITEM_PAD, (u32)(display_height - XMB_BOTTOM_PAD + 16), "O BACK", 8);
+            drawTTF(XMB_ITEM_PAD, (u32)(display_height - XMB_BOTTOM_PAD + 16), "O BACK", 14, 0x00FFFFFF);
             flip();
         }
         info_done:
@@ -1073,7 +1447,10 @@ static bool xmb_handle_input_browse(void) {
 static bool xmb_handle_input_search(void) {
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
-    if (BTN_PRESSED(circle) && !g_search_buf[0]) return true;
+    if (BTN_PRESSED(circle) && !g_search_buf[0]) {
+        xmb_switch_tab(xmb_next_enabled(g_active_tab, +1));
+        return false;
+    }
     if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; return false; }
 
     int row_count = OSK_ROWS_N + 1; // letter rows + bottom row
@@ -1223,39 +1600,62 @@ void ui_run_xmb(void) {
             xmb_cpu_draw_osk();
             xmb_cpu_draw_search_results();
         } else if (tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS) {
-            xmb_cpu_draw_items(tab);
+            if (tab == XMB_TAB_TV && g_tv_depth > 0)
+                xmb_cpu_draw_sub();
+            else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0)
+                xmb_cpu_draw_col_sub();
+            else
+                xmb_cpu_draw_items(tab);
         }
 
-        // RSX phase
-        // Top bar
-        drawTextScaled(XMB_ITEM_PAD, 16, "JELLYFIN-PS3", 20);
+        // CPU + TTF phase: logo, hints, content, bottom — all before tab bar (RSX)
+        drawTTF(XMB_ITEM_PAD, 16, "JELLYFIN-PS3", 28, 0x007C3CEA, true);
         {
-            // Right side: L1/R1 nav hint + time
             char hints[32];
             snprintf(hints, sizeof(hints), "< L1   R1 >");
             int hx = (int)display_width - (int)(strlen(hints) * 8) - XMB_ITEM_PAD;
-            drawTextScaled((u32)(hx > 0 ? hx : 0), 24, hints, 8);
+            drawTTF((u32)(hx > 0 ? hx : 0), 24, hints, 14, 0x00FFFFFF);
         }
-
-        // Tab bar
-        xmb_draw_tabs();
 
         // Content
         if (tab == XMB_TAB_SEARCH) {
             xmb_rsx_draw_osk();
         } else if (tab == XMB_TAB_MUSIC || tab == XMB_TAB_SETTINGS) {
-            drawTextScaled(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 40), "Coming soon", 16);
+            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 40), "Coming soon", 22, 0x00FFFFFF);
+        } else if (tab == XMB_TAB_TV && g_tv_depth > 0) {
+            char crumb[256];
+            if (g_tv_depth == 1)
+                snprintf(crumb, sizeof(crumb), "%s > Seasons", g_tv_series_name);
+            else
+                snprintf(crumb, sizeof(crumb), "%s > %s > Episodes",
+                         g_tv_series_name, g_tv_season_name);
+            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
+            if (g_tv_sub_count == 0)
+                drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 46), "No items.", 16, 0x00FFFFFF);
+            else
+                xmb_draw_sub_list();
+        } else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
+            char crumb[256];
+            snprintf(crumb, sizeof(crumb), "%s > Movies", g_col_name);
+            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
+            if (g_col_sub_count == 0)
+                drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 46), "No items.", 16, 0x00FFFFFF);
+            else
+                xmb_draw_col_sub_list();
         } else {
             if (g_items_loaded[tab] && g_item_count[tab] == 0)
-                drawTextScaled(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 20), "No items.", 8);
+                drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 20), "No items.", 16, 0x00FFFFFF);
             else
                 xmb_draw_item_list(tab);
         }
 
         // Bottom hints
-        drawTextScaled(XMB_ITEM_PAD,
-                       (u32)(display_height - XMB_BOTTOM_PAD + 16),
-                       "X SELECT   O BACK   /\\ INFO", 8);
+        drawTTF(XMB_ITEM_PAD,
+                (u32)(display_height - XMB_BOTTOM_PAD + 16),
+                "X SELECT   O BACK   /\\ INFO", 14, 0x00FFFFFF);
+
+        // Tab bar — after all drawTTF (CPU writes), before flip
+        xmb_draw_tabs();
 
         flip();
         sysUtilCheckCallback();
@@ -1266,6 +1666,16 @@ void ui_run_xmb(void) {
 // Lifecycle
 // -------------------------------------------------------
 
+static void ttf_init(void) {
+    s_font_buf = (unsigned char*)OpenSans_Regular_ttf;
+    if (stbtt_InitFont(&s_font, s_font_buf, 0))
+        s_ttf_ok = true;
+    if (stbtt_InitFont(&s_font_bold, (unsigned char*)OpenSans_Bold_ttf, 0))
+        s_ttf_bold_ok = true;
+    if (stbtt_InitFont(&s_icons, (unsigned char*)MaterialIcons_Regular_ttf, 0))
+        s_icons_ok = true;
+}
+
 void ui_init(void) {
     bitmapSetXpm(&fontBitmap, font8x8_xpm);
     rsxSetBlendFunc(context,
@@ -1274,6 +1684,7 @@ void ui_init(void) {
     rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
     rsxSetBlendEnable(context, GCM_TRUE);
     setRenderTarget(curr_fb);
+    ttf_init();
 }
 
 void ui_cleanup(void) {
