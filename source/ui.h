@@ -80,3 +80,7 @@ int  get_input(char *out, int max_len, const char *prompt, bool is_password);
 // One-time setup: upload font bitmap, configure RSX blend.
 void ui_init(void);
 void ui_cleanup(void);
+
+// Restore the RSX pipeline state that ui_init() configured.
+// Call after the player tears down RSX so the UI resumes in a known state.
+void ui_restore_rsx_state(void);

@@ -17,6 +17,8 @@
 #include "opensans_regular.h"
 #include "opensans_bold.h"
 #include "material_icons.h"
+#include "plog.h"
+#include "wave_shaders.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #ifdef __GNUC__
@@ -226,6 +228,23 @@ void cpuClearFb(u32 color) {
 // TTF text rendering (CPU write — call after rsxSync, before flip)
 // color: 0x00RRGGBB.  Falls back to drawTextScaled if font not loaded.
 // -------------------------------------------------------
+
+static int ttf_text_width(const char *text, float px) {
+    if (!s_ttf_ok) return (int)(strlen(text) * px);
+    float scale = stbtt_ScaleForPixelHeight(&s_font, px);
+    float xf = 0.0f;
+    int prev_cp = 0;
+    while (*text) {
+        int cp = (unsigned char)*text;
+        if (prev_cp) xf += stbtt_GetCodepointKernAdvance(&s_font, prev_cp, cp) * scale;
+        int advance;
+        stbtt_GetCodepointHMetrics(&s_font, cp, &advance, NULL);
+        xf += (float)advance * scale;
+        prev_cp = cp;
+        text++;
+    }
+    return (int)xf;
+}
 
 void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
     if (!s_ttf_ok) {
@@ -468,70 +487,111 @@ int get_input(char *out, int max_len, const char *prompt, bool is_password) {
 }
 
 // -------------------------------------------------------
-// Wave background
+// Wave background — RSX vertex rendering
 // -------------------------------------------------------
 
-// Pre-blended against background 0x0008060F:
-//   wave_blended = round(alpha * wave_rgb + (1-alpha) * bg_rgb)
-static const u32 WAVE_COLOR[3] = {
-    0x00221641,  // rgba(55,35,105,0.55)  → R=34 G=22 B=65
-    0x001A1032,  // rgba(44,26,84, 0.50)  → R=26 G=16 B=50
-    0x00130B23,  // rgba(32,16,60, 0.45)  → R=19 G=11 B=35
-};
+// Per-layer properties: colour (0x00RRGGBB), amplitude, sine frequency, base-y fraction, per-frame phase step.
+#define WAVE_STEP_PX    20
+#define WAVE_VERTS_MAX  200
+#define WAVE_VBUF_BYTES 12288  // 3 layers × 200 verts × 20 bytes
 
-static const float WAVE_AMP[3]   = { 16.0f, 12.0f, 8.0f  };
-static const float WAVE_FREQ[3]  = { 0.008f, 0.013f, 0.019f };
-static const float WAVE_SPEED[3] = { 0.6f,  0.9f,  1.5f  };
-// y-frac measured from BOTTOM → center_y (from top) = H * (1 - frac)
-static const float WAVE_YFRAC[3] = { 0.08f, 0.14f, 0.22f };
+static const u32   WAVE_COLOR[3]  = { 0x002d2745, 0x001e1a37, 0x00261f44 };
+static const float WAVE_AMP[3]    = { 30.0f, 20.0f, 14.0f };
+static const float WAVE_FREQ[3]   = { 1.5f,  1.8f,  2.1f  };
+static const float WAVE_BASEY[3]  = { 0.70f, 0.78f, 0.86f };
+static const float WAVE_DPHASE[3] = { 0.008f, 0.013f, 0.018f };
 
-static float g_wave_phase = 0.0f;
+// Vertex layout stored in the RSX vertex buffer.
+typedef struct {
+    float x, y, z, w; // clip-space position (pre-transformed on PPU)
+    u8 r, g, b, a;    // RGBA colour (u8, normalised to [0,1] by RSX)
+} WaveVert; // 20 bytes
+
+static float  s_wave_phase[3]   = { 0.0f, 0.0f, 0.0f };
+static u8    *s_wave_vbuf       = NULL; // RSX-memory vertex buffer (12288 bytes, 3 sub-regions)
+static u32   *s_wave_fp_buf     = NULL; // RSX-memory copy of FP ucode
+static u32    s_wave_fp_offset  = 0;   // RSX offset of s_wave_fp_buf
 
 static void wave_draw(void) {
-    int W = (int)display_width;
-    int H = (int)display_height;
+    if (!s_wave_vbuf || !s_wave_fp_buf) return;
 
-    // Wave center Y positions (from top of screen)
-    float cy[3];
-    for (int w = 0; w < 3; w++)
-        cy[w] = H * (1.0f - WAVE_YFRAC[w]);
+    rsxVertexProgram  *vpo = (rsxVertexProgram*)  wave_vp_data;
+    rsxFragmentProgram *fpo = (rsxFragmentProgram*) wave_fp_data;
 
-    // For each x column, compute the wave Y for each layer.
-    // Reuse a static buffer to avoid stack pressure on PPU.
-    static float wy[3][1920];
-    int cols = (W < 1920) ? W : 1920;
+    void *vp_ucode; u32 vp_size;
+    rsxVertexProgramGetUCode(vpo, &vp_ucode, &vp_size);
+    rsxLoadVertexProgram(context, vpo, vp_ucode);
+    rsxSetVertexAttribOutputMask(context, vpo->output_mask);
+    rsxLoadFragmentProgramLocation(context, fpo, s_wave_fp_offset, GCM_LOCATION_RSX);
 
-    for (int x = 0; x < cols; x++) {
-        for (int wi = 0; wi < 3; wi++) {
-            float p = g_wave_phase * WAVE_SPEED[wi];
-            float a = WAVE_AMP[wi];
-            float f = WAVE_FREQ[wi];
-            wy[wi][x] = cy[wi]
-                + sinf(x * f + p)           * a
-                + sinf(x * f * 1.65f + p * 0.6f) * a * 0.42f;
-        }
+    rsxSetDepthTestEnable(context, GCM_FALSE);
+    rsxSetDepthWriteEnable(context, GCM_FALSE);
+
+    float W = (float)display_width;
+    float H = (float)display_height;
+
+    for (int li = 0; li < 3; li++) {
+        s_wave_phase[li] += WAVE_DPHASE[li];
+        if (s_wave_phase[li] > 62.83f) s_wave_phase[li] -= 62.83f;
     }
 
-    // Find the topmost scanline any wave reaches.
-    int strip_top = H;
-    for (int wi = 0; wi < 3; wi++)
-        for (int x = 0; x < cols; x++) {
-            int iy = (int)wy[wi][x];
-            if (iy < strip_top) strip_top = iy;
-        }
-    if (strip_top < 0) strip_top = 0;
+    // Loop 1: build all three layers into separate sub-regions of the vertex buffer.
+    int layer_n[3];
+    for (int li = 0; li < 3; li++) {
+        float base_y = H * WAVE_BASEY[li];
+        float amp    = WAVE_AMP[li];
+        float freq   = WAVE_FREQ[li];
+        float phase  = s_wave_phase[li];
+        u32   col    = WAVE_COLOR[li];
+        u8    r = (col >> 16) & 0xFF;
+        u8    g = (col >>  8) & 0xFF;
+        u8    b =  col        & 0xFF;
 
-    // Fill scanlines back-to-front (layer 2 first, layer 0 last/on-top)
-    for (int y = strip_top; y < H; y++) {
-        u32 *row = color_buffer[curr_fb] + y * W;
-        for (int x = 0; x < cols; x++) {
-            u32 px = row[x]; // already cleared to BG by cpuClearFb
-            if (y > (int)wy[2][x]) px = WAVE_COLOR[2];
-            if (y > (int)wy[1][x]) px = WAVE_COLOR[1];
-            if (y > (int)wy[0][x]) px = WAVE_COLOR[0];
-            row[x] = px;
+        WaveVert *verts = (WaveVert*)(s_wave_vbuf + li * WAVE_VERTS_MAX * sizeof(WaveVert));
+        int n = 0;
+
+        for (int px = 0; px <= (int)W; px += WAVE_STEP_PX) {
+            float fx = (float)px;
+            float wy = base_y + sinf(fx / W * (freq * 3.14159265f) + phase) * amp;
+            if (wy < 0.0f) wy = 0.0f;
+            if (wy > H)    wy = H;
+
+            float cx     = (2.0f * fx / W) - 1.0f;
+            float cy_top = 1.0f - (2.0f * wy / H);
+            float cy_bot = -1.0f;
+
+            verts[n].x=cx; verts[n].y=cy_top; verts[n].z=0.0f; verts[n].w=1.0f;
+            verts[n].r=r;  verts[n].g=g;      verts[n].b=b;     verts[n].a=255;
+            n++;
+            verts[n].x=cx; verts[n].y=cy_bot; verts[n].z=0.0f; verts[n].w=1.0f;
+            verts[n].r=r;  verts[n].g=g;      verts[n].b=b;     verts[n].a=255;
+            n++;
         }
+        layer_n[li] = n;
     }
+
+    // Loop 2: issue draw calls back-to-front; all geometry is already in RSX memory.
+    u32 vbuf_base;
+    rsxAddressToOffset(s_wave_vbuf, &vbuf_base);
+
+    rsxSetBlendEnable(context, GCM_FALSE);
+
+    for (int li = 0; li < 3; li++) {
+        u32 vbuf_off = vbuf_base + (u32)(li * WAVE_VERTS_MAX * sizeof(WaveVert));
+
+        rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
+            vbuf_off,
+            (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+
+        rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
+            vbuf_off + 16u,
+            (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
+
+        rsxInvalidateVertexCache(context);
+        rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, (u32)layer_n[li]);
+    }
+
+    rsxSetBlendEnable(context, GCM_TRUE);
 }
 
 // -------------------------------------------------------
@@ -765,7 +825,7 @@ static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
 // XMB layout constants (pixel values, assume 720p minimum)
 // -------------------------------------------------------
 
-#define XMB_BG          0x0008060FUL   // dark near-black navy
+#define XMB_BG          0x000d0d1aUL   // dark near-black
 #define XMB_DIVIDER_CLR 0x00554077UL   // muted purple divider
 #define XMB_ACCENT      0x007C3CEAUL   // bright purple accent
 #define XMB_HIGHLIGHT   0x001D1040UL   // selected row bg
@@ -777,7 +837,7 @@ static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
 #define XMB_TOPBAR_H    64
 #define XMB_TABBAR_H    80
 #define XMB_DIVIDER_Y   (XMB_TOPBAR_H + XMB_TABBAR_H)
-#define XMB_CONTENT_Y   (XMB_DIVIDER_Y + 2)
+#define XMB_CONTENT_Y   (XMB_DIVIDER_Y + 52)
 #define XMB_BOTTOM_PAD  70
 #define XMB_ITEM_H      90
 #define XMB_THUMB_W     52
@@ -869,9 +929,17 @@ static void xmb_do_search(void) {
         "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
         g_server, g_userid, encoded, XMB_ITEMS_MAX);
 
+    char dbg[512];
+    snprintf(dbg, sizeof(dbg), "search url: %s", url);
+    plog(dbg);
+
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status == 200)
         g_search_results_count = parse_xmb_items(responseBuffer, g_search_results, XMB_ITEMS_MAX);
+
+    snprintf(dbg, sizeof(dbg), "search status: %d count: %d",
+             status, g_search_results_count);
+    plog(dbg);
 }
 
 static int xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max) {
@@ -930,27 +998,25 @@ static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
 };
 
 static void xmb_draw_tabs(void) {
+    const int TAB_SPACING  = 96;
+    const int group_half_w = ((XMB_TAB_COUNT - 1) * TAB_SPACING) / 2;
+    const int tab_group_x0 = (int)display_width / 2 - group_half_w;
+
     for (int t = 0; t < XMB_TAB_COUNT; t++) {
         if (!g_tabs[t].enabled) continue;
 
-        int cx      = xmb_tab_cx(t);
+        int cx      = tab_group_x0 + t * TAB_SPACING;
         bool active = (t == g_active_tab);
-        int icon_px = active ? 48 : 32;
+        int icon_px = active ? 96 : 32;
         int icon_x  = cx - icon_px / 2;
         int icon_y  = XMB_TOPBAR_H + (XMB_TABBAR_H - icon_px) / 2 - 8;
 
-        drawIcon((u32)icon_x, (u32)icon_y, TAB_CODEPOINTS[t], (float)icon_px, 0x007C3CEA);
-
-        if (active) {
-            int lx = cx - (int)(strlen(g_tabs[t].label) * 8) / 2;
-            int ly = XMB_TOPBAR_H + XMB_TABBAR_H - 18;
-            drawTTF((u32)(lx > 0 ? lx : 0), (u32)ly, g_tabs[t].label, 14, 0x00FFFFFF);
-        }
+        drawIcon((u32)icon_x, (u32)icon_y, TAB_CODEPOINTS[t], (float)icon_px, 0x00ae99d6);
     }
 }
 
 // Draw the meta string "year · duration · genre" at (x, y) in 8px text.
-static void xmb_draw_meta(u32 x, u32 y, const XMBItem *it) {
+static void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14) {
     char meta[64] = "";
     if (it->year_str[0])     { snprintf(meta, sizeof(meta), "%s", it->year_str); }
     if (it->duration_str[0]) {
@@ -961,7 +1027,7 @@ static void xmb_draw_meta(u32 x, u32 y, const XMBItem *it) {
         if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
         strncat(meta, it->genre, sizeof(meta)-strlen(meta)-1);
     }
-    if (meta[0]) drawTTF(x, y, meta, 14, 0x00FFFFFF);
+    if (meta[0]) drawTTF(x, y, meta, px, 0x00FFFFFF);
 }
 
 static void xmb_draw_item_list(int tab) {
@@ -1152,9 +1218,9 @@ static void xmb_cpu_draw_osk(void) {
     int total_w = 10 * OSK_STEP_X - OSK_GAP;
     int osk_x0  = (W - total_w) / 2;
 
-    // Input bar background
-    drawRect((u32)XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 8),
-             (u32)(W - XMB_ITEM_PAD * 2), 40, 0x001A1040);
+    // Input bar background — same width as the keyboard
+    drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + 8),
+             (u32)total_w, 40, 0x001A1040);
 
     // Keyboard key backgrounds
     for (int r = 0; r <= OSK_ROWS_N; r++) {
@@ -1198,10 +1264,16 @@ static void xmb_rsx_draw_osk(void) {
     u64 us = timing_get_us();
     bool cursor = ((us / 500000) & 1) == 0;
 
-    // Input bar text
+    // Input bar text — centered horizontally within the bar
     char disp[68];
     snprintf(disp, sizeof(disp), "%s%s", g_search_buf, cursor ? "_" : " ");
-    drawTTF((u32)(XMB_ITEM_PAD + 12), (u32)(XMB_CONTENT_Y + 18), disp, 14, 0x00FFFFFF);
+    {
+        int bar_cx = (int)display_width / 2;
+        int text_w = (int)strlen(disp) * 18;
+        int tx = bar_cx - text_w / 2;
+        if (tx < (int)XMB_ITEM_PAD + 4) tx = (int)XMB_ITEM_PAD + 4;
+        drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 18), disp, 18, 0x00FFFFFF);
+    }
 
     // Keyboard labels
     for (int r = 0; r <= OSK_ROWS_N; r++) {
@@ -1210,13 +1282,13 @@ static void xmb_rsx_draw_osk(void) {
             int space_w = 5 * OSK_STEP_X - OSK_GAP;
             int sy = OSK_Y0 + r * OSK_STEP_Y + (OSK_KEY_H - 8) / 2;
             int cx_space = osk_x0 + space_w / 2 - 20;
-            drawTTF((u32)(cx_space > 0 ? cx_space : 0), (u32)sy, "SPACE", 16, 0x00FFFFFF);
+            drawTTF((u32)(cx_space > 0 ? cx_space : 0), (u32)sy, "SPACE", 21, 0x00FFFFFF);
 
             int bsx = osk_x0 + space_w + OSK_GAP;
-            drawTTF((u32)(bsx + (OSK_KEY_W - 8) / 2), (u32)sy, "<", 16, 0x00FFFFFF);
+            drawTTF((u32)(bsx + (OSK_KEY_W - 8) / 2), (u32)sy, "<", 21, 0x00FFFFFF);
 
             int clx = bsx + OSK_KEY_W + OSK_GAP;
-            drawTTF((u32)(clx + (OSK_KEY_W - 40) / 2), (u32)sy, "CLEAR", 16, 0x00FFFFFF);
+            drawTTF((u32)(clx + (OSK_KEY_W - 40) / 2), (u32)sy, "CLEAR", 21, 0x00FFFFFF);
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
             const char  *row  = rows[r];
@@ -1226,27 +1298,28 @@ static void xmb_rsx_draw_osk(void) {
             for (int c = 0; c < base_len; c++) {
                 char label[3] = { row[c], '\0', '\0' };
                 int kx = osk_x0 + c * OSK_STEP_X + (OSK_KEY_W - 8) / 2;
-                drawTTF((u32)kx, (u32)ry, label, 16, 0x00FFFFFF);
+                drawTTF((u32)kx, (u32)ry, label, 21, 0x00FFFFFF);
             }
-            // Toggle key
-            {
+            // Toggle key — only on the second-to-bottom row
+            if (r == OSK_ROWS_N - 1) {
                 const char *toggle_lbl = g_osk_sym ? "ABC" : "#+=";
                 int kx = osk_x0 + base_len * OSK_STEP_X + (OSK_KEY_W - 24) / 2;
-                drawTTF((u32)(kx > 0 ? kx : 0), (u32)ry, toggle_lbl, 16, 0x00FFFFFF);
+                drawTTF((u32)(kx > 0 ? kx : 0), (u32)ry, toggle_lbl, 21, 0x00FFFFFF);
             }
         }
     }
 
     // Search results below keyboard
-    int results_y = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 8;
+    int kb_bottom = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
+    int results_y = kb_bottom;
     int count = g_search_results_count;
     int vis_r = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ITEM_H;
     if (vis_r < 0) vis_r = 0;
     for (int i = 0; i < vis_r && i < count; i++) {
         const XMBItem *it = &g_search_results[i];
         int iy = results_y + i * XMB_ITEM_H;
-        drawTTF((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 8), it->name, 14, 0x00FFFFFF);
-        xmb_draw_meta((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 30), it);
+        drawTTF((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 8), it->name, 18, 0x00FFFFFF);
+        xmb_draw_meta((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 30), it, 18);
     }
     if (count == 0 && g_search_buf[0]) {
         drawTTF((u32)XMB_ITEM_PAD, (u32)results_y, "No results.", 8, 0x00FFFFFF);
@@ -1255,7 +1328,7 @@ static void xmb_rsx_draw_osk(void) {
 
 // CPU draws for search results list (thumbs, highlights)
 static void xmb_cpu_draw_search_results(void) {
-    int results_y = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 8;
+    int results_y = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
     int count = g_search_results_count;
     int vis_r = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ITEM_H;
     if (vis_r < 0) vis_r = 0;
@@ -1336,7 +1409,9 @@ static bool xmb_handle_input_browse(void) {
                 strncpy(jf.name, it->name, sizeof(jf.name)-1);
                 strncpy(jf.type, it->type, sizeof(jf.type)-1);
                 show_player(&jf);
-                init_btns();
+                g_tv_depth = 0;
+                g_tv_sub_sel = 0;
+                g_tv_sub_scroll = 0;
             }
         }
         return false;
@@ -1369,13 +1444,15 @@ static bool xmb_handle_input_browse(void) {
             strncpy(jf.name, it->name, sizeof(jf.name)-1);
             strncpy(jf.type, it->type, sizeof(jf.type)-1);
             show_player(&jf);
-            init_btns();
+            g_col_depth = 0;
+            g_col_sub_sel = 0;
+            g_col_sub_scroll = 0;
         }
         return false;
     }
 
     // Normal browse (depth 0)
-    if (BTN_PRESSED(circle)) return true; // exit
+    if (BTN_PRESSED(circle)) return false;
 
     int count = g_item_count[tab];
 
@@ -1412,13 +1489,17 @@ static bool xmb_handle_input_browse(void) {
             strncpy(jf.name, it->name, sizeof(jf.name)-1);
             strncpy(jf.type, it->type, sizeof(jf.type)-1);
             show_player(&jf);
-            init_btns();
         }
     }
 
     if (BTN_PRESSED(triangle) && count > 0 && g_sel < count) {
         // Info overlay: show item details until O pressed
         const XMBItem *it = &g_items[tab][g_sel];
+        // The outer loop already called wave_draw() before input was polled, so RSX is
+        // actively reading s_wave_vbuf. Sync here to drain those commands before the
+        // inner loop calls wave_draw() and overwrites the vertex buffer from the CPU.
+        rsxSync();
+        flip();     // commit the interrupted outer frame so waitflip() below doesn't hang
         init_btns();
         while (running) {
             waitflip();
@@ -1431,10 +1512,12 @@ static bool xmb_handle_input_browse(void) {
                 if (BTN_PRESSED(circle) || BTN_PRESSED(triangle)) goto info_done;
             }
             clearScreen(XMB_BG);
+            wave_draw();
             rsxSync();
             drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 10, it->name, 24, 0x00FFFFFF);
             drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 46, it->year_str, 14, 0x00FFFFFF);
             xmb_draw_meta(XMB_ITEM_PAD, XMB_TOPBAR_H + 68, it);
+            drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 100, "Coming soon", 16, 0x00888888);
             drawTTF(XMB_ITEM_PAD, (u32)(display_height - XMB_BOTTOM_PAD + 16), "O BACK", 14, 0x00FFFFFF);
             flip();
         }
@@ -1534,7 +1617,7 @@ void ui_run_xmb(void) {
     g_active_tab = XMB_TAB_MOVIES;
     g_sel = 0; g_scroll_top = 0;
     g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
-    g_wave_phase = 0.0f;
+    s_wave_phase[0] = 0.0f; s_wave_phase[1] = 0.0f; s_wave_phase[2] = 0.0f;
 
     // Detect which library tabs exist on the server
     xmb_detect_tabs();
@@ -1550,21 +1633,13 @@ void ui_run_xmb(void) {
     OSK_Y0 = XMB_CONTENT_Y + 58; // 8px padding + 40px input bar + 10px gap
 
     init_btns();
-    u64 prev_us = timing_get_us();
     padInfo padinfo; padData paddata;
 
     while (running) {
         waitflip();
         sysUtilCheckCallback();
         clearScreen(XMB_BG);
-
-        // Timing
-        u64 now_us = timing_get_us();
-        float dt = (float)(now_us - prev_us) / 1000000.0f;
-        if (dt > 0.1f) dt = 0.1f; // clamp on first frame / hiccups
-        prev_us = now_us;
-        g_wave_phase += dt;
-        if (g_wave_phase > 6283.0f) g_wave_phase -= 6283.0f;
+        wave_draw(); // RSX phase: queued here, executes in parallel with CPU work below
 
         // Lazy-load items for the current browse tab
         int tab = g_active_tab;
@@ -1586,10 +1661,8 @@ void ui_run_xmb(void) {
             should_exit = xmb_handle_input_browse();
         if (should_exit) break;
 
-        // Render — CPU phase first, then RSX text
+        // CPU phase — wait for RSX (wave + clear) then write text/rects
         rsxSync();
-
-        //wave_draw();
 
         // Divider line
         u32 *div = color_buffer[curr_fb] + XMB_DIVIDER_Y * display_width;
@@ -1615,6 +1688,14 @@ void ui_run_xmb(void) {
             snprintf(hints, sizeof(hints), "< L1   R1 >");
             int hx = (int)display_width - (int)(strlen(hints) * 8) - XMB_ITEM_PAD;
             drawTTF((u32)(hx > 0 ? hx : 0), 24, hints, 14, 0x00FFFFFF);
+        }
+
+        // Active tab name header — centered below the divider line
+        {
+            const char *tab_name = g_tabs[g_active_tab].label;
+            int hx = (int)display_width / 2 - ttf_text_width(tab_name, 28) / 2;
+            if (hx < (int)XMB_ITEM_PAD) hx = (int)XMB_ITEM_PAD;
+            drawTTF((u32)hx, (u32)(XMB_DIVIDER_Y + 14), tab_name, 28, 0x00FFFFFF);
         }
 
         // Content
@@ -1652,7 +1733,7 @@ void ui_run_xmb(void) {
         // Bottom hints
         drawTTF(XMB_ITEM_PAD,
                 (u32)(display_height - XMB_BOTTOM_PAD + 16),
-                "X SELECT   O BACK   /\\ INFO", 14, 0x00FFFFFF);
+                "X SELECT   O BACK   /\\ INFO", 21, 0x00FFFFFF);
 
         // Tab bar — after all drawTTF (CPU writes), before flip
         xmb_draw_tabs();
@@ -1685,6 +1766,27 @@ void ui_init(void) {
     rsxSetBlendEnable(context, GCM_TRUE);
     setRenderTarget(curr_fb);
     ttf_init();
+
+    // Wave RSX buffers: vertex data + FP ucode copy (must live in RSX memory).
+    s_wave_vbuf = (u8*)rsxMemalign(256, WAVE_VBUF_BYTES);
+
+    rsxFragmentProgram *fpo = (rsxFragmentProgram*)wave_fp_data;
+    void *fp_ucode; u32 fp_size;
+    rsxFragmentProgramGetUCode(fpo, &fp_ucode, &fp_size);
+    s_wave_fp_buf = (u32*)rsxMemalign(256, fp_size);
+    memcpy(s_wave_fp_buf, fp_ucode, fp_size);
+    rsxAddressToOffset(s_wave_fp_buf, &s_wave_fp_offset);
+}
+
+void ui_restore_rsx_state(void) {
+    rsxSetBlendFunc(context,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
+    rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
+    rsxSetBlendEnable(context, GCM_TRUE);
+    rsxSetDepthTestEnable(context, GCM_FALSE);
+    rsxSetDepthWriteEnable(context, GCM_FALSE);
+    setRenderTarget(curr_fb);
 }
 
 void ui_cleanup(void) {

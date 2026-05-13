@@ -231,6 +231,7 @@ static void audio_thread_fn(void *arg) {
 
 void show_player(const JFItem *item) {
     plog("show_player: enter");
+    init_btns();
     {
         static bool s_logged_cbufs = false;
         if (!s_logged_cbufs) {
@@ -276,6 +277,7 @@ void show_player(const JFItem *item) {
         plog("show_player: vdec_open FAILED");
         vdec_close();
         show_error("VDEC init failed.", "See /dev_hdd0/tmp/player_log.txt");
+        ui_restore_rsx_state();
         return;
     }
     plog("show_player: vdec_open OK");
@@ -297,6 +299,7 @@ void show_player(const JFItem *item) {
         audio_close();
         vdec_close();
         show_error("Stream connection failed.", url);
+        ui_restore_rsx_state();
         return;
     }
     plog("show_player: stream_open OK");
@@ -313,6 +316,7 @@ void show_player(const JFItem *item) {
         netClose(sock);
         audio_close();
         vdec_close();
+        ui_restore_rsx_state();
         return;
     }
     {
@@ -409,6 +413,7 @@ void show_player(const JFItem *item) {
             if (!pi.status[i]) continue;
             ioPadGetData(i, &pd); update_buttons(&pd);
             if (BTN_PRESSED(start)) {
+                if (!playing) break;
                 plog("playing=0 reason=user_stop");
                 playing = false; break;
             }
@@ -585,6 +590,7 @@ void show_player(const JFItem *item) {
 
     // Signal all threads to stop, join in order: network → decode → audio (Steps 5e, 6d)
     playing = false;
+    usleep(16000);
 
     if (dec_tid) {
         u64 tret;
@@ -602,7 +608,6 @@ void show_player(const JFItem *item) {
     audio_close();
     vdec_close();
 
-    setRenderTarget(curr_fb);
-    init_btns();
+    ui_restore_rsx_state();
     plog("show_player: done");
 }
