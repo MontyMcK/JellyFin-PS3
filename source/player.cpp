@@ -23,6 +23,22 @@
 #include "ui.h"
 #include "jellyfin_api.h"
 #include "rsxutil.h"
+#include "video_shaders.h"
+
+// -------------------------------------------------------
+// Video GPU blit state (allocated per playback session)
+// -------------------------------------------------------
+
+// Double-buffered textures: upload thread writes to tex_buf[disp_idx^1],
+// display thread binds tex_buf[disp_idx] for RSX draw.
+static u32 *s_vid_tex_buf[2]    = {NULL, NULL};
+static u32  s_vid_tex_off[2]    = {0, 0};
+static u32 *s_vid_fp_buf        = NULL;  // RSX-local FP ucode copy
+static u32  s_vid_fp_off        = 0;
+static u8  *s_vid_vbuf          = NULL;  // RSX-local 4-vertex quad buffer
+static u32  s_vid_vbuf_off      = 0;
+static volatile int  s_vid_disp_idx    = 0;     // index RSX is reading from
+static volatile bool s_vid_frame_ready = false;  // upload → display handoff
 
 // -------------------------------------------------------
 // Async log — ring buffer drained by a dedicated thread
@@ -226,6 +242,47 @@ static void audio_thread_fn(void *arg) {
 }
 
 // -------------------------------------------------------
+// Upload thread — memcpy jbuf front slot → RSX-local back texture
+// -------------------------------------------------------
+
+struct UploadCtx {
+    volatile bool *playing;
+    u32 fw, fh;
+};
+
+static void upload_thread_fn(void *arg) {
+    UploadCtx     *ctx     = (UploadCtx*)arg;
+    volatile bool *playing = ctx->playing;
+    u32 nbytes = ctx->fw * ctx->fh * 4;
+
+    while (running && *playing && !s_vdec_error) {
+        if (s_vid_frame_ready) {
+            // Display thread hasn't consumed the last upload yet.
+            usleep(500);
+            continue;
+        }
+
+        sysMutexLock(s_jbuf_mtx, 0);
+        const u8 *slot = jbuf_peek();
+        sysMutexUnlock(s_jbuf_mtx);
+
+        if (!slot) {
+            usleep(1000);
+            continue;
+        }
+
+        // Upload to back buffer (the one RSX is NOT currently reading).
+        int back = s_vid_disp_idx ^ 1;
+        memcpy(s_vid_tex_buf[back], slot, nbytes);
+        // Ensure all PPU stores to GDDR3 are visible before signalling.
+        __asm__ volatile("sync" ::: "memory");
+        s_vid_frame_ready = true;
+    }
+
+    sysThreadExit(0);
+}
+
+// -------------------------------------------------------
 // show_player — public entry point
 // -------------------------------------------------------
 
@@ -326,6 +383,53 @@ void show_player(const JFItem *item) {
         plog(buf);
     }
 
+    // Video GPU blit init — allocate RSX buffers once per session
+    {
+        u32 fw = jbuf_fw(), fh = jbuf_fh();
+
+        s_vid_tex_buf[0] = (u32*)rsxMemalign(64, fw * fh * 4);
+        rsxAddressToOffset(s_vid_tex_buf[0], &s_vid_tex_off[0]);
+        s_vid_tex_buf[1] = (u32*)rsxMemalign(64, fw * fh * 4);
+        rsxAddressToOffset(s_vid_tex_buf[1], &s_vid_tex_off[1]);
+        s_vid_disp_idx    = 0;
+        s_vid_frame_ready = false;
+
+        rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*)video_fp_data;
+        void *fp_ucode; u32 fp_size;
+        rsxFragmentProgramGetUCode(vid_fpo, &fp_ucode, &fp_size);
+        s_vid_fp_buf = (u32*)rsxMemalign(256, fp_size);
+        memcpy(s_vid_fp_buf, fp_ucode, fp_size);
+        rsxAddressToOffset(s_vid_fp_buf, &s_vid_fp_off);
+
+        // 4 vertices: float4 pos + float2 uv = 24 bytes each
+        s_vid_vbuf = (u8*)rsxMemalign(128, 4 * 24);
+
+        // Aspect-ratio fit — same formula as display loop
+        u32 sw, sh;
+        if ((u64)fw * display_height > (u64)fh * display_width) {
+            sw = display_width;
+            sh = (u32)((u64)fh * display_width / fw);
+        } else {
+            sh = display_height;
+            sw = (u32)((u64)fw * display_height / fh);
+        }
+        u32 ox0v = (display_width  - sw) / 2;
+        u32 oy0v = (display_height - sh) / 2;
+        float cx0 = (float)ox0v / display_width  * 2.0f - 1.0f;
+        float cx1 = (float)(ox0v + sw) / display_width  * 2.0f - 1.0f;
+        float cy0 = 1.0f - (float)oy0v / display_height * 2.0f;
+        float cy1 = 1.0f - (float)(oy0v + sh) / display_height * 2.0f;
+
+        float *v = (float*)s_vid_vbuf;
+        v[0]=cx0; v[1]=cy0; v[2]=0.f; v[3]=1.f; v[4]=0.f; v[5]=0.f;   // TL
+        v[6]=cx1; v[7]=cy0; v[8]=0.f; v[9]=1.f; v[10]=1.f; v[11]=0.f; // TR
+        v[12]=cx0; v[13]=cy1; v[14]=0.f; v[15]=1.f; v[16]=0.f; v[17]=1.f; // BL
+        v[18]=cx1; v[19]=cy1; v[20]=0.f; v[21]=1.f; v[22]=1.f; v[23]=1.f; // BR
+        rsxAddressToOffset(s_vid_vbuf, &s_vid_vbuf_off);
+
+        plog("vid_gpu: init done");
+    }
+
     // 5 ms socket receive timeout keeps the network thread responsive
     { struct { u32 sec; u32 usec; } tv = { 0, 5000 };
       setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
@@ -357,6 +461,10 @@ void show_player(const JFItem *item) {
     }
 
     if (!playing) {
+        if (s_vid_tex_buf[0]) { rsxFree(s_vid_tex_buf[0]); s_vid_tex_buf[0] = NULL; }
+        if (s_vid_tex_buf[1]) { rsxFree(s_vid_tex_buf[1]); s_vid_tex_buf[1] = NULL; }
+        if (s_vid_fp_buf)     { rsxFree(s_vid_fp_buf);     s_vid_fp_buf     = NULL; }
+        if (s_vid_vbuf)       { rsxFree(s_vid_vbuf);       s_vid_vbuf       = NULL; }
         jbuf_free();
         netClose(sock);
         audio_close();
@@ -399,6 +507,22 @@ void show_player(const JFItem *item) {
         }
     }
 
+    // ---- Spawn upload thread — memcpy jbuf→RSX-local off the display thread ----
+    UploadCtx        upl_ctx = { &playing, jbuf_fw(), jbuf_fh() };
+    sys_ppu_thread_t upl_tid = 0;
+    if (playing) {
+        int trc = sysThreadCreate(&upl_tid, upload_thread_fn,
+                                  (void *)&upl_ctx,
+                                  850, 32 * 1024,
+                                  0, "jf_upload");
+        if (trc != 0) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "show_player: upl thread_create FAILED rc=%d", trc);
+            plog(buf);
+            playing = false;
+        }
+    }
+
     // Detection timeout tracking for Step 7e fallback
     u64 det_timeout_start = 0;
 
@@ -429,152 +553,190 @@ void show_player(const JFItem *item) {
                 s_timing_ready = true;
             }
         } else if (timing_frame_due()) {
-            sysMutexLock(s_jbuf_mtx, 0);
-            const u8 *rslot = jbuf_peek();
-            sysMutexUnlock(s_jbuf_mtx);
-
-            if (rslot) {
-                {
-                    static const u8 *s_prev_rslot = NULL;
-                    if (s_prev_rslot != NULL && rslot == s_prev_rslot) {
-                        char buf[128];
-                        snprintf(buf, sizeof(buf),
-                            "CORRUPT: same slot displayed twice fr=%d ptr=%p",
-                            frame_count, (void*)rslot);
-                        plog(buf);
-                    }
-                    s_prev_rslot = rslot;
-                }
-                u32 fw = jbuf_fw(), fh = jbuf_fh();
-
-                // Fit into display preserving aspect ratio, center with black bars.
-                u32 sw, sh;
-                if ((u64)fw * display_height > (u64)fh * display_width) {
-                    // wider than display → letterbox (black top/bottom)
-                    sw = display_width;
-                    sh = (u32)((u64)fh * display_width / fw);
-                } else {
-                    // narrower or equal → pillarbox (black left/right)
-                    sh = display_height;
-                    sw = (u32)((u64)fw * display_height / fh);
-                }
-                u32 ox0 = (display_width  - sw) / 2;
-                u32 oy0 = (display_height - sh) / 2;
-
-                const u32 *src = (const u32*)rslot;
-                u32       *dst = color_buffer[curr_fb];
-
-                {
-                    static bool s_logged_blit_pre = false;
-                    if (!s_logged_blit_pre) {
-                        s_logged_blit_pre = true;
-                        char buf[128];
-                        snprintf(buf, sizeof(buf),
-                            "blit[0]: curr_fb=%u dst=%p src=%p fw=%u fh=%u",
-                            curr_fb, (void*)dst, (void*)rslot, fw, fh);
-                        plog(buf);
-                        snprintf(buf, sizeof(buf), "blit[0]: src[0]=0x%08x", src[0]);
-                        plog(buf);
-                    }
-                }
-
-                {
-                    static u32 s_cpx[4] = {1u, 1u, 1u, 1u};
-                    u32 cx = src[(fh / 2) * fw + (fw / 2)];
-                    if ((cx == 0x00000000u || cx == 0xFFFFFFFFu) &&
-                        (s_cpx[1] != 0x00000000u && s_cpx[1] != 0xFFFFFFFFu) &&
-                        (s_cpx[2] != 0x00000000u && s_cpx[2] != 0xFFFFFFFFu) &&
-                        (s_cpx[3] != 0x00000000u && s_cpx[3] != 0xFFFFFFFFu)) {
-                        char buf[128];
-                        snprintf(buf, sizeof(buf),
-                            "CORRUPT: suspicious centre pixel fr=%d px=0x%08x",
-                            frame_count, cx);
-                        plog(buf);
-                    }
-                    s_cpx[0] = s_cpx[1];
-                    s_cpx[1] = s_cpx[2];
-                    s_cpx[2] = s_cpx[3];
-                    s_cpx[3] = cx;
-                }
-
-                {
-                    static int s_sr_count = 0;
-                    if (s_sr_count < 60) {
-                        u32 centre_px = ((u32*)rslot)[(408/2) * 960 + (960/2)];
-                        char buf[64];
-                        snprintf(buf, sizeof(buf), "slot_read: slot=%d px=0x%08x",
-                            jbuf_rd(), centre_px);
-                        plog(buf);
-                        s_sr_count++;
-                    }
-                }
-
-                // Precompute source-X and source-Y lookup tables.
-                // One 64-bit divide per output column/row instead of per pixel —
-                // eliminates all software-emulated divides from the inner blit loop.
-                static u32 sx[2048], sy[1200];
-                for (u32 ox = 0; ox < sw && ox < 2048; ox++)
-                    sx[ox] = (u32)((u64)ox * fw / sw);
-                for (u32 oy = 0; oy < sh && oy < 1200; oy++)
-                    sy[oy] = (u32)((u64)oy * fh / sh);
-
-                // Black top bar
-                if (oy0 > 0) memset(dst, 0, oy0 * display_width * 4);
-
-                // Video rows — inner loop is pure indexed load + store, no division
-                for (u32 oy = 0; oy < sh; oy++) {
-                    const u32 *srow = src + sy[oy] * fw;
-                    u32       *drow = dst + (oy0 + oy) * display_width;
-                    if (ox0 > 0) {
-                        memset(drow,                0, ox0 * 4);
-                        memset(drow + ox0 + sw,     0, ox0 * 4);
-                    }
-                    for (u32 ox = 0; ox < sw; ox++)
-                        drow[ox0 + ox] = srow[sx[ox]];
-                }
-
-                // Black bottom bar
-                if (oy0 > 0) memset(dst + (oy0 + sh) * display_width, 0, oy0 * display_width * 4);
-
-                {
-                    static bool s_logged_blit_post = false;
-                    if (!s_logged_blit_post) {
-                        s_logged_blit_post = true;
-                        char buf[128];
-                        snprintf(buf, sizeof(buf), "blit[0]: dst[0]=0x%08x", dst[0]);
-                        plog(buf);
-                    }
-                }
-
-                __asm__ volatile("sync" ::: "memory");
-                sysMutexLock(s_jbuf_mtx, 0);
-                jbuf_pop();
-                sysMutexUnlock(s_jbuf_mtx);
-                frame_count++;
-                timing_frame_shown();
-                {
-                    static u64 s_fi_last_us  = 0;
-                    static u64 s_fi_gaps[2]  = {0, 0};
-                    u64 now_us = timing_get_us();
-                    if (s_fi_last_us != 0) {
-                        s_fi_gaps[0] = s_fi_gaps[1];
-                        s_fi_gaps[1] = now_us - s_fi_last_us;
-                    }
-                    s_fi_last_us = now_us;
-                    if (frame_count % 60 == 0) {
-                        char buf[128];
-                        snprintf(buf, sizeof(buf),
-                            "frame_interval: fr=%d gap1=%lluus gap2=%lluus",
-                            frame_count,
-                            (unsigned long long)s_fi_gaps[0],
-                            (unsigned long long)s_fi_gaps[1]);
-                        plog(buf);
-                    }
-                }
-            } else {
-                char buf[128];
-                snprintf(buf, sizeof(buf), "CORRUPT: jbuf empty at fr=%d", frame_count);
+            if (!s_vid_frame_ready) {
+                char buf[96];
+                snprintf(buf, sizeof(buf), "UNDERRUN: upload not ready fr=%d", frame_count);
                 plog(buf);
+            } else {
+                sysMutexLock(s_jbuf_mtx, 0);
+                const u8 *rslot = jbuf_peek();
+                sysMutexUnlock(s_jbuf_mtx);
+
+                if (rslot) {
+                    {
+                        static const u8 *s_prev_rslot = NULL;
+                        if (s_prev_rslot != NULL && rslot == s_prev_rslot) {
+                            char buf[128];
+                            snprintf(buf, sizeof(buf),
+                                "CORRUPT: same slot displayed twice fr=%d ptr=%p",
+                                frame_count, (void*)rslot);
+                            plog(buf);
+                        }
+                        s_prev_rslot = rslot;
+                    }
+                    u32 fw = jbuf_fw(), fh = jbuf_fh();
+
+                    const u32 *src = (const u32*)rslot;
+
+                    {
+                        static bool s_logged_blit_pre = false;
+                        if (!s_logged_blit_pre) {
+                            s_logged_blit_pre = true;
+                            char buf[128];
+                            snprintf(buf, sizeof(buf),
+                                "blit[0]: curr_fb=%u disp_idx=%d src=%p fw=%u fh=%u",
+                                curr_fb, s_vid_disp_idx, (void*)rslot, fw, fh);
+                            plog(buf);
+                            snprintf(buf, sizeof(buf), "blit[0]: src[0]=0x%08x", src[0]);
+                            plog(buf);
+                        }
+                    }
+
+                    {
+                        static u32 s_cpx[4] = {1u, 1u, 1u, 1u};
+                        u32 cx = src[(fh / 2) * fw + (fw / 2)];
+                        if ((cx == 0x00000000u || cx == 0xFFFFFFFFu) &&
+                            (s_cpx[1] != 0x00000000u && s_cpx[1] != 0xFFFFFFFFu) &&
+                            (s_cpx[2] != 0x00000000u && s_cpx[2] != 0xFFFFFFFFu) &&
+                            (s_cpx[3] != 0x00000000u && s_cpx[3] != 0xFFFFFFFFu)) {
+                            char buf[128];
+                            snprintf(buf, sizeof(buf),
+                                "CORRUPT: suspicious centre pixel fr=%d px=0x%08x",
+                                frame_count, cx);
+                            plog(buf);
+                        }
+                        s_cpx[0] = s_cpx[1];
+                        s_cpx[1] = s_cpx[2];
+                        s_cpx[2] = s_cpx[3];
+                        s_cpx[3] = cx;
+                    }
+
+                    {
+                        static int s_sr_count = 0;
+                        if (s_sr_count < 60) {
+                            u32 centre_px = ((u32*)rslot)[(408/2) * 960 + (960/2)];
+                            char buf[64];
+                            snprintf(buf, sizeof(buf), "slot_read: slot=%d px=0x%08x",
+                                jbuf_rd(), centre_px);
+                            plog(buf);
+                            s_sr_count++;
+                        }
+                    }
+
+                    // Promote back buffer to front: upload thread already filled it.
+                    s_vid_disp_idx ^= 1;
+
+                    // Clear framebuffer to black (covers bars outside the quad)
+                    rsxSetClearColor(context, 0x00000000);
+                    rsxSetClearDepthStencil(context, 0xffff);
+                    rsxClearSurface(context,
+                        GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
+
+                    // Bind texture from RSX-local display buffer
+                    {
+                        gcmTexture tex;
+                        memset(&tex, 0, sizeof(tex));
+                        tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
+                        tex.mipmap    = 1;
+                        tex.dimension = GCM_TEXTURE_DIMS_2D;
+                        tex.cubemap   = GCM_FALSE;
+                        tex.remap     =
+                            ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT)
+                          | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT)
+                          | ((u32)GCM_TEXTURE_REMAP_COLOR_R    << GCM_TEXTURE_REMAP_COLOR_R_SHIFT)
+                          | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT)
+                          | ((u32)GCM_TEXTURE_REMAP_COLOR_G    << GCM_TEXTURE_REMAP_COLOR_G_SHIFT)
+                          | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_B_SHIFT)
+                          | ((u32)GCM_TEXTURE_REMAP_COLOR_B    << GCM_TEXTURE_REMAP_COLOR_B_SHIFT);
+                        tex.width     = (u16)fw;
+                        tex.height    = (u16)fh;
+                        tex.depth     = 1;
+                        tex.location  = GCM_LOCATION_RSX;
+                        tex.pitch     = fw * 4;
+                        tex.offset    = s_vid_tex_off[s_vid_disp_idx];
+                        rsxInvalidateTextureCache(context, GCM_INVALIDATE_TEXTURE);
+                        rsxLoadTexture(context, 0, &tex);
+                        rsxTextureControl(context, 0, GCM_TRUE, 0, 12 << 8,
+                            GCM_TEXTURE_MAX_ANISO_1);
+                        rsxTextureFilter(context, 0, 0,
+                            GCM_TEXTURE_LINEAR, GCM_TEXTURE_LINEAR,
+                            GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+                        rsxTextureWrapMode(context, 0,
+                            GCM_TEXTURE_CLAMP_TO_EDGE, GCM_TEXTURE_CLAMP_TO_EDGE,
+                            GCM_TEXTURE_CLAMP_TO_EDGE, 0, GCM_TEXTURE_ZFUNC_LESS, 0);
+                    }
+
+                    // Render state
+                    rsxSetDepthTestEnable(context, GCM_FALSE);
+                    rsxSetBlendEnable(context, GCM_FALSE);
+                    rsxSetColorMask(context,
+                        GCM_COLOR_MASK_R | GCM_COLOR_MASK_G |
+                        GCM_COLOR_MASK_B | GCM_COLOR_MASK_A);
+                    {
+                        float vp_sc[4]  = { display_width  *  0.5f,
+                                           -(float)display_height * 0.5f, 0.5f, 0.0f };
+                        float vp_off[4] = { display_width  *  0.5f,
+                                            (float)display_height * 0.5f, 0.5f, 0.0f };
+                        rsxSetViewport(context, 0, 0,
+                            (u16)display_width, (u16)display_height,
+                            0.0f, 1.0f, vp_sc, vp_off);
+                    }
+
+                    // Load shaders
+                    {
+                        rsxVertexProgram  *vid_vpo = (rsxVertexProgram*)  video_vp_data;
+                        rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*) video_fp_data;
+                        void *vp_ucode; u32 vp_size;
+                        rsxVertexProgramGetUCode(vid_vpo, &vp_ucode, &vp_size);
+                        rsxLoadVertexProgram(context, vid_vpo, vp_ucode);
+                        rsxSetVertexAttribOutputMask(context, vid_vpo->output_mask);
+                        rsxLoadFragmentProgramLocation(context, vid_fpo,
+                            s_vid_fp_off, GCM_LOCATION_RSX);
+                    }
+
+                    // Draw fullscreen quad (triangle strip, 4 verts)
+                    // Stride 24: float4 pos at offset 0, float2 uv at offset 16
+                    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
+                        s_vid_vbuf_off, 24, 4,
+                        GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+                    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
+                        s_vid_vbuf_off + 16, 24, 2,
+                        GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+                    rsxInvalidateVertexCache(context);
+                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+
+                    sysMutexLock(s_jbuf_mtx, 0);
+                    jbuf_pop();
+                    sysMutexUnlock(s_jbuf_mtx);
+                    frame_count++;
+                    timing_frame_shown();
+                    // Release barrier: jbuf_pop visible before upload thread reads next slot.
+                    __asm__ volatile("sync" ::: "memory");
+                    s_vid_frame_ready = false;
+                    {
+                        static u64 s_fi_last_us  = 0;
+                        static u64 s_fi_gaps[2]  = {0, 0};
+                        u64 now_us = timing_get_us();
+                        if (s_fi_last_us != 0) {
+                            s_fi_gaps[0] = s_fi_gaps[1];
+                            s_fi_gaps[1] = now_us - s_fi_last_us;
+                        }
+                        s_fi_last_us = now_us;
+                        if (frame_count % 60 == 0) {
+                            char buf[128];
+                            snprintf(buf, sizeof(buf),
+                                "frame_interval: fr=%d gap1=%lluus gap2=%lluus",
+                                frame_count,
+                                (unsigned long long)s_fi_gaps[0],
+                                (unsigned long long)s_fi_gaps[1]);
+                            plog(buf);
+                        }
+                    }
+                } else {
+                    char buf[128];
+                    snprintf(buf, sizeof(buf), "CORRUPT: jbuf empty at fr=%d", frame_count);
+                    plog(buf);
+                }
             }
         }
         flip();
@@ -602,6 +764,17 @@ void show_player(const JFItem *item) {
         sysThreadJoin(aud_tid, &tret);
         plog("show_player: audio thread joined");
     }
+    if (upl_tid) {
+        u64 tret;
+        sysThreadJoin(upl_tid, &tret);
+        plog("show_player: upload thread joined");
+    }
+
+    // Free video GPU blit resources before releasing the jitter buffer
+    if (s_vid_tex_buf[0]) { rsxFree(s_vid_tex_buf[0]); s_vid_tex_buf[0] = NULL; }
+    if (s_vid_tex_buf[1]) { rsxFree(s_vid_tex_buf[1]); s_vid_tex_buf[1] = NULL; }
+    if (s_vid_fp_buf)     { rsxFree(s_vid_fp_buf);     s_vid_fp_buf     = NULL; }
+    if (s_vid_vbuf)       { rsxFree(s_vid_vbuf);       s_vid_vbuf       = NULL; }
 
     jbuf_free();
     netClose(sock);
