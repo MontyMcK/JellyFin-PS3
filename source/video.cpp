@@ -387,6 +387,24 @@ u32       jbuf_fh(void)    { return s_jbuf_fh; }
 int       jbuf_count(void) { return s_jb_n; }
 int       jbuf_rd(void)    { return s_jb_rd; }
 
+// MPEG-2/H264 frame rate codes reported by the PS3 VDEC hardware.
+// Values 1-8 follow the ISO 13818-2 frame_rate_code table.
+static void fps_from_frc(int frc, int *num, int *den) {
+    switch (frc) {
+        case 1: *num = 24000; *den = 1001; break;  /* 23.976fps */
+        case 2: *num = 24;    *den = 1;    break;  /* 24fps     */
+        case 3: *num = 25;    *den = 1;    break;  /* 25fps     */
+        case 4: *num = 30000; *den = 1001; break;  /* 29.97fps  */
+        case 5: *num = 30;    *den = 1;    break;  /* 30fps     */
+        case 6: *num = 50;    *den = 1;    break;  /* 50fps     */
+        case 7: *num = 60000; *den = 1001; break;  /* 59.94fps  */
+        case 8: *num = 60;    *den = 1;    break;  /* 60fps     */
+        default:
+            plog("fps_detect: unknown frc, defaulting to 30fps");
+            *num = 30; *den = 1; break;
+    }
+}
+
 // Pull one decoded frame into the next free jitter buffer slot.
 // Called only from the decode thread; s_jbuf_mtx guards s_jb_n.
 bool vdec_pull_frame(void) {
@@ -401,9 +419,11 @@ bool vdec_pull_frame(void) {
         return false;
 
     const vdecPicture *pic = (const vdecPicture*)(uintptr_t)pic_addr;
+    u8 frc = 0;
     if (pic->codec_specific_addr) {
         const vdecH264Info *h =
             (const vdecH264Info*)(uintptr_t)pic->codec_specific_addr;
+        frc = h->frame_rate;
         if (h->width > 0 && h->height > 0 &&
             (h->width != s_jbuf_fw || h->height != s_jbuf_fh)) {
             char buf[80];
@@ -445,9 +465,13 @@ bool vdec_pull_frame(void) {
     sysMutexUnlock(s_jbuf_mtx);
 
     if (!s_timing_ready) {
-        timing_init(30, 1);
+        int fps_num, fps_den;
+        fps_from_frc(frc, &fps_num, &fps_den);
+        timing_init(fps_num, fps_den);
         s_timing_ready = true;
-        plog("fps_detect: hardcoded 30fps");
+        char buf[64];
+        snprintf(buf, sizeof(buf), "fps_detect: frc=%d -> %d/%d", (int)frc, fps_num, fps_den);
+        plog(buf);
     }
 
     return true;
