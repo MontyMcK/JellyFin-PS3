@@ -473,7 +473,7 @@ void show_player(const JFItem *item) {
     }
 
     plog("jbuf: pre-fill done — starting threads");
-    timing_init(30, 1);   // placeholder; overwritten by fps detection (Step 1/7)
+    timing_register_vblank();
 
     // ---- Spawn decode thread (Step 2) ----
     DecodeCtx        dec_ctx = { &playing, &frame_count, sock };
@@ -552,7 +552,7 @@ void show_player(const JFItem *item) {
                 timing_init(30, 1);
                 s_timing_ready = true;
             }
-        } else if (timing_frame_due()) {
+        } else if (timing_frame_due_vsync()) {
             if (!s_vid_frame_ready) {
                 char buf[96];
                 snprintf(buf, sizeof(buf), "UNDERRUN: upload not ready fr=%d", frame_count);
@@ -626,85 +626,6 @@ void show_player(const JFItem *item) {
                     // Promote back buffer to front: upload thread already filled it.
                     s_vid_disp_idx ^= 1;
 
-                    // Clear framebuffer to black (covers bars outside the quad)
-                    rsxSetClearColor(context, 0x00000000);
-                    rsxSetClearDepthStencil(context, 0xffff);
-                    rsxClearSurface(context,
-                        GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
-
-                    // Bind texture from RSX-local display buffer
-                    {
-                        gcmTexture tex;
-                        memset(&tex, 0, sizeof(tex));
-                        tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
-                        tex.mipmap    = 1;
-                        tex.dimension = GCM_TEXTURE_DIMS_2D;
-                        tex.cubemap   = GCM_FALSE;
-                        tex.remap     =
-                            ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT)
-                          | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT)
-                          | ((u32)GCM_TEXTURE_REMAP_COLOR_R    << GCM_TEXTURE_REMAP_COLOR_R_SHIFT)
-                          | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT)
-                          | ((u32)GCM_TEXTURE_REMAP_COLOR_G    << GCM_TEXTURE_REMAP_COLOR_G_SHIFT)
-                          | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_B_SHIFT)
-                          | ((u32)GCM_TEXTURE_REMAP_COLOR_B    << GCM_TEXTURE_REMAP_COLOR_B_SHIFT);
-                        tex.width     = (u16)fw;
-                        tex.height    = (u16)fh;
-                        tex.depth     = 1;
-                        tex.location  = GCM_LOCATION_RSX;
-                        tex.pitch     = fw * 4;
-                        tex.offset    = s_vid_tex_off[s_vid_disp_idx];
-                        rsxInvalidateTextureCache(context, GCM_INVALIDATE_TEXTURE);
-                        rsxLoadTexture(context, 0, &tex);
-                        rsxTextureControl(context, 0, GCM_TRUE, 0, 12 << 8,
-                            GCM_TEXTURE_MAX_ANISO_1);
-                        rsxTextureFilter(context, 0, 0,
-                            GCM_TEXTURE_LINEAR, GCM_TEXTURE_LINEAR,
-                            GCM_TEXTURE_CONVOLUTION_QUINCUNX);
-                        rsxTextureWrapMode(context, 0,
-                            GCM_TEXTURE_CLAMP_TO_EDGE, GCM_TEXTURE_CLAMP_TO_EDGE,
-                            GCM_TEXTURE_CLAMP_TO_EDGE, 0, GCM_TEXTURE_ZFUNC_LESS, 0);
-                    }
-
-                    // Render state
-                    rsxSetDepthTestEnable(context, GCM_FALSE);
-                    rsxSetBlendEnable(context, GCM_FALSE);
-                    rsxSetColorMask(context,
-                        GCM_COLOR_MASK_R | GCM_COLOR_MASK_G |
-                        GCM_COLOR_MASK_B | GCM_COLOR_MASK_A);
-                    {
-                        float vp_sc[4]  = { display_width  *  0.5f,
-                                           -(float)display_height * 0.5f, 0.5f, 0.0f };
-                        float vp_off[4] = { display_width  *  0.5f,
-                                            (float)display_height * 0.5f, 0.5f, 0.0f };
-                        rsxSetViewport(context, 0, 0,
-                            (u16)display_width, (u16)display_height,
-                            0.0f, 1.0f, vp_sc, vp_off);
-                    }
-
-                    // Load shaders
-                    {
-                        rsxVertexProgram  *vid_vpo = (rsxVertexProgram*)  video_vp_data;
-                        rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*) video_fp_data;
-                        void *vp_ucode; u32 vp_size;
-                        rsxVertexProgramGetUCode(vid_vpo, &vp_ucode, &vp_size);
-                        rsxLoadVertexProgram(context, vid_vpo, vp_ucode);
-                        rsxSetVertexAttribOutputMask(context, vid_vpo->output_mask);
-                        rsxLoadFragmentProgramLocation(context, vid_fpo,
-                            s_vid_fp_off, GCM_LOCATION_RSX);
-                    }
-
-                    // Draw fullscreen quad (triangle strip, 4 verts)
-                    // Stride 24: float4 pos at offset 0, float2 uv at offset 16
-                    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
-                        s_vid_vbuf_off, 24, 4,
-                        GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-                    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
-                        s_vid_vbuf_off + 16, 24, 2,
-                        GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-                    rsxInvalidateVertexCache(context);
-                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
-
                     sysMutexLock(s_jbuf_mtx, 0);
                     jbuf_pop();
                     sysMutexUnlock(s_jbuf_mtx);
@@ -739,6 +660,94 @@ void show_player(const JFItem *item) {
                 }
             }
         }
+
+        // Re-render the current video frame into the RSX back color buffer every vsync.
+        // flip() alternates the color buffer unconditionally, so on hold vsyncs (where the
+        // timing gate does not fire) we must re-draw the same texture or the display would
+        // flash the stale back buffer.  s_vid_disp_idx only advances inside the gate above.
+        if (frame_count > 0) {
+            u32 fw = jbuf_fw(), fh = jbuf_fh();
+
+            // Clear framebuffer to black (covers bars outside the quad)
+            rsxSetClearColor(context, 0x00000000);
+            rsxSetClearDepthStencil(context, 0xffff);
+            rsxClearSurface(context,
+                GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
+
+            // Bind texture from RSX-local display buffer
+            {
+                gcmTexture tex;
+                memset(&tex, 0, sizeof(tex));
+                tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
+                tex.mipmap    = 1;
+                tex.dimension = GCM_TEXTURE_DIMS_2D;
+                tex.cubemap   = GCM_FALSE;
+                tex.remap     =
+                    ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT)
+                  | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT)
+                  | ((u32)GCM_TEXTURE_REMAP_COLOR_R    << GCM_TEXTURE_REMAP_COLOR_R_SHIFT)
+                  | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT)
+                  | ((u32)GCM_TEXTURE_REMAP_COLOR_G    << GCM_TEXTURE_REMAP_COLOR_G_SHIFT)
+                  | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_B_SHIFT)
+                  | ((u32)GCM_TEXTURE_REMAP_COLOR_B    << GCM_TEXTURE_REMAP_COLOR_B_SHIFT);
+                tex.width     = (u16)fw;
+                tex.height    = (u16)fh;
+                tex.depth     = 1;
+                tex.location  = GCM_LOCATION_RSX;
+                tex.pitch     = fw * 4;
+                tex.offset    = s_vid_tex_off[s_vid_disp_idx];
+                rsxInvalidateTextureCache(context, GCM_INVALIDATE_TEXTURE);
+                rsxLoadTexture(context, 0, &tex);
+                rsxTextureControl(context, 0, GCM_TRUE, 0, 12 << 8,
+                    GCM_TEXTURE_MAX_ANISO_1);
+                rsxTextureFilter(context, 0, 0,
+                    GCM_TEXTURE_LINEAR, GCM_TEXTURE_LINEAR,
+                    GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+                rsxTextureWrapMode(context, 0,
+                    GCM_TEXTURE_CLAMP_TO_EDGE, GCM_TEXTURE_CLAMP_TO_EDGE,
+                    GCM_TEXTURE_CLAMP_TO_EDGE, 0, GCM_TEXTURE_ZFUNC_LESS, 0);
+            }
+
+            // Render state
+            rsxSetDepthTestEnable(context, GCM_FALSE);
+            rsxSetBlendEnable(context, GCM_FALSE);
+            rsxSetColorMask(context,
+                GCM_COLOR_MASK_R | GCM_COLOR_MASK_G |
+                GCM_COLOR_MASK_B | GCM_COLOR_MASK_A);
+            {
+                float vp_sc[4]  = { display_width  *  0.5f,
+                                   -(float)display_height * 0.5f, 0.5f, 0.0f };
+                float vp_off[4] = { display_width  *  0.5f,
+                                    (float)display_height * 0.5f, 0.5f, 0.0f };
+                rsxSetViewport(context, 0, 0,
+                    (u16)display_width, (u16)display_height,
+                    0.0f, 1.0f, vp_sc, vp_off);
+            }
+
+            // Load shaders
+            {
+                rsxVertexProgram  *vid_vpo = (rsxVertexProgram*)  video_vp_data;
+                rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*) video_fp_data;
+                void *vp_ucode; u32 vp_size;
+                rsxVertexProgramGetUCode(vid_vpo, &vp_ucode, &vp_size);
+                rsxLoadVertexProgram(context, vid_vpo, vp_ucode);
+                rsxSetVertexAttribOutputMask(context, vid_vpo->output_mask);
+                rsxLoadFragmentProgramLocation(context, vid_fpo,
+                    s_vid_fp_off, GCM_LOCATION_RSX);
+            }
+
+            // Draw fullscreen quad (triangle strip, 4 verts)
+            // Stride 24: float4 pos at offset 0, float2 uv at offset 16
+            rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
+                s_vid_vbuf_off, 24, 4,
+                GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+            rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
+                s_vid_vbuf_off + 16, 24, 2,
+                GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+            rsxInvalidateVertexCache(context);
+            rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+        }
+
         flip();
     }
 
@@ -749,6 +758,8 @@ void show_player(const JFItem *item) {
             running, (int)playing, (int)s_vdec_error, frame_count);
         plog(buf);
     }
+
+    timing_shutdown();
 
     // Signal all threads to stop, join in order: network → decode → audio (Steps 5e, 6d)
     playing = false;
