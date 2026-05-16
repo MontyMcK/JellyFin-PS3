@@ -8,13 +8,13 @@
 #include <audio/audio.h>
 #include <sys/event_queue.h>
 
-static u32               s_audio_port      = 0;
-static sys_event_queue_t s_audio_eq        = {0};
-static sys_ipc_key_t     s_audio_key       = 0;
-bool                     s_audio_ok        = false;
-static u32               s_read_index_addr = 0;
-static u32               s_data_start      = 0;
-static u32               s_num_blocks      = 0;
+static u32               s_audio_port  = 0;
+static sys_event_queue_t s_audio_eq    = {0};
+static sys_ipc_key_t     s_audio_key   = 0;
+bool                     s_audio_ok    = false;
+static u32               s_data_start  = 0;
+static u32               s_num_blocks  = 0;
+static u32               s_write_blk   = 0;  // next DMA block index to fill
 
 // Total audio blocks consumed since port start.  Incremented once per
 // sysEventQueueReceive success in audio_write_pcm().  Each block = 256 samples
@@ -63,9 +63,9 @@ void audio_open(void) {
 
     if (rc == 0 && cfg.audioDataStart) {
         u32 nb = (u32)p.numBlocks;  // known value — don't trust cfg.numBlocks yet
-        s_read_index_addr = cfg.readIndex;   // address of live SPU read-position u32
-        s_data_start      = cfg.audioDataStart;
-        s_num_blocks      = nb;
+        s_data_start  = cfg.audioDataStart;
+        s_num_blocks  = nb;
+        s_write_blk   = 1;  // block 0 pre-filled with silence; hardware starts there
         // Zero the entire DMA ring.  Hardware reads zeros → digital silence.
         memset((void*)(uintptr_t)cfg.audioDataStart, 0,
                nb * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float));
@@ -94,41 +94,27 @@ void audio_open(void) {
     s_audio_ok = true;
 }
 
-// Called from the dedicated audio thread.  Drains the audio event queue and
-// fills each DMA block with decoded PCM from the adec ring, or silence.
+// Called from the dedicated audio thread in a loop — one block per call.
+// Non-blocking: returns immediately if no event is ready.  The audio thread
+// loop provides the pacing; draining multiple events here would run audio
+// faster than real time.
 void audio_write_pcm(void) {
     if (!s_audio_ok) return;
-    static int s_clock_zero_count = 0;
     sys_event_t ev;
-    while (sysEventQueueReceive(s_audio_eq, &ev, 1) == 0) {
-        if (s_read_index_addr && s_data_start) {
-            // readIndex holds an ADDRESS to a u32 block index the SPU increments.
-            volatile u32 *ri_ptr = (volatile u32 *)(uintptr_t)s_read_index_addr;
-            u32 clk = *ri_ptr;
-            if (clk == 0) {
-                s_clock_zero_count++;
-                if (s_clock_zero_count == 3 || s_clock_zero_count % 500 == 0) {
-                    char buf[64];
-                    snprintf(buf, sizeof(buf),
-                        "WARN audio: clock stalled %d frames", s_clock_zero_count);
-                    plog(buf);
-                }
-            } else {
-                s_clock_zero_count = 0;
-            }
-            u32  blk   = (clk + 1) % s_num_blocks;
-            u32  addr  = s_data_start + blk * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float);
-            float *blk_buf = (float *)(uintptr_t)addr;
-            float interleaved[AUDIO_BLOCK_SAMPLES * 2];
-            int got = adec_read_pcm(interleaved, AUDIO_BLOCK_SAMPLES);
-            // Deinterleave: PS3 expects all L samples then all R samples
-            for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
-                blk_buf[i]                      = (i < got) ? interleaved[i * 2]     : 0.0f;  // L
-                blk_buf[AUDIO_BLOCK_SAMPLES + i] = (i < got) ? interleaved[i * 2 + 1] : 0.0f;  // R
-            }
+    if (sysEventQueueReceive(s_audio_eq, &ev, 0) != 0) return;
+    if (s_data_start) {
+        u32   addr    = s_data_start + s_write_blk * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float);
+        float *blk_buf = (float *)(uintptr_t)addr;
+        float interleaved[AUDIO_BLOCK_SAMPLES * 2];
+        int got = adec_read_pcm(interleaved, AUDIO_BLOCK_SAMPLES);
+        // Deinterleave: PS3 expects all L samples then all R samples
+        for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
+            blk_buf[i]                       = (i < got) ? interleaved[i * 2]     : 0.0f;  // L
+            blk_buf[AUDIO_BLOCK_SAMPLES + i] = (i < got) ? interleaved[i * 2 + 1] : 0.0f;  // R
         }
-        s_audio_blocks++;
+        s_write_blk = (s_write_blk + 1) % s_num_blocks;
     }
+    s_audio_blocks++;
 }
 
 void audio_close(void) {
@@ -138,8 +124,8 @@ void audio_close(void) {
     audioPortClose(s_audio_port);
     sysEventQueueDestroy(s_audio_eq, 0);
     audioQuit();
-    s_audio_ok        = false;
-    s_read_index_addr = 0;
-    s_data_start      = 0;
-    s_num_blocks      = 0;
+    s_audio_ok   = false;
+    s_data_start = 0;
+    s_num_blocks = 0;
+    s_write_blk  = 0;
 }

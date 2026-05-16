@@ -506,8 +506,18 @@ bool video_feed_ts(const u8 *pkt) {
         if (pes_payload(s_pes_out, vlen, &h264, &h264_len, &pts))
             vdec_submit(h264, h264_len, pts);
     }
-    if (ready & 2)
+    if (ready & 2) {
+        static bool s_logged_pes = false;
+        if (!s_logged_pes && alen >= 4) {
+            s_logged_pes = true;
+            char buf[64];
+            snprintf(buf, sizeof(buf), "adec_pes: bytes=%02x %02x %02x %02x len=%d",
+                s_audio_pes_out[0], s_audio_pes_out[1],
+                s_audio_pes_out[2], s_audio_pes_out[3], alen);
+            plog(buf);
+        }
         adec_push_pes(s_audio_pes_out, alen);
+    }
 
     if (s_frames_ready > 0)
         return vdec_pull_frame();
