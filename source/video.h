@@ -27,6 +27,7 @@ u32          jbuf_fw(void);
 u32          jbuf_fh(void);
 int          jbuf_count(void);
 int          jbuf_rd(void);
+u64          jbuf_peek_pts(void);  // PTS (us, 0=unknown) of current front slot
 
 // ---- Jitter buffer mutex (guards s_jb_n; lock before jbuf_peek/pop) ----
 extern sys_mutex_t s_jbuf_mtx;

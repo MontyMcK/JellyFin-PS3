@@ -1489,6 +1489,8 @@ static bool xmb_handle_input_browse(void) {
             strncpy(jf.name, it->name, sizeof(jf.name)-1);
             strncpy(jf.type, it->type, sizeof(jf.type)-1);
             show_player(&jf);
+            init_btns();
+            return false;
         }
     }
 

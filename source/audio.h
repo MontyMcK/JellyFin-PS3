@@ -10,3 +10,6 @@ void audio_close(void);
 // Total audio DMA blocks consumed since audio_open().
 // Each block = 256 samples at 48 kHz = 5.333 ms.
 u64  audio_block_count(void);
+
+// Microseconds of audio played since audio_open() (derived from DMA block count).
+u64  audio_get_clock_us(void);

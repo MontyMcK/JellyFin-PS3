@@ -629,34 +629,52 @@ void show_player(const JFItem *item) {
                         }
                     }
 
-                    // Promote back buffer to front: upload thread already filled it.
-                    s_vid_disp_idx ^= 1;
-
-                    sysMutexLock(s_jbuf_mtx, 0);
-                    jbuf_pop();
-                    sysMutexUnlock(s_jbuf_mtx);
-                    frame_count++;
-                    timing_frame_shown();
-                    // Release barrier: jbuf_pop visible before upload thread reads next slot.
-                    __asm__ volatile("sync" ::: "memory");
-                    s_vid_frame_ready = false;
+                    bool av_skip = false;
                     {
-                        static u64 s_fi_last_us  = 0;
-                        static u64 s_fi_gaps[2]  = {0, 0};
-                        u64 now_us = timing_get_us();
-                        if (s_fi_last_us != 0) {
-                            s_fi_gaps[0] = s_fi_gaps[1];
-                            s_fi_gaps[1] = now_us - s_fi_last_us;
+                        u64 frame_pts = jbuf_peek_pts();
+                        if (frame_pts != 0) {
+                            u64 audio_clk = audio_get_clock_us();
+                            if (frame_pts > audio_clk) {
+                                av_skip = true;
+                            } else if (audio_clk - frame_pts > 100000ULL) {
+                                char buf[80];
+                                snprintf(buf, sizeof(buf), "av_late: pts=%llu clock=%llu",
+                                    (unsigned long long)frame_pts,
+                                    (unsigned long long)audio_clk);
+                                plog(buf);
+                            }
                         }
-                        s_fi_last_us = now_us;
-                        if (frame_count % 60 == 0) {
-                            char buf[128];
-                            snprintf(buf, sizeof(buf),
-                                "frame_interval: fr=%d gap1=%lluus gap2=%lluus",
-                                frame_count,
-                                (unsigned long long)s_fi_gaps[0],
-                                (unsigned long long)s_fi_gaps[1]);
-                            plog(buf);
+                    }
+                    if (!av_skip) {
+                        // Promote back buffer to front: upload thread already filled it.
+                        s_vid_disp_idx ^= 1;
+
+                        sysMutexLock(s_jbuf_mtx, 0);
+                        jbuf_pop();
+                        sysMutexUnlock(s_jbuf_mtx);
+                        frame_count++;
+                        timing_frame_shown();
+                        // Release barrier: jbuf_pop visible before upload thread reads next slot.
+                        __asm__ volatile("sync" ::: "memory");
+                        s_vid_frame_ready = false;
+                        {
+                            static u64 s_fi_last_us  = 0;
+                            static u64 s_fi_gaps[2]  = {0, 0};
+                            u64 now_us = timing_get_us();
+                            if (s_fi_last_us != 0) {
+                                s_fi_gaps[0] = s_fi_gaps[1];
+                                s_fi_gaps[1] = now_us - s_fi_last_us;
+                            }
+                            s_fi_last_us = now_us;
+                            if (frame_count % 60 == 0) {
+                                char buf[128];
+                                snprintf(buf, sizeof(buf),
+                                    "frame_interval: fr=%d gap1=%lluus gap2=%lluus",
+                                    frame_count,
+                                    (unsigned long long)s_fi_gaps[0],
+                                    (unsigned long long)s_fi_gaps[1]);
+                                plog(buf);
+                            }
                         }
                     }
                 } else {

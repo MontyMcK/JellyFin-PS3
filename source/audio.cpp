@@ -25,6 +25,7 @@ static u32          s_pcm_blocks   = 0;
 static u32          s_sil_blocks   = 0;
 
 u64 audio_block_count(void) { return s_audio_blocks; }
+u64 audio_get_clock_us(void) { return (s_audio_blocks * 256ULL * 1000000ULL) / 48000ULL; }
 
 void audio_open(void) {
     int rc;

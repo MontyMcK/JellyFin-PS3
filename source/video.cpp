@@ -353,6 +353,7 @@ volatile bool s_timing_ready = false;
 sys_mutex_t s_jbuf_mtx;
 
 static u8  *s_jbuf_data[JBUF_SIZE] = {};
+static u64  s_jbuf_pts[JBUF_SIZE]  = {};
 static u32  s_jbuf_fw = 0, s_jbuf_fh = 0;
 static int  s_jb_wr = 0, s_jb_rd = 0;
 static volatile int s_jb_n = 0;
@@ -364,6 +365,7 @@ bool jbuf_alloc(u32 fw, u32 fh) {
         if (!s_jbuf_data[i]) return false;
     }
     s_jb_wr = s_jb_rd = s_jb_n = 0;
+    memset(s_jbuf_pts, 0, sizeof(s_jbuf_pts));
     sys_mutex_attr_t attr;
     memset(&attr, 0, sizeof(attr));
     attr.attr_protocol  = SYS_LWMUTEX_ATTR_PROTOCOL;
@@ -380,12 +382,13 @@ void jbuf_free(void) {
     sysMutexDestroy(s_jbuf_mtx);
 }
 
-const u8 *jbuf_peek(void)  { return (s_jb_n > 0) ? s_jbuf_data[s_jb_rd] : NULL; }
-void      jbuf_pop(void)   { s_jb_rd = (s_jb_rd + 1) % JBUF_SIZE; s_jb_n--; }
-u32       jbuf_fw(void)    { return s_jbuf_fw; }
-u32       jbuf_fh(void)    { return s_jbuf_fh; }
-int       jbuf_count(void) { return s_jb_n; }
-int       jbuf_rd(void)    { return s_jb_rd; }
+const u8 *jbuf_peek(void)     { return (s_jb_n > 0) ? s_jbuf_data[s_jb_rd] : NULL; }
+void      jbuf_pop(void)      { s_jb_rd = (s_jb_rd + 1) % JBUF_SIZE; s_jb_n--; }
+u32       jbuf_fw(void)       { return s_jbuf_fw; }
+u32       jbuf_fh(void)       { return s_jbuf_fh; }
+int       jbuf_count(void)    { return s_jb_n; }
+int       jbuf_rd(void)       { return s_jb_rd; }
+u64       jbuf_peek_pts(void) { return (s_jb_n > 0) ? s_jbuf_pts[s_jb_rd] : 0; }
 
 // MPEG-2/H264 frame rate codes reported by the PS3 VDEC hardware.
 // Values 1-8 follow the ISO 13818-2 frame_rate_code table.
@@ -459,6 +462,14 @@ bool vdec_pull_frame(void) {
         }
     }
     s_frames_ready--;
+    {
+        u64 pts_us = 0;
+        if (pic->pts[0].low != (u32)VDEC_TS_INVALID) {
+            u64 pts90 = ((u64)pic->pts[0].hi << 32) | (u64)pic->pts[0].low;
+            pts_us = pts90 * 1000000ULL / 90000ULL;
+        }
+        s_jbuf_pts[s_jb_wr] = pts_us;
+    }
     sysMutexLock(s_jbuf_mtx, 0);
     s_jb_wr = (s_jb_wr + 1) % JBUF_SIZE;
     s_jb_n++;
