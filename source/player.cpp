@@ -198,6 +198,15 @@ static void decode_thread_fn(void *arg) {
             if (!vdec_pull_frame()) break;
         }
 
+        {
+            int q = jbuf_count();
+            if (q < 4) {
+                char buf[32];
+                snprintf(buf, sizeof(buf), "jbuf_low: q=%d", q);
+                plog(buf);
+            }
+        }
+
         // Heartbeat every 2.5 s (wall-clock)  (Step 8b: add fps= field)
         u64 hb_now = timing_get_us();
         if (hb_now - hb_last_us >= 2500000ULL) {
@@ -273,6 +282,9 @@ static void upload_thread_fn(void *arg) {
         }
 
         // Upload to back buffer (the one RSX is NOT currently reading).
+        // Acquire barrier: ensure we see the latest s_vid_disp_idx after any
+        // pending display-thread flip before snapshotting the back index.
+        __asm__ volatile("sync" ::: "memory");
         int back = s_vid_disp_idx ^ 1;
         memcpy(s_vid_tex_buf[back], slot, nbytes);
         // Ensure all PPU stores to GDDR3 are visible before signalling.
@@ -657,17 +669,18 @@ void show_player(const JFItem *item) {
                         }
                     }
                     if (!av_skip) {
-                        // Promote back buffer to front: upload thread already filled it.
-                        s_vid_disp_idx ^= 1;
-
                         sysMutexLock(s_jbuf_mtx, 0);
                         jbuf_pop();
                         sysMutexUnlock(s_jbuf_mtx);
                         frame_count++;
                         timing_frame_shown();
-                        // Release barrier: jbuf_pop visible before upload thread reads next slot.
+                        // Release barrier: jbuf_pop visible before upload thread snapshots
+                        // s_vid_disp_idx.  Clear frame_ready before flipping disp_idx so the
+                        // upload thread always reads the post-flip index before starting memcpy.
                         __asm__ volatile("sync" ::: "memory");
                         s_vid_frame_ready = false;
+                        // Promote back buffer to front.
+                        s_vid_disp_idx ^= 1;
                         {
                             static u64 s_fi_last_us  = 0;
                             static u64 s_fi_gaps[2]  = {0, 0};
@@ -783,7 +796,22 @@ void show_player(const JFItem *item) {
             rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
         }
 
-        rsxSync();
+        {
+            u64 t0 = timing_get_us();
+            rsxSync();
+            u64 dt = timing_get_us() - t0;
+            if (dt > 16000) {
+                char buf[48];
+                snprintf(buf, sizeof(buf), "rsync_stall: %llums",
+                         (unsigned long long)(dt / 1000ULL));
+                plog(buf);
+            } else if (dt > 5000) {
+                char buf[48];
+                snprintf(buf, sizeof(buf), "rsync_slow: %llums",
+                         (unsigned long long)(dt / 1000ULL));
+                plog(buf);
+            }
+        }
         flip();
     }
 

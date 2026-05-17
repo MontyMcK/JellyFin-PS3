@@ -3,8 +3,8 @@
 #include <sys/mutex.h>
 
 #define TS_PACKET_SIZE   188
-#define JBUF_SIZE        16   // max buffered decoded frames (~56 MB at 1280×720)
-#define JBUF_PREFILL     12   // frames to decode before display starts
+#define JBUF_SIZE         16   // max buffered decoded frames (~28 MB at 1280×720)
+#define JBUF_PREFILL      12   // frames to decode before display starts
 
 // ---- VDEC lifecycle ----
 bool vdec_open(void);

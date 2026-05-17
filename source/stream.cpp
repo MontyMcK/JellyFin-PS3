@@ -2,6 +2,7 @@
 #include "plog.h"
 #include "jellyfin_api.h"
 #include "http.h"
+#include "timing.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -105,9 +106,21 @@ int stream_read(int sock, u8 *buf, int size) {
     int got = 0;
     while (got < size) {
         if (!s_chunked) {
+            u64 t0 = timing_get_us();
             int n = netRecv(sock, buf + got, size - got, 0);
-            if (n == 0) return -1;
-            if (n <  0) return  0;
+            u64 dt = timing_get_us() - t0;
+            if (n <= 0) {
+                char lb[48];
+                snprintf(lb, sizeof(lb), "net_error: rc=%d", n);
+                plog(lb);
+                return (n == 0) ? -1 : 0;
+            }
+            if (dt > 50000) {
+                char lb[64];
+                snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
+                         (unsigned long long)(dt / 1000ULL), n);
+                plog(lb);
+            }
             got += n;
             continue;
         }
@@ -142,9 +155,21 @@ int stream_read(int sock, u8 *buf, int size) {
 
         int want = size - got;
         if (want > s_chunk_remain) want = s_chunk_remain;
+        u64 t0 = timing_get_us();
         int n = netRecv(sock, buf + got, want, 0);
-        if (n == 0) return -1;
-        if (n <  0) return  0;
+        u64 dt = timing_get_us() - t0;
+        if (n <= 0) {
+            char lb[48];
+            snprintf(lb, sizeof(lb), "net_error: rc=%d", n);
+            plog(lb);
+            return (n == 0) ? -1 : 0;
+        }
+        if (dt > 50000) {
+            char lb[64];
+            snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
+                     (unsigned long long)(dt / 1000ULL), n);
+            plog(lb);
+        }
         got            += n;
         s_chunk_remain -= n;
         if (s_chunk_remain == 0)
