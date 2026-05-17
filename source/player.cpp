@@ -552,7 +552,7 @@ void show_player(const JFItem *item) {
                 timing_init(30, 1);
                 s_timing_ready = true;
             }
-        } else if (timing_frame_due_vsync()) {
+        } else if (timing_flip_due()) {
             if (!s_vid_frame_ready) {
                 char buf[96];
                 snprintf(buf, sizeof(buf), "UNDERRUN: upload not ready fr=%d", frame_count);

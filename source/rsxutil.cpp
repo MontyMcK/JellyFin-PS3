@@ -131,8 +131,10 @@ void init_screen(void *host_addr,u32 size)
 
 void waitflip()
 {
+	// Poll at 50 µs (was 200 µs) — tighter interval reduces post-vblank entry
+	// latency, giving the display thread more of the frame interval for render work.
 	while(gcmGetFlipStatus()!=0)
-		usleep(200);
+		usleep(50);
 	gcmResetFlipStatus();
 }
 
