@@ -41,14 +41,6 @@ static volatile int  s_vid_disp_idx    = 0;     // index RSX is reading from
 static volatile bool s_vid_frame_ready = false;  // upload → display handoff
 
 // -------------------------------------------------------
-// TS packet ring buffer — network thread fills, decode thread drains
-// -------------------------------------------------------
-#define TSRING_SIZE 512
-static u8           s_ts_ring[TSRING_SIZE][TS_PACKET_SIZE];
-static volatile int s_ts_wr = 0;
-static volatile int s_ts_rd = 0;
-
-// -------------------------------------------------------
 // Async log — ring buffer drained by a dedicated thread
 // -------------------------------------------------------
 
@@ -152,54 +144,13 @@ static void show_error(const char *line1, const char *line2) {
 }
 
 // -------------------------------------------------------
-// Network thread — reads raw TS packets from socket into ring buffer
-// -------------------------------------------------------
-
-struct NetCtx {
-    volatile bool *playing;
-    int            sock;
-};
-
-static void net_thread_fn(void *arg) {
-    NetCtx        *ctx     = (NetCtx*)arg;
-    volatile bool *playing = ctx->playing;
-    int            sock    = ctx->sock;
-
-    while (running && *playing && !s_vdec_error) {
-        // Barrier: read fresh s_ts_rd before checking ring fullness
-        __asm__ volatile("sync" ::: "memory");
-        int next_wr = (s_ts_wr + 1) % TSRING_SIZE;
-        if (next_wr == s_ts_rd) {
-            usleep(1000);
-            continue;
-        }
-
-        int rc = stream_read(sock, s_ts_ring[s_ts_wr], TS_PACKET_SIZE);
-        if (rc < 0) {
-            plog("playing=0 reason=stream_eof");
-            *ctx->playing = false;
-            break;
-        }
-        if (rc == 0) {
-            usleep(1000);
-            continue;
-        }
-
-        // Barrier: ensure packet data is visible before advancing write index
-        __asm__ volatile("sync" ::: "memory");
-        s_ts_wr = next_wr;
-    }
-
-    sysThreadExit(0);
-}
-
-// -------------------------------------------------------
 // Decode thread  (Steps 2, 5c, 8b)
 // -------------------------------------------------------
 
 struct DecodeCtx {
     volatile bool *playing;
     int           *frame_count;  // read-only for heartbeat (benign race)
+    int            sock;
 };
 
 static void decode_thread_fn(void *arg) {
@@ -207,6 +158,7 @@ static void decode_thread_fn(void *arg) {
     volatile bool *playing     = ctx->playing;
     int           *frame_count = ctx->frame_count;
 
+    u8   ts_pkt[TS_PACKET_SIZE];
     bool in_stall              = false;
     u64  stall_ep_start_us     = 0;
     long stall_ep_count        = 0;
@@ -222,16 +174,14 @@ static void decode_thread_fn(void *arg) {
         }
 
         for (int batch = 0; batch < 128 && jbuf_count() < JBUF_SIZE; batch++) {
-            // Barrier: read fresh s_ts_wr before checking ring emptiness
-            __asm__ volatile("sync" ::: "memory");
-            if (s_ts_rd == s_ts_wr) {
-                if (!in_stall) {
-                    in_stall = true;
-                    stall_ep_start_us = timing_get_us();
-                }
-                usleep(1000);
+            int rd = stream_read(ctx->sock, ts_pkt, TS_PACKET_SIZE);
+            if (rd < 0) {
+                plog("playing=0 reason=stream_eof");
+                *ctx->playing = false;
                 break;
             }
+            if (rd == 0) { usleep(1000); continue; }
+
             if (in_stall) {
                 in_stall = false;
                 long dur = (long)(timing_get_us() - stall_ep_start_us);
@@ -239,10 +189,8 @@ static void decode_thread_fn(void *arg) {
                 if (dur > stall_ep_dur_max_us) stall_ep_dur_max_us = dur;
                 stall_ep_count++;
             }
-            video_feed_ts(s_ts_ring[s_ts_rd]);
-            // Barrier: pop visible to network thread before it reclaims this slot
-            __asm__ volatile("sync" ::: "memory");
-            s_ts_rd = (s_ts_rd + 1) % TSRING_SIZE;
+
+            video_feed_ts(ts_pkt);
         }
 
         // Drain all decoded frames from VDEC into the jitter buffer
@@ -273,7 +221,7 @@ static void decode_thread_fn(void *arg) {
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
-                display_fps, (s_ts_wr - s_ts_rd + TSRING_SIZE) % TSRING_SIZE);
+                display_fps, 0);
             plog(buf);
             stall_ep_count = stall_ep_dur_max_us = stall_ep_dur_total_us = 0;
         }
@@ -509,10 +457,8 @@ void show_player(const JFItem *item) {
     bool          first_pkt  = true;
     int           frame_count = 0;
     int           rd          = 0;
-
-    // Reset TS ring buffer for this playback session
-    s_ts_wr = 0;
-    s_ts_rd = 0;
+    u64           s_ref_pts_us  = 0;
+    u64           s_ref_wall_us = 0;
 
     // ---- Pre-fill: decode JBUF_PREFILL frames before display starts ----
     plog("jbuf: pre-fill start");
@@ -549,24 +495,8 @@ void show_player(const JFItem *item) {
     plog("jbuf: pre-fill done — starting threads");
     timing_register_vblank();
 
-    // ---- Spawn network thread (fills TS ring; lower priority than decode) ----
-    NetCtx           net_ctx = { &playing, sock };
-    sys_ppu_thread_t net_tid = 0;
-    if (playing) {
-        int trc = sysThreadCreate(&net_tid, net_thread_fn,
-                                  (void *)&net_ctx,
-                                  900, 64 * 1024,
-                                  0, "jf_net");
-        if (trc != 0) {
-            char buf[64];
-            snprintf(buf, sizeof(buf), "show_player: net thread_create FAILED rc=%d", trc);
-            plog(buf);
-            playing = false;
-        }
-    }
-
     // ---- Spawn decode thread (Step 2) ----
-    DecodeCtx        dec_ctx = { &playing, &frame_count };
+    DecodeCtx        dec_ctx = { &playing, &frame_count, sock };
     sys_ppu_thread_t dec_tid = 0;
     if (playing) {
         int trc = sysThreadCreate(&dec_tid, decode_thread_fn,
@@ -642,12 +572,8 @@ void show_player(const JFItem *item) {
                 timing_init(30, 1);
                 s_timing_ready = true;
             }
-        } else if (timing_flip_due()) {
-            if (!s_vid_frame_ready) {
-                char buf[96];
-                snprintf(buf, sizeof(buf), "UNDERRUN: upload not ready fr=%d", frame_count);
-                plog(buf);
-            } else {
+        } else {
+            if (s_vid_frame_ready) {
                 sysMutexLock(s_jbuf_mtx, 0);
                 const u8 *rslot = jbuf_peek();
                 sysMutexUnlock(s_jbuf_mtx);
@@ -655,12 +581,16 @@ void show_player(const JFItem *item) {
                 if (rslot) {
                     {
                         static const u8 *s_prev_rslot = NULL;
+                        static int s_same_slot_count = 0;
                         if (s_prev_rslot != NULL && rslot == s_prev_rslot) {
-                            char buf[128];
-                            snprintf(buf, sizeof(buf),
-                                "CORRUPT: same slot displayed twice fr=%d ptr=%p",
-                                frame_count, (void*)rslot);
-                            plog(buf);
+                            s_same_slot_count++;
+                            if (s_same_slot_count % 300 == 0) {
+                                char buf[128];
+                                snprintf(buf, sizeof(buf),
+                                    "CORRUPT: same slot displayed twice fr=%d ptr=%p",
+                                    frame_count, (void*)rslot);
+                                plog(buf);
+                            }
                         }
                         s_prev_rslot = rslot;
                     }
@@ -713,34 +643,23 @@ void show_player(const JFItem *item) {
                         }
                     }
 
-                    bool av_skip = false;
-                    {
-                        static u64  s_pts_offset     = 0;
-                        static bool s_pts_offset_set = false;
-                        u64 frame_pts = jbuf_peek_pts();
-                        if (frame_pts != 0) {
-                            u64 audio_clk = audio_get_clock_us();
-                            if (!s_pts_offset_set && audio_clk > 0) {
-                                s_pts_offset     = frame_pts - audio_clk;
-                                s_pts_offset_set = true;
-                            }
-                            if (s_pts_offset_set) {
-                                u64 adj_pts = frame_pts - s_pts_offset;
-                                if (adj_pts > audio_clk + 50000ULL) {
-                                    av_skip = true;
-                                } else if (audio_clk > adj_pts + 100000ULL) {
-                                    char buf[96];
-                                    snprintf(buf, sizeof(buf),
-                                        "av_late: pts=%llu clock=%llu diff=%llums",
-                                        (unsigned long long)adj_pts,
-                                        (unsigned long long)audio_clk,
-                                        (unsigned long long)((audio_clk - adj_pts) / 1000ULL));
-                                    plog(buf);
-                                }
-                            }
+                    u64 frame_pts = jbuf_peek_pts();
+                    bool do_pop;
+                    if (frame_pts != 0) {
+                        if (s_ref_pts_us == 0) {
+                            s_ref_pts_us  = frame_pts;
+                            s_ref_wall_us = timing_get_us();
+                        } else {
+                            u64 target = s_ref_wall_us + (frame_pts - s_ref_pts_us);
+                            u64 now    = timing_get_us();
+                            if (target > now) usleep((u32)(target - now));
                         }
+                        do_pop = true;
+                    } else {
+                        do_pop = timing_flip_due();
                     }
-                    if (!av_skip) {
+
+                    if (do_pop) {
                         sysMutexLock(s_jbuf_mtx, 0);
                         jbuf_pop();
                         sysMutexUnlock(s_jbuf_mtx);
@@ -778,6 +697,10 @@ void show_player(const JFItem *item) {
                     snprintf(buf, sizeof(buf), "CORRUPT: jbuf empty at fr=%d", frame_count);
                     plog(buf);
                 }
+            } else if (timing_flip_due()) {
+                char buf[96];
+                snprintf(buf, sizeof(buf), "UNDERRUN: upload not ready fr=%d", frame_count);
+                plog(buf);
             }
         }
 
@@ -901,11 +824,6 @@ void show_player(const JFItem *item) {
     playing = false;
     usleep(16000);
 
-    if (net_tid) {
-        u64 tret;
-        sysThreadJoin(net_tid, &tret);
-        plog("show_player: network thread joined");
-    }
     if (dec_tid) {
         u64 tret;
         sysThreadJoin(dec_tid, &tret);
