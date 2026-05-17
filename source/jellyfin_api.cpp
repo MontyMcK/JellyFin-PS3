@@ -7,6 +7,7 @@
 #include <sysutil/sysutil.h>
 
 #include "jellyfin_api.h"
+#include "plog.h"
 #include "ui.h"
 #include "player.h"
 
@@ -442,4 +443,79 @@ void show_search(void) {
 
 void show_main_menu(void) {
     ui_run_xmb();
+}
+
+// -------------------------------------------------------
+// PlaybackInfo — obtain a Jellyfin PlaySessionId
+// -------------------------------------------------------
+
+bool jellyfin_get_play_session_id(const char *item_id,
+                                   char *out_session_id, int out_len) {
+    if (!g_server[0] || !g_userid[0] || !g_token[0]) {
+        plog("playbackinfo: missing server/user/token");
+        return false;
+    }
+
+    char url[512];
+    snprintf(url, sizeof(url), "%s/Users/%s/Items/%s/PlaybackInfo",
+             g_server, g_userid, item_id);
+
+    // Stored in read-only data — avoids putting ~700 bytes on the stack.
+    static const char body[] =
+        "{\"DeviceProfile\":{"
+          "\"MaxStreamingBitrate\":8000000,"
+          "\"TranscodingProfiles\":[{"
+            "\"Container\":\"ts\","
+            "\"Type\":\"Video\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"mp3\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"2\""
+          "}],"
+          "\"DirectPlayProfiles\":[],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"baseline\",\"IsRequired\":false},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"31\",\"IsRequired\":false},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"960\",\"IsRequired\":false},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"540\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":[]"
+        "}}";
+
+    int status = http_request(1, url, body, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "playbackinfo: http status %d", status);
+        plog(buf);
+        return false;
+    }
+
+    if (!json_get_string(responseBuffer, "PlaySessionId", out_session_id, out_len)) {
+        plog("playbackinfo: PlaySessionId not found in response");
+        return false;
+    }
+
+    char buf[96];
+    snprintf(buf, sizeof(buf), "playbackinfo: session=%s", out_session_id);
+    plog(buf);
+    return true;
 }

@@ -234,7 +234,8 @@ static void audio_thread_fn(void *arg) {
     volatile bool *playing = ctx->playing;
 
     while (running && *playing) {
-        audio_write_pcm();
+        if (!audio_write_pcm())
+            usleep(1000);
     }
 
     plog("audio_thread: exit");
@@ -301,9 +302,6 @@ void show_player(const JFItem *item) {
         }
     }
 
-    char session_id[32];
-    snprintf(session_id, sizeof(session_id), "ps3-%u", (unsigned)time(NULL));
-
     // H.264 level 3.1 caps at 1280×720 @ 30fps
     u32 req_w = display_width  < 960 ? display_width  : 960;
     u32 req_h = display_height < 540 ? display_height : 540;
@@ -320,8 +318,16 @@ void show_player(const JFItem *item) {
         "&MaxAudioChannels=2"
         "&MaxFramerate=30"
         "&DeviceId=ps3&Static=false"
-        "&MediaSourceId=%s&PlaySessionId=%s",
-    g_server, item->id, req_w, req_h, item->id, session_id);
+        "&MediaSourceId=%s",
+    g_server, item->id, req_w, req_h, item->id);
+
+    char session_id[64] = "";
+    if (jellyfin_get_play_session_id(item->id, session_id, sizeof(session_id))) {
+        int ul = strlen(url);
+        snprintf(url + ul, sizeof(url) - ul, "&PlaySessionId=%s", session_id);
+    } else {
+        plog("show_player: PlaybackInfo failed, streaming without PlaySessionId");
+    }
     plog(url);
 
     drawHeader();
@@ -497,7 +503,7 @@ void show_player(const JFItem *item) {
     if (playing) {
         int trc = sysThreadCreate(&aud_tid, audio_thread_fn,
                                   (void *)&aud_ctx,
-                                  900, 32 * 1024,
+                                  750, 32 * 1024,
                                   0, "jf_audio");
         if (trc != 0) {
             char buf[64];

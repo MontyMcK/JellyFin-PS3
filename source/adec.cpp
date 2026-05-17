@@ -1,7 +1,9 @@
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3.h"
 #include "adec.h"
+#include "plog.h"
 
+#include <stdio.h>
 #include <string.h>
 
 // ~170 ms of stereo audio at 48 kHz.  Must be a power of two for cheap modulo.
@@ -42,7 +44,17 @@ void adec_push_pes(const u8 *pes, int pes_len) {
         short pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
         int samples = mp3dec_decode_frame(&s_dec, es, left, pcm, &info);
         if (info.frame_bytes <= 0) break;
-        if (samples > 0) push_samples(pcm, samples, info.channels);
+        if (samples > 0) {
+            static bool s_logged_frame = false;
+            if (!s_logged_frame) {
+                s_logged_frame = true;
+                char fbuf[64];
+                snprintf(fbuf, sizeof(fbuf), "adec_frame: hz=%d ch=%d samples=%d",
+                         info.hz, info.channels, samples);
+                plog(fbuf);
+            }
+            push_samples(pcm, samples, info.channels);
+        }
         es   += info.frame_bytes;
         left -= info.frame_bytes;
     }

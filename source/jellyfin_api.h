@@ -29,6 +29,13 @@ int  parse_jf_items(const char *json, JFItem *arr, int max);
 void save_config(void);
 int  load_config(void);
 
+// Playback session
+// POST /Users/{userId}/Items/{item_id}/PlaybackInfo with a PS3 device profile.
+// Extracts PlaySessionId from the response.
+// Returns true and fills out_session_id on success; false on any failure.
+bool jellyfin_get_play_session_id(const char *item_id,
+                                   char *out_session_id, int out_len);
+
 // Screens (each blocks until the user navigates away)
 int  do_login(void);
 void show_library_browser(void);

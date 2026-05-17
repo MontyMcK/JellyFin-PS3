@@ -4,7 +4,7 @@
 extern bool s_audio_ok;
 
 void audio_open(void);
-void audio_write_pcm(void);
+bool audio_write_pcm(void);  // returns true if a DMA event was consumed
 void audio_close(void);
 
 // Total audio DMA blocks consumed since audio_open().
