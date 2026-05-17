@@ -92,8 +92,8 @@ Work in progress. Library browsing, login, TV show browser, collections browser,
 | Collections browsing | ✅ Working |
 | Search | ⚠️ In progress |
 | Video playback | ✅ Working (30fps, no corruption) |
-| Audio playback | ❌ In development |
-| Frame pacing | ⚠️ Minor judder |
+| Audio playback | ✅ Working |
+| Frame pacing | ⚠️ Working on PTS-driven scheduling to replace Bresenham accumulator |
 
 ## License
 
