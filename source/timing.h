@@ -23,6 +23,12 @@ void timing_vsync_tick(void);
 // Returns true when enough vsyncs have elapsed for the next frame.
 bool timing_frame_due_vsync(void);
 
+// Phase 2: vblank-edge gate.  The vblank handler sets a one-shot trigger at the
+// exact vsync edge where the Bresenham accumulator fires; this function reads and
+// clears it.  Preferred over timing_frame_due_vsync() for the display loop —
+// eliminates polling jitter and adds slip detection via "flip_late" log entries.
+bool timing_flip_due(void);
+
 // Call immediately after each frame is consumed from the jitter buffer.
 // Records the current vsync count and advances the Bresenham accumulator.
 void timing_frame_shown(void);

@@ -1,5 +1,6 @@
 #include "timing.h"
 #include "plog.h"
+#include <stdio.h>
 #include <ppu-asm.h>
 #include <sys/systime.h>
 #include <rsx/gcm_sys.h>
@@ -17,22 +18,38 @@ u64 timing_get_us(void) {
 static u64 s_interval_us   = 33333;
 static u64 s_last_shown_us = 0;
 
-// Vsync-counted scheduling state
-static u32 s_fps_num              = 30;
-static u32 s_fps_den              = 1;
-static volatile u64 s_vsync_count = 0;   // incremented by VBlank handler, read by display loop
-static u64 s_last_shown_vsync     = 0;
-static s64 s_vsync_err            = 0;   // Bresenham accumulator, units of fps_num
-static u32 s_vsyncs_next          = 2;   // precomputed vsync hold for the next frame
-static bool s_vsync_shown_once    = false;
+// Vsync-counted scheduling state.
+// Variables marked volatile are read by the vblank handler (interrupt context)
+// as well as written by the display thread; volatile prevents register caching.
+static u32           s_fps_num          = 30;
+static u32           s_fps_den          = 1;
+static volatile u64  s_vsync_count      = 0;
+static volatile u64  s_last_shown_vsync = 0;
+static s64           s_vsync_err        = 0;   // Bresenham accumulator, units of fps_num
+static volatile u32  s_vsyncs_next      = 2;   // precomputed vsync hold for the next frame
+static volatile bool s_vsync_shown_once = false;
 
-// VBlank handler — called by RSX at 60Hz regardless of display loop speed.
-// A PPC 64-bit store to an aligned address is a single instruction so the
-// write is always coherent; the increment itself can race only against itself
-// (there is one writer), which is acceptable for frame scheduling.
+// Phase 2 — vblank-edge flip trigger.
+// The vblank handler sets s_flip_trigger at the exact vsync edge where the
+// Bresenham gate fires.  The display thread reads/clears it in timing_flip_due().
+// s_flip_trigger_vc records which vsync set it, for slip detection.
+static volatile u32 s_flip_trigger    = 0;
+static volatile u64 s_flip_trigger_vc = 0;
+
+// VBlank handler — called by RSX at 60 Hz regardless of display loop speed.
+// Now owns the Bresenham gate check: fires s_flip_trigger at the exact vsync
+// edge where a new frame is due, so the display thread acts on a precise edge
+// rather than a polled count.  Guard against overwrite: if the display thread
+// hasn't consumed the previous trigger, don't stomp it.
 static void s_vblank_handler(const u32 head) {
     (void)head;
-    s_vsync_count++;
+    u64 vc = ++s_vsync_count;
+    if (s_vsync_shown_once &&
+        s_flip_trigger == 0 &&
+        vc >= s_last_shown_vsync + (u64)s_vsyncs_next) {
+        s_flip_trigger    = 1;
+        s_flip_trigger_vc = vc;
+    }
 }
 
 void timing_register_vblank(void) {
@@ -52,6 +69,8 @@ void timing_init(u32 fps_num, u32 fps_den) {
     s_vsync_err        = 0;
     s_vsyncs_next      = 2;
     s_vsync_shown_once = false;
+    s_flip_trigger     = 0;
+    s_flip_trigger_vc  = 0;
 }
 
 void timing_shutdown(void) {
@@ -73,7 +92,32 @@ bool timing_frame_due_vsync(void) {
     return s_vsync_count >= s_last_shown_vsync + s_vsyncs_next;
 }
 
+// Phase 2: vblank-edge gate.  Returns true when the vblank handler has set the
+// flip trigger at the exact vsync edge where the Bresenham accumulator fires.
+// Clears the trigger on read (one-shot).  Logs a slip diagnostic if the display
+// thread consumed the trigger more than one vsync after it was set, indicating
+// a render overrun or thread scheduling stall.
+bool timing_flip_due(void) {
+    if (!s_vsync_shown_once) return true;
+    if (!s_flip_trigger) return false;
+
+    u64 now_vc       = s_vsync_count;
+    u64 triggered_vc = s_flip_trigger_vc;
+    s_flip_trigger = 0;
+
+    if (now_vc > triggered_vc) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "flip_late: slipped %llu vsyncs",
+                 (unsigned long long)(now_vc - triggered_vc));
+        plog(buf);
+    }
+    return true;
+}
+
 void timing_frame_shown(void) {
+    // Clear any trigger the handler may have re-armed between timing_flip_due()
+    // and here; the handler will re-fire at the correct edge after this update.
+    s_flip_trigger     = 0;
     s_last_shown_us    = timing_get_us();
     s_last_shown_vsync = s_vsync_count;
     s_vsync_shown_once = true;
