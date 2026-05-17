@@ -124,13 +124,7 @@ bool audio_write_pcm(void) {
             waited++;
         }
         if (adec_pcm_available() >= AUDIO_BLOCK_SAMPLES) {
-            float interleaved[AUDIO_BLOCK_SAMPLES * 2];
-            adec_read_pcm(interleaved, AUDIO_BLOCK_SAMPLES);
-            // Deinterleave: PS3 expects all L samples then all R samples
-            for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
-                blk_buf[i]                       = interleaved[i * 2];
-                blk_buf[AUDIO_BLOCK_SAMPLES + i] = interleaved[i * 2 + 1];
-            }
+            adec_read_pcm(blk_buf, AUDIO_BLOCK_SAMPLES);
             s_pcm_blocks++;
         } else {
             // Decoder stall — write silence to keep DMA ring alive
