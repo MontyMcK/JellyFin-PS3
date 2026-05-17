@@ -631,17 +631,28 @@ void show_player(const JFItem *item) {
 
                     bool av_skip = false;
                     {
+                        static u64  s_pts_offset     = 0;
+                        static bool s_pts_offset_set = false;
                         u64 frame_pts = jbuf_peek_pts();
                         if (frame_pts != 0) {
                             u64 audio_clk = audio_get_clock_us();
-                            if (frame_pts > audio_clk) {
-                                av_skip = true;
-                            } else if (audio_clk - frame_pts > 100000ULL) {
-                                char buf[80];
-                                snprintf(buf, sizeof(buf), "av_late: pts=%llu clock=%llu",
-                                    (unsigned long long)frame_pts,
-                                    (unsigned long long)audio_clk);
-                                plog(buf);
+                            if (!s_pts_offset_set && audio_clk > 0) {
+                                s_pts_offset     = frame_pts - audio_clk;
+                                s_pts_offset_set = true;
+                            }
+                            if (s_pts_offset_set) {
+                                u64 adj_pts = frame_pts - s_pts_offset;
+                                if (adj_pts > audio_clk + 50000ULL) {
+                                    av_skip = true;
+                                } else if (audio_clk > adj_pts + 100000ULL) {
+                                    char buf[96];
+                                    snprintf(buf, sizeof(buf),
+                                        "av_late: pts=%llu clock=%llu diff=%llums",
+                                        (unsigned long long)adj_pts,
+                                        (unsigned long long)audio_clk,
+                                        (unsigned long long)((audio_clk - adj_pts) / 1000ULL));
+                                    plog(buf);
+                                }
                             }
                         }
                     }
@@ -772,6 +783,7 @@ void show_player(const JFItem *item) {
             rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
         }
 
+        rsxSync();
         flip();
     }
 

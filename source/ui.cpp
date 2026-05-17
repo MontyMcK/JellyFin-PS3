@@ -1367,6 +1367,7 @@ static int xmb_next_enabled(int start, int dir) {
 
 // Returns true if we should exit the XMB loop
 static bool xmb_handle_input_browse(void) {
+    static bool s_movie_just_exited = false;
     int tab = g_active_tab;
     int vis = XMB_ITEMS_VIS;
 
@@ -1469,6 +1470,8 @@ static bool xmb_handle_input_browse(void) {
         }
     }
 
+    if (s_movie_just_exited) { s_movie_just_exited = false; return false; }
+
     if (BTN_PRESSED(cross) && count > 0 && g_sel < count) {
         const XMBItem *it = &g_items[tab][g_sel];
         if (tab == XMB_TAB_TV && strcmp(it->type, "Series") == 0) {
@@ -1489,6 +1492,7 @@ static bool xmb_handle_input_browse(void) {
             strncpy(jf.name, it->name, sizeof(jf.name)-1);
             strncpy(jf.type, it->type, sizeof(jf.type)-1);
             show_player(&jf);
+            s_movie_just_exited = true;
             init_btns();
             return false;
         }

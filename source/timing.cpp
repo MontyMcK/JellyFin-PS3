@@ -4,6 +4,7 @@
 #include <ppu-asm.h>
 #include <sys/systime.h>
 #include <rsx/gcm_sys.h>
+#include <sysutil/video.h>
 
 // Direct timebase register read — single instruction, no LV2 syscall.
 // Cell PPU mftb fills a 64-bit GPR on a 64-bit core, so no upper/lower split needed.
@@ -23,6 +24,8 @@ static u64 s_last_shown_us = 0;
 // as well as written by the display thread; volatile prevents register caching.
 static u32           s_fps_num          = 30;
 static u32           s_fps_den          = 1;
+static u32           s_display_num      = 60000;  // display refresh rate numerator
+static u32           s_display_den      = 1001;   // display refresh rate denominator
 static volatile u64  s_vsync_count      = 0;
 static volatile u64  s_last_shown_vsync = 0;
 static s64           s_vsync_err        = 0;   // Bresenham accumulator, units of fps_num
@@ -36,7 +39,7 @@ static volatile bool s_vsync_shown_once = false;
 static volatile u32 s_flip_trigger    = 0;
 static volatile u64 s_flip_trigger_vc = 0;
 
-// VBlank handler — called by RSX at 60 Hz regardless of display loop speed.
+// VBlank handler — called by RSX at the display refresh rate regardless of display loop speed.
 // Now owns the Bresenham gate check: fires s_flip_trigger at the exact vsync
 // edge where a new frame is due, so the display thread acts on a precise edge
 // rather than a polled count.  Guard against overwrite: if the display thread
@@ -60,6 +63,25 @@ void timing_register_vblank(void) {
 void timing_init(u32 fps_num, u32 fps_den) {
     u64 f = sysGetTimebaseFrequency();
     if (f >= 1000000ULL && f <= 1000000000ULL) s_tb_freq = f;
+
+    // Query actual display refresh rate; default 59.94 Hz if unavailable.
+    s_display_num = 60000;
+    s_display_den = 1001;
+    {
+        videoState vs;
+        if (videoGetState(0, 0, &vs) == 0) {
+            u16 rr = vs.displayMode.refreshRates;
+            if      (rr & VIDEO_REFRESH_59_94HZ) { s_display_num = 60000; s_display_den = 1001; }
+            else if (rr & VIDEO_REFRESH_50HZ)    { s_display_num = 50;    s_display_den = 1;    }
+            else if (rr & VIDEO_REFRESH_60HZ)    { s_display_num = 60;    s_display_den = 1;    }
+            else if (rr & VIDEO_REFRESH_30HZ)    { s_display_num = 30;    s_display_den = 1;    }
+        }
+        char buf[80];
+        snprintf(buf, sizeof(buf), "timing: display=%u/%u fps=%u/%u",
+                 s_display_num, s_display_den, fps_num, fps_den);
+        plog(buf);
+    }
+
     s_interval_us      = (u64)1000000 * fps_den / fps_num;
     s_last_shown_us    = 0;
     s_fps_num          = fps_num;
@@ -121,8 +143,8 @@ void timing_frame_shown(void) {
     s_last_shown_us    = timing_get_us();
     s_last_shown_vsync = s_vsync_count;
     s_vsync_shown_once = true;
-    // Advance Bresenham accumulator to compute hold length for the next frame.
-    s_vsync_err   += (s64)(60 * s_fps_den);
-    s_vsyncs_next  = (u32)(s_vsync_err / (s64)s_fps_num);
-    s_vsync_err   -= (s64)s_vsyncs_next * (s64)s_fps_num;
+    // Advance Bresenham accumulator using actual display refresh rate.
+    s_vsync_err   += (s64)(s_display_num * s_fps_den);
+    s_vsyncs_next  = (u32)(s_vsync_err / (s64)(s_fps_num * s_display_den));
+    s_vsync_err   -= (s64)s_vsyncs_next * (s64)(s_fps_num * s_display_den);
 }
