@@ -400,6 +400,11 @@ void show_player(const JFItem *item) {
                  JBUF_SIZE, req_w, req_h, req_w * req_h * 4 / 1024);
         plog(buf);
     }
+    for (int i = 0; i < JBUF_SIZE; i++) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "jbuf_addr: slot=%d ptr=%p", i, (void*)jbuf_slot_ptr(i));
+        plog(buf);
+    }
 
     // Video GPU blit init — allocate RSX buffers once per session
     {
