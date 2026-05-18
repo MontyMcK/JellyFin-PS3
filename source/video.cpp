@@ -463,15 +463,44 @@ bool vdec_pull_frame(void) {
         }
     }
     s_frames_ready--;
-    {
-        u64 pts_us = 0;
-        if (pic->pts[0].low != (u32)VDEC_TS_INVALID) {
-            u64 pts90 = ((u64)pic->pts[0].hi << 32) | (u64)pic->pts[0].low;
-            pts_us = pts90 * 1000000ULL / 90000ULL;
-        }
-        s_jbuf_pts[s_jb_wr] = pts_us;
+    u64 pts_us = 0;
+    if (pic->pts[0].low != (u32)VDEC_TS_INVALID) {
+        u64 pts90 = ((u64)pic->pts[0].hi << 32) | (u64)pic->pts[0].low;
+        pts_us = pts90 * 1000000ULL / 90000ULL;
     }
+    s_jbuf_pts[s_jb_wr] = pts_us;
     sysMutexLock(s_jbuf_mtx, 0);
+    {
+        static u64 s_last_push_pts = 0;
+        static int s_push_count    = 0;
+        static int s_nonmono_count = 0;
+
+        if (pts_us != 0 && pts_us != (u64)VDEC_TS_INVALID) {
+            if (s_last_push_pts != 0 && pts_us < s_last_push_pts) {
+                s_nonmono_count++;
+                if (s_nonmono_count <= 20) {
+                    char buf[128];
+                    snprintf(buf, sizeof(buf),
+                        "pts_nonmono: push#%d prev=%llu new=%llu delta=%lld",
+                        s_push_count,
+                        (unsigned long long)s_last_push_pts,
+                        (unsigned long long)pts_us,
+                        (long long)((s64)pts_us - (s64)s_last_push_pts));
+                    plog(buf);
+                }
+            }
+            s_last_push_pts = pts_us;
+        }
+        s_push_count++;
+
+        if (s_push_count % 300 == 0) {
+            char buf[96];
+            snprintf(buf, sizeof(buf),
+                "pts_stats: pushes=%d nonmono=%d",
+                s_push_count, s_nonmono_count);
+            plog(buf);
+        }
+    }
     s_jb_wr = (s_jb_wr + 1) % JBUF_SIZE;
     s_jb_n++;
     sysMutexUnlock(s_jbuf_mtx);

@@ -8,6 +8,7 @@
 #include <ppu-types.h>
 #include <io/pad.h>
 #include <sysutil/sysutil.h>
+#include <sysutil/video.h>
 #include <net/net.h>
 #include <sys/socket.h>
 #include <sys/thread.h>
@@ -522,7 +523,7 @@ void show_player(const JFItem *item) {
     if (playing) {
         int trc = sysThreadCreate(&aud_tid, audio_thread_fn,
                                   (void *)&aud_ctx,
-                                  750, 32 * 1024,
+                                  700, 32 * 1024,
                                   0, "jf_audio");
         if (trc != 0) {
             char buf[64];
@@ -548,10 +549,10 @@ void show_player(const JFItem *item) {
         }
     }
 
-    // Detection timeout tracking for Step 7e fallback
+    // Detection timeout tracking for Bresenham fallback initialisation
     u64 det_timeout_start = 0;
 
-    // ---- Main (display) loop  (Steps 1, 3, 7d) ----
+    // ---- Main (display) loop ----
     while (running && playing && !s_vdec_error) {
         waitflip();
         sysUtilCheckCallback();
@@ -569,155 +570,126 @@ void show_player(const JFItem *item) {
         }
         if (!playing) break;
 
+        // fps detection timeout — needed only to initialise the Bresenham fallback
         if (!s_timing_ready) {
-            // Let frames accumulate until fps detection completes (Step 7d)
             if (det_timeout_start == 0) det_timeout_start = timing_get_us();
             if (timing_get_us() - det_timeout_start >= 5000000ULL) {
                 plog("fps_detect: timeout, fallback 30fps");
                 timing_init(30, 1);
                 s_timing_ready = true;
             }
-        } else {
-            if (s_vid_frame_ready) {
-                sysMutexLock(s_jbuf_mtx, 0);
-                const u8 *rslot = jbuf_peek();
-                sysMutexUnlock(s_jbuf_mtx);
+        }
 
-                if (rslot) {
-                    u32 fw = jbuf_fw(), fh = jbuf_fh();
-
-                    const u32 *src = (const u32*)rslot;
-
-                    {
-                        static bool s_logged_blit_pre = false;
-                        if (!s_logged_blit_pre) {
-                            s_logged_blit_pre = true;
-                            char buf[128];
-                            snprintf(buf, sizeof(buf),
-                                "blit[0]: curr_fb=%u disp_idx=%d src=%p fw=%u fh=%u",
-                                curr_fb, s_vid_disp_idx, (void*)rslot, fw, fh);
-                            plog(buf);
-                            snprintf(buf, sizeof(buf), "blit[0]: src[0]=0x%08x", src[0]);
-                            plog(buf);
-                        }
+        // Refresh-rate stability diagnostic: poll videoGetState every 300 vblanks
+        // (~5 s at 59.94 Hz). Logs whenever the refreshRates bitmask changes and
+        // emits periodic stats so a stable run shows a clean zero-change baseline.
+        {
+            static u64  s_rr_vblank   = 0;
+            static u16  s_last_rr     = 0;
+            static int  s_rr_changes  = 0;
+            static int  s_rr_polls    = 0;
+            s_rr_vblank++;
+            if (s_rr_vblank % 300 == 0) {
+                videoState vs;
+                if (videoGetState(0, 0, &vs) == 0) {
+                    u16 rr = vs.displayMode.refreshRates;
+                    s_rr_polls++;
+                    if (s_last_rr != 0 && rr != s_last_rr) {
+                        s_rr_changes++;
+                        char buf[96];
+                        snprintf(buf, sizeof(buf),
+                            "rr_change: poll#%d prev=0x%04x new=0x%04x changes=%d",
+                            s_rr_polls, (unsigned)s_last_rr,
+                            (unsigned)rr, s_rr_changes);
+                        plog(buf);
                     }
-
-                    {
-                        static u32 s_cpx[4] = {1u, 1u, 1u, 1u};
-                        u32 cx = src[(fh / 2) * fw + (fw / 2)];
-                        if ((cx == 0x00000000u || cx == 0xFFFFFFFFu) &&
-                            (s_cpx[1] != 0x00000000u && s_cpx[1] != 0xFFFFFFFFu) &&
-                            (s_cpx[2] != 0x00000000u && s_cpx[2] != 0xFFFFFFFFu) &&
-                            (s_cpx[3] != 0x00000000u && s_cpx[3] != 0xFFFFFFFFu)) {
-                            char buf[128];
-                            snprintf(buf, sizeof(buf),
-                                "CORRUPT: suspicious centre pixel fr=%d px=0x%08x",
-                                frame_count, cx);
-                            plog(buf);
-                        }
-                        s_cpx[0] = s_cpx[1];
-                        s_cpx[1] = s_cpx[2];
-                        s_cpx[2] = s_cpx[3];
-                        s_cpx[3] = cx;
+                    s_last_rr = rr;
+                    if (s_rr_polls % 12 == 0) {
+                        char buf[80];
+                        snprintf(buf, sizeof(buf),
+                            "rr_stats: polls=%d changes=%d cur=0x%04x",
+                            s_rr_polls, s_rr_changes, (unsigned)rr);
+                        plog(buf);
                     }
-
-                    {
-                        static int s_sr_count = 0;
-                        if (s_sr_count < 60) {
-                            u32 centre_px = ((u32*)rslot)[(408/2) * 960 + (960/2)];
-                            char buf[64];
-                            snprintf(buf, sizeof(buf), "slot_read: slot=%d px=0x%08x",
-                                jbuf_rd(), centre_px);
-                            plog(buf);
-                            s_sr_count++;
-                        }
-                    }
-
-                    u64 frame_pts = jbuf_peek_pts();
-                    u64 target_us = 0;
-                    bool do_pop;
-                    if (frame_pts == 0) {
-                        do_pop = timing_flip_due();
-                    } else if (s_ref_pts_us == 0) {
-                        s_ref_pts_us  = frame_pts;
-                        s_ref_wall_us = timing_get_us();
-                        do_pop = true;
-                    } else {
-                        const u64 vblank_period_us = 16683;
-                        target_us    = s_ref_wall_us + (frame_pts - s_ref_pts_us);
-                        u64 now_us   = timing_get_us();
-                        s64 err_show = (s64)now_us - (s64)target_us;
-                        if (err_show < 0) err_show = -err_show;
-                        s64 err_hold = (s64)(now_us + vblank_period_us) - (s64)target_us;
-                        if (err_hold < 0) err_hold = -err_hold;
-                        do_pop = (err_show <= err_hold);
-                    }
-
-                    if (do_pop) {
-                        sysMutexLock(s_jbuf_mtx, 0);
-                        jbuf_pop();
-                        sysMutexUnlock(s_jbuf_mtx);
-                        frame_count++;
-                        timing_frame_shown();
-                        // Release barrier: jbuf_pop visible before upload thread snapshots
-                        // s_vid_disp_idx.  Clear frame_ready before flipping disp_idx so the
-                        // upload thread always reads the post-flip index before starting memcpy.
-                        __asm__ volatile("sync" ::: "memory");
-                        s_vid_frame_ready = false;
-                        // Promote back buffer to front.
-                        s_vid_disp_idx ^= 1;
-                        {
-                            static u64 s_fi_last_us  = 0;
-                            static u64 s_fi_gaps[2]  = {0, 0};
-                            u64 now_us = timing_get_us();
-                            if (s_fi_last_us != 0) {
-                                s_fi_gaps[0] = s_fi_gaps[1];
-                                s_fi_gaps[1] = now_us - s_fi_last_us;
-                            }
-                            s_fi_last_us = now_us;
-                            if (frame_count % 60 == 0) {
-                                char buf[128];
-                                snprintf(buf, sizeof(buf),
-                                    "frame_interval: fr=%d gap1=%lluus gap2=%lluus",
-                                    frame_count,
-                                    (unsigned long long)s_fi_gaps[0],
-                                    (unsigned long long)s_fi_gaps[1]);
-                                plog(buf);
-                                if (target_us != 0) {
-                                    s64 drift_us = (s64)now_us - (s64)target_us;
-                                    snprintf(buf, sizeof(buf),
-                                        "pts_drift: fr=%d drift=%lldus",
-                                        frame_count, (long long)drift_us);
-                                    plog(buf);
-                                    s64 abs_drift = drift_us < 0 ? -drift_us : drift_us;
-                                    if (abs_drift > 100000) {
-                                        snprintf(buf, sizeof(buf),
-                                            "pts_drift_warn: fr=%d drift=%lldus",
-                                            frame_count, (long long)drift_us);
-                                        plog(buf);
-                                    }
-                                }
-                            }
-                        }
-                        rsxSync();
-                    }
-                } else {
-                    char buf[128];
-                    snprintf(buf, sizeof(buf), "CORRUPT: jbuf empty at fr=%d", frame_count);
-                    plog(buf);
                 }
-            } else if (timing_flip_due()) {
-                char buf[96];
-                snprintf(buf, sizeof(buf), "UNDERRUN: upload not ready fr=%d", frame_count);
-                plog(buf);
             }
         }
 
-        // Re-render the current video frame into the RSX back color buffer every vsync.
-        // flip() alternates the color buffer unconditionally, so on hold vsyncs (where the
-        // timing gate does not fire) we must re-draw the same texture or the display would
-        // flash the stale back buffer.  s_vid_disp_idx only advances inside the gate above.
+        u64  audio_clk      = audio_get_clock_us();
+        bool do_pop         = false;
+        bool used_bresenham = false;
+
+        if (audio_clk == 0 || !s_timing_ready) {
+            // Bresenham fallback: audio not yet started, or fps not yet detected
+            if (s_vid_frame_ready && s_timing_ready && timing_flip_due()) {
+                do_pop = true;
+                used_bresenham = true;
+            }
+        } else if (s_ref_pts_us == 0) {
+            // Anchor reference pair on first frame with a valid PTS
+            sysMutexLock(s_jbuf_mtx, 0);
+            u64 fpts = (jbuf_count() > 0) ? jbuf_peek_pts() : 0;
+            sysMutexUnlock(s_jbuf_mtx);
+            if (fpts != 0 && s_vid_frame_ready) {
+                s_ref_pts_us  = fpts;
+                s_ref_wall_us = audio_clk;
+                do_pop = true;
+            } else if (fpts == 0 && s_vid_frame_ready && timing_flip_due()) {
+                // No PTS yet: advance sequentially via Bresenham until we get one
+                do_pop = true;
+                used_bresenham = true;
+            }
+        } else {
+            // Audio-clock-driven selection: show frame whose adjusted PTS <= audio offset
+            u64 audio_offset = audio_clk - s_ref_wall_us;
+            if (s_vid_frame_ready && jbuf_count() > 0) {
+                sysMutexLock(s_jbuf_mtx, 0);
+                u64 fpts = jbuf_peek_pts();
+                sysMutexUnlock(s_jbuf_mtx);
+                if (fpts == 0) {
+                    do_pop = true;
+                } else {
+                    s64 adj = (s64)fpts - (s64)s_ref_pts_us;
+                    do_pop = (adj <= (s64)audio_offset);
+                }
+            }
+        }
+
+        if (do_pop) {
+            sysMutexLock(s_jbuf_mtx, 0);
+            jbuf_pop();
+            sysMutexUnlock(s_jbuf_mtx);
+            frame_count++;
+            if (used_bresenham) timing_frame_shown();
+            __asm__ volatile("sync" ::: "memory");
+            s_vid_frame_ready = false;
+            s_vid_disp_idx ^= 1;
+            {
+                static u64 s_fi_last_us = 0;
+                static u64 s_fi_gaps[2] = {0, 0};
+                u64 now_us = timing_get_us();
+                if (s_fi_last_us != 0) {
+                    s_fi_gaps[0] = s_fi_gaps[1];
+                    s_fi_gaps[1] = now_us - s_fi_last_us;
+                }
+                s_fi_last_us = now_us;
+                if (frame_count % 60 == 0) {
+                    char buf[128];
+                    snprintf(buf, sizeof(buf),
+                        "frame_interval: fr=%d gap1=%lluus gap2=%lluus audio=%lluus",
+                        frame_count,
+                        (unsigned long long)s_fi_gaps[0],
+                        (unsigned long long)s_fi_gaps[1],
+                        (unsigned long long)audio_clk);
+                    plog(buf);
+                }
+            }
+        }
+
+        // Re-draw the current frame into the RSX back color buffer every vblank.
+        // s_vid_disp_idx advances only on do_pop; hold vblanks re-blit the same texture.
         if (frame_count > 0) {
+            if (do_pop) rsxSync();
             u32 fw = jbuf_fw(), fh = jbuf_fh();
 
             // Clear framebuffer to black (covers bars outside the quad)

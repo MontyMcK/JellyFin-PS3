@@ -109,7 +109,7 @@ void audio_open(void) {
 // Called from the dedicated audio thread in a loop — one block per call.
 // Returns false immediately if no DMA event is ready (caller should sleep).
 // After receiving an event, blocks until the ring has a full 256-sample block
-// ready, sleeping 1ms per iteration up to a 100ms timeout.  On timeout writes
+// ready, sleeping 1ms per iteration up to a 30ms timeout.  On timeout writes
 // silence and logs a stall diagnostic rather than playing partial-fill noise.
 bool audio_write_pcm(void) {
     if (!s_audio_ok) return false;
@@ -120,7 +120,7 @@ bool audio_write_pcm(void) {
         float *blk_buf = (float *)(uintptr_t)addr;
         // Block until the decoder fills a complete block or the timeout fires.
         int waited = 0;
-        while (adec_pcm_available() < AUDIO_BLOCK_SAMPLES && waited < 100) {
+        while (adec_pcm_available() < AUDIO_BLOCK_SAMPLES && waited < 30) {
             usleep(1000);
             waited++;
         }

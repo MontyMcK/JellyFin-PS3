@@ -9,38 +9,12 @@
 #include <sysutil/sysutil.h>
 
 #include "ui.h"
-#include "bitmap.h"
-#include "font8x8.xpm"
+#include "ui_wave.h"
+#include "ui_visuals.h"
 #include "jellyfin_api.h"
 #include "player.h"
 #include "timing.h"
-#include "opensans_regular.h"
-#include "opensans_bold.h"
-#include "material_icons.h"
 #include "plog.h"
-#include "wave_shaders.h"
-
-#define STB_TRUETYPE_IMPLEMENTATION
-#ifdef __GNUC__
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#pragma GCC diagnostic ignored "-Wsign-compare"
-#endif
-#include "stb_truetype.h"
-#ifdef __GNUC__
-#pragma GCC diagnostic pop
-#endif
-
-static Bitmap fontBitmap;
-
-// TTF font state
-static stbtt_fontinfo  s_font;
-static unsigned char  *s_font_buf = NULL;
-static bool            s_ttf_ok   = false;
-static stbtt_fontinfo  s_font_bold;
-static bool            s_ttf_bold_ok = false;
-static stbtt_fontinfo  s_icons;
-static bool            s_icons_ok    = false;
 
 ButtonState btn_cur  = {0};
 ButtonState btn_prev = {0};
@@ -73,306 +47,12 @@ void init_btns(void) {
 }
 
 // -------------------------------------------------------
-// RSX drawing
+// Legacy on-screen keyboard state
 // -------------------------------------------------------
 
-void clearScreen(u32 color) {
-    rsxSetClearColor(context, color);
-    rsxSetClearDepthStencil(context, 0xffff);
-    rsxClearSurface(context,
-        GCM_CLEAR_R|GCM_CLEAR_G|GCM_CLEAR_B|GCM_CLEAR_A|GCM_CLEAR_S|GCM_CLEAR_Z);
-}
-
-void drawChar(u32 x, u32 y, char c) {
-    if (c < 32 || c > 126) c = '?';
-    int idx = c - 32;
-    int srcX = (idx % 16) * 8;
-    int srcY = (idx / 16) * 8;
-
-    gcmTransferScale   scale;
-    gcmTransferSurface surface;
-
-    scale.conversion = GCM_TRANSFER_CONVERSION_TRUNCATE;
-    scale.format     = GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8;
-    scale.origin     = GCM_TRANSFER_ORIGIN_CORNER;
-    scale.operation  = GCM_TRANSFER_OPERATION_SRCCOPY_AND;
-    scale.interp     = GCM_TRANSFER_INTERPOLATOR_NEAREST;
-    scale.clipX=0; scale.clipY=0;
-    scale.clipW=display_width; scale.clipH=display_height;
-    scale.outX=x; scale.outY=y;
-    scale.outW=CHAR_SIZE; scale.outH=CHAR_SIZE;
-    scale.ratioX=rsxGetFixedSint32(1.f/FONT_SCALE);
-    scale.ratioY=rsxGetFixedSint32(1.f/FONT_SCALE);
-    scale.inX=rsxGetFixedUint16(srcX);
-    scale.inY=rsxGetFixedUint16(srcY);
-    scale.inW=fontBitmap.width; scale.inH=fontBitmap.height;
-    scale.offset=fontBitmap.offset;
-    scale.pitch=sizeof(u32)*fontBitmap.width;
-
-    surface.format=GCM_TRANSFER_SURFACE_FORMAT_A8R8G8B8;
-    surface.pitch=color_pitch;
-    surface.offset=color_offset[curr_fb];
-
-    rsxSetTransferScaleMode(context, GCM_TRANSFER_LOCAL_TO_LOCAL, GCM_TRANSFER_SURFACE);
-    rsxSetTransferScaleSurface(context, &scale, &surface);
-}
-
-void drawText(u32 x, u32 y, const char *text) {
-    u32 cx = x;
-    while (*text) {
-        if (*text == '\n') { cx = x; y += LINE_HEIGHT; }
-        else { drawChar(cx, y, *text); cx += CHAR_SIZE; }
-        text++;
-    }
-}
-
-void drawTextf(u32 x, u32 y, const char *fmt, ...) {
-    char buf[512];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    drawText(x, y, buf);
-}
-
-// Render text at a custom pixel size (px = output pixels per 8x8 glyph).
-void drawTextScaled(u32 x, u32 y, const char *text, int px) {
-    if (px <= 0) return;
-    u32 cx = x;
-    while (*text) {
-        if (*text == '\n') { cx = x; y += (u32)px; }
-        else {
-            char c = *text;
-            if (c < 32 || c > 126) c = '?';
-            int idx = c - 32;
-            int srcX = (idx % 16) * 8;
-            int srcY = (idx / 16) * 8;
-
-            gcmTransferScale   scale;
-            gcmTransferSurface surface;
-
-            scale.conversion = GCM_TRANSFER_CONVERSION_TRUNCATE;
-            scale.format     = GCM_TRANSFER_SCALE_FORMAT_A8R8G8B8;
-            scale.origin     = GCM_TRANSFER_ORIGIN_CORNER;
-            scale.operation  = GCM_TRANSFER_OPERATION_SRCCOPY_AND;
-            scale.interp     = GCM_TRANSFER_INTERPOLATOR_NEAREST;
-            scale.clipX=0; scale.clipY=0;
-            scale.clipW=display_width; scale.clipH=display_height;
-            scale.outX=cx; scale.outY=y;
-            scale.outW=(u32)px; scale.outH=(u32)px;
-            scale.ratioX=rsxGetFixedSint32(8.0f / px);
-            scale.ratioY=rsxGetFixedSint32(8.0f / px);
-            scale.inX=rsxGetFixedUint16(srcX);
-            scale.inY=rsxGetFixedUint16(srcY);
-            scale.inW=fontBitmap.width; scale.inH=fontBitmap.height;
-            scale.offset=fontBitmap.offset;
-            scale.pitch=sizeof(u32)*fontBitmap.width;
-
-            surface.format=GCM_TRANSFER_SURFACE_FORMAT_A8R8G8B8;
-            surface.pitch=color_pitch;
-            surface.offset=color_offset[curr_fb];
-
-            rsxSetTransferScaleMode(context, GCM_TRANSFER_LOCAL_TO_LOCAL, GCM_TRANSFER_SURFACE);
-            rsxSetTransferScaleSurface(context, &scale, &surface);
-
-            cx += (u32)px;
-        }
-        text++;
-    }
-}
-
-void drawHeader(void) {
-    clearScreen(0x0d0d1a);
-    rsxSync();
-    drawTTF(40, 30, "JELLYFIN PS3", 16, 0x00FFFFFF);
-}
-
-void decode_unicode_escapes(char *str) {
-    char *src = str, *dst = str;
-    while (*src) {
-        if (src[0]=='\\' && src[1]=='u' &&
-            isxdigit(src[2]) && isxdigit(src[3]) &&
-            isxdigit(src[4]) && isxdigit(src[5])) {
-            char hex[5] = {src[2],src[3],src[4],src[5],0};
-            int code = (int)strtol(hex, NULL, 16);
-            *dst++ = (code >= 32 && code < 127) ? (char)code : '?';
-            src += 6;
-        } else { *dst++ = *src++; }
-    }
-    *dst = '\0';
-}
-
-// -------------------------------------------------------
-// CPU drawing (call only after rsxSync, before RSX commands)
-// color: 0x00RRGGBB  (X8R8G8B8, X byte unused by display)
-// -------------------------------------------------------
-
-void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color) {
-    if (x >= display_width || y >= display_height || w == 0 || h == 0) return;
-    u32 x2 = (x + w > display_width)  ? display_width  : x + w;
-    u32 y2 = (y + h > display_height) ? display_height : y + h;
-    for (u32 r = y; r < y2; r++) {
-        u32 *p = color_buffer[curr_fb] + r * display_width + x;
-        u32  n = x2 - x;
-        for (u32 c = 0; c < n; c++) p[c] = color;
-    }
-}
-
-void cpuClearFb(u32 color) {
-    u32 *fb = color_buffer[curr_fb];
-    u32  n  = display_width * display_height;
-    for (u32 i = 0; i < n; i++) fb[i] = color;
-}
-
-// -------------------------------------------------------
-// TTF text rendering (CPU write — call after rsxSync, before flip)
-// color: 0x00RRGGBB.  Falls back to drawTextScaled if font not loaded.
-// -------------------------------------------------------
-
-static int ttf_text_width(const char *text, float px) {
-    if (!s_ttf_ok) return (int)(strlen(text) * px);
-    float scale = stbtt_ScaleForPixelHeight(&s_font, px);
-    float xf = 0.0f;
-    int prev_cp = 0;
-    while (*text) {
-        int cp = (unsigned char)*text;
-        if (prev_cp) xf += stbtt_GetCodepointKernAdvance(&s_font, prev_cp, cp) * scale;
-        int advance;
-        stbtt_GetCodepointHMetrics(&s_font, cp, &advance, NULL);
-        xf += (float)advance * scale;
-        prev_cp = cp;
-        text++;
-    }
-    return (int)xf;
-}
-
-void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
-    if (!s_ttf_ok) {
-        drawTextScaled(x, y, text, (int)px);
-        return;
-    }
-
-    stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
-
-    float scale = stbtt_ScaleForPixelHeight(fi, px);
-    int ascent;
-    stbtt_GetFontVMetrics(fi, &ascent, NULL, NULL);
-    int baseline = (int)((float)ascent * scale);
-
-    u32 r_fg = (color >> 16) & 0xFF;
-    u32 g_fg = (color >>  8) & 0xFF;
-    u32 b_fg =  color        & 0xFF;
-
-    float xf     = (float)x;
-    int   prev_cp = 0;
-
-    while (*text) {
-        int cp = (unsigned char)*text;
-
-        if (prev_cp)
-            xf += stbtt_GetCodepointKernAdvance(fi, prev_cp, cp) * scale;
-
-        int w, h, xoff, yoff;
-        unsigned char *bm = stbtt_GetCodepointBitmap(
-            fi, scale, scale, cp, &w, &h, &xoff, &yoff);
-
-        if (bm) {
-            int draw_x0 = (int)xf + xoff;
-            int draw_y0 = (int)y + baseline + yoff;
-
-            for (int gy = 0; gy < h; gy++) {
-                int sy = draw_y0 + gy;
-                if (sy < 0 || (u32)sy >= display_height) continue;
-                u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
-                for (int gx = 0; gx < w; gx++) {
-                    int sx = draw_x0 + gx;
-                    if (sx < 0 || (u32)sx >= display_width) continue;
-                    u32 a = bm[gy * w + gx];
-                    if (a == 0) continue;
-                    if (a == 255) { row[sx] = color; continue; }
-                    u32 bg   = row[sx];
-                    u32 r_bg = (bg >> 16) & 0xFF;
-                    u32 g_bg = (bg >>  8) & 0xFF;
-                    u32 b_bg =  bg        & 0xFF;
-                    u32 r_out = (a * r_fg + (255 - a) * r_bg) / 255;
-                    u32 g_out = (a * g_fg + (255 - a) * g_bg) / 255;
-                    u32 b_out = (a * b_fg + (255 - a) * b_bg) / 255;
-                    row[sx] = (r_out << 16) | (g_out << 8) | b_out;
-                }
-            }
-            stbtt_FreeBitmap(bm, NULL);
-        }
-
-        int advance;
-        stbtt_GetCodepointHMetrics(fi, cp, &advance, NULL);
-        xf += (float)advance * scale;
-
-        prev_cp = cp;
-        text++;
-    }
-}
-
-void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
-    if (!s_icons_ok) return;
-    float scale = stbtt_ScaleForPixelHeight(&s_icons, px);
-    int ascent;
-    stbtt_GetFontVMetrics(&s_icons, &ascent, NULL, NULL);
-    int baseline = (int)((float)ascent * scale);
-    int w, h, xoff, yoff;
-    unsigned char *bm = stbtt_GetCodepointBitmap(
-        &s_icons, scale, scale, codepoint, &w, &h, &xoff, &yoff);
-    if (!bm) return;
-    u32 r_fg = (color >> 16) & 0xFF;
-    u32 g_fg = (color >>  8) & 0xFF;
-    u32 b_fg =  color        & 0xFF;
-    int draw_x0 = (int)x + xoff;
-    int draw_y0 = (int)y + baseline + yoff;
-    for (int gy = 0; gy < h; gy++) {
-        int sy = draw_y0 + gy;
-        if (sy < 0 || (u32)sy >= display_height) continue;
-        u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
-        for (int gx = 0; gx < w; gx++) {
-            int sx = draw_x0 + gx;
-            if (sx < 0 || (u32)sx >= display_width) continue;
-            u32 a = bm[gy * w + gx];
-            if (a == 0) continue;
-            if (a == 255) { row[sx] = color; continue; }
-            u32 bg   = row[sx];
-            u32 r_bg = (bg >> 16) & 0xFF;
-            u32 g_bg = (bg >>  8) & 0xFF;
-            u32 b_bg =  bg        & 0xFF;
-            u32 r_out = (a * r_fg + (255 - a) * r_bg) / 255;
-            u32 g_out = (a * g_fg + (255 - a) * g_bg) / 255;
-            u32 b_out = (a * b_fg + (255 - a) * b_bg) / 255;
-            row[sx] = (r_out << 16) | (g_out << 8) | b_out;
-        }
-    }
-    stbtt_FreeBitmap(bm, NULL);
-}
-
-// -------------------------------------------------------
-// Legacy on-screen keyboard (used by login / server-url screens)
-// -------------------------------------------------------
-
-static const char *KB_ROWS[] = {
-    "1234567890",
-    "qwertyuiop",
-    "asdfghjkl",
-    "zxcvbnm",
-};
-#define KB_LETTER_ROWS 4
-
-typedef struct { const char *label; char value; } SpecialKey;
-static const SpecialKey SPECIAL[] = {
-    {"SPC",' '}, {".",'.'},  {":",':'}, {"/",'/'},
-    {"@",'@'},   {"-",'-'},  {"_",'_'}, {"DEL",'\b'}, {"OK",'\r'},
-};
-#define SPECIAL_N  9
-#define TOTAL_ROWS (KB_LETTER_ROWS + 1)
-
-static int  kb_row  = 0;
-static int  kb_col  = 0;
-static bool kb_caps = false;
+int  kb_row  = 0;
+int  kb_col  = 0;
+bool kb_caps = false;
 
 static int row_len(int r) {
     return (r < KB_LETTER_ROWS) ? (int)strlen(KB_ROWS[r]) : SPECIAL_N;
@@ -384,60 +64,6 @@ static char current_key_value(void) {
         return kb_caps ? (char)toupper(c) : c;
     }
     return SPECIAL[kb_col].value;
-}
-
-static void draw_keyboard(const char *prompt, const char *input, bool is_password) {
-    drawHeader();
-    drawTTF(40, 85, prompt, 14, 0x00FFFFFF);
-
-    char display[256] = "";
-    int ilen = strlen(input);
-    if (is_password) {
-        memset(display, '*', ilen);
-        display[ilen] = '\0';
-    } else {
-        if (ilen > 34) strncpy(display, input + ilen - 34, 35);
-        else           strncpy(display, input, 255);
-    }
-    char input_line[260];
-    snprintf(input_line, sizeof(input_line), "> %s_", display);
-    drawTTF(40, 115, input_line, 14, 0x00FFFFFF);
-    if (kb_caps) drawTTF(40, 115+LINE_HEIGHT*2, "CAPS ON", 14, 0x00FFFFFF);
-
-    int kb_x = 50, kb_y = 175;
-    int key_h = LINE_HEIGHT + 8;
-
-    for (int r = 0; r < TOTAL_ROWS; r++) {
-        int key_w = (r < KB_LETTER_ROWS) ? (CHAR_SIZE + 16) : (CHAR_SIZE * 3 + 8);
-        int rlen  = row_len(r);
-        for (int c = 0; c < rlen; c++) {
-            int  xk  = kb_x + c * key_w;
-            int  yk  = kb_y + r * key_h;
-            bool sel = (r == kb_row && c == kb_col);
-
-            char buf[8];
-            const char *label;
-            if (r < KB_LETTER_ROWS) {
-                char ch = KB_ROWS[r][c];
-                buf[0] = kb_caps ? (char)toupper(ch) : ch;
-                buf[1] = '\0';
-                label  = buf;
-            } else {
-                label = SPECIAL[c].label;
-            }
-
-            if (sel) {
-                char sel_buf[12];
-                snprintf(sel_buf, sizeof(sel_buf), "[%s]", label);
-                drawTTF((u32)(xk - CHAR_SIZE), (u32)yk, sel_buf, 14, 0x00FFFFFF);
-            } else {
-                drawTTF((u32)xk, (u32)yk, label, 14, 0x00FFFFFF);
-            }
-        }
-    }
-
-    drawTTF(40, 660, "Dpad:move  X:type  Tri:caps  Sq:del  START:done  SEL:cancel", 12, 0x00FFFFFF);
-    flip();
 }
 
 int get_input(char *out, int max_len, const char *prompt, bool is_password) {
@@ -487,133 +113,10 @@ int get_input(char *out, int max_len, const char *prompt, bool is_password) {
 }
 
 // -------------------------------------------------------
-// Wave background — RSX vertex rendering
-// -------------------------------------------------------
-
-// Per-layer properties: colour (0x00RRGGBB), amplitude, sine frequency, base-y fraction, per-frame phase step.
-#define WAVE_STEP_PX    20
-#define WAVE_VERTS_MAX  200
-#define WAVE_VBUF_BYTES 12288  // 3 layers × 200 verts × 20 bytes
-
-static const u32   WAVE_COLOR[3]  = { 0x002d2745, 0x001e1a37, 0x00261f44 };
-static const float WAVE_AMP[3]    = { 30.0f, 20.0f, 14.0f };
-static const float WAVE_FREQ[3]   = { 1.5f,  1.8f,  2.1f  };
-static const float WAVE_BASEY[3]  = { 0.70f, 0.78f, 0.86f };
-static const float WAVE_DPHASE[3] = { 0.008f, 0.013f, 0.018f };
-
-// Vertex layout stored in the RSX vertex buffer.
-typedef struct {
-    float x, y, z, w; // clip-space position (pre-transformed on PPU)
-    u8 r, g, b, a;    // RGBA colour (u8, normalised to [0,1] by RSX)
-} WaveVert; // 20 bytes
-
-static float  s_wave_phase[3]   = { 0.0f, 0.0f, 0.0f };
-static u8    *s_wave_vbuf       = NULL; // RSX-memory vertex buffer (12288 bytes, 3 sub-regions)
-static u32   *s_wave_fp_buf     = NULL; // RSX-memory copy of FP ucode
-static u32    s_wave_fp_offset  = 0;   // RSX offset of s_wave_fp_buf
-
-static void wave_draw(void) {
-    if (!s_wave_vbuf || !s_wave_fp_buf) return;
-
-    rsxVertexProgram  *vpo = (rsxVertexProgram*)  wave_vp_data;
-    rsxFragmentProgram *fpo = (rsxFragmentProgram*) wave_fp_data;
-
-    void *vp_ucode; u32 vp_size;
-    rsxVertexProgramGetUCode(vpo, &vp_ucode, &vp_size);
-    rsxLoadVertexProgram(context, vpo, vp_ucode);
-    rsxSetVertexAttribOutputMask(context, vpo->output_mask);
-    rsxLoadFragmentProgramLocation(context, fpo, s_wave_fp_offset, GCM_LOCATION_RSX);
-
-    rsxSetDepthTestEnable(context, GCM_FALSE);
-    rsxSetDepthWriteEnable(context, GCM_FALSE);
-
-    float W = (float)display_width;
-    float H = (float)display_height;
-
-    for (int li = 0; li < 3; li++) {
-        s_wave_phase[li] += WAVE_DPHASE[li];
-        if (s_wave_phase[li] > 62.83f) s_wave_phase[li] -= 62.83f;
-    }
-
-    // Loop 1: build all three layers into separate sub-regions of the vertex buffer.
-    int layer_n[3];
-    for (int li = 0; li < 3; li++) {
-        float base_y = H * WAVE_BASEY[li];
-        float amp    = WAVE_AMP[li];
-        float freq   = WAVE_FREQ[li];
-        float phase  = s_wave_phase[li];
-        u32   col    = WAVE_COLOR[li];
-        u8    r = (col >> 16) & 0xFF;
-        u8    g = (col >>  8) & 0xFF;
-        u8    b =  col        & 0xFF;
-
-        WaveVert *verts = (WaveVert*)(s_wave_vbuf + li * WAVE_VERTS_MAX * sizeof(WaveVert));
-        int n = 0;
-
-        for (int px = 0; px <= (int)W; px += WAVE_STEP_PX) {
-            float fx = (float)px;
-            float wy = base_y + sinf(fx / W * (freq * 3.14159265f) + phase) * amp;
-            if (wy < 0.0f) wy = 0.0f;
-            if (wy > H)    wy = H;
-
-            float cx     = (2.0f * fx / W) - 1.0f;
-            float cy_top = 1.0f - (2.0f * wy / H);
-            float cy_bot = -1.0f;
-
-            verts[n].x=cx; verts[n].y=cy_top; verts[n].z=0.0f; verts[n].w=1.0f;
-            verts[n].r=r;  verts[n].g=g;      verts[n].b=b;     verts[n].a=255;
-            n++;
-            verts[n].x=cx; verts[n].y=cy_bot; verts[n].z=0.0f; verts[n].w=1.0f;
-            verts[n].r=r;  verts[n].g=g;      verts[n].b=b;     verts[n].a=255;
-            n++;
-        }
-        layer_n[li] = n;
-    }
-
-    // Loop 2: issue draw calls back-to-front; all geometry is already in RSX memory.
-    u32 vbuf_base;
-    rsxAddressToOffset(s_wave_vbuf, &vbuf_base);
-
-    rsxSetBlendEnable(context, GCM_FALSE);
-
-    for (int li = 0; li < 3; li++) {
-        u32 vbuf_off = vbuf_base + (u32)(li * WAVE_VERTS_MAX * sizeof(WaveVert));
-
-        rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
-            vbuf_off,
-            (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-
-        rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
-            vbuf_off + 16u,
-            (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
-
-        rsxInvalidateVertexCache(context);
-        rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, (u32)layer_n[li]);
-    }
-
-    rsxSetBlendEnable(context, GCM_TRUE);
-}
-
-// -------------------------------------------------------
 // XMB tab / item data
 // -------------------------------------------------------
 
-#define XMB_TAB_SEARCH      0
-#define XMB_TAB_MOVIES      1
-#define XMB_TAB_TV          2
-#define XMB_TAB_MUSIC       3
-#define XMB_TAB_COLLECTIONS 4
-#define XMB_TAB_SETTINGS    5
-#define XMB_TAB_COUNT       6
-
-typedef struct {
-    const char *label;
-    const char *icon;   // short ASCII glyph drawn as the tab icon
-    char library_id[64];
-    bool enabled;
-} XMBTab;
-
-static XMBTab g_tabs[XMB_TAB_COUNT] = {
+XMBTab g_tabs[XMB_TAB_COUNT] = {
     {"SEARCH",      "?",  "", true },
     {"MOVIES",      "#",  "", false},
     {"TV SHOWS",    "=",  "", false},
@@ -622,57 +125,56 @@ static XMBTab g_tabs[XMB_TAB_COUNT] = {
     {"SETTINGS",    "*",  "", true },
 };
 
-#define XMB_ITEMS_MAX 50
+XMBItem g_items[XMB_TAB_COUNT][XMB_ITEMS_MAX];
+int     g_item_count[XMB_TAB_COUNT];
+bool    g_items_loaded[XMB_TAB_COUNT];
 
-static XMBItem g_items[XMB_TAB_COUNT][XMB_ITEMS_MAX];
-static int     g_item_count[XMB_TAB_COUNT];
-static bool    g_items_loaded[XMB_TAB_COUNT];
-
-// UI state
-static int  g_active_tab = XMB_TAB_MOVIES;
-static int  g_sel        = 0;
-static int  g_scroll_top = 0;
+// UI navigation state
+int  g_active_tab = XMB_TAB_MOVIES;
+int  g_sel        = 0;
+int  g_scroll_top = 0;
 
 // TV sub-screen state (Series→Seasons→Episodes)
-static int  g_tv_depth       = 0;  // 0=series list, 1=season list, 2=episode list
+static int  g_tv_depth       = 0;
 static char g_tv_series_id[64];
 static char g_tv_series_name[128];
 static char g_tv_season_id[64];
 static char g_tv_season_name[64];
-static XMBItem g_tv_sub_items[XMB_ITEMS_MAX];
-static int     g_tv_sub_count  = 0;
-static int     g_tv_sub_sel    = 0;
-static int     g_tv_sub_scroll = 0;
+XMBItem g_tv_sub_items[XMB_ITEMS_MAX];
+int     g_tv_sub_count  = 0;
+int     g_tv_sub_sel    = 0;
+int     g_tv_sub_scroll = 0;
 
 // Collections sub-screen state (Collection→Movies)
 static int  g_col_depth      = 0;
 static char g_col_id[64];
 static char g_col_name[128];
-static XMBItem g_col_sub_items[XMB_ITEMS_MAX];
-static int     g_col_sub_count  = 0;
-static int     g_col_sub_sel    = 0;
-static int     g_col_sub_scroll = 0;
+XMBItem g_col_sub_items[XMB_ITEMS_MAX];
+int     g_col_sub_count  = 0;
+int     g_col_sub_sel    = 0;
+int     g_col_sub_scroll = 0;
 
 // Search OSK state
-#define OSK_ROWS_N 4
-static const char *OSK_LETTERS[OSK_ROWS_N] = {
+const char *OSK_LETTERS[OSK_ROWS_N] = {
     "1234567890",
     "QWERTYUIOP",
     "ASDFGHJKL",
-    "ZXCVBNM",  // index 7 = "#+=" toggle key
+    "ZXCVBNM",
 };
-static const char *OSK_SYMBOLS[OSK_ROWS_N] = {
+const char *OSK_SYMBOLS[OSK_ROWS_N] = {
     "!@#$%^&*()",
     "-_=+[]{}|\\",
     ":;\"'`~<>?",
-    ".,/!",       // index 4 = "ABC" back key
+    ".,/!",
 };
-static int  g_osk_row    = 0;
-static int  g_osk_col    = 0;
-static bool g_osk_sym    = false;  // false=letters true=symbols
-static char g_search_buf[64];
-static int  g_search_results_count = 0;
-static XMBItem g_search_results[XMB_ITEMS_MAX];
+int  g_osk_row    = 0;
+int  g_osk_col    = 0;
+bool g_osk_sym    = false;
+char g_search_buf[64];
+int  g_search_results_count = 0;
+XMBItem g_search_results[XMB_ITEMS_MAX];
+
+int OSK_Y0 = 0;
 
 // -------------------------------------------------------
 // XMB JSON parsing helpers (local, avoids changing jellyfin_api.cpp)
@@ -736,7 +238,6 @@ static long long xmb_json_ll_range(const char *start, int len,
     return def;
 }
 
-// Parse first element of a JSON string array: "Key":["Value",...]
 static int xmb_json_first_arr_str(const char *start, int len,
                                    const char *key, char *out, int out_size) {
     char search[64];
@@ -757,8 +258,6 @@ static int xmb_json_first_arr_str(const char *start, int len,
     return 0;
 }
 
-// Parse full list of XMBItems from a Jellyfin JSON Items response.
-// Expects Fields=Genres,RunTimeTicks,ProductionYear,Container in the request.
 static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
     const char *p = strstr(json, "\"Items\":[");
     if (!p) return 0;
@@ -787,11 +286,9 @@ static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
         xmb_json_str_range(obj, olen, "Type", it.type, sizeof(it.type));
         if (!it.id[0]) continue;
 
-        // Year
         int year = xmb_json_int_range(obj, olen, "ProductionYear", 0);
         if (year > 0) snprintf(it.year_str, sizeof(it.year_str), "%d", year);
 
-        // Duration from RunTimeTicks (100ns units)
         long long ticks = xmb_json_ll_range(obj, olen, "RunTimeTicks", 0);
         if (ticks > 0) {
             int total_min = (int)(ticks / 600000000LL);
@@ -800,12 +297,8 @@ static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
             else        snprintf(it.duration_str, sizeof(it.duration_str), "%dm", m);
         }
 
-        // First genre
         xmb_json_first_arr_str(obj, olen, "Genres", it.genre, sizeof(it.genre));
 
-        // Codec badge — Container tells us the mux, not codec, but most MKV/MP4
-        // content in typical Jellyfin setups is H.264.  Proper codec detection
-        // requires MediaSources; improve here if needed.
         char container[16] = "";
         xmb_json_str_range(obj, olen, "Container", container, sizeof(container));
         if (strstr(container, "hevc") || strstr(container, "h265") ||
@@ -822,39 +315,6 @@ static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
 }
 
 // -------------------------------------------------------
-// XMB layout constants (pixel values, assume 720p minimum)
-// -------------------------------------------------------
-
-#define XMB_BG          0x000d0d1aUL   // dark near-black
-#define XMB_DIVIDER_CLR 0x00554077UL   // muted purple divider
-#define XMB_ACCENT      0x007C3CEAUL   // bright purple accent
-#define XMB_HIGHLIGHT   0x001D1040UL   // selected row bg
-#define XMB_THUMB_DIM   0x00241444UL   // thumb placeholder (dark purple)
-#define XMB_BADGE_BG    0x00302050UL   // codec badge background
-#define XMB_KEY_NORMAL  0x001A103AUL   // unselected OSK key bg
-#define XMB_KEY_SEL     0x005A3AB0UL   // selected OSK key bg
-
-#define XMB_TOPBAR_H    64
-#define XMB_TABBAR_H    80
-#define XMB_DIVIDER_Y   (XMB_TOPBAR_H + XMB_TABBAR_H)
-#define XMB_CONTENT_Y   (XMB_DIVIDER_Y + 52)
-#define XMB_BOTTOM_PAD  70
-#define XMB_ITEM_H      90
-#define XMB_THUMB_W     52
-#define XMB_THUMB_H     74
-#define XMB_ITEM_PAD    40
-
-// Items visible simultaneously in the list area
-#define XMB_ITEMS_VIS ((int)((display_height - XMB_CONTENT_Y - XMB_BOTTOM_PAD) / XMB_ITEM_H))
-
-// OSK constants (pixels)
-#define OSK_KEY_W    80
-#define OSK_KEY_H    44
-#define OSK_GAP       8
-#define OSK_STEP_X   (OSK_KEY_W + OSK_GAP)  // 88
-#define OSK_STEP_Y   (OSK_KEY_H + OSK_GAP)  // 52
-
-// -------------------------------------------------------
 // XMB API fetch helpers
 // -------------------------------------------------------
 
@@ -864,7 +324,6 @@ static void xmb_detect_tabs(void) {
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return;
 
-    // Walk items in the Views response to find which library types exist.
     const char *p = strstr(responseBuffer, "\"Items\":[");
     if (!p) return;
     p += 9;
@@ -980,362 +439,31 @@ static int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, i
 }
 
 // -------------------------------------------------------
-// XMB rendering helpers
-// -------------------------------------------------------
-
-// Returns the display-width x-centre of tab slot t.
-static int xmb_tab_cx(int t) {
-    return (int)(((t + 0.5f) * display_width) / XMB_TAB_COUNT);
-}
-
-static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
-    0xE8B6,  // XMB_TAB_SEARCH      (search/magnifier)
-    0xE54D,  // XMB_TAB_MOVIES      (movie/film)
-    0xE333,  // XMB_TAB_TV          (TV)
-    0xE3A1,  // XMB_TAB_MUSIC       (music note)
-    0xE8EF,  // XMB_TAB_COLLECTIONS (collections/four squares)
-    0xE8B8,  // XMB_TAB_SETTINGS    (settings/gear)
-};
-
-static void xmb_draw_tabs(void) {
-    const int TAB_SPACING  = 96;
-    const int group_half_w = ((XMB_TAB_COUNT - 1) * TAB_SPACING) / 2;
-    const int tab_group_x0 = (int)display_width / 2 - group_half_w;
-
-    for (int t = 0; t < XMB_TAB_COUNT; t++) {
-        if (!g_tabs[t].enabled) continue;
-
-        int cx      = tab_group_x0 + t * TAB_SPACING;
-        bool active = (t == g_active_tab);
-        int icon_px = active ? 96 : 32;
-        int icon_x  = cx - icon_px / 2;
-        int icon_y  = XMB_TOPBAR_H + (XMB_TABBAR_H - icon_px) / 2 - 8;
-
-        drawIcon((u32)icon_x, (u32)icon_y, TAB_CODEPOINTS[t], (float)icon_px, 0x00ae99d6);
-    }
-}
-
-// Draw the meta string "year · duration · genre" at (x, y) in 8px text.
-static void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14) {
-    char meta[64] = "";
-    if (it->year_str[0])     { snprintf(meta, sizeof(meta), "%s", it->year_str); }
-    if (it->duration_str[0]) {
-        if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
-        strncat(meta, it->duration_str, sizeof(meta)-strlen(meta)-1);
-    }
-    if (it->genre[0]) {
-        if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
-        strncat(meta, it->genre, sizeof(meta)-strlen(meta)-1);
-    }
-    if (meta[0]) drawTTF(x, y, meta, px, 0x00FFFFFF);
-}
-
-static void xmb_draw_item_list(int tab) {
-    int count = g_item_count[tab];
-    int vis   = XMB_ITEMS_VIS;
-
-    for (int i = 0; i < vis; i++) {
-        int idx = g_scroll_top + i;
-        if (idx >= count) break;
-        const XMBItem *it = &g_items[tab][idx];
-
-        int iy = XMB_CONTENT_Y + i * XMB_ITEM_H;
-
-        // Title  (22px font)
-        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
-        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
-
-        // Meta line (8px font)
-        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
-
-        // Codec badge text
-        if (it->codec[0]) {
-            int bx = (int)display_width - XMB_ITEM_PAD - 60;
-            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
-        }
-
-        // Scroll indicator dots on right edge when there are more items
-        if (i == 0 && g_scroll_top > 0)
-            drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
-        if (i == vis-1 && g_scroll_top + vis < count)
-            drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
-    }
-}
-
-// CPU draws for item list (highlight, thumb, badge bg) - called in CPU phase
-static void xmb_cpu_draw_items(int tab) {
-    int count = g_item_count[tab];
-    int vis   = XMB_ITEMS_VIS;
-    int W     = (int)display_width;
-
-    for (int i = 0; i < vis; i++) {
-        int idx = g_scroll_top + i;
-        if (idx >= count) break;
-
-        int iy = XMB_CONTENT_Y + i * XMB_ITEM_H;
-
-        if (idx == g_sel) {
-            // Highlight row background
-            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
-                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2),
-                     XMB_HIGHLIGHT);
-            // Left accent bar
-            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy,
-                     4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
-        }
-
-        // Thumbnail placeholder
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8),
-                 XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
-
-        // Codec badge background
-        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6),
-                 66, 22, XMB_BADGE_BG);
-    }
-}
-
-// CPU draws for the TV sub-item list (seasons or episodes)
-static void xmb_cpu_draw_sub(void) {
-    int vis = XMB_ITEMS_VIS;
-    int W   = (int)display_width;
-    int y0  = XMB_CONTENT_Y + 26; // leaves room for breadcrumb
-    for (int i = 0; i < vis; i++) {
-        int idx = g_tv_sub_scroll + i;
-        if (idx >= g_tv_sub_count) break;
-        int iy = y0 + i * XMB_ITEM_H;
-        if (idx == g_tv_sub_sel) {
-            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
-                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2), XMB_HIGHLIGHT);
-            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy, 4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
-        }
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
-        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6), 66, 22, XMB_BADGE_BG);
-    }
-}
-
-// TTF draws for the TV sub-item list
-static void xmb_draw_sub_list(void) {
-    int vis = XMB_ITEMS_VIS;
-    int y0  = XMB_CONTENT_Y + 26;
-    for (int i = 0; i < vis; i++) {
-        int idx = g_tv_sub_scroll + i;
-        if (idx >= g_tv_sub_count) break;
-        const XMBItem *it = &g_tv_sub_items[idx];
-        int iy = y0 + i * XMB_ITEM_H;
-        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
-        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
-        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
-        if (it->codec[0]) {
-            int bx = (int)display_width - XMB_ITEM_PAD - 60;
-            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
-        }
-        if (i == 0 && g_tv_sub_scroll > 0)
-            drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
-        if (i == vis-1 && g_tv_sub_scroll + vis < g_tv_sub_count)
-            drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
-    }
-}
-
-// CPU draws for the Collections sub-item list (movies inside a collection)
-static void xmb_cpu_draw_col_sub(void) {
-    int vis = XMB_ITEMS_VIS;
-    int W   = (int)display_width;
-    int y0  = XMB_CONTENT_Y + 26;
-    for (int i = 0; i < vis; i++) {
-        int idx = g_col_sub_scroll + i;
-        if (idx >= g_col_sub_count) break;
-        int iy = y0 + i * XMB_ITEM_H;
-        if (idx == g_col_sub_sel) {
-            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
-                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2), XMB_HIGHLIGHT);
-            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy, 4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
-        }
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
-        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6), 66, 22, XMB_BADGE_BG);
-    }
-}
-
-// TTF draws for the Collections sub-item list
-static void xmb_draw_col_sub_list(void) {
-    int vis = XMB_ITEMS_VIS;
-    int y0  = XMB_CONTENT_Y + 26;
-    for (int i = 0; i < vis; i++) {
-        int idx = g_col_sub_scroll + i;
-        if (idx >= g_col_sub_count) break;
-        const XMBItem *it = &g_col_sub_items[idx];
-        int iy = y0 + i * XMB_ITEM_H;
-        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
-        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
-        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
-        if (it->codec[0]) {
-            int bx = (int)display_width - XMB_ITEM_PAD - 60;
-            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
-        }
-        if (i == 0 && g_col_sub_scroll > 0)
-            drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
-        if (i == vis-1 && g_col_sub_scroll + vis < g_col_sub_count)
-            drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
-    }
-}
-
-// -------------------------------------------------------
-// Search / OSK rendering
+// OSK helpers
 // -------------------------------------------------------
 
 static int osk_row_len(int r) {
     if (r >= OSK_ROWS_N) {
-        // bottom row: SPACE(0), BACKSPACE(1), CLEAR(2)
         return 3;
     }
     const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
     int base = strlen(rows[r]);
-    if (!g_osk_sym && r == OSK_ROWS_N - 1) base++; // #+=  toggle key
-    if  (g_osk_sym && r == OSK_ROWS_N - 1) base++; // ABC toggle key
+    if (!g_osk_sym && r == OSK_ROWS_N - 1) base++;
+    if  (g_osk_sym && r == OSK_ROWS_N - 1) base++;
     return base;
 }
 
-// Returns char to type for current OSK key, 0 for action keys.
 static char osk_current_char(void) {
     if (g_osk_row >= OSK_ROWS_N) {
-        // bottom row actions handled separately
         return 0;
     }
     const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
     const char *row   = rows[g_osk_row];
     int base_len = strlen(row);
-    // last key in letter row 3 = toggle, last in sym row 3 = toggle
     bool is_toggle = (g_osk_row == OSK_ROWS_N-1 && g_osk_col == base_len);
     if (is_toggle) return 0;
     if (g_osk_col < base_len) return row[g_osk_col];
     return 0;
-}
-
-static int OSK_Y0 = 0; // set at runtime based on display_height
-
-static void xmb_cpu_draw_osk(void) {
-    int W = (int)display_width;
-    // All rows anchored to the width of the widest row (10 keys)
-    int total_w = 10 * OSK_STEP_X - OSK_GAP;
-    int osk_x0  = (W - total_w) / 2;
-
-    // Input bar background — same width as the keyboard
-    drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + 8),
-             (u32)total_w, 40, 0x001A1040);
-
-    // Keyboard key backgrounds
-    for (int r = 0; r <= OSK_ROWS_N; r++) {
-        if (r == OSK_ROWS_N) {
-            // Bottom row: wide SPACE, BACKSPACE, CLEAR — left edge = osk_x0
-            int space_w = 5 * OSK_STEP_X - OSK_GAP;  // 5 key-slots wide
-            int sy = OSK_Y0 + r * OSK_STEP_Y;
-            bool sp_sel = (r == g_osk_row && g_osk_col == 0);
-            drawRect((u32)osk_x0, (u32)sy, (u32)space_w, OSK_KEY_H,
-                     sp_sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
-            int bsx = osk_x0 + space_w + OSK_GAP;
-            bool bs_sel = (r == g_osk_row && g_osk_col == 1);
-            drawRect((u32)bsx, (u32)sy, OSK_KEY_W, OSK_KEY_H,
-                     bs_sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
-            int clx = bsx + OSK_KEY_W + OSK_GAP;
-            bool cl_sel = (r == g_osk_row && g_osk_col == 2);
-            drawRect((u32)clx, (u32)sy, OSK_KEY_W, OSK_KEY_H,
-                     cl_sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
-        } else {
-            const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
-            int rlen = (int)strlen(rows[r]);
-            if (r == OSK_ROWS_N - 1) rlen++; // toggle key
-            int ry = OSK_Y0 + r * OSK_STEP_Y;
-            for (int c = 0; c < rlen; c++) {
-                bool sel = (r == g_osk_row && c == g_osk_col);
-                drawRect((u32)(osk_x0 + c * OSK_STEP_X), (u32)ry,
-                         OSK_KEY_W, OSK_KEY_H,
-                         sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
-            }
-        }
-    }
-}
-
-static void xmb_rsx_draw_osk(void) {
-    int W = (int)display_width;
-    // Must match xmb_cpu_draw_osk exactly so labels land on their backgrounds
-    int total_w = 10 * OSK_STEP_X - OSK_GAP;
-    int osk_x0  = (W - total_w) / 2;
-
-    // Cursor blink: show cursor on even half-seconds
-    u64 us = timing_get_us();
-    bool cursor = ((us / 500000) & 1) == 0;
-
-    // Input bar text — centered horizontally within the bar
-    char disp[68];
-    snprintf(disp, sizeof(disp), "%s%s", g_search_buf, cursor ? "_" : " ");
-    {
-        int bar_cx = (int)display_width / 2;
-        int text_w = (int)strlen(disp) * 18;
-        int tx = bar_cx - text_w / 2;
-        if (tx < (int)XMB_ITEM_PAD + 4) tx = (int)XMB_ITEM_PAD + 4;
-        drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 18), disp, 18, 0x00FFFFFF);
-    }
-
-    // Keyboard labels
-    for (int r = 0; r <= OSK_ROWS_N; r++) {
-        if (r == OSK_ROWS_N) {
-            // Bottom row: SPACE  <  CLEAR
-            int space_w = 5 * OSK_STEP_X - OSK_GAP;
-            int sy = OSK_Y0 + r * OSK_STEP_Y + (OSK_KEY_H - 8) / 2;
-            int cx_space = osk_x0 + space_w / 2 - 20;
-            drawTTF((u32)(cx_space > 0 ? cx_space : 0), (u32)sy, "SPACE", 21, 0x00FFFFFF);
-
-            int bsx = osk_x0 + space_w + OSK_GAP;
-            drawTTF((u32)(bsx + (OSK_KEY_W - 8) / 2), (u32)sy, "<", 21, 0x00FFFFFF);
-
-            int clx = bsx + OSK_KEY_W + OSK_GAP;
-            drawTTF((u32)(clx + (OSK_KEY_W - 40) / 2), (u32)sy, "CLEAR", 21, 0x00FFFFFF);
-        } else {
-            const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
-            const char  *row  = rows[r];
-            int base_len = strlen(row);
-            int ry = OSK_Y0 + r * OSK_STEP_Y + (OSK_KEY_H - 8) / 2;
-
-            for (int c = 0; c < base_len; c++) {
-                char label[3] = { row[c], '\0', '\0' };
-                int kx = osk_x0 + c * OSK_STEP_X + (OSK_KEY_W - 8) / 2;
-                drawTTF((u32)kx, (u32)ry, label, 21, 0x00FFFFFF);
-            }
-            // Toggle key — only on the second-to-bottom row
-            if (r == OSK_ROWS_N - 1) {
-                const char *toggle_lbl = g_osk_sym ? "ABC" : "#+=";
-                int kx = osk_x0 + base_len * OSK_STEP_X + (OSK_KEY_W - 24) / 2;
-                drawTTF((u32)(kx > 0 ? kx : 0), (u32)ry, toggle_lbl, 21, 0x00FFFFFF);
-            }
-        }
-    }
-
-    // Search results below keyboard
-    int kb_bottom = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
-    int results_y = kb_bottom;
-    int count = g_search_results_count;
-    int vis_r = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ITEM_H;
-    if (vis_r < 0) vis_r = 0;
-    for (int i = 0; i < vis_r && i < count; i++) {
-        const XMBItem *it = &g_search_results[i];
-        int iy = results_y + i * XMB_ITEM_H;
-        drawTTF((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 8), it->name, 18, 0x00FFFFFF);
-        xmb_draw_meta((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 30), it, 18);
-    }
-    if (count == 0 && g_search_buf[0]) {
-        drawTTF((u32)XMB_ITEM_PAD, (u32)results_y, "No results.", 8, 0x00FFFFFF);
-    }
-}
-
-// CPU draws for search results list (thumbs, highlights)
-static void xmb_cpu_draw_search_results(void) {
-    int results_y = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
-    int count = g_search_results_count;
-    int vis_r = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ITEM_H;
-    if (vis_r < 0) vis_r = 0;
-    for (int i = 0; i < vis_r && i < count; i++) {
-        int iy = results_y + i * XMB_ITEM_H;
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
-    }
 }
 
 // -------------------------------------------------------
@@ -1355,7 +483,6 @@ static void xmb_switch_tab(int new_tab) {
     }
 }
 
-// Find next enabled tab in direction dir (+1 or -1)
 static int xmb_next_enabled(int start, int dir) {
     int t = start + dir;
     while (t >= 0 && t < XMB_TAB_COUNT) {
@@ -1365,7 +492,6 @@ static int xmb_next_enabled(int start, int dir) {
     return start;
 }
 
-// Returns true if we should exit the XMB loop
 static bool xmb_handle_input_browse(void) {
     static bool s_movie_just_exited = false;
     int tab = g_active_tab;
@@ -1397,14 +523,12 @@ static bool xmb_handle_input_browse(void) {
         if (BTN_PRESSED(cross) && g_tv_sub_count > 0 && g_tv_sub_sel < g_tv_sub_count) {
             const XMBItem *it = &g_tv_sub_items[g_tv_sub_sel];
             if (g_tv_depth == 1) {
-                // Season selected → fetch episodes
                 strncpy(g_tv_season_id,   it->id,   sizeof(g_tv_season_id)-1);
                 strncpy(g_tv_season_name, it->name, sizeof(g_tv_season_name)-1);
                 g_tv_sub_count = xmb_fetch_episodes(g_tv_series_id, g_tv_season_id,
                                                      g_tv_sub_items, XMB_ITEMS_MAX);
                 g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
             } else {
-                // Episode selected → play
                 JFItem jf; memset(&jf, 0, sizeof(jf));
                 strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
                 strncpy(jf.name, it->name, sizeof(jf.name)-1);
@@ -1475,13 +599,11 @@ static bool xmb_handle_input_browse(void) {
     if (BTN_PRESSED(cross) && count > 0 && g_sel < count) {
         const XMBItem *it = &g_items[tab][g_sel];
         if (tab == XMB_TAB_TV && strcmp(it->type, "Series") == 0) {
-            // Series selected → fetch seasons
             strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
             strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
             g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items, XMB_ITEMS_MAX);
             g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
         } else if (tab == XMB_TAB_COLLECTIONS) {
-            // Collection selected → fetch movies inside it
             strncpy(g_col_id,   it->id,   sizeof(g_col_id)-1);
             strncpy(g_col_name, it->name, sizeof(g_col_name)-1);
             g_col_sub_count = xmb_fetch_collection_items(g_col_id, g_col_sub_items, XMB_ITEMS_MAX);
@@ -1499,13 +621,10 @@ static bool xmb_handle_input_browse(void) {
     }
 
     if (BTN_PRESSED(triangle) && count > 0 && g_sel < count) {
-        // Info overlay: show item details until O pressed
         const XMBItem *it = &g_items[tab][g_sel];
-        // The outer loop already called wave_draw() before input was polled, so RSX is
-        // actively reading s_wave_vbuf. Sync here to drain those commands before the
-        // inner loop calls wave_draw() and overwrites the vertex buffer from the CPU.
+        // Drain RSX commands before the inner loop writes new wave geometry.
         rsxSync();
-        flip();     // commit the interrupted outer frame so waitflip() below doesn't hang
+        flip();
         init_btns();
         while (running) {
             waitflip();
@@ -1542,7 +661,7 @@ static bool xmb_handle_input_search(void) {
     }
     if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; return false; }
 
-    int row_count = OSK_ROWS_N + 1; // letter rows + bottom row
+    int row_count = OSK_ROWS_N + 1;
 
     if (BTN_PRESSED(up)) {
         g_osk_row = (g_osk_row - 1 + row_count) % row_count;
@@ -1565,19 +684,17 @@ static bool xmb_handle_input_search(void) {
 
     if (BTN_PRESSED(cross)) {
         if (g_osk_row == OSK_ROWS_N) {
-            // Bottom row: SPACE / BACKSPACE / CLEAR
-            if (g_osk_col == 0) { // SPACE
+            if (g_osk_col == 0) {
                 int len = strlen(g_search_buf);
                 if (len < (int)sizeof(g_search_buf)-1) { g_search_buf[len]=' '; g_search_buf[len+1]='\0'; }
-            } else if (g_osk_col == 1) { // BACKSPACE
+            } else if (g_osk_col == 1) {
                 int len = strlen(g_search_buf);
                 if (len > 0) g_search_buf[len-1] = '\0';
-            } else { // CLEAR
+            } else {
                 g_search_buf[0] = '\0';
                 g_search_results_count = 0;
             }
         } else {
-            // Check toggle key
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
             int base_len = strlen(rows[g_osk_row]);
             if (g_osk_row == OSK_ROWS_N - 1 && g_osk_col == base_len) {
@@ -1596,12 +713,10 @@ static bool xmb_handle_input_search(void) {
         }
     }
 
-    // Triangle = submit search
     if (BTN_PRESSED(triangle) || BTN_PRESSED(start)) {
         xmb_do_search();
     }
 
-    // Cross on search result: play it
     if (BTN_PRESSED(cross) && g_osk_row == OSK_ROWS_N) {
         // handled above
     }
@@ -1614,7 +729,6 @@ static bool xmb_handle_input_search(void) {
 // -------------------------------------------------------
 
 void ui_run_xmb(void) {
-    // Reset state
     memset(g_items, 0, sizeof(g_items));
     memset(g_item_count, 0, sizeof(g_item_count));
     memset(g_items_loaded, 0, sizeof(g_items_loaded));
@@ -1623,20 +737,17 @@ void ui_run_xmb(void) {
     g_active_tab = XMB_TAB_MOVIES;
     g_sel = 0; g_scroll_top = 0;
     g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
-    s_wave_phase[0] = 0.0f; s_wave_phase[1] = 0.0f; s_wave_phase[2] = 0.0f;
+    wave_reset();
 
-    // Detect which library tabs exist on the server
     xmb_detect_tabs();
 
-    // Start on first enabled content tab (prefer Movies)
     if (!g_tabs[XMB_TAB_MOVIES].enabled) {
         for (int t = 0; t < XMB_TAB_COUNT; t++) {
             if (g_tabs[t].enabled) { g_active_tab = t; break; }
         }
     }
 
-    // Pre-compute OSK Y start (depends on display height)
-    OSK_Y0 = XMB_CONTENT_Y + 58; // 8px padding + 40px input bar + 10px gap
+    OSK_Y0 = XMB_CONTENT_Y + 58;
 
     init_btns();
     padInfo padinfo; padData paddata;
@@ -1645,15 +756,12 @@ void ui_run_xmb(void) {
         waitflip();
         sysUtilCheckCallback();
         clearScreen(XMB_BG);
-        wave_draw(); // RSX phase: queued here, executes in parallel with CPU work below
+        wave_draw();
 
-        // Lazy-load items for the current browse tab
         int tab = g_active_tab;
         if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS)
             if (!g_items_loaded[tab]) xmb_fetch_tab_items(tab);
 
-        // Input — always poll every connected pad to keep btn_prev current,
-        // then handle input once after all pads are updated.
         ioPadGetInfo(&padinfo);
         for (int i = 0; i < MAX_PADS; i++) {
             if (!padinfo.status[i]) continue;
@@ -1667,14 +775,12 @@ void ui_run_xmb(void) {
             should_exit = xmb_handle_input_browse();
         if (should_exit) break;
 
-        // CPU phase — wait for RSX (wave + clear) then write text/rects
         rsxSync();
 
         // Divider line
         u32 *div = color_buffer[curr_fb] + XMB_DIVIDER_Y * display_width;
         for (u32 x = 0; x < display_width; x++) div[x] = XMB_DIVIDER_CLR;
 
-        // Tab-specific CPU draws
         if (tab == XMB_TAB_SEARCH) {
             xmb_cpu_draw_osk();
             xmb_cpu_draw_search_results();
@@ -1687,7 +793,6 @@ void ui_run_xmb(void) {
                 xmb_cpu_draw_items(tab);
         }
 
-        // CPU + TTF phase: logo, hints, content, bottom — all before tab bar (RSX)
         drawTTF(XMB_ITEM_PAD, 16, "JELLYFIN-PS3", 28, 0x007C3CEA, true);
         {
             char hints[32];
@@ -1696,7 +801,6 @@ void ui_run_xmb(void) {
             drawTTF((u32)(hx > 0 ? hx : 0), 24, hints, 14, 0x00FFFFFF);
         }
 
-        // Active tab name header — centered below the divider line
         {
             const char *tab_name = g_tabs[g_active_tab].label;
             int hx = (int)display_width / 2 - ttf_text_width(tab_name, 28) / 2;
@@ -1704,7 +808,6 @@ void ui_run_xmb(void) {
             drawTTF((u32)hx, (u32)(XMB_DIVIDER_Y + 14), tab_name, 28, 0x00FFFFFF);
         }
 
-        // Content
         if (tab == XMB_TAB_SEARCH) {
             xmb_rsx_draw_osk();
         } else if (tab == XMB_TAB_MUSIC || tab == XMB_TAB_SETTINGS) {
@@ -1736,12 +839,10 @@ void ui_run_xmb(void) {
                 xmb_draw_item_list(tab);
         }
 
-        // Bottom hints
         drawTTF(XMB_ITEM_PAD,
                 (u32)(display_height - XMB_BOTTOM_PAD + 16),
                 "X SELECT   O BACK   /\\ INFO", 21, 0x00FFFFFF);
 
-        // Tab bar — after all drawTTF (CPU writes), before flip
         xmb_draw_tabs();
 
         flip();
@@ -1753,18 +854,7 @@ void ui_run_xmb(void) {
 // Lifecycle
 // -------------------------------------------------------
 
-static void ttf_init(void) {
-    s_font_buf = (unsigned char*)OpenSans_Regular_ttf;
-    if (stbtt_InitFont(&s_font, s_font_buf, 0))
-        s_ttf_ok = true;
-    if (stbtt_InitFont(&s_font_bold, (unsigned char*)OpenSans_Bold_ttf, 0))
-        s_ttf_bold_ok = true;
-    if (stbtt_InitFont(&s_icons, (unsigned char*)MaterialIcons_Regular_ttf, 0))
-        s_icons_ok = true;
-}
-
 void ui_init(void) {
-    bitmapSetXpm(&fontBitmap, font8x8_xpm);
     rsxSetBlendFunc(context,
         GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
         GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
@@ -1772,16 +862,7 @@ void ui_init(void) {
     rsxSetBlendEnable(context, GCM_TRUE);
     setRenderTarget(curr_fb);
     ttf_init();
-
-    // Wave RSX buffers: vertex data + FP ucode copy (must live in RSX memory).
-    s_wave_vbuf = (u8*)rsxMemalign(256, WAVE_VBUF_BYTES);
-
-    rsxFragmentProgram *fpo = (rsxFragmentProgram*)wave_fp_data;
-    void *fp_ucode; u32 fp_size;
-    rsxFragmentProgramGetUCode(fpo, &fp_ucode, &fp_size);
-    s_wave_fp_buf = (u32*)rsxMemalign(256, fp_size);
-    memcpy(s_wave_fp_buf, fp_ucode, fp_size);
-    rsxAddressToOffset(s_wave_fp_buf, &s_wave_fp_offset);
+    wave_init();
 }
 
 void ui_restore_rsx_state(void) {
@@ -1796,5 +877,5 @@ void ui_restore_rsx_state(void) {
 }
 
 void ui_cleanup(void) {
-    bitmapDestroy(&fontBitmap);
+    visuals_cleanup();
 }
