@@ -389,6 +389,7 @@ u32       jbuf_fh(void)       { return s_jbuf_fh; }
 int       jbuf_count(void)    { return s_jb_n; }
 int       jbuf_rd(void)       { return s_jb_rd; }
 u64       jbuf_peek_pts(void) { return (s_jb_n > 0) ? s_jbuf_pts[s_jb_rd] : 0; }
+const u8 *jbuf_slot_ptr(int i) { return (i >= 0 && i < JBUF_SIZE) ? s_jbuf_data[i] : NULL; }
 
 // MPEG-2/H264 frame rate codes reported by the PS3 VDEC hardware.
 // Values 1-8 follow the ISO 13818-2 frame_rate_code table.
