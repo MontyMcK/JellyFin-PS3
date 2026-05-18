@@ -579,21 +579,6 @@ void show_player(const JFItem *item) {
                 sysMutexUnlock(s_jbuf_mtx);
 
                 if (rslot) {
-                    {
-                        static const u8 *s_prev_rslot = NULL;
-                        static int s_same_slot_count = 0;
-                        if (s_prev_rslot != NULL && rslot == s_prev_rslot) {
-                            s_same_slot_count++;
-                            if (s_same_slot_count % 300 == 0) {
-                                char buf[128];
-                                snprintf(buf, sizeof(buf),
-                                    "CORRUPT: same slot displayed twice fr=%d ptr=%p",
-                                    frame_count, (void*)rslot);
-                                plog(buf);
-                            }
-                        }
-                        s_prev_rslot = rslot;
-                    }
                     u32 fw = jbuf_fw(), fh = jbuf_fh();
 
                     const u32 *src = (const u32*)rslot;
@@ -644,19 +629,23 @@ void show_player(const JFItem *item) {
                     }
 
                     u64 frame_pts = jbuf_peek_pts();
+                    u64 target_us = 0;
                     bool do_pop;
-                    if (frame_pts != 0) {
-                        if (s_ref_pts_us == 0) {
-                            s_ref_pts_us  = frame_pts;
-                            s_ref_wall_us = timing_get_us();
-                        } else {
-                            u64 target = s_ref_wall_us + (frame_pts - s_ref_pts_us);
-                            u64 now    = timing_get_us();
-                            if (target > now) usleep((u32)(target - now));
-                        }
+                    if (frame_pts == 0) {
+                        do_pop = timing_flip_due();
+                    } else if (s_ref_pts_us == 0) {
+                        s_ref_pts_us  = frame_pts;
+                        s_ref_wall_us = timing_get_us();
                         do_pop = true;
                     } else {
-                        do_pop = timing_flip_due();
+                        const u64 vblank_period_us = 16683;
+                        target_us    = s_ref_wall_us + (frame_pts - s_ref_pts_us);
+                        u64 now_us   = timing_get_us();
+                        s64 err_show = (s64)now_us - (s64)target_us;
+                        if (err_show < 0) err_show = -err_show;
+                        s64 err_hold = (s64)(now_us + vblank_period_us) - (s64)target_us;
+                        if (err_hold < 0) err_hold = -err_hold;
+                        do_pop = (err_show <= err_hold);
                     }
 
                     if (do_pop) {
@@ -689,8 +678,23 @@ void show_player(const JFItem *item) {
                                     (unsigned long long)s_fi_gaps[0],
                                     (unsigned long long)s_fi_gaps[1]);
                                 plog(buf);
+                                if (target_us != 0) {
+                                    s64 drift_us = (s64)now_us - (s64)target_us;
+                                    snprintf(buf, sizeof(buf),
+                                        "pts_drift: fr=%d drift=%lldus",
+                                        frame_count, (long long)drift_us);
+                                    plog(buf);
+                                    s64 abs_drift = drift_us < 0 ? -drift_us : drift_us;
+                                    if (abs_drift > 100000) {
+                                        snprintf(buf, sizeof(buf),
+                                            "pts_drift_warn: fr=%d drift=%lldus",
+                                            frame_count, (long long)drift_us);
+                                        plog(buf);
+                                    }
+                                }
                             }
                         }
+                        rsxSync();
                     }
                 } else {
                     char buf[128];
@@ -791,22 +795,6 @@ void show_player(const JFItem *item) {
             rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
         }
 
-        {
-            u64 t0 = timing_get_us();
-            rsxSync();
-            u64 dt = timing_get_us() - t0;
-            if (dt > 16000) {
-                char buf[48];
-                snprintf(buf, sizeof(buf), "rsync_stall: %llums",
-                         (unsigned long long)(dt / 1000ULL));
-                plog(buf);
-            } else if (dt > 5000) {
-                char buf[48];
-                snprintf(buf, sizeof(buf), "rsync_slow: %llums",
-                         (unsigned long long)(dt / 1000ULL));
-                plog(buf);
-            }
-        }
         flip();
     }
 
