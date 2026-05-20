@@ -30,6 +30,13 @@ int          jbuf_rd(void);
 u64          jbuf_peek_pts(void);  // PTS (us, 0=unknown) of current front slot
 const u8    *jbuf_slot_ptr(int i); // raw pointer to slot i's frame buffer
 
+// ---- Jitter buffer duration API ----
+s64          jbuf_peek_dur(void);       // remaining duration of front slot (us)
+s64          jbuf_peek_next_dur(void);  // natural duration of next slot (us)
+const u8    *jbuf_peek_next(void);      // pointer to next slot, or NULL if count<2
+void         jbuf_consume_dur(s64 us);  // subtract us from front slot's remaining duration
+void         jbuf_advance(void);        // pop front only if its duration <= 0
+
 // ---- Jitter buffer mutex (guards s_jb_n; lock before jbuf_peek/pop) ----
 extern sys_mutex_t s_jbuf_mtx;
 

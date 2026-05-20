@@ -34,12 +34,16 @@
 // display thread binds tex_buf[disp_idx] for RSX draw.
 static u32 *s_vid_tex_buf[2]    = {NULL, NULL};
 static u32  s_vid_tex_off[2]    = {0, 0};
+// Second pair for frame B (temporal blend — next jbuf slot)
+static u32 *s_vid_tex_buf_b[2]  = {NULL, NULL};
+static u32  s_vid_tex_off_b[2]  = {0, 0};
 static u32 *s_vid_fp_buf        = NULL;  // RSX-local FP ucode copy
 static u32  s_vid_fp_off        = 0;
 static u8  *s_vid_vbuf          = NULL;  // RSX-local 4-vertex quad buffer
 static u32  s_vid_vbuf_off      = 0;
 static volatile int  s_vid_disp_idx    = 0;     // index RSX is reading from
 static volatile bool s_vid_frame_ready = false;  // upload → display handoff
+static volatile bool s_vid_b_present  = false;   // frame B uploaded this cycle
 
 // -------------------------------------------------------
 // Async log — ring buffer drained by a dedicated thread
@@ -268,27 +272,26 @@ static void upload_thread_fn(void *arg) {
 
     while (running && *playing && !s_vdec_error) {
         if (s_vid_frame_ready) {
-            // Display thread hasn't consumed the last upload yet.
             usleep(500);
             continue;
         }
 
         sysMutexLock(s_jbuf_mtx, 0);
-        const u8 *slot = jbuf_peek();
+        const u8 *slot_a = jbuf_peek();
+        const u8 *slot_b = jbuf_peek_next();
         sysMutexUnlock(s_jbuf_mtx);
 
-        if (!slot) {
-            usleep(1000);
-            continue;
-        }
+        if (!slot_a) { usleep(1000); continue; }
 
-        // Upload to back buffer (the one RSX is NOT currently reading).
-        // Acquire barrier: ensure we see the latest s_vid_disp_idx after any
-        // pending display-thread flip before snapshotting the back index.
         __asm__ volatile("sync" ::: "memory");
         int back = s_vid_disp_idx ^ 1;
-        memcpy(s_vid_tex_buf[back], slot, nbytes);
-        // Ensure all PPU stores to GDDR3 are visible before signalling.
+        memcpy(s_vid_tex_buf[back], slot_a, nbytes);
+        if (slot_b) {
+            memcpy(s_vid_tex_buf_b[back], slot_b, nbytes);
+            s_vid_b_present = true;
+        } else {
+            s_vid_b_present = false;
+        }
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = true;
     }
@@ -415,8 +418,13 @@ void show_player(const JFItem *item) {
         rsxAddressToOffset(s_vid_tex_buf[0], &s_vid_tex_off[0]);
         s_vid_tex_buf[1] = (u32*)rsxMemalign(64, fw * fh * 4);
         rsxAddressToOffset(s_vid_tex_buf[1], &s_vid_tex_off[1]);
+        s_vid_tex_buf_b[0] = (u32*)rsxMemalign(64, fw * fh * 4);
+        rsxAddressToOffset(s_vid_tex_buf_b[0], &s_vid_tex_off_b[0]);
+        s_vid_tex_buf_b[1] = (u32*)rsxMemalign(64, fw * fh * 4);
+        rsxAddressToOffset(s_vid_tex_buf_b[1], &s_vid_tex_off_b[1]);
         s_vid_disp_idx    = 0;
         s_vid_frame_ready = false;
+        s_vid_b_present   = false;
 
         rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*)video_fp_data;
         void *fp_ucode; u32 fp_size;
@@ -463,8 +471,6 @@ void show_player(const JFItem *item) {
     bool          first_pkt  = true;
     int           frame_count = 0;
     int           rd          = 0;
-    u64           s_ref_pts_us  = 0;
-    u64           s_ref_wall_us = 0;
 
     // ---- Pre-fill: decode JBUF_PREFILL frames before display starts ----
     plog("jbuf: pre-fill start");
@@ -487,10 +493,12 @@ void show_player(const JFItem *item) {
     }
 
     if (!playing) {
-        if (s_vid_tex_buf[0]) { rsxFree(s_vid_tex_buf[0]); s_vid_tex_buf[0] = NULL; }
-        if (s_vid_tex_buf[1]) { rsxFree(s_vid_tex_buf[1]); s_vid_tex_buf[1] = NULL; }
-        if (s_vid_fp_buf)     { rsxFree(s_vid_fp_buf);     s_vid_fp_buf     = NULL; }
-        if (s_vid_vbuf)       { rsxFree(s_vid_vbuf);       s_vid_vbuf       = NULL; }
+        if (s_vid_tex_buf[0])   { rsxFree(s_vid_tex_buf[0]);   s_vid_tex_buf[0]   = NULL; }
+        if (s_vid_tex_buf[1])   { rsxFree(s_vid_tex_buf[1]);   s_vid_tex_buf[1]   = NULL; }
+        if (s_vid_tex_buf_b[0]) { rsxFree(s_vid_tex_buf_b[0]); s_vid_tex_buf_b[0] = NULL; }
+        if (s_vid_tex_buf_b[1]) { rsxFree(s_vid_tex_buf_b[1]); s_vid_tex_buf_b[1] = NULL; }
+        if (s_vid_fp_buf)       { rsxFree(s_vid_fp_buf);       s_vid_fp_buf       = NULL; }
+        if (s_vid_vbuf)         { rsxFree(s_vid_vbuf);         s_vid_vbuf         = NULL; }
         jbuf_free();
         netClose(sock);
         audio_close();
@@ -615,52 +623,57 @@ void show_player(const JFItem *item) {
             }
         }
 
-        u64  audio_clk      = audio_get_clock_us();
-        bool do_pop         = false;
-        bool used_bresenham = false;
+        // ---- Duration-consumption gate logic (Movian-style temporal blend) ----
+        static const s64 vblank_period_us = 16683; // 59.94 Hz
+        static int  s_pure_count = 0;
+        static int  s_mid_count  = 0;
+        static s64  s_spill_max  = 0;
 
-        if (audio_clk == 0 || !s_timing_ready) {
-            // Bresenham fallback: audio not yet started, or fps not yet detected
-            if (s_vid_frame_ready && s_timing_ready && timing_flip_due()) {
-                do_pop = true;
-                used_bresenham = true;
+        bool  do_pop       = false;
+        bool  render_blend = false;
+        bool  silent_flip  = false;
+        float blend_factor = 0.0f;
+
+        // Log first 30 gate-logic vblanks after timing is ready
+        {
+            static int s_blend_init_n = 0;
+            if (s_blend_init_n < 30 && s_timing_ready) {
+                s_blend_init_n++;
+                char buf[96];
+                snprintf(buf, sizeof(buf),
+                    "blend_init: tick=%d n=%d dur=%lldus",
+                    s_blend_init_n, jbuf_count(),
+                    (long long)jbuf_peek_dur());
+                plog(buf);
             }
-        } else if (s_ref_pts_us == 0) {
-            // Anchor reference pair on first frame with a valid PTS
-            sysMutexLock(s_jbuf_mtx, 0);
-            u64 fpts = (jbuf_count() > 0) ? jbuf_peek_pts() : 0;
-            sysMutexUnlock(s_jbuf_mtx);
-            if (fpts != 0 && s_vid_frame_ready) {
-                s_ref_pts_us  = fpts;
-                s_ref_wall_us = audio_clk;
-                do_pop = true;
-            } else if (fpts == 0 && s_vid_frame_ready && timing_flip_due()) {
-                // No PTS yet: advance sequentially via Bresenham until we get one
-                do_pop = true;
-                used_bresenham = true;
-            }
-        } else {
-            // Audio-clock-driven selection: show frame whose adjusted PTS <= audio offset
-            u64 audio_offset = audio_clk - s_ref_wall_us;
-            if (s_vid_frame_ready && jbuf_count() > 0) {
-                sysMutexLock(s_jbuf_mtx, 0);
-                u64 fpts = jbuf_peek_pts();
-                sysMutexUnlock(s_jbuf_mtx);
-                if (fpts == 0) {
-                    do_pop = true;
-                } else {
-                    s64 adj = (s64)fpts - (s64)s_ref_pts_us;
-                    do_pop = (adj <= (s64)audio_offset);
-                }
+        }
+
+        if (s_vid_frame_ready && s_timing_ready && jbuf_count() > 0) {
+            s64  dur_a = jbuf_peek_dur();
+            bool b_ok  = (jbuf_peek_next() != NULL) && s_vid_b_present;
+
+            if (!b_ok || dur_a >= vblank_period_us) {
+                // Pure-A: consume one vblank period, pop if frame exhausted
+                jbuf_consume_dur(vblank_period_us);
+                jbuf_advance();
+                silent_flip = true;
+                s_pure_count++;
+            } else {
+                // Crossfade: dur_a < vblank, B available — blend A→B
+                blend_factor  = (float)dur_a / (float)vblank_period_us;
+                s64 spill     = vblank_period_us - dur_a;
+                jbuf_consume_dur(dur_a);   // exhaust A
+                jbuf_advance();            // pop A (dur now <= 0)
+                jbuf_consume_dur(spill);   // consume spill from new front (old B)
+                do_pop        = true;
+                render_blend  = true;
+                s_mid_count++;
+                if (spill > s_spill_max) s_spill_max = spill;
             }
         }
 
         if (do_pop) {
-            sysMutexLock(s_jbuf_mtx, 0);
-            jbuf_pop();
-            sysMutexUnlock(s_jbuf_mtx);
             frame_count++;
-            if (used_bresenham) timing_frame_shown();
             __asm__ volatile("sync" ::: "memory");
             s_vid_frame_ready = false;
             s_vid_disp_idx ^= 1;
@@ -674,6 +687,7 @@ void show_player(const JFItem *item) {
                 }
                 s_fi_last_us = now_us;
                 if (frame_count % 60 == 0) {
+                    u64 audio_clk = audio_get_clock_us();
                     char buf[128];
                     snprintf(buf, sizeof(buf),
                         "frame_interval: fr=%d gap1=%lluus gap2=%lluus audio=%lluus",
@@ -682,12 +696,21 @@ void show_player(const JFItem *item) {
                         (unsigned long long)s_fi_gaps[1],
                         (unsigned long long)audio_clk);
                     plog(buf);
+                    char buf2[128];
+                    snprintf(buf2, sizeof(buf2),
+                        "blend_dist: fr=%d pure=%d mid=%d spill_max=%lldus",
+                        frame_count, s_pure_count, s_mid_count,
+                        (long long)s_spill_max);
+                    plog(buf2);
                 }
             }
+        } else if (silent_flip && s_vid_frame_ready) {
+            __asm__ volatile("sync" ::: "memory");
+            s_vid_frame_ready = false;
+            s_vid_disp_idx ^= 1;
         }
 
-        // Re-draw the current frame into the RSX back color buffer every vblank.
-        // s_vid_disp_idx advances only on do_pop; hold vblanks re-blit the same texture.
+        // Re-draw every vblank. s_vid_disp_idx advances on do_pop or silent_flip.
         if (frame_count > 0) {
             if (do_pop) rsxSync();
             u32 fw = jbuf_fw(), fh = jbuf_fh();
@@ -698,43 +721,8 @@ void show_player(const JFItem *item) {
             rsxClearSurface(context,
                 GCM_CLEAR_R | GCM_CLEAR_G | GCM_CLEAR_B | GCM_CLEAR_A);
 
-            // Bind texture from RSX-local display buffer
-            {
-                gcmTexture tex;
-                memset(&tex, 0, sizeof(tex));
-                tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
-                tex.mipmap    = 1;
-                tex.dimension = GCM_TEXTURE_DIMS_2D;
-                tex.cubemap   = GCM_FALSE;
-                tex.remap     =
-                    ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT)
-                  | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT)
-                  | ((u32)GCM_TEXTURE_REMAP_COLOR_R    << GCM_TEXTURE_REMAP_COLOR_R_SHIFT)
-                  | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT)
-                  | ((u32)GCM_TEXTURE_REMAP_COLOR_G    << GCM_TEXTURE_REMAP_COLOR_G_SHIFT)
-                  | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_B_SHIFT)
-                  | ((u32)GCM_TEXTURE_REMAP_COLOR_B    << GCM_TEXTURE_REMAP_COLOR_B_SHIFT);
-                tex.width     = (u16)fw;
-                tex.height    = (u16)fh;
-                tex.depth     = 1;
-                tex.location  = GCM_LOCATION_RSX;
-                tex.pitch     = fw * 4;
-                tex.offset    = s_vid_tex_off[s_vid_disp_idx];
-                rsxInvalidateTextureCache(context, GCM_INVALIDATE_TEXTURE);
-                rsxLoadTexture(context, 0, &tex);
-                rsxTextureControl(context, 0, GCM_TRUE, 0, 12 << 8,
-                    GCM_TEXTURE_MAX_ANISO_1);
-                rsxTextureFilter(context, 0, 0,
-                    GCM_TEXTURE_LINEAR, GCM_TEXTURE_LINEAR,
-                    GCM_TEXTURE_CONVOLUTION_QUINCUNX);
-                rsxTextureWrapMode(context, 0,
-                    GCM_TEXTURE_CLAMP_TO_EDGE, GCM_TEXTURE_CLAMP_TO_EDGE,
-                    GCM_TEXTURE_CLAMP_TO_EDGE, 0, GCM_TEXTURE_ZFUNC_LESS, 0);
-            }
-
-            // Render state
+            // Common render state
             rsxSetDepthTestEnable(context, GCM_FALSE);
-            rsxSetBlendEnable(context, GCM_FALSE);
             rsxSetColorMask(context,
                 GCM_COLOR_MASK_R | GCM_COLOR_MASK_G |
                 GCM_COLOR_MASK_B | GCM_COLOR_MASK_A);
@@ -750,7 +738,7 @@ void show_player(const JFItem *item) {
 
             // Load shaders
             {
-                rsxVertexProgram  *vid_vpo = (rsxVertexProgram*)  video_vp_data;
+                rsxVertexProgram   *vid_vpo = (rsxVertexProgram*)  video_vp_data;
                 rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*) video_fp_data;
                 void *vp_ucode; u32 vp_size;
                 rsxVertexProgramGetUCode(vid_vpo, &vp_ucode, &vp_size);
@@ -760,16 +748,176 @@ void show_player(const JFItem *item) {
                     s_vid_fp_off, GCM_LOCATION_RSX);
             }
 
-            // Draw fullscreen quad (triangle strip, 4 verts)
-            // Stride 24: float4 pos at offset 0, float2 uv at offset 16
+            // Vertex buffer binding (shared by both passes)
             rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
                 s_vid_vbuf_off, 24, 4,
                 GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
             rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
                 s_vid_vbuf_off + 16, 24, 2,
                 GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-            rsxInvalidateVertexCache(context);
-            rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+
+            // TEMP DIAGNOSTIC: force a fixed 50 % crossfade on every blend vblank
+            // to verify the RSX hardware blend path is visually firing.
+            // Revert this block when done diagnosing.
+            if (render_blend) {
+                blend_factor = 0.5f;
+            }
+
+            // TEMP DIAGNOSTIC: centre-pixel dump on 10th crossfade vblank (steady-state).
+            // matchA=1 → tex A matches live jbuf front; matchB=1 → tex B matches live jbuf next.
+            {
+                static int s_blend_dbg_count = 0;
+                if (render_blend) {
+                    s_blend_dbg_count++;
+                    if (s_blend_dbg_count == 10) {
+                        int back = s_vid_disp_idx;
+                        u32 *texA = s_vid_tex_buf[back];
+                        u32 *texB = s_vid_tex_buf_b[back];
+                        u32 cx = fw / 2, cy = fh / 2;
+                        u32 pxA = texA[cy * fw + cx];
+                        u32 pxB = texB[cy * fw + cx];
+
+                        sysMutexLock(s_jbuf_mtx, 0);
+                        const u8 *slot_a_live = jbuf_peek();
+                        const u8 *slot_b_live = jbuf_peek_next();
+                        u32 jbufA = slot_a_live ? ((u32*)slot_a_live)[cy * fw + cx] : 0;
+                        u32 jbufB = slot_b_live ? ((u32*)slot_b_live)[cy * fw + cx] : 0;
+                        sysMutexUnlock(s_jbuf_mtx);
+
+                        char buf[192];
+                        snprintf(buf, sizeof(buf),
+                            "blend_dbg10: texA=0x%08x texB=0x%08x  jbufA=0x%08x jbufB=0x%08x  matchA=%d matchB=%d",
+                            pxA, pxB, jbufA, jbufB,
+                            (int)(pxA == jbufA), (int)(pxB == jbufB));
+                        plog(buf);
+                    }
+                }
+            }
+
+            if (render_blend) {
+                // Pass 1: frame A — no blend
+                {
+                    gcmTexture tex;
+                    memset(&tex, 0, sizeof(tex));
+                    tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
+                    tex.mipmap    = 1;
+                    tex.dimension = GCM_TEXTURE_DIMS_2D;
+                    tex.cubemap   = GCM_FALSE;
+                    tex.remap     =
+                        ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_R    << GCM_TEXTURE_REMAP_COLOR_R_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_G    << GCM_TEXTURE_REMAP_COLOR_G_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_B_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_B    << GCM_TEXTURE_REMAP_COLOR_B_SHIFT);
+                    tex.width     = (u16)fw;
+                    tex.height    = (u16)fh;
+                    tex.depth     = 1;
+                    tex.location  = GCM_LOCATION_RSX;
+                    tex.pitch     = fw * 4;
+                    tex.offset    = s_vid_tex_off[s_vid_disp_idx];
+                    rsxInvalidateTextureCache(context, GCM_INVALIDATE_TEXTURE);
+                    rsxLoadTexture(context, 0, &tex);
+                    rsxTextureControl(context, 0, GCM_TRUE, 0, 12 << 8,
+                        GCM_TEXTURE_MAX_ANISO_1);
+                    rsxTextureFilter(context, 0, 0,
+                        GCM_TEXTURE_LINEAR, GCM_TEXTURE_LINEAR,
+                        GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+                    rsxTextureWrapMode(context, 0,
+                        GCM_TEXTURE_CLAMP_TO_EDGE, GCM_TEXTURE_CLAMP_TO_EDGE,
+                        GCM_TEXTURE_CLAMP_TO_EDGE, 0, GCM_TEXTURE_ZFUNC_LESS, 0);
+                }
+                rsxSetBlendEnable(context, GCM_FALSE);
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+
+                // Pass 2: frame B — constant-alpha blend over frame A
+                // Result = A*blend_factor + B*(1-blend_factor)
+                //   alpha_const = 1-blend_factor (weight of B in the dst equation)
+                {
+                    u8  a   = (u8)((1.0f - blend_factor) * 255.0f);
+                    u32 col = ((u32)a << 24) | ((u32)a << 16) | ((u32)a << 8) | (u32)a;
+                    rsxSetBlendColor(context, col, col);
+                    rsxSetBlendFunc(context,
+                        GCM_CONSTANT_ALPHA, GCM_ONE_MINUS_CONSTANT_ALPHA,
+                        GCM_CONSTANT_ALPHA, GCM_ONE_MINUS_CONSTANT_ALPHA);
+                    rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
+                    rsxSetBlendEnable(context, GCM_TRUE);
+                }
+                {
+                    gcmTexture tex;
+                    memset(&tex, 0, sizeof(tex));
+                    tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
+                    tex.mipmap    = 1;
+                    tex.dimension = GCM_TEXTURE_DIMS_2D;
+                    tex.cubemap   = GCM_FALSE;
+                    tex.remap     =
+                        ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_R    << GCM_TEXTURE_REMAP_COLOR_R_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_G    << GCM_TEXTURE_REMAP_COLOR_G_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_B_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_B    << GCM_TEXTURE_REMAP_COLOR_B_SHIFT);
+                    tex.width     = (u16)fw;
+                    tex.height    = (u16)fh;
+                    tex.depth     = 1;
+                    tex.location  = GCM_LOCATION_RSX;
+                    tex.pitch     = fw * 4;
+                    tex.offset    = s_vid_tex_off_b[s_vid_disp_idx];
+                    rsxInvalidateTextureCache(context, GCM_INVALIDATE_TEXTURE);
+                    rsxLoadTexture(context, 0, &tex);
+                    rsxTextureControl(context, 0, GCM_TRUE, 0, 12 << 8,
+                        GCM_TEXTURE_MAX_ANISO_1);
+                    rsxTextureFilter(context, 0, 0,
+                        GCM_TEXTURE_LINEAR, GCM_TEXTURE_LINEAR,
+                        GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+                    rsxTextureWrapMode(context, 0,
+                        GCM_TEXTURE_CLAMP_TO_EDGE, GCM_TEXTURE_CLAMP_TO_EDGE,
+                        GCM_TEXTURE_CLAMP_TO_EDGE, 0, GCM_TEXTURE_ZFUNC_LESS, 0);
+                }
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+                rsxSetBlendEnable(context, GCM_FALSE);
+            } else {
+                // Single pass: frame A only
+                {
+                    gcmTexture tex;
+                    memset(&tex, 0, sizeof(tex));
+                    tex.format    = GCM_TEXTURE_FORMAT_A8R8G8B8 | GCM_TEXTURE_FORMAT_LIN;
+                    tex.mipmap    = 1;
+                    tex.dimension = GCM_TEXTURE_DIMS_2D;
+                    tex.cubemap   = GCM_FALSE;
+                    tex.remap     =
+                        ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_A_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_R_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_R    << GCM_TEXTURE_REMAP_COLOR_R_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_G_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_G    << GCM_TEXTURE_REMAP_COLOR_G_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_TYPE_REMAP << GCM_TEXTURE_REMAP_TYPE_B_SHIFT)
+                      | ((u32)GCM_TEXTURE_REMAP_COLOR_B    << GCM_TEXTURE_REMAP_COLOR_B_SHIFT);
+                    tex.width     = (u16)fw;
+                    tex.height    = (u16)fh;
+                    tex.depth     = 1;
+                    tex.location  = GCM_LOCATION_RSX;
+                    tex.pitch     = fw * 4;
+                    tex.offset    = s_vid_tex_off[s_vid_disp_idx];
+                    rsxInvalidateTextureCache(context, GCM_INVALIDATE_TEXTURE);
+                    rsxLoadTexture(context, 0, &tex);
+                    rsxTextureControl(context, 0, GCM_TRUE, 0, 12 << 8,
+                        GCM_TEXTURE_MAX_ANISO_1);
+                    rsxTextureFilter(context, 0, 0,
+                        GCM_TEXTURE_LINEAR, GCM_TEXTURE_LINEAR,
+                        GCM_TEXTURE_CONVOLUTION_QUINCUNX);
+                    rsxTextureWrapMode(context, 0,
+                        GCM_TEXTURE_CLAMP_TO_EDGE, GCM_TEXTURE_CLAMP_TO_EDGE,
+                        GCM_TEXTURE_CLAMP_TO_EDGE, 0, GCM_TEXTURE_ZFUNC_LESS, 0);
+                }
+                rsxSetBlendEnable(context, GCM_FALSE);
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+            }
         }
 
         flip();
@@ -806,10 +954,12 @@ void show_player(const JFItem *item) {
     }
 
     // Free video GPU blit resources before releasing the jitter buffer
-    if (s_vid_tex_buf[0]) { rsxFree(s_vid_tex_buf[0]); s_vid_tex_buf[0] = NULL; }
-    if (s_vid_tex_buf[1]) { rsxFree(s_vid_tex_buf[1]); s_vid_tex_buf[1] = NULL; }
-    if (s_vid_fp_buf)     { rsxFree(s_vid_fp_buf);     s_vid_fp_buf     = NULL; }
-    if (s_vid_vbuf)       { rsxFree(s_vid_vbuf);       s_vid_vbuf       = NULL; }
+    if (s_vid_tex_buf[0])   { rsxFree(s_vid_tex_buf[0]);   s_vid_tex_buf[0]   = NULL; }
+    if (s_vid_tex_buf[1])   { rsxFree(s_vid_tex_buf[1]);   s_vid_tex_buf[1]   = NULL; }
+    if (s_vid_tex_buf_b[0]) { rsxFree(s_vid_tex_buf_b[0]); s_vid_tex_buf_b[0] = NULL; }
+    if (s_vid_tex_buf_b[1]) { rsxFree(s_vid_tex_buf_b[1]); s_vid_tex_buf_b[1] = NULL; }
+    if (s_vid_fp_buf)       { rsxFree(s_vid_fp_buf);       s_vid_fp_buf       = NULL; }
+    if (s_vid_vbuf)         { rsxFree(s_vid_vbuf);         s_vid_vbuf         = NULL; }
 
     jbuf_free();
     netClose(sock);

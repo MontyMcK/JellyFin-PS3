@@ -354,6 +354,7 @@ sys_mutex_t s_jbuf_mtx;
 
 static u8  *s_jbuf_data[JBUF_SIZE] = {};
 static u64  s_jbuf_pts[JBUF_SIZE]  = {};
+static s64  s_jbuf_dur[JBUF_SIZE]  = {};  // remaining display duration per slot (us)
 static u32  s_jbuf_fw = 0, s_jbuf_fh = 0;
 static int  s_jb_wr = 0, s_jb_rd = 0;
 static volatile int s_jb_n = 0;
@@ -366,6 +367,7 @@ bool jbuf_alloc(u32 fw, u32 fh) {
     }
     s_jb_wr = s_jb_rd = s_jb_n = 0;
     memset(s_jbuf_pts, 0, sizeof(s_jbuf_pts));
+    memset(s_jbuf_dur, 0, sizeof(s_jbuf_dur));
     sys_mutex_attr_t attr;
     memset(&attr, 0, sizeof(attr));
     attr.attr_protocol  = SYS_LWMUTEX_ATTR_PROTOCOL;
@@ -391,6 +393,23 @@ int       jbuf_rd(void)       { return s_jb_rd; }
 u64       jbuf_peek_pts(void) { return (s_jb_n > 0) ? s_jbuf_pts[s_jb_rd] : 0; }
 const u8 *jbuf_slot_ptr(int i) { return (i >= 0 && i < JBUF_SIZE) ? s_jbuf_data[i] : NULL; }
 
+s64       jbuf_peek_dur(void)      { return (s_jb_n > 0) ? s_jbuf_dur[s_jb_rd] : 0; }
+s64       jbuf_peek_next_dur(void) { return (s_jb_n > 1) ? s_jbuf_dur[(s_jb_rd + 1) % JBUF_SIZE] : 0; }
+const u8 *jbuf_peek_next(void)     { return (s_jb_n > 1) ? s_jbuf_data[(s_jb_rd + 1) % JBUF_SIZE] : NULL; }
+
+void jbuf_consume_dur(s64 us) {
+    if (s_jb_n > 0) s_jbuf_dur[s_jb_rd] -= us;
+}
+
+void jbuf_advance(void) {
+    sysMutexLock(s_jbuf_mtx, 0);
+    if (s_jb_n > 0 && s_jbuf_dur[s_jb_rd] <= 0) {
+        s_jb_rd = (s_jb_rd + 1) % JBUF_SIZE;
+        s_jb_n--;
+    }
+    sysMutexUnlock(s_jbuf_mtx);
+}
+
 // MPEG-2/H264 frame rate codes reported by the PS3 VDEC hardware.
 // Values 1-8 follow the ISO 13818-2 frame_rate_code table.
 static void fps_from_frc(int frc, int *num, int *den) {
@@ -406,6 +425,21 @@ static void fps_from_frc(int frc, int *num, int *den) {
         default:
             plog("fps_detect: unknown frc, defaulting to 30fps");
             *num = 30; *den = 1; break;
+    }
+}
+
+// Frame durations in microseconds from ISO 13818-2 frame_rate_code (Movian mpeg_durations table).
+static s64 dur_from_frc(int frc) {
+    switch (frc) {
+        case 1: return 41708;   /* 23.976 fps */
+        case 2: return 41667;   /* 24 fps     */
+        case 3: return 40000;   /* 25 fps     */
+        case 4: return 33367;   /* 29.97 fps  */
+        case 5: return 33333;   /* 30 fps     */
+        case 6: return 20000;   /* 50 fps     */
+        case 7: return 16683;   /* 59.94 fps  */
+        case 8: return 16667;   /* 60 fps     */
+        default: return 40000;
     }
 }
 
@@ -469,6 +503,7 @@ bool vdec_pull_frame(void) {
         pts_us = pts90 * 1000000ULL / 90000ULL;
     }
     s_jbuf_pts[s_jb_wr] = pts_us;
+    s_jbuf_dur[s_jb_wr] = dur_from_frc(frc);
     sysMutexLock(s_jbuf_mtx, 0);
     {
         static u64 s_last_push_pts = 0;
@@ -494,10 +529,11 @@ bool vdec_pull_frame(void) {
         s_push_count++;
 
         if (s_push_count % 300 == 0) {
-            char buf[96];
+            char buf[128];
             snprintf(buf, sizeof(buf),
-                "pts_stats: pushes=%d nonmono=%d",
-                s_push_count, s_nonmono_count);
+                "pts_stats: pushes=%d nonmono=%d dur=%lldus",
+                s_push_count, s_nonmono_count,
+                (long long)s_jbuf_dur[s_jb_wr]);
             plog(buf);
         }
     }
