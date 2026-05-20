@@ -355,6 +355,8 @@ sys_mutex_t s_jbuf_mtx;
 static u8  *s_jbuf_data[JBUF_SIZE] = {};
 static u64  s_jbuf_pts[JBUF_SIZE]  = {};
 static s64  s_jbuf_dur[JBUF_SIZE]  = {};  // remaining display duration per slot (us)
+static u32  s_jbuf_seq[JBUF_SIZE]  = {};
+static u32  s_seq_counter          = 0;
 static u32  s_jbuf_fw = 0, s_jbuf_fh = 0;
 static int  s_jb_wr = 0, s_jb_rd = 0;
 static volatile int s_jb_n = 0;
@@ -391,6 +393,7 @@ u32       jbuf_fh(void)       { return s_jbuf_fh; }
 int       jbuf_count(void)    { return s_jb_n; }
 int       jbuf_rd(void)       { return s_jb_rd; }
 u64       jbuf_peek_pts(void) { return (s_jb_n > 0) ? s_jbuf_pts[s_jb_rd] : 0; }
+u32       jbuf_peek_seq(void) { return (s_jb_n > 0) ? s_jbuf_seq[s_jb_rd] : 0; }
 const u8 *jbuf_slot_ptr(int i) { return (i >= 0 && i < JBUF_SIZE) ? s_jbuf_data[i] : NULL; }
 
 s64       jbuf_peek_dur(void)      { return (s_jb_n > 0) ? s_jbuf_dur[s_jb_rd] : 0; }
@@ -504,6 +507,7 @@ bool vdec_pull_frame(void) {
     }
     s_jbuf_pts[s_jb_wr] = pts_us;
     s_jbuf_dur[s_jb_wr] = dur_from_frc(frc);
+    s_jbuf_seq[s_jb_wr] = ++s_seq_counter;
     sysMutexLock(s_jbuf_mtx, 0);
     {
         static u64 s_last_push_pts = 0;

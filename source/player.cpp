@@ -660,6 +660,23 @@ void show_player(const JFItem *item) {
                 s_pure_count++;
             } else {
                 // Crossfade: dur_a < vblank, B available — blend A→B
+                {
+                    static u64 s_last_cf_us = 0;
+                    u64 now_cf = timing_get_us();
+                    u64 delta_cf = (s_last_cf_us != 0) ? (now_cf - s_last_cf_us) : 0;
+                    s_last_cf_us = now_cf;
+                    if (frame_count < 200) {
+                        char buf[128];
+                        snprintf(buf, sizeof(buf),
+                            "cf: t=%lluus delta=%lluus blend=%.3f fr=%d dur_a=%lld",
+                            (unsigned long long)now_cf,
+                            (unsigned long long)delta_cf,
+                            (double)((float)dur_a / (float)vblank_period_us),
+                            frame_count,
+                            (long long)dur_a);
+                        plog(buf);
+                    }
+                }
                 blend_factor  = (float)dur_a / (float)vblank_period_us;
                 s64 spill     = vblank_period_us - dur_a;
                 jbuf_consume_dur(dur_a);   // exhaust A
@@ -673,6 +690,7 @@ void show_player(const JFItem *item) {
         }
 
         if (do_pop) {
+            u32 disp_seq = jbuf_peek_seq();
             frame_count++;
             __asm__ volatile("sync" ::: "memory");
             s_vid_frame_ready = false;
@@ -702,6 +720,16 @@ void show_player(const JFItem *item) {
                         frame_count, s_pure_count, s_mid_count,
                         (long long)s_spill_max);
                     plog(buf2);
+                }
+            }
+            {
+                int window_pos = frame_count % 240;
+                if (window_pos >= 1 && window_pos <= 24) {
+                    char buf[80];
+                    snprintf(buf, sizeof(buf),
+                        "disp_seq: fr=%d seq=%u window=%d",
+                        frame_count, disp_seq, frame_count / 240);
+                    plog(buf);
                 }
             }
         } else if (silent_flip && s_vid_frame_ready) {
@@ -755,44 +783,6 @@ void show_player(const JFItem *item) {
             rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
                 s_vid_vbuf_off + 16, 24, 2,
                 GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-
-            // TEMP DIAGNOSTIC: force a fixed 50 % crossfade on every blend vblank
-            // to verify the RSX hardware blend path is visually firing.
-            // Revert this block when done diagnosing.
-            if (render_blend) {
-                blend_factor = 0.5f;
-            }
-
-            // TEMP DIAGNOSTIC: centre-pixel dump on 10th crossfade vblank (steady-state).
-            // matchA=1 → tex A matches live jbuf front; matchB=1 → tex B matches live jbuf next.
-            {
-                static int s_blend_dbg_count = 0;
-                if (render_blend) {
-                    s_blend_dbg_count++;
-                    if (s_blend_dbg_count == 10) {
-                        int back = s_vid_disp_idx;
-                        u32 *texA = s_vid_tex_buf[back];
-                        u32 *texB = s_vid_tex_buf_b[back];
-                        u32 cx = fw / 2, cy = fh / 2;
-                        u32 pxA = texA[cy * fw + cx];
-                        u32 pxB = texB[cy * fw + cx];
-
-                        sysMutexLock(s_jbuf_mtx, 0);
-                        const u8 *slot_a_live = jbuf_peek();
-                        const u8 *slot_b_live = jbuf_peek_next();
-                        u32 jbufA = slot_a_live ? ((u32*)slot_a_live)[cy * fw + cx] : 0;
-                        u32 jbufB = slot_b_live ? ((u32*)slot_b_live)[cy * fw + cx] : 0;
-                        sysMutexUnlock(s_jbuf_mtx);
-
-                        char buf[192];
-                        snprintf(buf, sizeof(buf),
-                            "blend_dbg10: texA=0x%08x texB=0x%08x  jbufA=0x%08x jbufB=0x%08x  matchA=%d matchB=%d",
-                            pxA, pxB, jbufA, jbufB,
-                            (int)(pxA == jbufA), (int)(pxB == jbufB));
-                        plog(buf);
-                    }
-                }
-            }
 
             if (render_blend) {
                 // Pass 1: frame A — no blend
@@ -917,6 +907,29 @@ void show_player(const JFItem *item) {
                 rsxSetBlendEnable(context, GCM_FALSE);
                 rsxInvalidateVertexCache(context);
                 rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+            }
+        }
+
+        {
+            static int s_vb_log_n = 0;
+            static int s_vb_log_start_fr = -1;
+            // Skip first 60 frames (startup), then log 200 vblanks
+            if (frame_count >= 60 && frame_count < 260 && s_timing_ready) {
+                if (s_vb_log_start_fr < 0) s_vb_log_start_fr = frame_count;
+                u64 now_us = timing_get_us();
+                char buf[160];
+                snprintf(buf, sizeof(buf),
+                    "vb: t=%lluus fr=%d disp=%d dur_a=%lld do_pop=%d render_blend=%d blend=%.3f q=%d",
+                    (unsigned long long)now_us,
+                    frame_count,
+                    s_vid_disp_idx,
+                    (long long)jbuf_peek_dur(),
+                    do_pop ? 1 : 0,
+                    render_blend ? 1 : 0,
+                    (double)blend_factor,
+                    jbuf_count());
+                plog(buf);
+                s_vb_log_n++;
             }
         }
 
