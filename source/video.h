@@ -28,6 +28,7 @@ u32          jbuf_fh(void);
 int          jbuf_count(void);
 int          jbuf_rd(void);
 u64          jbuf_peek_pts(void);  // PTS (us, 0=unknown) of current front slot
+u32          jbuf_peek_seq(void);  // decode sequence number of current front slot
 const u8    *jbuf_slot_ptr(int i); // raw pointer to slot i's frame buffer
 
 // ---- Jitter buffer duration API ----
