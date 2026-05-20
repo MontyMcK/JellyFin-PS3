@@ -1,0 +1,7 @@
+!!ARBfp1.0
+TEMP colA, colB, mixed;
+TEX colA, fragment.texcoord[0], texture[0], 2D;
+TEX colB, fragment.texcoord[0], texture[1], 2D;
+LRP mixed, c[0].xxxx, colA, colB;
+MOV result.color, mixed;
+END

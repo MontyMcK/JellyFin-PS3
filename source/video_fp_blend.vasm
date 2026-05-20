@@ -1,0 +1,10 @@
+!!ARBfp1.0
+# Two-texture linear blend for temporal frame interpolation.
+# u_blend.x = blend factor (1.0 = pure A, 0.0 = pure B, in between = crossfade)
+PARAM u_blend = program.local[0];
+TEMP colA, colB, mixed;
+TEX colA, fragment.texcoord[0], texture[0], 2D;
+TEX colB, fragment.texcoord[0], texture[1], 2D;
+LRP mixed, u_blend.xxxx, colA, colB;
+MOV result.color, mixed;
+END
