@@ -364,6 +364,7 @@ void show_player(const JFItem *item) {
     plog("show_player: audio_open");
     audio_open();
     adec_init();
+    adec_start();
     plog("show_player: audio_open done");
 
     drawHeader();
@@ -375,6 +376,7 @@ void show_player(const JFItem *item) {
     int sock = stream_open(url);
     if (sock < 0) {
         plog("show_player: stream_open FAILED");
+        adec_stop();
         audio_close();
         vdec_close();
         show_error("Stream connection failed.", url);
@@ -393,6 +395,7 @@ void show_player(const JFItem *item) {
     if (!jbuf_alloc(req_w, req_h)) {
         plog("show_player: jbuf_alloc FAILED");
         netClose(sock);
+        adec_stop();
         audio_close();
         vdec_close();
         ui_restore_rsx_state();
@@ -501,6 +504,7 @@ void show_player(const JFItem *item) {
         if (s_vid_vbuf)         { rsxFree(s_vid_vbuf);         s_vid_vbuf         = NULL; }
         jbuf_free();
         netClose(sock);
+        adec_stop();
         audio_close();
         vdec_close();
         return;
@@ -649,6 +653,9 @@ void show_player(const JFItem *item) {
         }
 
         if (s_vid_frame_ready && s_timing_ready && jbuf_count() > 0) {
+            // Step 4: measurement only — result discarded; EMA updated for logging.
+            { u64 vpts = jbuf_peek_pts_us(); (void)avsync_compute_diff(vpts); }
+
             s64  dur_a = jbuf_peek_dur();
             bool b_ok  = (jbuf_peek_next() != NULL) && s_vid_b_present;
 
@@ -720,6 +727,16 @@ void show_player(const JFItem *item) {
                         frame_count, s_pure_count, s_mid_count,
                         (long long)s_spill_max);
                     plog(buf2);
+                    s64  smooth = avsync_get_smoothed_diff();
+                    bool locked = avsync_is_locked();
+                    char buf3[128];
+                    snprintf(buf3, sizeof(buf3),
+                        "avsync: smooth=%lldus locked=%d audio=%lluus video=%lluus",
+                        (long long)smooth,
+                        locked ? 1 : 0,
+                        (unsigned long long)audio_get_clock_us(),
+                        (unsigned long long)jbuf_peek_pts_us());
+                    plog(buf3);
                 }
             }
             {
@@ -976,6 +993,7 @@ void show_player(const JFItem *item) {
 
     jbuf_free();
     netClose(sock);
+    adec_stop();
     audio_close();
     vdec_close();
 

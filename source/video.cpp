@@ -286,6 +286,19 @@ void vdec_close(void) {
 
 static void vdec_submit(const u8 *data, int len, u64 pts) {
     if (len <= 0 || len > AU_BUF_SIZE) return;
+    {
+        static int s_in_pts_log = 0;
+        if (s_in_pts_log < 10) {
+            s_in_pts_log++;
+            char buf[96];
+            snprintf(buf, sizeof(buf),
+                "vdec_in_pts: n=%d pts=%llu (=0x%016llx)",
+                s_in_pts_log,
+                (unsigned long long)pts,
+                (unsigned long long)pts);
+            plog(buf);
+        }
+    }
 
     u8   nal_first = 0;
     bool has_sps   = false;
@@ -316,10 +329,13 @@ static void vdec_submit(const u8 *data, int len, u64 pts) {
     memset(&au, 0, sizeof(au));
     au.packet_addr = (u32)(uintptr_t)au_buf;
     au.packet_size = (u32)len;
+    // DTS == PTS for baseline H.264 (no B-frames, decode order == display order).
+    // Never send VDEC_TS_INVALID as DTS — VDEC will reject the PTS if it
+    // interprets the timestamp pair as invalid.
     au.pts.low     = (u32)(pts & 0xFFFFFFFFUL);
     au.pts.hi      = (u32)(pts >> 32);
-    au.dts.low     = VDEC_TS_INVALID;
-    au.dts.hi      = 0;
+    au.dts.low     = (u32)(pts & 0xFFFFFFFFUL);
+    au.dts.hi      = (u32)(pts >> 32);
 
     int retries = 0;
     s32 dret;
@@ -392,7 +408,7 @@ u32       jbuf_fw(void)       { return s_jbuf_fw; }
 u32       jbuf_fh(void)       { return s_jbuf_fh; }
 int       jbuf_count(void)    { return s_jb_n; }
 int       jbuf_rd(void)       { return s_jb_rd; }
-u64       jbuf_peek_pts(void) { return (s_jb_n > 0) ? s_jbuf_pts[s_jb_rd] : 0; }
+u64       jbuf_peek_pts_us(void) { return (s_jb_n > 0) ? s_jbuf_pts[s_jb_rd] : 0; }
 u32       jbuf_peek_seq(void) { return (s_jb_n > 0) ? s_jbuf_seq[s_jb_rd] : 0; }
 const u8 *jbuf_slot_ptr(int i) { return (i >= 0 && i < JBUF_SIZE) ? s_jbuf_data[i] : NULL; }
 
@@ -504,6 +520,20 @@ bool vdec_pull_frame(void) {
     if (pic->pts[0].low != (u32)VDEC_TS_INVALID) {
         u64 pts90 = ((u64)pic->pts[0].hi << 32) | (u64)pic->pts[0].low;
         pts_us = pts90 * 1000000ULL / 90000ULL;
+    }
+    {
+        static int s_vdec_pts_log = 0;
+        if (s_vdec_pts_log < 30) {
+            s_vdec_pts_log++;
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                "vdec_pts: n=%d raw_lo=0x%08x raw_hi=0x%08x pts_us=%llu",
+                s_vdec_pts_log,
+                (unsigned)pic->pts[0].low,
+                (unsigned)pic->pts[0].hi,
+                (unsigned long long)pts_us);
+            plog(buf);
+        }
     }
     s_jbuf_pts[s_jb_wr] = pts_us;
     s_jbuf_dur[s_jb_wr] = dur_from_frc(frc);

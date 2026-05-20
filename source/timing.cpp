@@ -1,4 +1,5 @@
 #include "timing.h"
+#include "audio.h"
 #include "plog.h"
 #include <stdio.h>
 #include <ppu-asm.h>
@@ -147,4 +148,33 @@ void timing_frame_shown(void) {
     s_vsync_err   += (s64)(s_display_num * s_fps_den);
     s_vsyncs_next  = (u32)(s_vsync_err / (s64)(s_fps_num * s_display_den));
     s_vsync_err   -= (s64)s_vsyncs_next * (s64)(s_fps_num * s_display_den);
+}
+
+// ---- AV sync EMA ----
+
+static s64  s_avsync_smooth_us    = 0;
+static bool s_avsync_initialized  = false;
+
+s64 avsync_compute_diff(u64 video_pts_us) {
+    if (video_pts_us == 0) return 0;
+    u64 audio_clk = audio_get_clock_us();
+    if (audio_clk == 0) return 0;
+    s64 raw_diff = (s64)video_pts_us - (s64)audio_clk;
+    if (!s_avsync_initialized) {
+        s_avsync_smooth_us   = raw_diff;
+        s_avsync_initialized = true;
+    } else {
+        s_avsync_smooth_us = (s_avsync_smooth_us * 9 + raw_diff) / 10;
+    }
+    return raw_diff;
+}
+
+s64 avsync_get_smoothed_diff(void) {
+    return s_avsync_smooth_us;
+}
+
+bool avsync_is_locked(void) {
+    if (!s_avsync_initialized) return false;
+    s64 abs_diff = s_avsync_smooth_us < 0 ? -s_avsync_smooth_us : s_avsync_smooth_us;
+    return abs_diff < 41667;
 }

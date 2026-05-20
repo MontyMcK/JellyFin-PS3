@@ -25,7 +25,23 @@ static u32          s_pcm_blocks   = 0;
 static u32          s_sil_blocks   = 0;
 
 u64 audio_block_count(void) { return s_audio_blocks; }
-u64 audio_get_clock_us(void) { return (s_audio_blocks * 256ULL * 1000000ULL) / 48000ULL; }
+
+u64 audio_get_clock_us(void) {
+    u64 read_pts = adec_get_read_pts_us();
+    if (read_pts == 0)
+        return (s_audio_blocks * 256ULL * 1000000ULL) / 48000ULL;
+    // adec_get_read_pts_us() is the PTS of the next sample entering the hardware
+    // DMA pipeline.  The sample currently audible is (s_num_blocks - 1) blocks
+    // behind that point.
+    const u64 hw_latency_us =
+        ((u64)(s_num_blocks - 1) * AUDIO_BLOCK_SAMPLES * 1000000ULL)
+        / 48000ULL;
+    return (read_pts > hw_latency_us) ? (read_pts - hw_latency_us) : 0;
+}
+
+bool audio_clock_valid(void) {
+    return adec_get_read_pts_us() != 0;
+}
 
 void audio_open(void) {
     int rc;
@@ -137,12 +153,16 @@ bool audio_write_pcm(void) {
     }
     u64 total = ++s_audio_blocks;
     if (total % 500 == 0) {
-        char buf[64];
+        char buf[128];
         snprintf(buf, sizeof(buf), "audio_ratio: pcm=%u sil=%u total=%llu",
                  s_pcm_blocks, s_sil_blocks, (unsigned long long)total);
         plog(buf);
         s_pcm_blocks = 0;
         s_sil_blocks = 0;
+        u64 clk = audio_get_clock_us();
+        snprintf(buf, sizeof(buf), "audio_clock: clk=%lluus blocks=%llu",
+                 (unsigned long long)clk, (unsigned long long)total);
+        plog(buf);
     }
     return true;
 }

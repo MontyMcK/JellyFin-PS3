@@ -35,3 +35,13 @@ void timing_frame_shown(void);
 
 // Unregister the VBlank handler.  Call once at session teardown.
 void timing_shutdown(void);
+
+// Audio-video difference in microseconds.  Positive = video PTS is ahead of
+// audio PTS.  Returns 0 if either clock is invalid (no PTS yet, empty jbuf).
+s64  avsync_compute_diff(u64 video_pts_us);
+
+// Smoothed AV diff via exponential moving average.  Updated by avsync_compute_diff.
+s64  avsync_get_smoothed_diff(void);
+
+// True once EMA has been seeded and |smooth_diff| < 41 667 µs (~1 frame at 24 fps).
+bool avsync_is_locked(void);
