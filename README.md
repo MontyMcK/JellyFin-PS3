@@ -180,11 +180,11 @@ Work in progress. Library browsing, login, TV show browser, collections browser,
 | Movie browsing | ✅ Working |
 | TV show browsing | ✅ Working |
 | Collections browsing | ✅ Working |
-| Search | ⚠️ In progress |
+| Search | ✅ Working |
 | Video playback | ✅ Working (24fps, hardware vsync, RSX GPU blit) |
 | Audio playback | ✅ Working (48kHz stereo, zero silence blocks) |
 | AV sync | ✅ Working (audio clock infrastructure in place) |
-| Frame pacing | ⚠️ Working on PTS-driven scheduling to replace Bresenham accumulator |
+| Frame pacing | ✅ Working |
 | Jellyfin transcoding | ⚠️ PlaybackInfo session flow in progress |
 
 ## Known Limitations
