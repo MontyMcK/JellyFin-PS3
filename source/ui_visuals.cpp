@@ -471,24 +471,26 @@ void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px) {
 }
 
 void xmb_draw_item_list(int tab) {
-    int count = g_item_count[tab];
-    int vis   = XMB_ITEMS_VIS;
+    int count  = g_item_count[tab];
+    int vis    = XMB_ITEMS_VIS;
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
 
     for (int i = 0; i < vis; i++) {
         int idx = g_scroll_top + i;
         if (idx >= count) break;
         const XMBItem *it = &g_items[tab][idx];
 
-        int iy = XMB_CONTENT_Y + i * XMB_ITEM_H;
+        int iy = XMB_CONTENT_Y + i * XMB_ROW_STRIDE;
+        int tx = list_x + 16 + XMB_THUMB_W + 16;
 
-        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
-        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
-
-        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
+        drawTTF((u32)tx, (u32)(iy + 20), it->name, 22, 0x00FFFFFF);
+        xmb_draw_meta((u32)tx, (u32)(iy + 50), it);
 
         if (it->codec[0]) {
-            int bx = (int)display_width - XMB_ITEM_PAD - 60;
-            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
+            int bx = list_x + XMB_LIST_W - 75;
+            int by = iy + (XMB_ROW_H - 22) / 2 + 4;
+            drawTTF((u32)bx, (u32)by, it->codec, 13, 0x00FFFFFF);
         }
 
         if (i == 0 && g_scroll_top > 0)
@@ -500,66 +502,76 @@ void xmb_draw_item_list(int tab) {
 
 // CPU draws for item list (highlight, thumb, badge bg)
 void xmb_cpu_draw_items(int tab) {
-    int count = g_item_count[tab];
-    int vis   = XMB_ITEMS_VIS;
-    int W     = (int)display_width;
+    int count  = g_item_count[tab];
+    int vis    = XMB_ITEMS_VIS;
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
 
     for (int i = 0; i < vis; i++) {
         int idx = g_scroll_top + i;
         if (idx >= count) break;
 
-        int iy = XMB_CONTENT_Y + i * XMB_ITEM_H;
+        int iy = XMB_CONTENT_Y + i * XMB_ROW_STRIDE;
 
         if (idx == g_sel) {
-            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
-                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2),
-                     XMB_HIGHLIGHT);
-            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy,
-                     4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
+            drawRect((u32)list_x, (u32)iy,
+                     (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
+            drawRect((u32)(list_x - 5), (u32)iy,
+                     4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
 
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8),
-                 XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        int thumb_x = list_x + 16;
+        int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
+        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
 
-        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6),
-                 66, 22, XMB_BADGE_BG);
+        int badge_x = list_x + XMB_LIST_W - 80;
+        int badge_y = iy + (XMB_ROW_H - 22) / 2;
+        drawRect((u32)badge_x, (u32)badge_y, 66, 22, XMB_BADGE_BG);
     }
 }
 
 // CPU draws for the TV sub-item list (seasons or episodes)
 void xmb_cpu_draw_sub(void) {
-    int vis = XMB_ITEMS_VIS;
-    int W   = (int)display_width;
-    int y0  = XMB_CONTENT_Y + 26;
+    int vis    = XMB_ITEMS_VIS;
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+    int y0     = XMB_CONTENT_Y + 26;
     for (int i = 0; i < vis; i++) {
         int idx = g_tv_sub_scroll + i;
         if (idx >= g_tv_sub_count) break;
-        int iy = y0 + i * XMB_ITEM_H;
+        int iy = y0 + i * XMB_ROW_STRIDE;
         if (idx == g_tv_sub_sel) {
-            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
-                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2), XMB_HIGHLIGHT);
-            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy, 4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
+            drawRect((u32)list_x, (u32)iy,
+                     (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
+            drawRect((u32)(list_x - 5), (u32)iy, 4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
-        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6), 66, 22, XMB_BADGE_BG);
+        int thumb_x = list_x + 16;
+        int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
+        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        int badge_x = list_x + XMB_LIST_W - 80;
+        int badge_y = iy + (XMB_ROW_H - 22) / 2;
+        drawRect((u32)badge_x, (u32)badge_y, 66, 22, XMB_BADGE_BG);
     }
 }
 
 // TTF draws for the TV sub-item list
 void xmb_draw_sub_list(void) {
-    int vis = XMB_ITEMS_VIS;
-    int y0  = XMB_CONTENT_Y + 26;
+    int vis    = XMB_ITEMS_VIS;
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+    int y0     = XMB_CONTENT_Y + 26;
     for (int i = 0; i < vis; i++) {
         int idx = g_tv_sub_scroll + i;
         if (idx >= g_tv_sub_count) break;
         const XMBItem *it = &g_tv_sub_items[idx];
-        int iy = y0 + i * XMB_ITEM_H;
-        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
-        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
-        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
+        int iy = y0 + i * XMB_ROW_STRIDE;
+        int tx = list_x + 16 + XMB_THUMB_W + 16;
+        drawTTF((u32)tx, (u32)(iy + 20), it->name, 22, 0x00FFFFFF);
+        xmb_draw_meta((u32)tx, (u32)(iy + 50), it);
         if (it->codec[0]) {
-            int bx = (int)display_width - XMB_ITEM_PAD - 60;
-            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
+            int bx = list_x + XMB_LIST_W - 75;
+            int by = iy + (XMB_ROW_H - 22) / 2 + 4;
+            drawTTF((u32)bx, (u32)by, it->codec, 13, 0x00FFFFFF);
         }
         if (i == 0 && g_tv_sub_scroll > 0)
             drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
@@ -570,38 +582,46 @@ void xmb_draw_sub_list(void) {
 
 // CPU draws for the Collections sub-item list (movies inside a collection)
 void xmb_cpu_draw_col_sub(void) {
-    int vis = XMB_ITEMS_VIS;
-    int W   = (int)display_width;
-    int y0  = XMB_CONTENT_Y + 26;
+    int vis    = XMB_ITEMS_VIS;
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+    int y0     = XMB_CONTENT_Y + 26;
     for (int i = 0; i < vis; i++) {
         int idx = g_col_sub_scroll + i;
         if (idx >= g_col_sub_count) break;
-        int iy = y0 + i * XMB_ITEM_H;
+        int iy = y0 + i * XMB_ROW_STRIDE;
         if (idx == g_col_sub_sel) {
-            drawRect((u32)XMB_ITEM_PAD, (u32)iy,
-                     (u32)(W - XMB_ITEM_PAD * 2), (u32)(XMB_ITEM_H - 2), XMB_HIGHLIGHT);
-            drawRect((u32)(XMB_ITEM_PAD - 5), (u32)iy, 4, (u32)(XMB_ITEM_H - 2), XMB_ACCENT);
+            drawRect((u32)list_x, (u32)iy,
+                     (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
+            drawRect((u32)(list_x - 5), (u32)iy, 4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
-        drawRect((u32)(W - XMB_ITEM_PAD - 70), (u32)(iy + 6), 66, 22, XMB_BADGE_BG);
+        int thumb_x = list_x + 16;
+        int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
+        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        int badge_x = list_x + XMB_LIST_W - 80;
+        int badge_y = iy + (XMB_ROW_H - 22) / 2;
+        drawRect((u32)badge_x, (u32)badge_y, 66, 22, XMB_BADGE_BG);
     }
 }
 
 // TTF draws for the Collections sub-item list
 void xmb_draw_col_sub_list(void) {
-    int vis = XMB_ITEMS_VIS;
-    int y0  = XMB_CONTENT_Y + 26;
+    int vis    = XMB_ITEMS_VIS;
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+    int y0     = XMB_CONTENT_Y + 26;
     for (int i = 0; i < vis; i++) {
         int idx = g_col_sub_scroll + i;
         if (idx >= g_col_sub_count) break;
         const XMBItem *it = &g_col_sub_items[idx];
-        int iy = y0 + i * XMB_ITEM_H;
-        int tx = XMB_ITEM_PAD + XMB_THUMB_W + 16;
-        drawTTF((u32)tx, (u32)(iy + 8), it->name, 22, 0x00FFFFFF);
-        xmb_draw_meta((u32)tx, (u32)(iy + 32), it);
+        int iy = y0 + i * XMB_ROW_STRIDE;
+        int tx = list_x + 16 + XMB_THUMB_W + 16;
+        drawTTF((u32)tx, (u32)(iy + 20), it->name, 22, 0x00FFFFFF);
+        xmb_draw_meta((u32)tx, (u32)(iy + 50), it);
         if (it->codec[0]) {
-            int bx = (int)display_width - XMB_ITEM_PAD - 60;
-            drawTTF((u32)bx, (u32)(iy + 10), it->codec, 13, 0x00FFFFFF);
+            int bx = list_x + XMB_LIST_W - 75;
+            int by = iy + (XMB_ROW_H - 22) / 2 + 4;
+            drawTTF((u32)bx, (u32)by, it->codec, 13, 0x00FFFFFF);
         }
         if (i == 0 && g_col_sub_scroll > 0)
             drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
@@ -704,27 +724,45 @@ void xmb_rsx_draw_osk(void) {
     int kb_bottom = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
     int results_y = kb_bottom;
     int count = g_search_results_count;
-    int vis_r = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ITEM_H;
+    int vis_r = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ROW_STRIDE;
     if (vis_r < 0) vis_r = 0;
-    for (int i = 0; i < vis_r && i < count; i++) {
-        const XMBItem *it = &g_search_results[i];
-        int iy = results_y + i * XMB_ITEM_H;
-        drawTTF((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 8), it->name, 18, 0x00FFFFFF);
-        xmb_draw_meta((u32)(XMB_ITEM_PAD + XMB_THUMB_W + 16), (u32)(iy + 30), it, 18);
+    {
+        int sr_list_x = ((int)display_width - XMB_LIST_W) / 2;
+        int sr_tx     = sr_list_x + 16 + XMB_THUMB_W + 16;
+        for (int i = 0; i < vis_r; i++) {
+            int idx = g_search_scroll + i;
+            if (idx >= count) break;
+            const XMBItem *it = &g_search_results[idx];
+            int iy = results_y + i * XMB_ROW_STRIDE;
+            drawTTF((u32)sr_tx, (u32)(iy + 20), it->name, 18, 0x00FFFFFF);
+            xmb_draw_meta((u32)sr_tx, (u32)(iy + 48), it, 18);
+        }
     }
     if (count == 0 && g_search_buf[0]) {
         drawTTF((u32)XMB_ITEM_PAD, (u32)results_y, "No results.", 8, 0x00FFFFFF);
     }
 }
 
-// CPU draws for search results list (thumbs)
+// CPU draws for search results list (thumbs + selection highlight)
 void xmb_cpu_draw_search_results(void) {
     int results_y = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
-    int count = g_search_results_count;
-    int vis_r = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ITEM_H;
+    int count     = g_search_results_count;
+    int vis_r     = ((int)display_height - XMB_BOTTOM_PAD - results_y) / XMB_ROW_STRIDE;
     if (vis_r < 0) vis_r = 0;
-    for (int i = 0; i < vis_r && i < count; i++) {
-        int iy = results_y + i * XMB_ITEM_H;
-        drawRect((u32)(XMB_ITEM_PAD + 4), (u32)(iy + 8), XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+    for (int i = 0; i < vis_r; i++) {
+        int idx = g_search_scroll + i;
+        if (idx >= count) break;
+        int iy = results_y + i * XMB_ROW_STRIDE;
+        if (g_search_focus_results && idx == g_search_sel) {
+            drawRect((u32)list_x, (u32)iy,
+                     (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
+            drawRect((u32)(list_x - 5), (u32)iy,
+                     4, (u32)XMB_ROW_H, XMB_ACCENT);
+        }
+        int thumb_x = list_x + 16;
+        int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
+        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
     }
 }

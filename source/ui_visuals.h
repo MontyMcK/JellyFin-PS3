@@ -58,8 +58,15 @@ typedef struct { const char *label; char value; } SpecialKey;
 #define XMB_THUMB_H     74
 #define XMB_ITEM_PAD    40
 
+// Centered narrow list layout
+#define XMB_LIST_W      780                         // ~60% of 1280
+#define XMB_ROW_H        88                         // row visual height
+#define XMB_ROW_GAP      16                         // vertical gap between rows
+#define XMB_ROW_STRIDE  (XMB_ROW_H + XMB_ROW_GAP)
+#define XMB_ROW_RADIUS    8                         // reserved for future rounded corners
+
 // Items visible simultaneously in the list area
-#define XMB_ITEMS_VIS ((int)((display_height - XMB_CONTENT_Y - XMB_BOTTOM_PAD) / XMB_ITEM_H))
+#define XMB_ITEMS_VIS ((int)((display_height - XMB_CONTENT_Y - XMB_BOTTOM_PAD) / XMB_ROW_STRIDE))
 
 // OSK constants (pixels)
 #define OSK_KEY_W    80
@@ -101,6 +108,9 @@ extern XMBItem g_col_sub_items[XMB_ITEMS_MAX];
 extern int     g_osk_row;
 extern int     g_osk_col;
 extern bool    g_osk_sym;
+extern bool    g_search_focus_results;
+extern int     g_search_sel;
+extern int     g_search_scroll;
 extern char    g_search_buf[64];
 extern int     g_search_results_count;
 extern XMBItem g_search_results[XMB_ITEMS_MAX];
