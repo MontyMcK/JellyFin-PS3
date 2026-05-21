@@ -319,15 +319,15 @@ void show_player(const JFItem *item) {
     }
 
     // H.264 level 3.1 caps at 1280×720 @ 30fps
-    u32 req_w = display_width  < 960 ? display_width  : 960;
-    u32 req_h = display_height < 540 ? display_height : 540;
+    u32 req_w = display_width  < 1280 ? display_width  : 1280;
+    u32 req_h = display_height < 720  ? display_height : 720;
 
     char url[640];
     snprintf(url, sizeof(url),
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
         "&VideoProfile=baseline"
-        "&VideoLevel=30"
+        "&VideoLevel=31"
         "&MaxWidth=%u&MaxHeight=%u"
         "&VideoBitrate=4000000"
         "&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000"

@@ -59,8 +59,7 @@ int http_request(int is_post, const char *url, const char *body,
     char auth[400];
     if (token && token[0])
         snprintf(auth, sizeof(auth),
-            "MediaBrowser Client=\"PS3\", Device=\"PS3\","
-            " DeviceId=\"ps3\", Version=\"0.1\", Token=\"%s\"", token);
+            "MediaBrowser Token=\"%s\"", token);
     else
         snprintf(auth, sizeof(auth),
             "MediaBrowser Client=\"PS3\", Device=\"PS3\","
@@ -72,7 +71,7 @@ int http_request(int is_post, const char *url, const char *body,
     rlen += snprintf(req+rlen, sizeof(req)-rlen,
         "%s %s HTTP/1.1\r\n"
         "Host: %s:%d\r\n"
-        "X-Emby-Authorization: %s\r\n"
+        "Authorization: %s\r\n"
         "Accept: application/json\r\n"
         "User-Agent: " HTTP_USER_AGENT "\r\n",
         is_post ? "POST" : "GET", path, host, port, auth);

@@ -532,7 +532,7 @@ bool vdec_pull_frame(void) {
     {
         static int s_sw_count = 0;
         if (s_sw_count < 60) {
-            u32 centre_px = ((u32*)s_jbuf_data[s_jb_wr])[(408/2) * 960 + (960/2)];
+            u32 centre_px = ((u32*)s_jbuf_data[s_jb_wr])[(s_jbuf_fh / 2) * s_jbuf_fw + (s_jbuf_fw / 2)];
             char buf[64];
             snprintf(buf, sizeof(buf), "slot_write: slot=%d px=0x%08x",
                 s_jb_wr, centre_px);

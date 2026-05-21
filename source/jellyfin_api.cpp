@@ -456,36 +456,46 @@ bool jellyfin_get_play_session_id(const char *item_id,
         return false;
     }
 
-    char url[512];
-    snprintf(url, sizeof(url), "%s/Users/%s/Items/%s/PlaybackInfo",
-             g_server, g_userid, item_id);
+    char url[768];
+    snprintf(url, sizeof(url),
+        "%s/Items/%s/PlaybackInfo"
+        "?UserId=%s"
+        "&MaxStreamingBitrate=8000000"
+        "&StartTimeTicks=0"
+        "&AutoOpenLiveStream=true",
+        g_server, item_id, g_userid);
 
     // Stored in read-only data — avoids putting ~700 bytes on the stack.
     static const char body[] =
         "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
           "\"MaxStreamingBitrate\":8000000,"
+          "\"MaxStaticBitrate\":8000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
           "\"TranscodingProfiles\":[{"
-            "\"Container\":\"ts\","
             "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
             "\"VideoCodec\":\"h264\","
             "\"AudioCodec\":\"mp3\","
             "\"Protocol\":\"http\","
             "\"Context\":\"Streaming\","
             "\"MaxAudioChannels\":\"2\""
           "}],"
-          "\"DirectPlayProfiles\":[],"
           "\"CodecProfiles\":[{"
             "\"Type\":\"Video\","
             "\"Codec\":\"h264\","
             "\"Conditions\":["
-              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoProfile\","
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
                "\"Value\":\"baseline\",\"IsRequired\":false},"
               "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
                "\"Value\":\"31\",\"IsRequired\":false},"
               "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
-               "\"Value\":\"960\",\"IsRequired\":false},"
+               "\"Value\":\"1280\",\"IsRequired\":false},"
               "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
-               "\"Value\":\"540\",\"IsRequired\":false}"
+               "\"Value\":\"720\",\"IsRequired\":false},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"4000000\",\"IsRequired\":false}"
             "]"
           "},{"
             "\"Type\":\"VideoAudio\","
@@ -503,9 +513,13 @@ bool jellyfin_get_play_session_id(const char *item_id,
 
     int status = http_request(1, url, body, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) {
-        char buf[64];
+        char buf[80];
         snprintf(buf, sizeof(buf), "playbackinfo: http status %d", status);
         plog(buf);
+        // Log first 256 bytes of error body so we can see Jellyfin's complaint
+        char errbuf[280];
+        snprintf(errbuf, sizeof(errbuf), "playbackinfo_err: %.256s", responseBuffer);
+        plog(errbuf);
         return false;
     }
 
