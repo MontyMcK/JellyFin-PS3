@@ -170,6 +170,9 @@ const char *OSK_SYMBOLS[OSK_ROWS_N] = {
 int  g_osk_row    = 0;
 int  g_osk_col    = 0;
 bool g_osk_sym    = false;
+bool g_search_focus_results = false;
+int  g_search_sel           = 0;
+int  g_search_scroll        = 0;
 char g_search_buf[64];
 int  g_search_results_count = 0;
 XMBItem g_search_results[XMB_ITEMS_MAX];
@@ -399,6 +402,28 @@ static void xmb_do_search(void) {
     snprintf(dbg, sizeof(dbg), "search status: %d count: %d",
              status, g_search_results_count);
     plog(dbg);
+
+    {
+        char dbg2[400];
+        snprintf(dbg2, sizeof(dbg2),
+            "search: term='%s' status=%d count=%d",
+            g_search_buf,
+            status,
+            g_search_results_count);
+        plog(dbg2);
+
+        if (status != 200) {
+            char errbuf[320];
+            snprintf(errbuf, sizeof(errbuf),
+                "search_err: %.300s", responseBuffer);
+            plog(errbuf);
+        } else if (g_search_results_count == 0) {
+            char respbuf[224];
+            snprintf(respbuf, sizeof(respbuf),
+                "search_empty_resp: %.200s", responseBuffer);
+            plog(respbuf);
+        }
+    }
 }
 
 static int xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max) {
@@ -653,36 +678,83 @@ static bool xmb_handle_input_browse(void) {
 }
 
 static bool xmb_handle_input_search(void) {
-    if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
-    if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
+    char prev_buf[sizeof(g_search_buf)];
+    strcpy(prev_buf, g_search_buf);
+
+    if (BTN_PRESSED(l1)) { g_search_focus_results = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
+    if (BTN_PRESSED(r1)) { g_search_focus_results = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
     if (BTN_PRESSED(circle) && !g_search_buf[0]) {
         xmb_switch_tab(xmb_next_enabled(g_active_tab, +1));
         return false;
     }
-    if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; return false; }
+    if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; g_search_focus_results = false; return false; }
 
     int row_count = OSK_ROWS_N + 1;
 
-    if (BTN_PRESSED(up)) {
-        g_osk_row = (g_osk_row - 1 + row_count) % row_count;
-        int ml = osk_row_len(g_osk_row);
-        if (g_osk_col >= ml) g_osk_col = ml - 1;
-    }
-    if (BTN_PRESSED(down)) {
-        g_osk_row = (g_osk_row + 1) % row_count;
-        int ml = osk_row_len(g_osk_row);
-        if (g_osk_col >= ml) g_osk_col = ml - 1;
-    }
-    if (BTN_PRESSED(left)) {
-        int ml = osk_row_len(g_osk_row);
-        g_osk_col = (g_osk_col - 1 + ml) % ml;
-    }
-    if (BTN_PRESSED(right)) {
-        int ml = osk_row_len(g_osk_row);
-        g_osk_col = (g_osk_col + 1) % ml;
+    if (!g_search_focus_results) {
+        if (BTN_PRESSED(up)) {
+            if (g_osk_row == 0) {
+                g_osk_row = row_count - 1;
+            } else {
+                g_osk_row--;
+            }
+            int ml = osk_row_len(g_osk_row);
+            if (g_osk_col >= ml) g_osk_col = ml - 1;
+        }
+        if (BTN_PRESSED(down)) {
+            if (g_osk_row == row_count - 1) {
+                if (g_search_results_count > 0) {
+                    g_search_focus_results = true;
+                    g_search_sel    = 0;
+                    g_search_scroll = 0;
+                } else {
+                    g_osk_row = 0;
+                }
+            } else {
+                g_osk_row++;
+                int ml = osk_row_len(g_osk_row);
+                if (g_osk_col >= ml) g_osk_col = ml - 1;
+            }
+        }
+        if (BTN_PRESSED(left)) {
+            int ml = osk_row_len(g_osk_row);
+            g_osk_col = (g_osk_col - 1 + ml) % ml;
+        }
+        if (BTN_PRESSED(right)) {
+            int ml = osk_row_len(g_osk_row);
+            g_osk_col = (g_osk_col + 1) % ml;
+        }
+    } else {
+        if (BTN_PRESSED(up)) {
+            if (g_search_sel == 0) {
+                g_search_focus_results = false;
+                g_osk_row = row_count - 1;
+                int ml = osk_row_len(g_osk_row);
+                if (g_osk_col >= ml) g_osk_col = ml - 1;
+            } else {
+                g_search_sel--;
+                if (g_search_sel < g_search_scroll) g_search_scroll = g_search_sel;
+            }
+        }
+        if (BTN_PRESSED(down)) {
+            if (g_search_sel < g_search_results_count - 1) {
+                g_search_sel++;
+                if (g_search_sel >= g_search_scroll + 6)
+                    g_search_scroll = g_search_sel - 5;
+            }
+        }
+        if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {
+            const XMBItem *it = &g_search_results[g_search_sel];
+            JFItem jf; memset(&jf, 0, sizeof(jf));
+            strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
+            strncpy(jf.name, it->name, sizeof(jf.name)-1);
+            strncpy(jf.type, it->type, sizeof(jf.type)-1);
+            show_player(&jf);
+            return false;
+        }
     }
 
-    if (BTN_PRESSED(cross)) {
+    if (!g_search_focus_results && BTN_PRESSED(cross)) {
         if (g_osk_row == OSK_ROWS_N) {
             if (g_osk_col == 0) {
                 int len = strlen(g_search_buf);
@@ -693,6 +765,7 @@ static bool xmb_handle_input_search(void) {
             } else {
                 g_search_buf[0] = '\0';
                 g_search_results_count = 0;
+                g_search_focus_results = false;
             }
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
@@ -713,12 +786,13 @@ static bool xmb_handle_input_search(void) {
         }
     }
 
-    if (BTN_PRESSED(triangle) || BTN_PRESSED(start)) {
-        xmb_do_search();
-    }
-
-    if (BTN_PRESSED(cross) && g_osk_row == OSK_ROWS_N) {
-        // handled above
+    if (strcmp(prev_buf, g_search_buf) != 0) {
+        if (g_search_buf[0]) {
+            xmb_do_search();
+        } else {
+            g_search_results_count = 0;
+            g_search_focus_results = false;
+        }
     }
 
     return false;
