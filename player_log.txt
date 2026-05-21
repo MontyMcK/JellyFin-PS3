@@ -1,204 +1,985 @@
-[2026-05-17 06:50:58] show_player: enter
-[2026-05-17 06:50:58] color_buffer[0]=0xce215fc0
-[2026-05-17 06:50:58] color_buffer[1]=0xcda2cf80
-[2026-05-17 06:50:58] playbackinfo: http status 404
-[2026-05-17 06:50:58] show_player: PlaybackInfo failed, streaming without PlaySessionId
-[2026-05-17 06:50:58] http://101.100.137.246:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&VideoProfile=baseline&VideoLevel=
-[2026-05-17 06:50:58] show_player: vdec_open
-[2026-05-17 06:50:58] vdec_open: load VDEC base
-[2026-05-17 06:50:58] vdec_open: load VDEC_H264
-[2026-05-17 06:50:58] vdec_open: mod_ret base=0 h264=0
-[2026-05-17 06:50:58] vdec_open: queryAttr
-[2026-05-17 06:50:58] vdec_open: mem_size=33368829
-[2026-05-17 06:50:58] vdec_open: memalign vdec_mem
-[2026-05-17 06:50:58] vdec_open: memalign au_bufs
-[2026-05-17 06:50:58] cfg: addr=0x52200000 size=100663296(33368829) prio=500 stack=0x40000 spu_prio=250 spus=3
-[2026-05-17 06:50:58] vdec_cb_opd32: code=0x0002d9b8 toc=0x000801d8 fn=0x101bccf8
-[2026-05-17 06:50:58] vdec_open: vdecOpen
-[2026-05-17 06:50:58] vdec_open: startSequence
-[2026-05-17 06:50:58] vdec_open: startSequence ret=0
-[2026-05-17 06:50:58] vdec_open: done
-[2026-05-17 06:50:58] show_player: vdec_open OK
-[2026-05-17 06:50:58] show_player: audio_open
-[2026-05-17 06:50:58] audio: sysAudioInit rc=0x0
-[2026-05-17 06:50:58] audio: sysAudioPortOpen rc=0x0 port=0
-[2026-05-17 06:50:58] audio_param: ch=2 blocks=8 attrib=0 level=1.0000
-[2026-05-17 06:50:58] audio: sysAudioGetPortConfig rc=0x0
-[2026-05-17 06:50:58] audio: cfg readIndex=0x40010010 status=0x1
-[2026-05-17 06:50:58] audio: cfg channelCount=2 numBlocks=8
-[2026-05-17 06:50:58] audio: cfg portSize=0x4000 portAddr=0x40020000
-[2026-05-17 06:50:58] audio: pre-filled 8 blocks start=0x40020000 ri_addr=0x40010010
-[2026-05-17 06:50:58] audio: audioSetNotifyEventQueue rc=0x0
-[2026-05-17 06:50:58] audio: sysAudioPortStart rc=0x0
-[2026-05-17 06:50:58] show_player: audio_open done
-[2026-05-17 06:50:58] show_player: stream_open
-[2026-05-17 06:51:00] stream_open: status=200 OK
+[2026-05-21 01:12:05] show_player: enter
+[2026-05-21 01:12:05] color_buffer[0]=0xce215fc0
+[2026-05-21 01:12:05] color_buffer[1]=0xcda2cf80
+[2026-05-21 01:12:05] playbackinfo: http status 404
+[2026-05-21 01:12:05] show_player: PlaybackInfo failed, streaming without PlaySessionId
+[2026-05-21 01:12:05] http://101.100.137.246:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&VideoProfile=baseline&VideoLevel=
+[2026-05-21 01:12:05] show_player: vdec_open
+[2026-05-21 01:12:05] vdec_open: load VDEC base
+[2026-05-21 01:12:05] vdec_open: load VDEC_H264
+[2026-05-21 01:12:05] vdec_open: mod_ret base=0 h264=0
+[2026-05-21 01:12:05] vdec_open: queryAttr
+[2026-05-21 01:12:05] vdec_open: mem_size=33368829
+[2026-05-21 01:12:05] vdec_open: memalign vdec_mem
+[2026-05-21 01:12:05] vdec_open: memalign au_bufs
+[2026-05-21 01:12:05] cfg: addr=0x52200000 size=100663296(33368829) prio=500 stack=0x40000 spu_prio=250 spus=3
+[2026-05-21 01:12:05] vdec_cb_opd32: code=0x0002f530 toc=0x000804d8 fn=0x1022cf08
+[2026-05-21 01:12:05] vdec_open: vdecOpen
+[2026-05-21 01:12:05] vdec_open: startSequence
+[2026-05-21 01:12:05] vdec_open: startSequence ret=0
+[2026-05-21 01:12:05] vdec_open: done
+[2026-05-21 01:12:05] show_player: vdec_open OK
+[2026-05-21 01:12:05] show_player: audio_open
+[2026-05-21 01:12:05] audio: sysAudioInit rc=0x0
+[2026-05-21 01:12:05] audio: sysAudioPortOpen rc=0x0 port=0
+[2026-05-21 01:12:05] audio_param: ch=2 blocks=8 attrib=0 level=1.0000
+[2026-05-21 01:12:05] audio: sysAudioGetPortConfig rc=0x0
+[2026-05-21 01:12:05] audio: cfg readIndex=0x40010010 status=0x1
+[2026-05-21 01:12:05] audio: cfg channelCount=2 numBlocks=8
+[2026-05-21 01:12:05] audio: cfg portSize=0x4000 portAddr=0x40020000
+[2026-05-21 01:12:05] audio: pre-filled 8 blocks start=0x40020000 ri_addr=0x40010010
+[2026-05-21 01:12:05] audio: audioSetNotifyEventQueue rc=0x0
+[2026-05-21 01:12:05] audio: sysAudioPortStart rc=0x0
+[2026-05-21 01:12:05] show_player: audio_open done
+[2026-05-21 01:12:05] show_player: stream_open
+[2026-05-21 01:12:05] stream_open: status=200 OK
 Conn chunked=1
-[2026-05-17 06:51:00] show_player: stream_open OK
-[2026-05-17 06:51:00] jbuf: 16 slots 960x540 ~2025 KB each
-[2026-05-17 06:51:00] vid_gpu: init done
-[2026-05-17 06:51:00] jbuf: pre-fill start
-[2026-05-17 06:51:00] show_player: first pkt byte=0x47
-[2026-05-17 06:51:00] adec_pes: bytes=00 00 01 c0 len=2894
-[2026-05-17 06:51:00] adec_frame: hz=48000 ch=2 samples=1152
-[2026-05-17 06:51:00] vdec: actual 960x408 (alloc 960x540)
-[2026-05-17 06:51:00] slot_write: slot=0 px=0xff000000
-[2026-05-17 06:51:00] timing: display=60000/1001 fps=24000/1001
-[2026-05-17 06:51:00] fps_detect: frc=1 -> 24000/1001
-[2026-05-17 06:51:00] slot_write: slot=1 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=2 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=3 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=4 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=5 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=6 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=7 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=8 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=9 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=10 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=11 px=0xff000000
-[2026-05-17 06:51:00] jbuf: pre-fill done — starting threads
-[2026-05-17 06:51:00] timing: vsync handler registered
-[2026-05-17 06:51:00] UNDERRUN: upload not ready fr=0
-[2026-05-17 06:51:00] slot_write: slot=12 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=13 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=14 px=0xff000000
-[2026-05-17 06:51:00] blit[0]: curr_fb=1 disp_idx=0 src=0x58300180 fw=960 fh=408
-[2026-05-17 06:51:00] blit[0]: src[0]=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=0 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=15 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=0 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=1 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=1 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=2 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=2 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=3 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=3 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=4 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=4 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=5 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=5 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=6 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=6 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=7 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=7 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=8 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=8 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=9 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=9 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=10 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=10 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=11 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=11 px=0xff010000
-[2026-05-17 06:51:00] slot_read: slot=12 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=12 px=0xff0c0101
-[2026-05-17 06:51:00] slot_read: slot=13 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=13 px=0xff1b0000
-[2026-05-17 06:51:00] slot_read: slot=14 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=14 px=0xff000000
-[2026-05-17 06:51:00] slot_read: slot=15 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=15 px=0xff2e0501
-[2026-05-17 06:51:00] slot_read: slot=0 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=0 px=0xff421a06
-[2026-05-17 06:51:00] slot_read: slot=1 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=1 px=0xff4c2606
-[2026-05-17 06:51:00] slot_read: slot=2 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=2 px=0xff5a2b08
-[2026-05-17 06:51:00] slot_read: slot=3 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=3 px=0xff613309
-[2026-05-17 06:51:00] slot_read: slot=4 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=4 px=0xff603208
-[2026-05-17 06:51:00] slot_read: slot=5 px=0xff000000
-[2026-05-17 06:51:00] slot_write: slot=5 px=0xff653b12
-[2026-05-17 06:51:01] slot_read: slot=6 px=0xff000000
-[2026-05-17 06:51:01] slot_write: slot=6 px=0xff572b05
-[2026-05-17 06:51:01] slot_read: slot=7 px=0xff000000
-[2026-05-17 06:51:01] slot_write: slot=7 px=0xff613b16
-[2026-05-17 06:51:01] slot_read: slot=8 px=0xff000000
-[2026-05-17 06:51:01] slot_write: slot=8 px=0xff64401d
-[2026-05-17 06:51:01] slot_read: slot=9 px=0xff000000
-[2026-05-17 06:51:01] slot_write: slot=9 px=0xff573d17
-[2026-05-17 06:51:01] slot_read: slot=10 px=0xff000000
-[2026-05-17 06:51:01] slot_write: slot=10 px=0xff55411d
-[2026-05-17 06:51:01] slot_read: slot=11 px=0xff010000
-[2026-05-17 06:51:01] slot_write: slot=11 px=0xff55411d
-[2026-05-17 06:51:01] slot_read: slot=12 px=0xff0c0101
-[2026-05-17 06:51:01] slot_write: slot=12 px=0xff503e1e
-[2026-05-17 06:51:01] slot_read: slot=13 px=0xff1b0000
-[2026-05-17 06:51:01] slot_write: slot=13 px=0xff4c3c1d
-[2026-05-17 06:51:01] slot_read: slot=14 px=0xff000000
-[2026-05-17 06:51:01] slot_write: slot=14 px=0xff5b431d
-[2026-05-17 06:51:01] slot_read: slot=15 px=0xff2e0501
-[2026-05-17 06:51:01] slot_write: slot=15 px=0xff4a3d1d
-[2026-05-17 06:51:01] slot_read: slot=0 px=0xff421a06
-[2026-05-17 06:51:01] slot_write: slot=0 px=0xff483d22
-[2026-05-17 06:51:01] slot_read: slot=1 px=0xff4c2606
-[2026-05-17 06:51:01] slot_write: slot=1 px=0xff4a3f24
-[2026-05-17 06:51:01] slot_read: slot=2 px=0xff5a2b08
-[2026-05-17 06:51:01] slot_write: slot=2 px=0xff443e24
-[2026-05-17 06:51:01] slot_read: slot=3 px=0xff613309
-[2026-05-17 06:51:01] slot_write: slot=3 px=0xff413d27
-[2026-05-17 06:51:01] slot_read: slot=4 px=0xff603208
-[2026-05-17 06:51:01] slot_write: slot=4 px=0xff3e3c28
-[2026-05-17 06:51:01] slot_read: slot=5 px=0xff653b12
-[2026-05-17 06:51:01] slot_write: slot=5 px=0xff3d3c28
-[2026-05-17 06:51:01] slot_read: slot=6 px=0xff572b05
-[2026-05-17 06:51:01] slot_write: slot=6 px=0xff473e25
-[2026-05-17 06:51:01] slot_read: slot=7 px=0xff613b16
-[2026-05-17 06:51:01] slot_write: slot=7 px=0xff3a3a28
-[2026-05-17 06:51:01] slot_read: slot=8 px=0xff64401d
-[2026-05-17 06:51:01] slot_write: slot=8 px=0xff363827
-[2026-05-17 06:51:01] slot_read: slot=9 px=0xff573d17
-[2026-05-17 06:51:01] slot_write: slot=9 px=0xff373628
-[2026-05-17 06:51:01] slot_read: slot=10 px=0xff55411d
-[2026-05-17 06:51:01] slot_write: slot=10 px=0xff323327
-[2026-05-17 06:51:01] slot_read: slot=11 px=0xff55411d
-[2026-05-17 06:51:01] slot_write: slot=11 px=0xff2f3123
-[2026-05-17 06:51:01] slot_read: slot=12 px=0xff503e1e
-[2026-05-17 06:51:01] slot_read: slot=13 px=0xff4c3c1d
-[2026-05-17 06:51:02] slot_read: slot=14 px=0xff5b431d
-[2026-05-17 06:51:02] slot_read: slot=15 px=0xff4a3d1d
-[2026-05-17 06:51:02] slot_read: slot=0 px=0xff483d22
-[2026-05-17 06:51:02] slot_read: slot=1 px=0xff4a3f24
-[2026-05-17 06:51:02] slot_read: slot=2 px=0xff443e24
-[2026-05-17 06:51:02] slot_read: slot=3 px=0xff413d27
-[2026-05-17 06:51:02] slot_read: slot=4 px=0xff3e3c28
-[2026-05-17 06:51:02] slot_read: slot=5 px=0xff3d3c28
-[2026-05-17 06:51:02] slot_read: slot=6 px=0xff473e25
-[2026-05-17 06:51:02] slot_read: slot=7 px=0xff3a3a28
-[2026-05-17 06:51:02] slot_read: slot=8 px=0xff363827
-[2026-05-17 06:51:02] slot_read: slot=9 px=0xff373628
-[2026-05-17 06:51:02] slot_read: slot=10 px=0xff323327
-[2026-05-17 06:51:02] slot_read: slot=11 px=0xff2f3123
-[2026-05-17 06:51:02] frame_interval: fr=60 gap1=50030us gap2=33398us
-[2026-05-17 06:51:02] hb: fr=61 q=15 au=78 ab=427 stalls=0 max=0ms avg=0ms fps=24.2 netq=0
-[2026-05-17 06:51:03] audio_ratio: pcm=500 sil=0 total=500
-[2026-05-17 06:51:05] frame_interval: fr=120 gap1=50157us gap2=33252us
-[2026-05-17 06:51:05] hb: fr=121 q=15 au=137 ab=877 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
-[2026-05-17 06:51:05] audio_ratio: pcm=500 sil=0 total=1000
-[2026-05-17 06:51:07] frame_interval: fr=180 gap1=50030us gap2=33370us
-[2026-05-17 06:51:07] hb: fr=181 q=16 au=199 ab=1338 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
-[2026-05-17 06:51:08] audio_ratio: pcm=500 sil=0 total=1500
-[2026-05-17 06:51:10] frame_interval: fr=240 gap1=50029us gap2=33387us
-[2026-05-17 06:51:10] hb: fr=241 q=16 au=258 ab=1798 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
-[2026-05-17 06:51:11] audio_ratio: pcm=500 sil=0 total=2000
-[2026-05-17 06:51:12] frame_interval: fr=300 gap1=50033us gap2=33438us
-[2026-05-17 06:51:12] hb: fr=301 q=16 au=319 ab=2238 stalls=0 max=0ms avg=0ms fps=23.9 netq=0
-[2026-05-17 06:51:14] audio_ratio: pcm=500 sil=0 total=2500
-[2026-05-17 06:51:15] frame_interval: fr=360 gap1=50033us gap2=33351us
-[2026-05-17 06:51:15] hb: fr=362 q=16 au=379 ab=2696 stalls=0 max=0ms avg=0ms fps=24.1 netq=0
-[2026-05-17 06:51:16] audio_ratio: pcm=500 sil=0 total=3000
-[2026-05-17 06:51:17] frame_interval: fr=420 gap1=50041us gap2=33374us
-[2026-05-17 06:51:17] hb: fr=422 q=16 au=440 ab=3146 stalls=0 max=0ms avg=0ms fps=23.9 netq=0
-[2026-05-17 06:51:19] audio_ratio: pcm=500 sil=0 total=3500
-[2026-05-17 06:51:20] frame_interval: fr=480 gap1=50041us gap2=33370us
-[2026-05-17 06:51:20] hb: fr=483 q=15 au=500 ab=3602 stalls=0 max=0ms avg=0ms fps=23.9 netq=0
-[2026-05-17 06:51:22] audio_ratio: pcm=500 sil=0 total=4000
-[2026-05-17 06:51:22] frame_interval: fr=540 gap1=50073us gap2=33355us
-[2026-05-17 06:51:22] hb: fr=543 q=16 au=560 ab=4050 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
-[2026-05-17 06:51:24] show_player: loop exit running=0 playing=1 vdec_err=0 fr=574
-[2026-05-17 06:51:24] timing: vsync handler unregistered
-[2026-05-17 06:51:24] audio_thread: exit
-[2026-05-17 06:51:24] show_player: decode thread joined
-[2026-05-17 06:51:24] show_player: audio thread joined
-[2026-05-17 06:51:24] show_player: upload thread joined
-[2026-05-17 06:51:24] show_player: done
+[2026-05-21 01:12:05] show_player: stream_open OK
+[2026-05-21 01:12:05] jbuf: 16 slots 960x540 ~2025 KB each
+[2026-05-21 01:12:05] jbuf_addr: slot=0 ptr=0x58300180
+[2026-05-21 01:12:05] jbuf_addr: slot=1 ptr=0x584fa600
+[2026-05-21 01:12:05] jbuf_addr: slot=2 ptr=0x586f4a80
+[2026-05-21 01:12:05] jbuf_addr: slot=3 ptr=0x588eef00
+[2026-05-21 01:12:05] jbuf_addr: slot=4 ptr=0x58ae9380
+[2026-05-21 01:12:05] jbuf_addr: slot=5 ptr=0x58ce3800
+[2026-05-21 01:12:05] jbuf_addr: slot=6 ptr=0x58eddc80
+[2026-05-21 01:12:05] jbuf_addr: slot=7 ptr=0x590d8100
+[2026-05-21 01:12:05] jbuf_addr: slot=8 ptr=0x592d2580
+[2026-05-21 01:12:05] jbuf_addr: slot=9 ptr=0x594cca00
+[2026-05-21 01:12:05] jbuf_addr: slot=10 ptr=0x596c6e80
+[2026-05-21 01:12:05] jbuf_addr: slot=11 ptr=0x598c1300
+[2026-05-21 01:12:05] jbuf_addr: slot=12 ptr=0x59abb780
+[2026-05-21 01:12:05] jbuf_addr: slot=13 ptr=0x59cb5c00
+[2026-05-21 01:12:05] jbuf_addr: slot=14 ptr=0x59eb0080
+[2026-05-21 01:12:05] jbuf_addr: slot=15 ptr=0x5a0aa500
+[2026-05-21 01:12:05] vid_gpu: init done
+[2026-05-21 01:12:05] jbuf: pre-fill start
+[2026-05-21 01:12:05] show_player: first pkt byte=0x47
+[2026-05-21 01:12:05] vdec_in_pts: n=1 pts=128072 (=0x000000000001f448)
+[2026-05-21 01:12:05] vdec_in_pts: n=2 pts=131826 (=0x00000000000202f2)
+[2026-05-21 01:12:05] vdec_in_pts: n=3 pts=135580 (=0x000000000002119c)
+[2026-05-21 01:12:05] vdec_in_pts: n=4 pts=139333 (=0x0000000000022045)
+[2026-05-21 01:12:05] vdec_in_pts: n=5 pts=143087 (=0x0000000000022eef)
+[2026-05-21 01:12:05] adec_pes: bytes=00 00 01 c0 len=2894
+[2026-05-21 01:12:05] vdec_in_pts: n=6 pts=146841 (=0x0000000000023d99)
+[2026-05-21 01:12:05] vdec_in_pts: n=7 pts=150595 (=0x0000000000024c43)
+[2026-05-21 01:12:05] adec_frame: hz=48000 ch=2 samples=1152
+[2026-05-21 01:12:05] vdec: actual 960x408 (alloc 960x540)
+[2026-05-21 01:12:05] slot_write: slot=0 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=1 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] timing: display=60000/1001 fps=24000/1001
+[2026-05-21 01:12:05] fps_detect: frc=1 -> 24000/1001
+[2026-05-21 01:12:05] vdec_in_pts: n=8 pts=154348 (=0x0000000000025aec)
+[2026-05-21 01:12:05] slot_write: slot=1 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=2 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=2 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=3 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] vdec_in_pts: n=9 pts=158102 (=0x0000000000026996)
+[2026-05-21 01:12:05] vdec_in_pts: n=10 pts=161856 (=0x0000000000027840)
+[2026-05-21 01:12:05] slot_write: slot=3 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=4 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=4 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=5 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=5 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=6 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=6 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=7 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=7 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=8 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=8 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=9 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=9 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=10 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=10 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=11 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=11 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=12 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] jbuf: pre-fill done — starting threads
+[2026-05-21 01:12:05] timing: vsync handler registered
+[2026-05-21 01:12:05] blend_init: tick=1 n=12 dur=41708us
+[2026-05-21 01:12:05] slot_write: slot=12 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=13 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=13 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=14 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] blend_init: tick=2 n=14 dur=41708us
+[2026-05-21 01:12:05] slot_write: slot=14 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=15 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] slot_write: slot=15 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=16 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] blend_init: tick=3 n=16 dur=25025us
+[2026-05-21 01:12:05] blend_init: tick=4 n=16 dur=8342us
+[2026-05-21 01:12:05] cf: t=40148768us delta=0us blend=0.500 fr=0 dur_a=8342
+[2026-05-21 01:12:05] disp_seq: fr=1 seq=2 window=0
+[2026-05-21 01:12:05] slot_write: slot=0 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=17 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] blend_init: tick=5 n=16 dur=33367us
+[2026-05-21 01:12:05] blend_init: tick=6 n=16 dur=16684us
+[2026-05-21 01:12:05] blend_init: tick=7 n=16 dur=1us
+[2026-05-21 01:12:05] cf: t=40198942us delta=50174us blend=0.000 fr=1 dur_a=1
+[2026-05-21 01:12:05] disp_seq: fr=2 seq=3 window=0
+[2026-05-21 01:12:05] slot_write: slot=1 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=18 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] blend_init: tick=8 n=16 dur=25026us
+[2026-05-21 01:12:05] blend_init: tick=9 n=16 dur=8343us
+[2026-05-21 01:12:05] cf: t=40232174us delta=33232us blend=0.500 fr=2 dur_a=8343
+[2026-05-21 01:12:05] disp_seq: fr=3 seq=4 window=0
+[2026-05-21 01:12:05] slot_write: slot=2 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=19 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] blend_init: tick=10 n=16 dur=33368us
+[2026-05-21 01:12:05] blend_init: tick=11 n=16 dur=16685us
+[2026-05-21 01:12:05] blend_init: tick=12 n=16 dur=2us
+[2026-05-21 01:12:05] cf: t=40282210us delta=50036us blend=0.000 fr=3 dur_a=2
+[2026-05-21 01:12:05] disp_seq: fr=4 seq=5 window=0
+[2026-05-21 01:12:05] slot_write: slot=3 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=20 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] blend_init: tick=13 n=16 dur=25027us
+[2026-05-21 01:12:05] blend_init: tick=14 n=16 dur=8344us
+[2026-05-21 01:12:05] cf: t=40315597us delta=33387us blend=0.500 fr=4 dur_a=8344
+[2026-05-21 01:12:05] disp_seq: fr=5 seq=6 window=0
+[2026-05-21 01:12:05] slot_write: slot=4 px=0xff000000
+[2026-05-21 01:12:05] vdec_pts: n=21 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:05] blend_init: tick=15 n=16 dur=33369us
+[2026-05-21 01:12:05] blend_init: tick=16 n=16 dur=16686us
+[2026-05-21 01:12:06] blend_init: tick=17 n=16 dur=3us
+[2026-05-21 01:12:06] cf: t=40365650us delta=50053us blend=0.000 fr=5 dur_a=3
+[2026-05-21 01:12:06] disp_seq: fr=6 seq=7 window=0
+[2026-05-21 01:12:06] slot_write: slot=5 px=0xff000000
+[2026-05-21 01:12:06] vdec_pts: n=22 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] blend_init: tick=18 n=16 dur=25028us
+[2026-05-21 01:12:06] blend_init: tick=19 n=16 dur=8345us
+[2026-05-21 01:12:06] cf: t=40399007us delta=33357us blend=0.500 fr=6 dur_a=8345
+[2026-05-21 01:12:06] disp_seq: fr=7 seq=8 window=0
+[2026-05-21 01:12:06] slot_write: slot=6 px=0xff000000
+[2026-05-21 01:12:06] vdec_pts: n=23 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] blend_init: tick=20 n=16 dur=33370us
+[2026-05-21 01:12:06] blend_init: tick=21 n=16 dur=16687us
+[2026-05-21 01:12:06] blend_init: tick=22 n=16 dur=4us
+[2026-05-21 01:12:06] cf: t=40449063us delta=50056us blend=0.000 fr=7 dur_a=4
+[2026-05-21 01:12:06] disp_seq: fr=8 seq=9 window=0
+[2026-05-21 01:12:06] slot_write: slot=7 px=0xff000000
+[2026-05-21 01:12:06] vdec_pts: n=24 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] blend_init: tick=23 n=16 dur=25029us
+[2026-05-21 01:12:06] blend_init: tick=24 n=16 dur=8346us
+[2026-05-21 01:12:06] cf: t=40482476us delta=33413us blend=0.500 fr=8 dur_a=8346
+[2026-05-21 01:12:06] disp_seq: fr=9 seq=10 window=0
+[2026-05-21 01:12:06] slot_write: slot=8 px=0xff000000
+[2026-05-21 01:12:06] vdec_pts: n=25 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] blend_init: tick=25 n=16 dur=33371us
+[2026-05-21 01:12:06] blend_init: tick=26 n=16 dur=16688us
+[2026-05-21 01:12:06] blend_init: tick=27 n=16 dur=5us
+[2026-05-21 01:12:06] cf: t=40532486us delta=50010us blend=0.000 fr=9 dur_a=5
+[2026-05-21 01:12:06] disp_seq: fr=10 seq=11 window=0
+[2026-05-21 01:12:06] slot_write: slot=9 px=0xff000000
+[2026-05-21 01:12:06] vdec_pts: n=26 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] blend_init: tick=28 n=16 dur=25030us
+[2026-05-21 01:12:06] blend_init: tick=29 n=16 dur=8347us
+[2026-05-21 01:12:06] cf: t=40565848us delta=33362us blend=0.500 fr=10 dur_a=8347
+[2026-05-21 01:12:06] disp_seq: fr=11 seq=12 window=0
+[2026-05-21 01:12:06] slot_write: slot=10 px=0xff000000
+[2026-05-21 01:12:06] vdec_pts: n=27 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] blend_init: tick=30 n=16 dur=33372us
+[2026-05-21 01:12:06] cf: t=40615899us delta=50051us blend=0.000 fr=11 dur_a=6
+[2026-05-21 01:12:06] disp_seq: fr=12 seq=13 window=0
+[2026-05-21 01:12:06] slot_write: slot=11 px=0xff000000
+[2026-05-21 01:12:06] vdec_pts: n=28 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] cf: t=40649260us delta=33361us blend=0.500 fr=12 dur_a=8348
+[2026-05-21 01:12:06] disp_seq: fr=13 seq=14 window=0
+[2026-05-21 01:12:06] slot_write: slot=12 px=0xff010000
+[2026-05-21 01:12:06] vdec_pts: n=29 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] cf: t=40699317us delta=50057us blend=0.000 fr=13 dur_a=7
+[2026-05-21 01:12:06] disp_seq: fr=14 seq=15 window=0
+[2026-05-21 01:12:06] slot_write: slot=13 px=0xff0c0101
+[2026-05-21 01:12:06] vdec_pts: n=30 raw_lo=0xffffffff raw_hi=0xffffffff pts_us=0
+[2026-05-21 01:12:06] cf: t=40732685us delta=33368us blend=0.500 fr=14 dur_a=8349
+[2026-05-21 01:12:06] disp_seq: fr=15 seq=16 window=0
+[2026-05-21 01:12:06] slot_write: slot=14 px=0xff1b0000
+[2026-05-21 01:12:06] cf: t=40782772us delta=50087us blend=0.000 fr=15 dur_a=8
+[2026-05-21 01:12:06] disp_seq: fr=16 seq=17 window=0
+[2026-05-21 01:12:06] slot_write: slot=15 px=0xff2e0501
+[2026-05-21 01:12:06] cf: t=40816108us delta=33336us blend=0.501 fr=16 dur_a=8350
+[2026-05-21 01:12:06] disp_seq: fr=17 seq=18 window=0
+[2026-05-21 01:12:06] slot_write: slot=0 px=0xff421a06
+[2026-05-21 01:12:06] cf: t=40866155us delta=50047us blend=0.001 fr=17 dur_a=9
+[2026-05-21 01:12:06] disp_seq: fr=18 seq=19 window=0
+[2026-05-21 01:12:06] slot_write: slot=1 px=0xff4c2606
+[2026-05-21 01:12:06] cf: t=40899521us delta=33366us blend=0.501 fr=18 dur_a=8351
+[2026-05-21 01:12:06] disp_seq: fr=19 seq=20 window=0
+[2026-05-21 01:12:06] slot_write: slot=2 px=0xff572b05
+[2026-05-21 01:12:06] cf: t=40949575us delta=50054us blend=0.001 fr=19 dur_a=10
+[2026-05-21 01:12:06] disp_seq: fr=20 seq=21 window=0
+[2026-05-21 01:12:06] slot_write: slot=3 px=0xff5a2b08
+[2026-05-21 01:12:06] cf: t=40982951us delta=33376us blend=0.501 fr=20 dur_a=8352
+[2026-05-21 01:12:06] disp_seq: fr=21 seq=22 window=0
+[2026-05-21 01:12:06] slot_write: slot=4 px=0xff613309
+[2026-05-21 01:12:06] cf: t=41032991us delta=50040us blend=0.001 fr=21 dur_a=11
+[2026-05-21 01:12:06] disp_seq: fr=22 seq=23 window=0
+[2026-05-21 01:12:06] slot_write: slot=5 px=0xff603208
+[2026-05-21 01:12:06] cf: t=41066365us delta=33374us blend=0.501 fr=22 dur_a=8353
+[2026-05-21 01:12:06] disp_seq: fr=23 seq=24 window=0
+[2026-05-21 01:12:06] slot_write: slot=6 px=0xff653b12
+[2026-05-21 01:12:06] cf: t=41116410us delta=50045us blend=0.001 fr=23 dur_a=12
+[2026-05-21 01:12:06] disp_seq: fr=24 seq=25 window=0
+[2026-05-21 01:12:06] slot_write: slot=7 px=0xff613b16
+[2026-05-21 01:12:06] cf: t=41149765us delta=33355us blend=0.501 fr=24 dur_a=8354
+[2026-05-21 01:12:06] slot_write: slot=8 px=0xff64401d
+[2026-05-21 01:12:06] cf: t=41199820us delta=50055us blend=0.001 fr=25 dur_a=13
+[2026-05-21 01:12:06] slot_write: slot=9 px=0xff573d17
+[2026-05-21 01:12:06] cf: t=41233188us delta=33368us blend=0.501 fr=26 dur_a=8355
+[2026-05-21 01:12:06] slot_write: slot=10 px=0xff5b431d
+[2026-05-21 01:12:06] cf: t=41283237us delta=50049us blend=0.001 fr=27 dur_a=14
+[2026-05-21 01:12:06] slot_write: slot=11 px=0xff55411d
+[2026-05-21 01:12:06] cf: t=41316616us delta=33379us blend=0.501 fr=28 dur_a=8356
+[2026-05-21 01:12:06] slot_write: slot=12 px=0xff55411d
+[2026-05-21 01:12:07] cf: t=41366651us delta=50035us blend=0.001 fr=29 dur_a=15
+[2026-05-21 01:12:07] slot_write: slot=13 px=0xff503e1e
+[2026-05-21 01:12:07] cf: t=41400031us delta=33380us blend=0.501 fr=30 dur_a=8357
+[2026-05-21 01:12:07] slot_write: slot=14 px=0xff4c3c1d
+[2026-05-21 01:12:07] cf: t=41450084us delta=50053us blend=0.001 fr=31 dur_a=16
+[2026-05-21 01:12:07] slot_write: slot=15 px=0xff4a3d1d
+[2026-05-21 01:12:07] cf: t=41483450us delta=33366us blend=0.501 fr=32 dur_a=8358
+[2026-05-21 01:12:07] slot_write: slot=0 px=0xff483d22
+[2026-05-21 01:12:07] cf: t=41533518us delta=50068us blend=0.001 fr=33 dur_a=17
+[2026-05-21 01:12:07] slot_write: slot=1 px=0xff4a3f24
+[2026-05-21 01:12:07] cf: t=41566877us delta=33359us blend=0.501 fr=34 dur_a=8359
+[2026-05-21 01:12:07] slot_write: slot=2 px=0xff473e25
+[2026-05-21 01:12:07] cf: t=41616929us delta=50052us blend=0.001 fr=35 dur_a=18
+[2026-05-21 01:12:07] slot_write: slot=3 px=0xff443e24
+[2026-05-21 01:12:07] cf: t=41650291us delta=33362us blend=0.501 fr=36 dur_a=8360
+[2026-05-21 01:12:07] slot_write: slot=4 px=0xff413d27
+[2026-05-21 01:12:07] cf: t=41700341us delta=50050us blend=0.001 fr=37 dur_a=19
+[2026-05-21 01:12:07] slot_write: slot=5 px=0xff3e3c28
+[2026-05-21 01:12:07] cf: t=41733709us delta=33368us blend=0.501 fr=38 dur_a=8361
+[2026-05-21 01:12:07] slot_write: slot=6 px=0xff3d3c28
+[2026-05-21 01:12:07] cf: t=41783768us delta=50059us blend=0.001 fr=39 dur_a=20
+[2026-05-21 01:12:07] slot_write: slot=7 px=0xff3a3a28
+[2026-05-21 01:12:07] cf: t=41817131us delta=33363us blend=0.501 fr=40 dur_a=8362
+[2026-05-21 01:12:07] slot_write: slot=8 px=0xff363827
+[2026-05-21 01:12:07] cf: t=41867193us delta=50062us blend=0.001 fr=41 dur_a=21
+[2026-05-21 01:12:07] slot_write: slot=9 px=0xff373628
+[2026-05-21 01:12:07] cf: t=41900550us delta=33357us blend=0.501 fr=42 dur_a=8363
+[2026-05-21 01:12:07] slot_write: slot=10 px=0xff2f3123
+[2026-05-21 01:12:07] cf: t=41950611us delta=50061us blend=0.001 fr=43 dur_a=22
+[2026-05-21 01:12:07] slot_write: slot=11 px=0xff323327
+[2026-05-21 01:12:07] cf: t=41983958us delta=33347us blend=0.501 fr=44 dur_a=8364
+[2026-05-21 01:12:07] cf: t=42034025us delta=50067us blend=0.001 fr=45 dur_a=23
+[2026-05-21 01:12:07] cf: t=42067394us delta=33369us blend=0.501 fr=46 dur_a=8365
+[2026-05-21 01:12:07] cf: t=42117421us delta=50027us blend=0.001 fr=47 dur_a=24
+[2026-05-21 01:12:07] cf: t=42150968us delta=33547us blend=0.501 fr=48 dur_a=8366
+[2026-05-21 01:12:07] cf: t=42200854us delta=49886us blend=0.001 fr=49 dur_a=25
+[2026-05-21 01:12:07] cf: t=42234222us delta=33368us blend=0.502 fr=50 dur_a=8367
+[2026-05-21 01:12:07] cf: t=42284307us delta=50085us blend=0.002 fr=51 dur_a=26
+[2026-05-21 01:12:07] cf: t=42317640us delta=33333us blend=0.502 fr=52 dur_a=8368
+[2026-05-21 01:12:08] cf: t=42367706us delta=50066us blend=0.002 fr=53 dur_a=27
+[2026-05-21 01:12:08] cf: t=42401063us delta=33357us blend=0.502 fr=54 dur_a=8369
+[2026-05-21 01:12:08] cf: t=42451113us delta=50050us blend=0.002 fr=55 dur_a=28
+[2026-05-21 01:12:08] cf: t=42484501us delta=33388us blend=0.502 fr=56 dur_a=8370
+[2026-05-21 01:12:08] cf: t=42534542us delta=50041us blend=0.002 fr=57 dur_a=29
+[2026-05-21 01:12:08] cf: t=42567905us delta=33363us blend=0.502 fr=58 dur_a=8371
+[2026-05-21 01:12:08] cf: t=42617954us delta=50049us blend=0.002 fr=59 dur_a=30
+[2026-05-21 01:12:08] frame_interval: fr=60 gap1=33363us gap2=50048us audio=3885176us
+[2026-05-21 01:12:08] blend_dist: fr=60 pure=91 mid=60 spill_max=16682us
+[2026-05-21 01:12:08] avsync: smooth=0us locked=0 audio=3885176us video=0us bias=0us
+[2026-05-21 01:12:08] vb: t=42618041us fr=60 disp=1 dur_a=25055 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] hb: fr=60 q=16 au=77 ab=474 stalls=0 max=0ms avg=0ms fps=23.8 netq=0
+[2026-05-21 01:12:08] vb: t=42634646us fr=60 disp=0 dur_a=8372 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42651316us delta=33362us blend=0.502 fr=60 dur_a=8372
+[2026-05-21 01:12:08] vb: t=42651390us fr=61 disp=1 dur_a=33397 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=42668021us fr=61 disp=0 dur_a=16714 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=42684697us fr=61 disp=1 dur_a=31 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42701371us delta=50055us blend=0.002 fr=61 dur_a=31
+[2026-05-21 01:12:08] vb: t=42701445us fr=62 disp=0 dur_a=25056 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=42718055us fr=62 disp=1 dur_a=8373 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42734757us delta=33386us blend=0.502 fr=62 dur_a=8373
+[2026-05-21 01:12:08] vb: t=42734845us fr=63 disp=0 dur_a=33398 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=42751428us fr=63 disp=1 dur_a=16715 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] audio_ratio: pcm=500 sil=0 total=500
+[2026-05-21 01:12:08] audio_clock: clk=4029167us blocks=500
+[2026-05-21 01:12:08] vb: t=42768108us fr=63 disp=0 dur_a=32 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42784790us delta=50033us blend=0.002 fr=63 dur_a=32
+[2026-05-21 01:12:08] vb: t=42784863us fr=64 disp=1 dur_a=25057 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=42801595us fr=64 disp=0 dur_a=8374 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42818150us delta=33360us blend=0.502 fr=64 dur_a=8374
+[2026-05-21 01:12:08] vb: t=42818224us fr=65 disp=1 dur_a=33399 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=42834851us fr=65 disp=0 dur_a=16716 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=42851536us fr=65 disp=1 dur_a=33 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42868231us delta=50081us blend=0.002 fr=65 dur_a=33
+[2026-05-21 01:12:08] vb: t=42868307us fr=66 disp=0 dur_a=25058 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=42884896us fr=66 disp=1 dur_a=8375 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42901578us delta=33347us blend=0.502 fr=66 dur_a=8375
+[2026-05-21 01:12:08] vb: t=42901662us fr=67 disp=0 dur_a=33400 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=42918261us fr=67 disp=1 dur_a=16717 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=42935008us fr=67 disp=0 dur_a=34 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42951626us delta=50048us blend=0.002 fr=67 dur_a=34
+[2026-05-21 01:12:08] vb: t=42951701us fr=68 disp=1 dur_a=25059 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=42968302us fr=68 disp=0 dur_a=8376 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=42984994us delta=33368us blend=0.502 fr=68 dur_a=8376
+[2026-05-21 01:12:08] vb: t=42985068us fr=69 disp=1 dur_a=33401 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=43001676us fr=69 disp=0 dur_a=16718 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=43018376us fr=69 disp=1 dur_a=35 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43035051us delta=50057us blend=0.002 fr=69 dur_a=35
+[2026-05-21 01:12:08] vb: t=43035135us fr=70 disp=0 dur_a=25060 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=43051759us fr=70 disp=1 dur_a=8377 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43068414us delta=33363us blend=0.502 fr=70 dur_a=8377
+[2026-05-21 01:12:08] vb: t=43068492us fr=71 disp=0 dur_a=33402 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=43085102us fr=71 disp=1 dur_a=16719 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=43101769us fr=71 disp=0 dur_a=36 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43118506us delta=50092us blend=0.002 fr=71 dur_a=36
+[2026-05-21 01:12:08] vb: t=43118582us fr=72 disp=1 dur_a=25061 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=43135213us fr=72 disp=0 dur_a=8378 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43151829us delta=33323us blend=0.502 fr=72 dur_a=8378
+[2026-05-21 01:12:08] vb: t=43151904us fr=73 disp=1 dur_a=33403 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=43168524us fr=73 disp=0 dur_a=16720 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=43185209us fr=73 disp=1 dur_a=37 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43201885us delta=50056us blend=0.002 fr=73 dur_a=37
+[2026-05-21 01:12:08] vb: t=43201970us fr=74 disp=0 dur_a=25062 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=43218582us fr=74 disp=1 dur_a=8379 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43235254us delta=33369us blend=0.502 fr=74 dur_a=8379
+[2026-05-21 01:12:08] vb: t=43235327us fr=75 disp=0 dur_a=33404 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=43251940us fr=75 disp=1 dur_a=16721 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=43268629us fr=75 disp=0 dur_a=38 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43285298us delta=50044us blend=0.002 fr=75 dur_a=38
+[2026-05-21 01:12:08] vb: t=43285386us fr=76 disp=1 dur_a=25063 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:08] vb: t=43301989us fr=76 disp=0 dur_a=8380 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] cf: t=43318670us delta=33372us blend=0.502 fr=76 dur_a=8380
+[2026-05-21 01:12:08] vb: t=43318798us fr=77 disp=1 dur_a=33405 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:08] vb: t=43335369us fr=77 disp=0 dur_a=16722 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:08] vb: t=43352049us fr=77 disp=1 dur_a=39 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43368703us delta=50033us blend=0.002 fr=77 dur_a=39
+[2026-05-21 01:12:09] vb: t=43368778us fr=78 disp=0 dur_a=25064 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:09] vb: t=43385400us fr=78 disp=1 dur_a=8381 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43402086us delta=33383us blend=0.502 fr=78 dur_a=8381
+[2026-05-21 01:12:09] vb: t=43402170us fr=79 disp=0 dur_a=33406 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:09] vb: t=43418762us fr=79 disp=1 dur_a=16723 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=43435476us fr=79 disp=0 dur_a=40 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43452267us delta=50181us blend=0.002 fr=79 dur_a=40
+[2026-05-21 01:12:09] vb: t=43452366us fr=80 disp=1 dur_a=25065 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:09] vb: t=43468832us fr=80 disp=0 dur_a=8382 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43485520us delta=33253us blend=0.502 fr=80 dur_a=8382
+[2026-05-21 01:12:09] vb: t=43485594us fr=81 disp=1 dur_a=33407 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:09] vb: t=43502197us fr=81 disp=0 dur_a=16724 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=43518921us fr=81 disp=1 dur_a=41 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43535557us delta=50037us blend=0.002 fr=81 dur_a=41
+[2026-05-21 01:12:09] vb: t=43535630us fr=82 disp=0 dur_a=25066 do_pop=1 render_blend=1 blend=0.002 q=15
+[2026-05-21 01:12:09] vb: t=43552254us fr=82 disp=1 dur_a=8383 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43568927us delta=33370us blend=0.502 fr=82 dur_a=8383
+[2026-05-21 01:12:09] vb: t=43569000us fr=83 disp=0 dur_a=33408 do_pop=1 render_blend=1 blend=0.502 q=15
+[2026-05-21 01:12:09] vb: t=43585694us fr=83 disp=1 dur_a=16725 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=43602298us fr=83 disp=0 dur_a=42 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43618981us delta=50054us blend=0.003 fr=83 dur_a=42
+[2026-05-21 01:12:09] vb: t=43619055us fr=84 disp=1 dur_a=25067 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=43635693us fr=84 disp=0 dur_a=8384 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43652365us delta=33384us blend=0.503 fr=84 dur_a=8384
+[2026-05-21 01:12:09] vb: t=43652438us fr=85 disp=1 dur_a=33409 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=43669054us fr=85 disp=0 dur_a=16726 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=43685722us fr=85 disp=1 dur_a=43 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43702386us delta=50021us blend=0.003 fr=85 dur_a=43
+[2026-05-21 01:12:09] vb: t=43702479us fr=86 disp=0 dur_a=25068 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=43719127us fr=86 disp=1 dur_a=8385 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43735770us delta=33384us blend=0.503 fr=86 dur_a=8385
+[2026-05-21 01:12:09] vb: t=43735845us fr=87 disp=0 dur_a=33410 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=43752442us fr=87 disp=1 dur_a=16727 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=43769129us fr=87 disp=0 dur_a=44 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43785818us delta=50048us blend=0.003 fr=87 dur_a=44
+[2026-05-21 01:12:09] vb: t=43785892us fr=88 disp=1 dur_a=25069 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=43802509us fr=88 disp=0 dur_a=8386 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43819197us delta=33379us blend=0.503 fr=88 dur_a=8386
+[2026-05-21 01:12:09] vb: t=43819270us fr=89 disp=1 dur_a=33411 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=43835881us fr=89 disp=0 dur_a=16728 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=43852570us fr=89 disp=1 dur_a=45 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43869228us delta=50031us blend=0.003 fr=89 dur_a=45
+[2026-05-21 01:12:09] vb: t=43869314us fr=90 disp=0 dur_a=25070 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=43885956us fr=90 disp=1 dur_a=8387 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43902617us delta=33389us blend=0.503 fr=90 dur_a=8387
+[2026-05-21 01:12:09] vb: t=43902690us fr=91 disp=0 dur_a=33412 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=43919301us fr=91 disp=1 dur_a=16729 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=43935981us fr=91 disp=0 dur_a=46 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43952666us delta=50049us blend=0.003 fr=91 dur_a=46
+[2026-05-21 01:12:09] vb: t=43952739us fr=92 disp=1 dur_a=25071 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=43969383us fr=92 disp=0 dur_a=8388 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=43986023us delta=33357us blend=0.503 fr=92 dur_a=8388
+[2026-05-21 01:12:09] vb: t=43986097us fr=93 disp=1 dur_a=33413 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=44002712us fr=93 disp=0 dur_a=16730 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=44019440us fr=93 disp=1 dur_a=47 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44036082us delta=50059us blend=0.003 fr=93 dur_a=47
+[2026-05-21 01:12:09] vb: t=44036168us fr=94 disp=0 dur_a=25072 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=44052770us fr=94 disp=1 dur_a=8389 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44069440us delta=33358us blend=0.503 fr=94 dur_a=8389
+[2026-05-21 01:12:09] vb: t=44069513us fr=95 disp=0 dur_a=33414 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=44086131us fr=95 disp=1 dur_a=16731 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=44102847us fr=95 disp=0 dur_a=48 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44119498us delta=50058us blend=0.003 fr=95 dur_a=48
+[2026-05-21 01:12:09] vb: t=44119572us fr=96 disp=1 dur_a=25073 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=44136210us fr=96 disp=0 dur_a=8390 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44152878us delta=33380us blend=0.503 fr=96 dur_a=8390
+[2026-05-21 01:12:09] vb: t=44152952us fr=97 disp=1 dur_a=33415 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=44169578us fr=97 disp=0 dur_a=16732 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=44186246us fr=97 disp=1 dur_a=49 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44202910us delta=50032us blend=0.003 fr=97 dur_a=49
+[2026-05-21 01:12:09] vb: t=44202984us fr=98 disp=0 dur_a=25074 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=44219600us fr=98 disp=1 dur_a=8391 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44236364us delta=33454us blend=0.503 fr=98 dur_a=8391
+[2026-05-21 01:12:09] vb: t=44236466us fr=99 disp=0 dur_a=33416 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=44252979us fr=99 disp=1 dur_a=16733 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=44269647us fr=99 disp=0 dur_a=50 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44286329us delta=49965us blend=0.003 fr=99 dur_a=50
+[2026-05-21 01:12:09] vb: t=44286403us fr=100 disp=1 dur_a=25075 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:09] vb: t=44303027us fr=100 disp=0 dur_a=8392 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] cf: t=44319700us delta=33371us blend=0.503 fr=100 dur_a=8392
+[2026-05-21 01:12:09] vb: t=44319775us fr=101 disp=1 dur_a=33417 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:09] vb: t=44336427us fr=101 disp=0 dur_a=16734 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:09] vb: t=44353117us fr=101 disp=1 dur_a=51 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44369755us delta=50055us blend=0.003 fr=101 dur_a=51
+[2026-05-21 01:12:10] vb: t=44369835us fr=102 disp=0 dur_a=25076 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44386463us fr=102 disp=1 dur_a=8393 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44403112us delta=33357us blend=0.503 fr=102 dur_a=8393
+[2026-05-21 01:12:10] vb: t=44403186us fr=103 disp=0 dur_a=33418 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:10] vb: t=44419790us fr=103 disp=1 dur_a=16735 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=44436508us fr=103 disp=0 dur_a=52 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44453166us delta=50054us blend=0.003 fr=103 dur_a=52
+[2026-05-21 01:12:10] vb: t=44453240us fr=104 disp=1 dur_a=25077 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44469883us fr=104 disp=0 dur_a=8394 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44486559us delta=33393us blend=0.503 fr=104 dur_a=8394
+[2026-05-21 01:12:10] vb: t=44486633us fr=105 disp=1 dur_a=33419 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:10] vb: t=44503229us fr=105 disp=0 dur_a=16736 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=44519909us fr=105 disp=1 dur_a=53 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44536588us delta=50029us blend=0.003 fr=105 dur_a=53
+[2026-05-21 01:12:10] vb: t=44536662us fr=106 disp=0 dur_a=25078 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44553288us fr=106 disp=1 dur_a=8395 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44569953us delta=33365us blend=0.503 fr=106 dur_a=8395
+[2026-05-21 01:12:10] vb: t=44570027us fr=107 disp=0 dur_a=33420 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:10] vb: t=44586645us fr=107 disp=1 dur_a=16737 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=44603328us fr=107 disp=0 dur_a=54 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44619996us delta=50043us blend=0.003 fr=107 dur_a=54
+[2026-05-21 01:12:10] vb: t=44620071us fr=108 disp=1 dur_a=25079 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44636691us fr=108 disp=0 dur_a=8396 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44653378us delta=33382us blend=0.503 fr=108 dur_a=8396
+[2026-05-21 01:12:10] vb: t=44653451us fr=109 disp=1 dur_a=33421 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:10] vb: t=44670073us fr=109 disp=0 dur_a=16738 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=44686736us fr=109 disp=1 dur_a=55 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44703437us delta=50059us blend=0.003 fr=109 dur_a=55
+[2026-05-21 01:12:10] vb: t=44703511us fr=110 disp=0 dur_a=25080 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44720110us fr=110 disp=1 dur_a=8397 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44736785us delta=33348us blend=0.503 fr=110 dur_a=8397
+[2026-05-21 01:12:10] vb: t=44736859us fr=111 disp=0 dur_a=33422 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:10] vb: t=44753507us fr=111 disp=1 dur_a=16739 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=44770165us fr=111 disp=0 dur_a=56 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44786827us delta=50042us blend=0.003 fr=111 dur_a=56
+[2026-05-21 01:12:10] vb: t=44786902us fr=112 disp=1 dur_a=25081 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44803531us fr=112 disp=0 dur_a=8398 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44820234us delta=33407us blend=0.503 fr=112 dur_a=8398
+[2026-05-21 01:12:10] vb: t=44820309us fr=113 disp=1 dur_a=33423 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:10] vb: t=44836886us fr=113 disp=0 dur_a=16740 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=44853590us fr=113 disp=1 dur_a=57 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44870266us delta=50032us blend=0.003 fr=113 dur_a=57
+[2026-05-21 01:12:10] vb: t=44870352us fr=114 disp=0 dur_a=25082 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44887059us fr=114 disp=1 dur_a=8399 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44903627us delta=33361us blend=0.503 fr=114 dur_a=8399
+[2026-05-21 01:12:10] vb: t=44903701us fr=115 disp=0 dur_a=33424 do_pop=1 render_blend=1 blend=0.503 q=15
+[2026-05-21 01:12:10] vb: t=44920324us fr=115 disp=1 dur_a=16741 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=44937012us fr=115 disp=0 dur_a=58 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44953670us delta=50043us blend=0.003 fr=115 dur_a=58
+[2026-05-21 01:12:10] vb: t=44953745us fr=116 disp=1 dur_a=25083 do_pop=1 render_blend=1 blend=0.003 q=15
+[2026-05-21 01:12:10] vb: t=44970381us fr=116 disp=0 dur_a=8400 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=44987047us delta=33377us blend=0.504 fr=116 dur_a=8400
+[2026-05-21 01:12:10] vb: t=44987121us fr=117 disp=1 dur_a=33425 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:10] vb: t=45003725us fr=117 disp=0 dur_a=16742 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=45020461us fr=117 disp=1 dur_a=59 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45037103us delta=50056us blend=0.004 fr=117 dur_a=59
+[2026-05-21 01:12:10] vb: t=45037177us fr=118 disp=0 dur_a=25084 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:10] vb: t=45053811us fr=118 disp=1 dur_a=8401 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45070481us delta=33378us blend=0.504 fr=118 dur_a=8401
+[2026-05-21 01:12:10] vb: t=45070554us fr=119 disp=0 dur_a=33426 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:10] vb: t=45087356us fr=119 disp=1 dur_a=16743 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=45103843us fr=119 disp=0 dur_a=60 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45120522us delta=50041us blend=0.004 fr=119 dur_a=60
+[2026-05-21 01:12:10] frame_interval: fr=120 gap1=33377us gap2=50041us audio=6386353us
+[2026-05-21 01:12:10] blend_dist: fr=120 pure=181 mid=120 spill_max=16682us
+[2026-05-21 01:12:10] avsync: smooth=0us locked=0 audio=6386353us video=0us bias=0us
+[2026-05-21 01:12:10] vb: t=45120607us fr=120 disp=1 dur_a=25085 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:10] hb: fr=120 q=15 au=136 ab=943 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
+[2026-05-21 01:12:10] vb: t=45137204us fr=120 disp=0 dur_a=8402 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45153933us delta=33411us blend=0.504 fr=120 dur_a=8402
+[2026-05-21 01:12:10] vb: t=45154008us fr=121 disp=1 dur_a=33427 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:10] vb: t=45170625us fr=121 disp=0 dur_a=16744 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=45187258us fr=121 disp=1 dur_a=61 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45203936us delta=50003us blend=0.004 fr=121 dur_a=61
+[2026-05-21 01:12:10] vb: t=45204023us fr=122 disp=0 dur_a=25086 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:10] vb: t=45220673us fr=122 disp=1 dur_a=8403 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45237295us delta=33359us blend=0.504 fr=122 dur_a=8403
+[2026-05-21 01:12:10] vb: t=45237368us fr=123 disp=0 dur_a=33428 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:10] vb: t=45253986us fr=123 disp=1 dur_a=16745 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=45270684us fr=123 disp=0 dur_a=62 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45287359us delta=50064us blend=0.004 fr=123 dur_a=62
+[2026-05-21 01:12:10] vb: t=45287432us fr=124 disp=1 dur_a=25087 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:10] vb: t=45304062us fr=124 disp=0 dur_a=8404 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] cf: t=45320728us delta=33369us blend=0.504 fr=124 dur_a=8404
+[2026-05-21 01:12:10] vb: t=45320802us fr=125 disp=1 dur_a=33429 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:10] vb: t=45337543us fr=125 disp=0 dur_a=16746 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:10] vb: t=45354113us fr=125 disp=1 dur_a=63 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45370762us delta=50034us blend=0.004 fr=125 dur_a=63
+[2026-05-21 01:12:11] vb: t=45370837us fr=126 disp=0 dur_a=25088 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45387459us fr=126 disp=1 dur_a=8405 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45404153us delta=33391us blend=0.504 fr=126 dur_a=8405
+[2026-05-21 01:12:11] vb: t=45404308us fr=127 disp=0 dur_a=33430 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=45420839us fr=127 disp=1 dur_a=16747 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] audio_ratio: pcm=500 sil=0 total=1000
+[2026-05-21 01:12:11] audio_clock: clk=6695667us blocks=1000
+[2026-05-21 01:12:11] vb: t=45437515us fr=127 disp=0 dur_a=64 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45454196us delta=50043us blend=0.004 fr=127 dur_a=64
+[2026-05-21 01:12:11] vb: t=45454270us fr=128 disp=1 dur_a=25089 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45470925us fr=128 disp=0 dur_a=8406 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45487563us delta=33367us blend=0.504 fr=128 dur_a=8406
+[2026-05-21 01:12:11] vb: t=45487637us fr=129 disp=1 dur_a=33431 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=45504253us fr=129 disp=0 dur_a=16748 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=45520938us fr=129 disp=1 dur_a=65 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45537712us delta=50149us blend=0.004 fr=129 dur_a=65
+[2026-05-21 01:12:11] vb: t=45537807us fr=130 disp=0 dur_a=25090 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45554302us fr=130 disp=1 dur_a=8407 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45570985us delta=33273us blend=0.504 fr=130 dur_a=8407
+[2026-05-21 01:12:11] vb: t=45571059us fr=131 disp=0 dur_a=33432 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=45587671us fr=131 disp=1 dur_a=16749 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=45604348us fr=131 disp=0 dur_a=66 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45621035us delta=50050us blend=0.004 fr=131 dur_a=66
+[2026-05-21 01:12:11] vb: t=45621109us fr=132 disp=1 dur_a=25091 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45637705us fr=132 disp=0 dur_a=8408 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45654405us delta=33370us blend=0.504 fr=132 dur_a=8408
+[2026-05-21 01:12:11] vb: t=45654479us fr=133 disp=1 dur_a=33433 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=45671125us fr=133 disp=0 dur_a=16750 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=45687786us fr=133 disp=1 dur_a=67 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45704439us delta=50034us blend=0.004 fr=133 dur_a=67
+[2026-05-21 01:12:11] vb: t=45704515us fr=134 disp=0 dur_a=25092 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45721153us fr=134 disp=1 dur_a=8409 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45737814us delta=33375us blend=0.504 fr=134 dur_a=8409
+[2026-05-21 01:12:11] vb: t=45737901us fr=135 disp=0 dur_a=33434 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=45754521us fr=135 disp=1 dur_a=16751 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=45771197us fr=135 disp=0 dur_a=68 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45787882us delta=50068us blend=0.004 fr=135 dur_a=68
+[2026-05-21 01:12:11] vb: t=45787956us fr=136 disp=1 dur_a=25093 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45804567us fr=136 disp=0 dur_a=8410 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45821240us delta=33358us blend=0.504 fr=136 dur_a=8410
+[2026-05-21 01:12:11] vb: t=45821314us fr=137 disp=1 dur_a=33435 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=45837921us fr=137 disp=0 dur_a=16752 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=45854585us fr=137 disp=1 dur_a=69 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45871285us delta=50045us blend=0.004 fr=137 dur_a=69
+[2026-05-21 01:12:11] vb: t=45871366us fr=138 disp=0 dur_a=25094 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45887967us fr=138 disp=1 dur_a=8411 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45904653us delta=33368us blend=0.504 fr=138 dur_a=8411
+[2026-05-21 01:12:11] vb: t=45904726us fr=139 disp=0 dur_a=33436 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=45921336us fr=139 disp=1 dur_a=16753 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=45938045us fr=139 disp=0 dur_a=70 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45954710us delta=50057us blend=0.004 fr=139 dur_a=70
+[2026-05-21 01:12:11] vb: t=45954784us fr=140 disp=1 dur_a=25095 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=45971398us fr=140 disp=0 dur_a=8412 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=45988075us delta=33365us blend=0.504 fr=140 dur_a=8412
+[2026-05-21 01:12:11] vb: t=45988149us fr=141 disp=1 dur_a=33437 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=46004760us fr=141 disp=0 dur_a=16754 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=46021455us fr=141 disp=1 dur_a=71 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46038135us delta=50060us blend=0.004 fr=141 dur_a=71
+[2026-05-21 01:12:11] vb: t=46038208us fr=142 disp=0 dur_a=25096 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=46054821us fr=142 disp=1 dur_a=8413 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46071553us delta=33418us blend=0.504 fr=142 dur_a=8413
+[2026-05-21 01:12:11] vb: t=46071629us fr=143 disp=0 dur_a=33438 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=46088199us fr=143 disp=1 dur_a=16755 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=46104875us fr=143 disp=0 dur_a=72 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46121586us delta=50033us blend=0.004 fr=143 dur_a=72
+[2026-05-21 01:12:11] vb: t=46121660us fr=144 disp=1 dur_a=25097 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=46138236us fr=144 disp=0 dur_a=8414 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46154903us delta=33317us blend=0.504 fr=144 dur_a=8414
+[2026-05-21 01:12:11] vb: t=46154976us fr=145 disp=1 dur_a=33439 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=46171639us fr=145 disp=0 dur_a=16756 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=46188401us fr=145 disp=1 dur_a=73 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46204948us delta=50045us blend=0.004 fr=145 dur_a=73
+[2026-05-21 01:12:11] vb: t=46205023us fr=146 disp=0 dur_a=25098 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=46221651us fr=146 disp=1 dur_a=8415 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46238326us delta=33378us blend=0.504 fr=146 dur_a=8415
+[2026-05-21 01:12:11] vb: t=46238401us fr=147 disp=0 dur_a=33440 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=46255029us fr=147 disp=1 dur_a=16757 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=46271716us fr=147 disp=0 dur_a=74 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46288379us delta=50053us blend=0.004 fr=147 dur_a=74
+[2026-05-21 01:12:11] vb: t=46288452us fr=148 disp=1 dur_a=25099 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:11] vb: t=46305061us fr=148 disp=0 dur_a=8416 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] cf: t=46321791us delta=33412us blend=0.504 fr=148 dur_a=8416
+[2026-05-21 01:12:11] vb: t=46321878us fr=149 disp=1 dur_a=33441 do_pop=1 render_blend=1 blend=0.504 q=15
+[2026-05-21 01:12:11] vb: t=46338460us fr=149 disp=0 dur_a=16758 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:11] vb: t=46355128us fr=149 disp=1 dur_a=75 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46371801us delta=50010us blend=0.004 fr=149 dur_a=75
+[2026-05-21 01:12:12] vb: t=46371875us fr=150 disp=0 dur_a=25100 do_pop=1 render_blend=1 blend=0.004 q=15
+[2026-05-21 01:12:12] vb: t=46388500us fr=150 disp=1 dur_a=8417 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46405154us delta=33353us blend=0.505 fr=150 dur_a=8417
+[2026-05-21 01:12:12] vb: t=46405229us fr=151 disp=0 dur_a=33442 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=46421862us fr=151 disp=1 dur_a=16759 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=46438561us fr=151 disp=0 dur_a=76 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46455230us delta=50076us blend=0.005 fr=151 dur_a=76
+[2026-05-21 01:12:12] vb: t=46455309us fr=152 disp=1 dur_a=25101 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=46471915us fr=152 disp=0 dur_a=8418 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46488591us delta=33361us blend=0.505 fr=152 dur_a=8418
+[2026-05-21 01:12:12] vb: t=46488665us fr=153 disp=1 dur_a=33443 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=46505293us fr=153 disp=0 dur_a=16760 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=46521970us fr=153 disp=1 dur_a=77 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46538677us delta=50086us blend=0.005 fr=153 dur_a=77
+[2026-05-21 01:12:12] vb: t=46538756us fr=154 disp=0 dur_a=25102 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=46555317us fr=154 disp=1 dur_a=8419 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46571993us delta=33316us blend=0.505 fr=154 dur_a=8419
+[2026-05-21 01:12:12] vb: t=46572067us fr=155 disp=0 dur_a=33444 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=46588700us fr=155 disp=1 dur_a=16761 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=46605379us fr=155 disp=0 dur_a=78 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46622063us delta=50070us blend=0.005 fr=155 dur_a=78
+[2026-05-21 01:12:12] vb: t=46622144us fr=156 disp=1 dur_a=25103 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=46638738us fr=156 disp=0 dur_a=8420 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46655430us delta=33367us blend=0.505 fr=156 dur_a=8420
+[2026-05-21 01:12:12] vb: t=46655504us fr=157 disp=1 dur_a=33445 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=46672132us fr=157 disp=0 dur_a=16762 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=46688818us fr=157 disp=1 dur_a=79 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46705479us delta=50049us blend=0.005 fr=157 dur_a=79
+[2026-05-21 01:12:12] vb: t=46705567us fr=158 disp=0 dur_a=25104 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=46722168us fr=158 disp=1 dur_a=8421 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46738843us delta=33364us blend=0.505 fr=158 dur_a=8421
+[2026-05-21 01:12:12] vb: t=46738916us fr=159 disp=0 dur_a=33446 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=46755530us fr=159 disp=1 dur_a=16763 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=46772261us fr=159 disp=0 dur_a=80 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46788899us delta=50056us blend=0.005 fr=159 dur_a=80
+[2026-05-21 01:12:12] vb: t=46788972us fr=160 disp=1 dur_a=25105 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=46805571us fr=160 disp=0 dur_a=8422 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46822266us delta=33367us blend=0.505 fr=160 dur_a=8422
+[2026-05-21 01:12:12] vb: t=46822341us fr=161 disp=1 dur_a=33447 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=46839080us fr=161 disp=0 dur_a=16764 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=46855641us fr=161 disp=1 dur_a=81 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46872312us delta=50046us blend=0.005 fr=161 dur_a=81
+[2026-05-21 01:12:12] vb: t=46872400us fr=162 disp=0 dur_a=25106 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=46889004us fr=162 disp=1 dur_a=8423 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46905685us delta=33373us blend=0.505 fr=162 dur_a=8423
+[2026-05-21 01:12:12] vb: t=46905758us fr=163 disp=0 dur_a=33448 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=46922430us fr=163 disp=1 dur_a=16765 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=46939062us fr=163 disp=0 dur_a=82 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46955738us delta=50053us blend=0.005 fr=163 dur_a=82
+[2026-05-21 01:12:12] vb: t=46955813us fr=164 disp=1 dur_a=25107 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=46972493us fr=164 disp=0 dur_a=8424 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=46989106us delta=33368us blend=0.505 fr=164 dur_a=8424
+[2026-05-21 01:12:12] vb: t=46989197us fr=165 disp=1 dur_a=33449 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=47005796us fr=165 disp=0 dur_a=16766 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=47022486us fr=165 disp=1 dur_a=83 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47039161us delta=50055us blend=0.005 fr=165 dur_a=83
+[2026-05-21 01:12:12] vb: t=47039245us fr=166 disp=0 dur_a=25108 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=47055843us fr=166 disp=1 dur_a=8425 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47072537us delta=33376us blend=0.505 fr=166 dur_a=8425
+[2026-05-21 01:12:12] vb: t=47072612us fr=167 disp=0 dur_a=33450 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=47089209us fr=167 disp=1 dur_a=16767 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=47105925us fr=167 disp=0 dur_a=84 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47122584us delta=50047us blend=0.005 fr=167 dur_a=84
+[2026-05-21 01:12:12] vb: t=47122658us fr=168 disp=1 dur_a=25109 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=47139273us fr=168 disp=0 dur_a=8426 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47155942us delta=33358us blend=0.505 fr=168 dur_a=8426
+[2026-05-21 01:12:12] vb: t=47156016us fr=169 disp=1 dur_a=33451 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=47172683us fr=169 disp=0 dur_a=16768 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=47189315us fr=169 disp=1 dur_a=85 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47205983us delta=50041us blend=0.005 fr=169 dur_a=85
+[2026-05-21 01:12:12] vb: t=47206056us fr=170 disp=0 dur_a=25110 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=47222738us fr=170 disp=1 dur_a=8427 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47239358us delta=33375us blend=0.505 fr=170 dur_a=8427
+[2026-05-21 01:12:12] vb: t=47239433us fr=171 disp=0 dur_a=33452 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=47256058us fr=171 disp=1 dur_a=16769 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=47272736us fr=171 disp=0 dur_a=86 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47289399us delta=50041us blend=0.005 fr=171 dur_a=86
+[2026-05-21 01:12:12] vb: t=47289474us fr=172 disp=1 dur_a=25111 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:12] vb: t=47306113us fr=172 disp=0 dur_a=8428 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] cf: t=47322777us delta=33378us blend=0.505 fr=172 dur_a=8428
+[2026-05-21 01:12:12] vb: t=47322860us fr=173 disp=1 dur_a=33453 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:12] vb: t=47339477us fr=173 disp=0 dur_a=16770 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:12] vb: t=47356161us fr=173 disp=1 dur_a=87 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47372832us delta=50055us blend=0.005 fr=173 dur_a=87
+[2026-05-21 01:12:13] vb: t=47372905us fr=174 disp=0 dur_a=25112 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:13] vb: t=47389526us fr=174 disp=1 dur_a=8429 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47406192us delta=33360us blend=0.505 fr=174 dur_a=8429
+[2026-05-21 01:12:13] vb: t=47406279us fr=175 disp=0 dur_a=33454 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:13] vb: t=47422962us fr=175 disp=1 dur_a=16771 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=47439572us fr=175 disp=0 dur_a=88 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47456248us delta=50056us blend=0.005 fr=175 dur_a=88
+[2026-05-21 01:12:13] vb: t=47456322us fr=176 disp=1 dur_a=25113 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:13] vb: t=47472965us fr=176 disp=0 dur_a=8430 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47489747us delta=33499us blend=0.505 fr=176 dur_a=8430
+[2026-05-21 01:12:13] vb: t=47489824us fr=177 disp=1 dur_a=33455 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:13] vb: t=47506357us fr=177 disp=0 dur_a=16772 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=47523003us fr=177 disp=1 dur_a=89 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47539670us delta=49923us blend=0.005 fr=177 dur_a=89
+[2026-05-21 01:12:13] vb: t=47539744us fr=178 disp=0 dur_a=25114 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:13] vb: t=47556367us fr=178 disp=1 dur_a=8431 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47573032us delta=33362us blend=0.505 fr=178 dur_a=8431
+[2026-05-21 01:12:13] vb: t=47573106us fr=179 disp=0 dur_a=33456 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:13] vb: t=47589724us fr=179 disp=1 dur_a=16773 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=47606423us fr=179 disp=0 dur_a=90 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47623161us delta=50129us blend=0.005 fr=179 dur_a=90
+[2026-05-21 01:12:13] frame_interval: fr=180 gap1=33362us gap2=50129us audio=8892863us
+[2026-05-21 01:12:13] blend_dist: fr=180 pure=271 mid=180 spill_max=16682us
+[2026-05-21 01:12:13] avsync: smooth=0us locked=0 audio=8892863us video=0us bias=0us
+[2026-05-21 01:12:13] vb: t=47623249us fr=180 disp=1 dur_a=25115 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:13] hb: fr=180 q=15 au=197 ab=1412 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
+[2026-05-21 01:12:13] vb: t=47639792us fr=180 disp=0 dur_a=8432 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47656471us delta=33310us blend=0.505 fr=180 dur_a=8432
+[2026-05-21 01:12:13] vb: t=47656544us fr=181 disp=1 dur_a=33457 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:13] vb: t=47673142us fr=181 disp=0 dur_a=16774 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=47689823us fr=181 disp=1 dur_a=91 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47706519us delta=50048us blend=0.005 fr=181 dur_a=91
+[2026-05-21 01:12:13] vb: t=47706599us fr=182 disp=0 dur_a=25116 do_pop=1 render_blend=1 blend=0.005 q=15
+[2026-05-21 01:12:13] vb: t=47723205us fr=182 disp=1 dur_a=8433 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47739882us delta=33363us blend=0.505 fr=182 dur_a=8433
+[2026-05-21 01:12:13] vb: t=47739955us fr=183 disp=0 dur_a=33458 do_pop=1 render_blend=1 blend=0.505 q=15
+[2026-05-21 01:12:13] vb: t=47756585us fr=183 disp=1 dur_a=16775 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=47773249us fr=183 disp=0 dur_a=92 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47789934us delta=50052us blend=0.006 fr=183 dur_a=92
+[2026-05-21 01:12:13] vb: t=47790007us fr=184 disp=1 dur_a=25117 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:13] vb: t=47806620us fr=184 disp=0 dur_a=8434 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47823293us delta=33359us blend=0.506 fr=184 dur_a=8434
+[2026-05-21 01:12:13] vb: t=47823367us fr=185 disp=1 dur_a=33459 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:13] vb: t=47839983us fr=185 disp=0 dur_a=16776 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=47856656us fr=185 disp=1 dur_a=93 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47873347us delta=50054us blend=0.006 fr=185 dur_a=93
+[2026-05-21 01:12:13] vb: t=47873420us fr=186 disp=0 dur_a=25118 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:13] vb: t=47890018us fr=186 disp=1 dur_a=8435 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47906708us delta=33361us blend=0.506 fr=186 dur_a=8435
+[2026-05-21 01:12:13] vb: t=47906782us fr=187 disp=0 dur_a=33460 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:13] vb: t=47923441us fr=187 disp=1 dur_a=16777 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=47940091us fr=187 disp=0 dur_a=94 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47956760us delta=50052us blend=0.006 fr=187 dur_a=94
+[2026-05-21 01:12:13] vb: t=47956843us fr=188 disp=1 dur_a=25119 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:13] vb: t=47973458us fr=188 disp=0 dur_a=8436 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=47990139us delta=33379us blend=0.506 fr=188 dur_a=8436
+[2026-05-21 01:12:13] vb: t=47990213us fr=189 disp=1 dur_a=33461 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:13] vb: t=48006804us fr=189 disp=0 dur_a=16778 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=48023513us fr=189 disp=1 dur_a=95 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48040190us delta=50051us blend=0.006 fr=189 dur_a=95
+[2026-05-21 01:12:13] vb: t=48040264us fr=190 disp=0 dur_a=25120 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:13] vb: t=48056860us fr=190 disp=1 dur_a=8437 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48073606us delta=33416us blend=0.506 fr=190 dur_a=8437
+[2026-05-21 01:12:13] vb: t=48073679us fr=191 disp=0 dur_a=33462 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:13] vb: t=48090224us fr=191 disp=1 dur_a=16779 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] audio_ratio: pcm=500 sil=0 total=1500
+[2026-05-21 01:12:13] audio_clock: clk=9362167us blocks=1500
+[2026-05-21 01:12:13] vb: t=48106931us fr=191 disp=0 dur_a=96 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48123590us delta=49984us blend=0.006 fr=191 dur_a=96
+[2026-05-21 01:12:13] vb: t=48123665us fr=192 disp=1 dur_a=25121 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:13] vb: t=48140455us fr=192 disp=0 dur_a=8438 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48156969us delta=33379us blend=0.506 fr=192 dur_a=8438
+[2026-05-21 01:12:13] vb: t=48157043us fr=193 disp=1 dur_a=33463 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:13] vb: t=48173711us fr=193 disp=0 dur_a=16780 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=48190346us fr=193 disp=1 dur_a=97 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48207030us delta=50061us blend=0.006 fr=193 dur_a=97
+[2026-05-21 01:12:13] vb: t=48207103us fr=194 disp=0 dur_a=25122 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:13] vb: t=48223702us fr=194 disp=1 dur_a=8439 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48240391us delta=33361us blend=0.506 fr=194 dur_a=8439
+[2026-05-21 01:12:13] vb: t=48240482us fr=195 disp=0 dur_a=33464 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:13] vb: t=48257062us fr=195 disp=1 dur_a=16781 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=48273845us fr=195 disp=0 dur_a=98 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48290438us delta=50047us blend=0.006 fr=195 dur_a=98
+[2026-05-21 01:12:13] vb: t=48290518us fr=196 disp=1 dur_a=25123 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:13] vb: t=48307132us fr=196 disp=0 dur_a=8440 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] cf: t=48323812us delta=33374us blend=0.506 fr=196 dur_a=8440
+[2026-05-21 01:12:13] vb: t=48323887us fr=197 disp=1 dur_a=33465 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:13] vb: t=48340490us fr=197 disp=0 dur_a=16782 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:13] vb: t=48357184us fr=197 disp=1 dur_a=99 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] cf: t=48373847us delta=50035us blend=0.006 fr=197 dur_a=99
+[2026-05-21 01:12:14] vb: t=48373922us fr=198 disp=0 dur_a=25124 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48390549us fr=198 disp=1 dur_a=8441 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] cf: t=48407246us delta=33399us blend=0.506 fr=198 dur_a=8441
+[2026-05-21 01:12:14] vb: t=48407408us fr=199 disp=0 dur_a=33466 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=48423916us fr=199 disp=1 dur_a=16783 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48440611us fr=199 disp=0 dur_a=100 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] cf: t=48457288us delta=50042us blend=0.006 fr=199 dur_a=100
+[2026-05-21 01:12:14] vb: t=48457363us fr=200 disp=1 dur_a=25125 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48473969us fr=200 disp=0 dur_a=8442 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48490697us fr=201 disp=1 dur_a=33467 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=48507336us fr=201 disp=0 dur_a=16784 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48524021us fr=201 disp=1 dur_a=101 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48540765us fr=202 disp=0 dur_a=25126 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48557420us fr=202 disp=1 dur_a=8443 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48574126us fr=203 disp=0 dur_a=33468 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=48590762us fr=203 disp=1 dur_a=16785 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48607443us fr=203 disp=0 dur_a=102 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48624180us fr=204 disp=1 dur_a=25127 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48640805us fr=204 disp=0 dur_a=8444 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48657548us fr=205 disp=1 dur_a=33469 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=48674169us fr=205 disp=0 dur_a=16786 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48690854us fr=205 disp=1 dur_a=103 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48707602us fr=206 disp=0 dur_a=25128 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48724276us fr=206 disp=1 dur_a=8445 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48740962us fr=207 disp=0 dur_a=33470 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=48757595us fr=207 disp=1 dur_a=16787 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48774281us fr=207 disp=0 dur_a=104 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48791133us fr=208 disp=1 dur_a=25129 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48807640us fr=208 disp=0 dur_a=8446 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48824376us fr=209 disp=1 dur_a=33471 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=48841005us fr=209 disp=0 dur_a=16788 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48857725us fr=209 disp=1 dur_a=105 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48874440us fr=210 disp=0 dur_a=25130 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48891061us fr=210 disp=1 dur_a=8447 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48907797us fr=211 disp=0 dur_a=33472 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=48924595us fr=211 disp=1 dur_a=16789 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48941123us fr=211 disp=0 dur_a=106 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48957844us fr=212 disp=1 dur_a=25131 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=48974468us fr=212 disp=0 dur_a=8448 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=48991218us fr=213 disp=1 dur_a=33473 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=49007873us fr=213 disp=0 dur_a=16790 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49024546us fr=213 disp=1 dur_a=107 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49041273us fr=214 disp=0 dur_a=25132 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=49057928us fr=214 disp=1 dur_a=8449 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49074641us fr=215 disp=0 dur_a=33474 do_pop=1 render_blend=1 blend=0.506 q=15
+[2026-05-21 01:12:14] vb: t=49091265us fr=215 disp=1 dur_a=16791 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49107961us fr=215 disp=0 dur_a=108 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49124688us fr=216 disp=1 dur_a=25133 do_pop=1 render_blend=1 blend=0.006 q=15
+[2026-05-21 01:12:14] vb: t=49141371us fr=216 disp=0 dur_a=8450 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49158055us fr=217 disp=1 dur_a=33475 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:14] vb: t=49174688us fr=217 disp=0 dur_a=16792 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49191355us fr=217 disp=1 dur_a=109 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49208114us fr=218 disp=0 dur_a=25134 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:14] vb: t=49224721us fr=218 disp=1 dur_a=8451 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49241463us fr=219 disp=0 dur_a=33476 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:14] vb: t=49258099us fr=219 disp=1 dur_a=16793 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49274801us fr=219 disp=0 dur_a=110 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49291526us fr=220 disp=1 dur_a=25135 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:14] vb: t=49308154us fr=220 disp=0 dur_a=8452 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49324898us fr=221 disp=1 dur_a=33477 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:14] vb: t=49341523us fr=221 disp=0 dur_a=16794 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:14] vb: t=49358220us fr=221 disp=1 dur_a=111 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49374952us fr=222 disp=0 dur_a=25136 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49391581us fr=222 disp=1 dur_a=8453 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49408303us fr=223 disp=0 dur_a=33478 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=49424945us fr=223 disp=1 dur_a=16795 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49441771us fr=223 disp=0 dur_a=112 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49458362us fr=224 disp=1 dur_a=25137 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49475021us fr=224 disp=0 dur_a=8454 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49491775us fr=225 disp=1 dur_a=33479 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=49508400us fr=225 disp=0 dur_a=16796 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49525053us fr=225 disp=1 dur_a=113 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49541781us fr=226 disp=0 dur_a=25138 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49558402us fr=226 disp=1 dur_a=8455 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49575255us fr=227 disp=0 dur_a=33480 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=49591785us fr=227 disp=1 dur_a=16797 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49608462us fr=227 disp=0 dur_a=114 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49625211us fr=228 disp=1 dur_a=25139 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49641839us fr=228 disp=0 dur_a=8456 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49658572us fr=229 disp=1 dur_a=33481 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=49675202us fr=229 disp=0 dur_a=16798 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49691887us fr=229 disp=1 dur_a=115 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49708658us fr=230 disp=0 dur_a=25140 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49725259us fr=230 disp=1 dur_a=8457 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49741984us fr=231 disp=0 dur_a=33482 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=49758603us fr=231 disp=1 dur_a=16799 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49775307us fr=231 disp=0 dur_a=116 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49792040us fr=232 disp=1 dur_a=25141 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49808647us fr=232 disp=0 dur_a=8458 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49825401us fr=233 disp=1 dur_a=33483 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=49842038us fr=233 disp=0 dur_a=16800 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49858730us fr=233 disp=1 dur_a=117 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49875457us fr=234 disp=0 dur_a=25142 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49892090us fr=234 disp=1 dur_a=8459 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49908876us fr=235 disp=0 dur_a=33484 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=49925463us fr=235 disp=1 dur_a=16801 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49942152us fr=235 disp=0 dur_a=118 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49958878us fr=236 disp=1 dur_a=25143 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=49975518us fr=236 disp=0 dur_a=8460 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=49992242us fr=237 disp=1 dur_a=33485 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=50008906us fr=237 disp=0 dur_a=16802 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=50025566us fr=237 disp=1 dur_a=119 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=50042314us fr=238 disp=0 dur_a=25144 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=50058929us fr=238 disp=1 dur_a=8461 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=50075651us fr=239 disp=0 dur_a=33486 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=50092702us fr=239 disp=1 dur_a=16803 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=50108980us fr=239 disp=0 dur_a=120 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] frame_interval: fr=240 gap1=33352us gap2=50070us audio=11394040us
+[2026-05-21 01:12:15] blend_dist: fr=240 pure=361 mid=240 spill_max=16682us
+[2026-05-21 01:12:15] avsync: smooth=0us locked=0 audio=11394040us video=0us bias=0us
+[2026-05-21 01:12:15] vb: t=50125752us fr=240 disp=1 dur_a=25145 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] hb: fr=240 q=16 au=257 ab=1882 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
+[2026-05-21 01:12:15] vb: t=50142350us fr=240 disp=0 dur_a=8462 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] disp_seq: fr=241 seq=242 window=1
+[2026-05-21 01:12:15] vb: t=50159140us fr=241 disp=1 dur_a=33487 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=50175719us fr=241 disp=0 dur_a=16804 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=50192392us fr=241 disp=1 dur_a=121 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] disp_seq: fr=242 seq=243 window=1
+[2026-05-21 01:12:15] vb: t=50209138us fr=242 disp=0 dur_a=25146 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=50225919us fr=242 disp=1 dur_a=8463 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] disp_seq: fr=243 seq=244 window=1
+[2026-05-21 01:12:15] vb: t=50242510us fr=243 disp=0 dur_a=33488 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=50259144us fr=243 disp=1 dur_a=16805 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=50275828us fr=243 disp=0 dur_a=122 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] disp_seq: fr=244 seq=245 window=1
+[2026-05-21 01:12:15] vb: t=50292555us fr=244 disp=1 dur_a=25147 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:15] vb: t=50309171us fr=244 disp=0 dur_a=8464 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] disp_seq: fr=245 seq=246 window=1
+[2026-05-21 01:12:15] vb: t=50325928us fr=245 disp=1 dur_a=33489 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:15] vb: t=50342559us fr=245 disp=0 dur_a=16806 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:15] vb: t=50359271us fr=245 disp=1 dur_a=123 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=246 seq=247 window=1
+[2026-05-21 01:12:16] vb: t=50375976us fr=246 disp=0 dur_a=25148 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:16] vb: t=50392611us fr=246 disp=1 dur_a=8465 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=247 seq=248 window=1
+[2026-05-21 01:12:16] vb: t=50409368us fr=247 disp=0 dur_a=33490 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:16] vb: t=50425986us fr=247 disp=1 dur_a=16807 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] vb: t=50442658us fr=247 disp=0 dur_a=124 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=248 seq=249 window=1
+[2026-05-21 01:12:16] vb: t=50459395us fr=248 disp=1 dur_a=25149 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:16] vb: t=50476020us fr=248 disp=0 dur_a=8466 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=249 seq=250 window=1
+[2026-05-21 01:12:16] vb: t=50492771us fr=249 disp=1 dur_a=33491 do_pop=1 render_blend=1 blend=0.507 q=15
+[2026-05-21 01:12:16] vb: t=50509394us fr=249 disp=0 dur_a=16808 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] vb: t=50526082us fr=249 disp=1 dur_a=125 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=250 seq=251 window=1
+[2026-05-21 01:12:16] vb: t=50542825us fr=250 disp=0 dur_a=25150 do_pop=1 render_blend=1 blend=0.007 q=15
+[2026-05-21 01:12:16] vb: t=50559441us fr=250 disp=1 dur_a=8467 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=251 seq=252 window=1
+[2026-05-21 01:12:16] vb: t=50576187us fr=251 disp=0 dur_a=33492 do_pop=1 render_blend=1 blend=0.508 q=15
+[2026-05-21 01:12:16] vb: t=50592824us fr=251 disp=1 dur_a=16809 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] vb: t=50609490us fr=251 disp=0 dur_a=126 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=252 seq=253 window=1
+[2026-05-21 01:12:16] vb: t=50626231us fr=252 disp=1 dur_a=25151 do_pop=1 render_blend=1 blend=0.008 q=15
+[2026-05-21 01:12:16] vb: t=50642843us fr=252 disp=0 dur_a=8468 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=253 seq=254 window=1
+[2026-05-21 01:12:16] vb: t=50659610us fr=253 disp=1 dur_a=33493 do_pop=1 render_blend=1 blend=0.508 q=15
+[2026-05-21 01:12:16] vb: t=50676235us fr=253 disp=0 dur_a=16810 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] vb: t=50692909us fr=253 disp=1 dur_a=127 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=254 seq=255 window=1
+[2026-05-21 01:12:16] vb: t=50709718us fr=254 disp=0 dur_a=25152 do_pop=1 render_blend=1 blend=0.008 q=15
+[2026-05-21 01:12:16] vb: t=50726288us fr=254 disp=1 dur_a=8469 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=255 seq=256 window=1
+[2026-05-21 01:12:16] vb: t=50743127us fr=255 disp=0 dur_a=33494 do_pop=1 render_blend=1 blend=0.508 q=15
+[2026-05-21 01:12:16] audio_ratio: pcm=500 sil=0 total=2000
+[2026-05-21 01:12:16] audio_clock: clk=12028667us blocks=2000
+[2026-05-21 01:12:16] vb: t=50759645us fr=255 disp=1 dur_a=16811 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] vb: t=50776338us fr=255 disp=0 dur_a=128 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=256 seq=257 window=1
+[2026-05-21 01:12:16] vb: t=50793062us fr=256 disp=1 dur_a=25153 do_pop=1 render_blend=1 blend=0.008 q=15
+[2026-05-21 01:12:16] vb: t=50809726us fr=256 disp=0 dur_a=8470 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=257 seq=258 window=1
+[2026-05-21 01:12:16] vb: t=50826507us fr=257 disp=1 dur_a=33495 do_pop=1 render_blend=1 blend=0.508 q=15
+[2026-05-21 01:12:16] vb: t=50843071us fr=257 disp=0 dur_a=16812 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] vb: t=50859740us fr=257 disp=1 dur_a=129 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=258 seq=259 window=1
+[2026-05-21 01:12:16] vb: t=50876650us fr=258 disp=0 dur_a=25154 do_pop=1 render_blend=1 blend=0.008 q=15
+[2026-05-21 01:12:16] vb: t=50893113us fr=258 disp=1 dur_a=8471 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=259 seq=260 window=1
+[2026-05-21 01:12:16] vb: t=50909862us fr=259 disp=0 dur_a=33496 do_pop=1 render_blend=1 blend=0.508 q=15
+[2026-05-21 01:12:16] vb: t=50926495us fr=259 disp=1 dur_a=16813 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] vb: t=50943173us fr=259 disp=0 dur_a=130 do_pop=0 render_blend=0 blend=0.000 q=16
+[2026-05-21 01:12:16] disp_seq: fr=260 seq=261 window=1
+[2026-05-21 01:12:16] disp_seq: fr=261 seq=262 window=1
+[2026-05-21 01:12:16] disp_seq: fr=262 seq=263 window=1
+[2026-05-21 01:12:16] disp_seq: fr=263 seq=264 window=1
+[2026-05-21 01:12:16] disp_seq: fr=264 seq=265 window=1
+[2026-05-21 01:12:17] pts_stats: pushes=300 nonmono=0 dur=41708us
+[2026-05-21 01:12:18] frame_interval: fr=300 gap1=33374us gap2=50046us audio=13895217us
+[2026-05-21 01:12:18] blend_dist: fr=300 pure=451 mid=300 spill_max=16682us
+[2026-05-21 01:12:18] avsync: smooth=0us locked=0 audio=13895217us video=0us bias=0us
+[2026-05-21 01:12:18] hb: fr=300 q=16 au=317 ab=2351 stalls=0 max=0ms avg=0ms fps=24.0 netq=0
+[2026-05-21 01:12:19] audio_ratio: pcm=500 sil=0 total=2500
+[2026-05-21 01:12:19] audio_clock: clk=14695167us blocks=2500
+[2026-05-21 01:12:20] frame_interval: fr=360 gap1=33382us gap2=50041us audio=16396394us
+[2026-05-21 01:12:20] blend_dist: fr=360 pure=541 mid=360 spill_max=16682us
+[2026-05-21 01:12:20] avsync: smooth=0us locked=0 audio=16396394us video=0us bias=0us
+[2026-05-21 01:12:20] hb: fr=360 q=16 au=377 ab=2821 stalls=0 max=0ms avg=0ms fps=23.9 netq=0
+[2026-05-21 01:12:21] playing=0 reason=user_stop
+[2026-05-21 01:12:21] show_player: loop exit running=1 playing=0 vdec_err=0 fr=366
+[2026-05-21 01:12:21] timing: vsync handler unregistered
+[2026-05-21 01:12:21] audio_thread: exit
+[2026-05-21 01:12:21] show_player: decode thread joined
+[2026-05-21 01:12:21] show_player: audio thread joined
+[2026-05-21 01:12:21] show_player: upload thread joined
+[2026-05-21 01:12:21] show_player: done

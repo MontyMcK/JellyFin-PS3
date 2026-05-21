@@ -628,7 +628,7 @@ void show_player(const JFItem *item) {
         }
 
         // ---- Duration-consumption gate logic (Movian-style temporal blend) ----
-        static const s64 vblank_period_us = 16683; // 59.94 Hz
+        s64 vblank_period_us = avsync_biased_period(16683);
         static int  s_pure_count = 0;
         static int  s_mid_count  = 0;
         static s64  s_spill_max  = 0;
@@ -729,13 +729,15 @@ void show_player(const JFItem *item) {
                     plog(buf2);
                     s64  smooth = avsync_get_smoothed_diff();
                     bool locked = avsync_is_locked();
-                    char buf3[128];
+                    s64  biased = avsync_biased_period(16683);
+                    char buf3[160];
                     snprintf(buf3, sizeof(buf3),
-                        "avsync: smooth=%lldus locked=%d audio=%lluus video=%lluus",
+                        "avsync: smooth=%lldus locked=%d audio=%lluus video=%lluus bias=%lldus",
                         (long long)smooth,
                         locked ? 1 : 0,
                         (unsigned long long)audio_get_clock_us(),
-                        (unsigned long long)jbuf_peek_pts_us());
+                        (unsigned long long)jbuf_peek_pts_us(),
+                        (long long)(biased - 16683));
                     plog(buf3);
                 }
             }

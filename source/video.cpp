@@ -329,13 +329,17 @@ static void vdec_submit(const u8 *data, int len, u64 pts) {
     memset(&au, 0, sizeof(au));
     au.packet_addr = (u32)(uintptr_t)au_buf;
     au.packet_size = (u32)len;
-    // DTS == PTS for baseline H.264 (no B-frames, decode order == display order).
-    // Never send VDEC_TS_INVALID as DTS — VDEC will reject the PTS if it
-    // interprets the timestamp pair as invalid.
-    au.pts.low     = (u32)(pts & 0xFFFFFFFFUL);
-    au.pts.hi      = (u32)(pts >> 32);
-    au.dts.low     = (u32)(pts & 0xFFFFFFFFUL);
-    au.dts.hi      = (u32)(pts >> 32);
+    // Convert 90kHz PTS to microseconds before passing to VDEC.
+    // Hypothesis: VDEC rejects PTS values below some threshold and
+    // returns VDEC_TS_INVALID. Movian passes microsecond-scale
+    // values (millions) and VDEC accepts them.
+    u64 pts_us = (pts * 100ULL) / 9ULL;
+    // Round to millisecond precision (Movian: required for some streams)
+    pts_us = (pts_us / 1000ULL) * 1000ULL;
+    au.pts.low = (u32)(pts_us & 0xFFFFFFFFUL);
+    au.pts.hi  = (u32)(pts_us >> 32);
+    au.dts.low = (u32)(pts_us & 0xFFFFFFFFUL);
+    au.dts.hi  = (u32)(pts_us >> 32);
 
     int retries = 0;
     s32 dret;
@@ -476,6 +480,27 @@ bool vdec_pull_frame(void) {
         return false;
 
     const vdecPicture *pic = (const vdecPicture*)(uintptr_t)pic_addr;
+    // Read PTS before vdecGetPicture — GetPicture consumes the picture
+    // and may invalidate the pic_addr metadata (mirrors Movian order).
+    u64 pts_us = 0;
+    if (pic->pts[0].low != (u32)VDEC_TS_INVALID) {
+        // VDEC now outputs PTS in microseconds (matches input format).
+        pts_us = ((u64)pic->pts[0].hi << 32) | (u64)pic->pts[0].low;
+    }
+    {
+        static int s_vdec_pts_log = 0;
+        if (s_vdec_pts_log < 30) {
+            s_vdec_pts_log++;
+            char buf[160];
+            snprintf(buf, sizeof(buf),
+                "vdec_pts: n=%d raw_lo=0x%08x raw_hi=0x%08x pts_us=%llu",
+                s_vdec_pts_log,
+                (unsigned)pic->pts[0].low,
+                (unsigned)pic->pts[0].hi,
+                (unsigned long long)pts_us);
+            plog(buf);
+        }
+    }
     u8 frc = 0;
     if (pic->codec_specific_addr) {
         const vdecH264Info *h =
@@ -516,25 +541,6 @@ bool vdec_pull_frame(void) {
         }
     }
     s_frames_ready--;
-    u64 pts_us = 0;
-    if (pic->pts[0].low != (u32)VDEC_TS_INVALID) {
-        u64 pts90 = ((u64)pic->pts[0].hi << 32) | (u64)pic->pts[0].low;
-        pts_us = pts90 * 1000000ULL / 90000ULL;
-    }
-    {
-        static int s_vdec_pts_log = 0;
-        if (s_vdec_pts_log < 30) {
-            s_vdec_pts_log++;
-            char buf[160];
-            snprintf(buf, sizeof(buf),
-                "vdec_pts: n=%d raw_lo=0x%08x raw_hi=0x%08x pts_us=%llu",
-                s_vdec_pts_log,
-                (unsigned)pic->pts[0].low,
-                (unsigned)pic->pts[0].hi,
-                (unsigned long long)pts_us);
-            plog(buf);
-        }
-    }
     s_jbuf_pts[s_jb_wr] = pts_us;
     s_jbuf_dur[s_jb_wr] = dur_from_frc(frc);
     s_jbuf_seq[s_jb_wr] = ++s_seq_counter;

@@ -45,3 +45,8 @@ s64  avsync_get_smoothed_diff(void);
 
 // True once EMA has been seeded and |smooth_diff| < 41 667 µs (~1 frame at 24 fps).
 bool avsync_is_locked(void);
+
+// Returns the per-vblank duration to consume in the gate, biased
+// by the smoothed AV diff. Pass the nominal vblank period; the
+// returned value will be within ±5000us of it.
+s64 avsync_biased_period(s64 nominal_vblank_us);

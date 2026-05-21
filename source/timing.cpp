@@ -178,3 +178,16 @@ bool avsync_is_locked(void) {
     s64 abs_diff = s_avsync_smooth_us < 0 ? -s_avsync_smooth_us : s_avsync_smooth_us;
     return abs_diff < 41667;
 }
+
+s64 avsync_biased_period(s64 nominal_vblank_us) {
+    // Video ahead (smooth > 0) → consume LESS per vblank → slow video down.
+    // Video behind (smooth < 0) → consume MORE per vblank → speed video up.
+    // Quadratic bias: delta = sign(smooth) * min((|smooth|/1000)^2, 5000).
+    // At ±10ms gives ±100µs bias; caps at ±5000µs around ±71ms.
+    if (!avsync_is_locked()) return nominal_vblank_us;
+    s64 smooth   = avsync_get_smoothed_diff();
+    s64 abs_ms   = (smooth < 0 ? -smooth : smooth) / 1000;
+    s64 delta_us = abs_ms * abs_ms;
+    if (delta_us > 5000) delta_us = 5000;
+    return nominal_vblank_us - (smooth > 0 ? delta_us : -delta_us);
+}
