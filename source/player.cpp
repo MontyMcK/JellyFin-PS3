@@ -26,6 +26,8 @@
 #include "rsxutil.h"
 #include "video_shaders.h"
 
+extern void crash_log(const char *msg);
+
 // -------------------------------------------------------
 // Video GPU blit state (allocated per playback session)
 // -------------------------------------------------------
@@ -304,6 +306,7 @@ static void upload_thread_fn(void *arg) {
 // -------------------------------------------------------
 
 void show_player(const JFItem *item) {
+    crash_log("p1 enter");
     plog("show_player: enter");
     init_btns();
     {
@@ -351,6 +354,7 @@ void show_player(const JFItem *item) {
     drawText(40, 130, "Initializing decoder...");
     flip();
 
+    crash_log("p2 vdec_open begin");
     plog("show_player: vdec_open");
     if (!vdec_open()) {
         plog("show_player: vdec_open FAILED");
@@ -360,18 +364,22 @@ void show_player(const JFItem *item) {
         return;
     }
     plog("show_player: vdec_open OK");
+    crash_log("p3 vdec_open OK");
 
+    crash_log("p4 audio_open begin");
     plog("show_player: audio_open");
     audio_open();
     adec_init();
     adec_start();
     plog("show_player: audio_open done");
+    crash_log("p5 audio_open OK");
 
     drawHeader();
     drawTextf(40, 100, "%.70s", item->name);
     drawText(40, 130, "Connecting to stream...");
     flip();
 
+    crash_log("p6 stream_open begin");
     plog("show_player: stream_open");
     int sock = stream_open(url);
     if (sock < 0) {
@@ -384,6 +392,7 @@ void show_player(const JFItem *item) {
         return;
     }
     plog("show_player: stream_open OK");
+    crash_log("p7 stream_open OK");
 
     drawHeader();
     drawTextf(40, 100, "%.70s", item->name);
@@ -412,6 +421,7 @@ void show_player(const JFItem *item) {
         snprintf(buf, sizeof(buf), "jbuf_addr: slot=%d ptr=%p", i, (void*)jbuf_slot_ptr(i));
         plog(buf);
     }
+    crash_log("p8 jbuf alloc OK");
 
     // Video GPU blit init — allocate RSX buffers once per session
     {
@@ -561,9 +571,12 @@ void show_player(const JFItem *item) {
         }
     }
 
+    crash_log("p9 threads started");
+
     // Detection timeout tracking for Bresenham fallback initialisation
     u64 det_timeout_start = 0;
 
+    crash_log("p10 loop");
     // ---- Main (display) loop ----
     while (running && playing && !s_vdec_error) {
         waitflip();
@@ -955,6 +968,7 @@ void show_player(const JFItem *item) {
         flip();
     }
 
+    crash_log("p11 loop exit");
     {
         char buf[96];
         snprintf(buf, sizeof(buf),
@@ -984,6 +998,7 @@ void show_player(const JFItem *item) {
         sysThreadJoin(upl_tid, &tret);
         plog("show_player: upload thread joined");
     }
+    crash_log("p12 threads joined");
 
     // Free video GPU blit resources before releasing the jitter buffer
     if (s_vid_tex_buf[0])   { rsxFree(s_vid_tex_buf[0]);   s_vid_tex_buf[0]   = NULL; }
@@ -993,12 +1008,19 @@ void show_player(const JFItem *item) {
     if (s_vid_fp_buf)       { rsxFree(s_vid_fp_buf);       s_vid_fp_buf       = NULL; }
     if (s_vid_vbuf)         { rsxFree(s_vid_vbuf);         s_vid_vbuf         = NULL; }
 
+    crash_log("p17 jbuf_free begin");
     jbuf_free();
+    crash_log("p18 jbuf_free OK");
     netClose(sock);
     adec_stop();
+    crash_log("p15 audio_close begin");
     audio_close();
+    crash_log("p16 audio_close OK");
+    crash_log("p13 vdec_close begin");
     vdec_close();
+    crash_log("p14 vdec_close OK");
 
     ui_restore_rsx_state();
+    crash_log("p19 done");
     plog("show_player: done");
 }

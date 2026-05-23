@@ -29,6 +29,21 @@ int  parse_jf_items(const char *json, JFItem *arr, int max);
 void save_config(void);
 int  load_config(void);
 
+// Full per-item detail (populated by jellyfin_fetch_item_detail)
+typedef struct {
+    char overview[1024];       // Plot summary
+    char tagline[256];         // "How fast do you like it?"
+    char official_rating[16];  // "NZ-M" / "PG-13" / etc.
+    char community_rating[8];  // "6.5"
+    char critic_rating[8];     // "37%"
+    char video_info[64];       // "1080p H264 SDR"
+    char audio_info[128];      // "English EAC3 5.1"
+    char genres[128];          // "Action, Crime, Thriller"
+    char studios[256];         // "Universal Pictures, Original Film"
+} XMBItemDetail;
+
+bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
+
 // Playback session
 // POST /Users/{userId}/Items/{item_id}/PlaybackInfo with a PS3 device profile.
 // Extracts PlaySessionId from the response.

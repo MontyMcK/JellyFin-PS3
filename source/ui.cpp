@@ -18,6 +18,7 @@
 
 ButtonState btn_cur  = {0};
 ButtonState btn_prev = {0};
+u64 g_info_cooldown_until = 0;  // microseconds; ignore triangle until this time
 
 void update_buttons(padData *pad) {
     btn_prev         = btn_cur;
@@ -645,12 +646,50 @@ static bool xmb_handle_input_browse(void) {
         }
     }
 
-    if (BTN_PRESSED(triangle) && count > 0 && g_sel < count) {
+    // Log outer-loop button state every time we're about to detect triangle
+    if (btn_cur.triangle || btn_prev.triangle) {
+        char dbg[200];
+        snprintf(dbg, sizeof(dbg),
+            "outer: triangle state cur=%d prev=%d (BTN_PRESSED would be %d)",
+            btn_cur.triangle, btn_prev.triangle,
+            (btn_cur.triangle && !btn_prev.triangle) ? 1 : 0);
+        plog(dbg);
+    }
+    u64 now_us = timing_get_us();
+    if (BTN_PRESSED(triangle) && count > 0 && g_sel < count
+        && now_us >= g_info_cooldown_until) {
         const XMBItem *it = &g_items[tab][g_sel];
+        {
+            char dbg[260];
+            snprintf(dbg, sizeof(dbg),
+                "info: ENTER tab=%d sel=%d cnt=%d "
+                "btn_cur(tri=%d cir=%d crs=%d) btn_prev(tri=%d cir=%d crs=%d) "
+                "name='%.40s'",
+                tab, g_sel, count,
+                btn_cur.triangle, btn_cur.circle, btn_cur.cross,
+                btn_prev.triangle, btn_prev.circle, btn_prev.cross,
+                it->name);
+            plog(dbg);
+        }
         // Drain RSX commands before the inner loop writes new wave geometry.
         rsxSync();
         flip();
         init_btns();
+        {
+            char dbg[200];
+            snprintf(dbg, sizeof(dbg),
+                "info: after init_btns btn_cur(tri=%d cir=%d crs=%d) "
+                "btn_prev(tri=%d cir=%d crs=%d)",
+                btn_cur.triangle, btn_cur.circle, btn_cur.cross,
+                btn_prev.triangle, btn_prev.circle, btn_prev.cross);
+            plog(dbg);
+        }
+        XMBItemDetail detail;
+        memset(&detail, 0, sizeof(detail));
+        jellyfin_fetch_item_detail(it->id, &detail);
+        int info_frames = 0;
+        int info_exit_reason = 0;  // 1=circle, 2=triangle, 3=loop ended without exit
+        bool exit_armed = false;  // require buttons released before honoring exit
         while (running) {
             waitflip();
             sysUtilCheckCallback();
@@ -659,19 +698,114 @@ static bool xmb_handle_input_browse(void) {
             for (int i = 0; i < MAX_PADS; i++) {
                 if (!pi.status[i]) continue;
                 ioPadGetData(i, &pd); update_buttons(&pd);
-                if (BTN_PRESSED(circle) || BTN_PRESSED(triangle)) goto info_done;
+                // First frame in the loop: only become "armed" once we see
+                // circle and triangle both released. This prevents stale
+                // press detection from the parent context exiting us.
+                if (!exit_armed) {
+                    if (!btn_cur.circle && !btn_cur.triangle) {
+                        exit_armed = true;
+                    }
+                    continue;  // don't check exit conditions yet
+                }
+                if (BTN_PRESSED(circle))   { info_exit_reason = 1; goto info_done; }
+                if (BTN_PRESSED(triangle)) { info_exit_reason = 2; goto info_done; }
             }
             clearScreen(XMB_BG);
             wave_draw();
             rsxSync();
-            drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 10, it->name, 24, 0x00FFFFFF);
-            drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 46, it->year_str, 14, 0x00FFFFFF);
-            xmb_draw_meta(XMB_ITEM_PAD, XMB_TOPBAR_H + 68, it);
-            drawTTF(XMB_ITEM_PAD, XMB_TOPBAR_H + 100, "Coming soon", 16, 0x00888888);
-            drawTTF(XMB_ITEM_PAD, (u32)(display_height - XMB_BOTTOM_PAD + 16), "O BACK", 14, 0x00FFFFFF);
+            {
+                u32 X = XMB_ITEM_PAD;
+                u32 Y = XMB_TOPBAR_H + 10;
+                // Title
+                drawTTF(X, Y, it->name, 56, 0x00FFFFFF);
+                Y += 80;
+                // Year · runtime · rating · community score
+                char meta_line[256];
+                snprintf(meta_line, sizeof(meta_line), "%s  %s  %s  %s",
+                         it->year_str,
+                         it->duration_str,
+                         detail.official_rating[0] ? detail.official_rating : "",
+                         detail.community_rating[0] ? detail.community_rating : "");
+                drawTTF(X, Y, meta_line, 28, 0x00AAAAAA);
+                Y += 56;
+                // Video stream info
+                if (detail.video_info[0]) {
+                    drawTTF(X,       Y, "Video:", 24, 0x00888888);
+                    drawTTF(X + 160, Y, detail.video_info, 24, 0x00FFFFFF);
+                    Y += 40;
+                }
+                // Audio stream info
+                if (detail.audio_info[0]) {
+                    drawTTF(X,       Y, "Audio:", 24, 0x00888888);
+                    drawTTF(X + 160, Y, detail.audio_info, 24, 0x00FFFFFF);
+                    Y += 48;
+                }
+                // Tagline
+                if (detail.tagline[0]) {
+                    drawTTF(X, Y, detail.tagline, 32, 0x00AACCFF);
+                    Y += 56;
+                }
+                // Overview — manual word-wrap, up to 6 lines
+                if (detail.overview[0]) {
+                    const int max_cpl   = 40;
+                    const int max_lines = 6;
+                    const char *p = detail.overview;
+                    int lines_drawn = 0;
+                    while (*p && lines_drawn < max_lines) {
+                        int line_len = (int)strlen(p);
+                        if (line_len > max_cpl) {
+                            int i;
+                            for (i = max_cpl; i > 0; i--)
+                                if (p[i] == ' ') break;
+                            if (i == 0) i = max_cpl;
+                            char buf[128];
+                            snprintf(buf, sizeof(buf), "%.*s", i, p);
+                            drawTTF(X, Y, buf, 24, 0x00FFFFFF);
+                            p += i;
+                            if (*p == ' ') p++;
+                        } else {
+                            drawTTF(X, Y, p, 24, 0x00FFFFFF);
+                            p += line_len;
+                        }
+                        Y += 36;
+                        lines_drawn++;
+                    }
+                    Y += 16;
+                }
+                // Genres
+                if (detail.genres[0]) {
+                    drawTTF(X,       Y, "Genres:", 24, 0x00888888);
+                    drawTTF(X + 160, Y, detail.genres, 24, 0x00FFFFFF);
+                    Y += 40;
+                }
+                // Studios
+                if (detail.studios[0]) {
+                    drawTTF(X,       Y, "Studios:", 24, 0x00888888);
+                    drawTTF(X + 160, Y, detail.studios, 24, 0x00FFFFFF);
+                }
+            }
+            drawTTF(XMB_ITEM_PAD, (u32)(display_height - XMB_BOTTOM_PAD + 16), "O BACK", 28, 0x00FFFFFF);
             flip();
+            info_frames++;
+            if ((info_frames % 30) == 0) {
+                char dbg[80];
+                snprintf(dbg, sizeof(dbg), "info: frame=%d", info_frames);
+                plog(dbg);
+            }
         }
+        info_exit_reason = 3;
         info_done:
+        {
+            char dbg[200];
+            snprintf(dbg, sizeof(dbg),
+                "info: EXIT reason=%d frames=%d "
+                "btn_cur(tri=%d cir=%d crs=%d) btn_prev(tri=%d cir=%d crs=%d)",
+                info_exit_reason, info_frames,
+                btn_cur.triangle, btn_cur.circle, btn_cur.cross,
+                btn_prev.triangle, btn_prev.circle, btn_prev.cross);
+            plog(dbg);
+        }
+        g_info_cooldown_until = timing_get_us() + 500000;  // 500ms cooldown
         init_btns();
     }
     return false;

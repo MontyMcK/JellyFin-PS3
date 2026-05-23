@@ -1,140 +1,122 @@
-#---------------------------------------------------------------------------------
-# Clear the implicit built in rules
-#---------------------------------------------------------------------------------
+#---------------------------------------------------------------------------
+# Jellyfin PS3 — build system
+#---------------------------------------------------------------------------
 .SUFFIXES:
-#---------------------------------------------------------------------------------
+
 ifeq ($(strip $(PSL1GHT)),)
-$(error "Please set PSL1GHT in your environment. export PSL1GHT=<path>")
+$(error "PSL1GHT environment variable not set. export PSL1GHT=<path>")
 endif
 
 include $(PSL1GHT)/ppu_rules
 
-#---------------------------------------------------------------------------------
-# TARGET is the name of the output
-# BUILD is the directory where object files & intermediate files will be placed
-# SOURCES is a list of directories containing source code
-# INCLUDES is a list of directories containing extra header files
-#---------------------------------------------------------------------------------
-TARGET		:=	$(notdir $(CURDIR))
-BUILD		:=	build
-SOURCES		:=	source
-DATA		:=	data
-INCLUDES	:=	include
+#---------------------------------------------------------------------------
+# Project metadata
+#---------------------------------------------------------------------------
+TARGET      := $(notdir $(CURDIR))
+BUILD       := build
+SOURCES     := source
+DATA        := data
+INCLUDES    := include
 
-TITLE		:=	Jellyfin PS3
-APPID		:=	DEBUGPR01
-CONTENTID	:=	UP0001-$(APPID)_00-0000000000000000
-#---------------------------------------------------------------------------------
-# options for code generation
-#---------------------------------------------------------------------------------
+TITLE       := Jellyfin PS3
+APPID       := DEBUGPR01
+CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 
-CFLAGS		=	-O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
-CXXFLAGS	=	$(CFLAGS)
+#---------------------------------------------------------------------------
+# Tool paths (using the system-installed PSL1GHT toolchain)
+#---------------------------------------------------------------------------
+PS3PY_DIR       := $(HOME)/ps3dev/ps3py
+PYTHON          := env -u LD_LIBRARY_PATH python3.13
+PKG_TOOL        := $(PYTHON) $(PS3PY_DIR)/pkg.py
+SFO_TOOL        := $(PYTHON) $(PS3PY_DIR)/sfo.py
+SFO_TEMPLATE    := $(PS3PY_DIR)/sfo.xml
+MAKE_SELF_NPDRM    := $(PSL1GHT)/tools/geohot/make_self_npdrm
+PACKAGE_FINALIZE   := $(PSL1GHT)/tools/geohot/package_finalize
 
-LDFLAGS		=	$(MACHDEP) -Wl,-Map,$(notdir $@).map
+#---------------------------------------------------------------------------
+# Compiler flags
+#---------------------------------------------------------------------------
+CFLAGS    = -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
+CXXFLAGS  = $(CFLAGS)
+LDFLAGS   = $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
-#---------------------------------------------------------------------------------
-# any extra libraries we wish to link with the project
-#---------------------------------------------------------------------------------
-LIBS := -lvdec -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm -lnet -lsysmodule -lssl -lhttp -lhttputil
+LIBS := -lvdec -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm \
+        -lnet -lsysmodule -lssl -lhttp -lhttputil
 
-#---------------------------------------------------------------------------------
-# list of directories containing libraries, this must be the top level containing
-# include and lib
-#---------------------------------------------------------------------------------
-LIBDIRS	:=
+LIBDIRS :=
 
-#---------------------------------------------------------------------------------
-# no real need to edit anything past this point unless you need to add additional
-# rules for different file extensions
-#---------------------------------------------------------------------------------
+#---------------------------------------------------------------------------
+# Build setup (don't modify below unless adding extra file extensions)
+#---------------------------------------------------------------------------
 ifneq ($(BUILD),$(notdir $(CURDIR)))
-#---------------------------------------------------------------------------------
 
-export OUTPUT	:=	$(CURDIR)/$(TARGET)
+export OUTPUT   := $(CURDIR)/$(TARGET)
+export VPATH    := $(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
+                   $(foreach dir,$(DATA),$(CURDIR)/$(dir))
+export DEPSDIR  := $(CURDIR)/$(BUILD)
+export BUILDDIR := $(CURDIR)/$(BUILD)
 
-export VPATH	:=	$(foreach dir,$(SOURCES),$(CURDIR)/$(dir)) \
-					$(foreach dir,$(DATA),$(CURDIR)/$(dir))
+CFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
+CPPFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
+sFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
+SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.S)))
+BINFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
 
-export DEPSDIR	:=	$(CURDIR)/$(BUILD)
-
-export BUILDDIR	:=	$(CURDIR)/$(BUILD)
-
-#---------------------------------------------------------------------------------
-# automatically build a list of object files for our project
-#---------------------------------------------------------------------------------
-CFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
-CPPFILES	:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
-sFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
-SFILES		:=	$(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.S)))
-BINFILES	:=	$(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.*)))
-
-#---------------------------------------------------------------------------------
-# use CXX for linking C++ projects, CC for standard C
-#---------------------------------------------------------------------------------
 ifeq ($(strip $(CPPFILES)),)
-	export LD	:=	$(CC)
+	export LD := $(CC)
 else
-	export LD	:=	$(CXX)
+	export LD := $(CXX)
 endif
 
-export OFILES	:=	$(addsuffix .o,$(BINFILES)) \
-					$(CPPFILES:.cpp=.o) $(CFILES:.c=.o) \
-					$(sFILES:.s=.o) $(SFILES:.S=.o)
+export OFILES := $(addsuffix .o,$(BINFILES)) \
+                 $(CPPFILES:.cpp=.o) $(CFILES:.c=.o) \
+                 $(sFILES:.s=.o) $(SFILES:.S=.o)
 
-#---------------------------------------------------------------------------------
-# build a list of include paths
-#---------------------------------------------------------------------------------
-export INCLUDE	:=	$(foreach dir,$(INCLUDES), -I$(CURDIR)/$(dir)) \
-					$(foreach dir,$(LIBDIRS),-I$(dir)/include) \
-					$(LIBPSL1GHT_INC) \
-					-I$(CURDIR)/$(BUILD)
+export INCLUDE := $(foreach dir,$(INCLUDES), -I$(CURDIR)/$(dir)) \
+                 $(foreach dir,$(LIBDIRS),-I$(dir)/include) \
+                 $(LIBPSL1GHT_INC) \
+                 -I$(CURDIR)/$(BUILD)
 
-#---------------------------------------------------------------------------------
-# build a list of library paths
-#---------------------------------------------------------------------------------
-export LIBPATHS	:=	$(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
-					$(LIBPSL1GHT_LIB) -L$(PS3DEV)/ppu/lib
+export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
+                   $(LIBPSL1GHT_LIB) -L$(PS3DEV)/ppu/lib
 
-export OUTPUT	:=	$(CURDIR)/$(TARGET)
-.PHONY: $(BUILD) clean
+.PHONY: $(BUILD) clean pkg run all
 
-#---------------------------------------------------------------------------------
+all: $(BUILD)
+
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
-#---------------------------------------------------------------------------------
 clean:
-	@echo clean ...
-	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).self
+	@echo cleaning...
+	@rm -fr $(BUILD) $(OUTPUT).elf $(OUTPUT).self pkg $(TARGET).pkg
 
-#---------------------------------------------------------------------------------
 run:
 	ps3load $(OUTPUT).self
 
+pkg: $(OUTPUT).self
+	@echo "Building $(TARGET).pkg..."
+	@rm -rf pkg
+	@mkdir -p pkg/USRDIR
+	@cp $(OUTPUT).fake.self pkg/USRDIR/EBOOT.BIN
+	@cp ICON0.PNG pkg/ICON0.PNG
+	@$(SFO_TOOL) --title "$(TITLE)" --appid "$(APPID)" -f $(SFO_TEMPLATE) pkg/PARAM.SFO
+	@$(PKG_TOOL) --contentid $(CONTENTID) pkg/ $(TARGET).pkg
+	@$(PACKAGE_FINALIZE) $(TARGET).pkg
+	@echo "Created $(TARGET).pkg"
 
-#---------------------------------------------------------------------------------
 else
 
-DEPENDS	:=	$(OFILES:.o=.d)
+DEPENDS := $(OFILES:.o=.d)
 
-#---------------------------------------------------------------------------------
-# main targets
-#---------------------------------------------------------------------------------
 $(OUTPUT).self: $(OUTPUT).elf
-$(OUTPUT).elf:	$(OFILES)
+$(OUTPUT).elf:  $(OFILES)
 
-#---------------------------------------------------------------------------------
-# This rule links in binary data with the .bin extension
-#---------------------------------------------------------------------------------
-%.bin.o	:	%.bin
-#---------------------------------------------------------------------------------
+%.bin.o: %.bin
 	@echo $(notdir $<)
 	@$(bin2o)
 
 -include $(DEPENDS)
 
-#---------------------------------------------------------------------------------
 endif
-#---------------------------------------------------------------------------------

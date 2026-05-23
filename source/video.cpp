@@ -14,6 +14,8 @@
 #include <codec/vdec.h>
 #include <sys/mutex.h>
 
+extern void crash_log(const char *msg);
+
 // -------------------------------------------------------
 // MPEG-TS demuxer
 // -------------------------------------------------------
@@ -199,8 +201,11 @@ static u32 vdec_cb(u32 handle, u32 msgtype, u32 msgdata, u32 arg) {
 }
 
 bool vdec_open(void) {
+    crash_log("v1 vdec_open enter");
+    crash_log("v2 sysModuleLoad VDEC");
     plog("vdec_open: load VDEC base");
     s32 r1 = sysModuleLoad(SYSMODULE_VDEC);
+    crash_log("v3 sysModuleLoad H264");
     plog("vdec_open: load VDEC_H264");
     s32 r2 = sysModuleLoad(SYSMODULE_VDEC_H264);
     { char buf[64]; snprintf(buf,sizeof(buf),"vdec_open: mod_ret base=%d h264=%d",(int)r1,(int)r2); plog(buf); }
@@ -209,6 +214,7 @@ bool vdec_open(void) {
     codec.codec_type    = VDEC_CODEC_TYPE_H264;
     codec.profile_level = 31;
 
+    crash_log("v4 queryAttr");
     plog("vdec_open: queryAttr");
     vdecAttr attr;
     s32 qret = vdecQueryAttr(&codec, &attr);
@@ -221,10 +227,12 @@ bool vdec_open(void) {
     const u32 NUM_SPUS = 3; //was 4
     u32 mem_size_aligned = ((attr.mem_size * NUM_SPUS) + (1024*1024-1))
                            & ~(u32)(1024*1024-1);
+    crash_log("v5 memalign vdec_mem");
     plog("vdec_open: memalign vdec_mem");
     s_vdec_mem = (u8*)memalign(1024*1024, mem_size_aligned);
     if (!s_vdec_mem) { plog("vdec_open: vdec_mem alloc FAILED (4x SPU size)"); return false; }
 
+    crash_log("v6 memalign au_bufs");
     plog("vdec_open: memalign au_bufs");
     for (int i = 0; i < AU_BUF_COUNT; i++) {
         s_au_bufs[i] = (u8*)memalign(128, AU_BUF_SIZE);
@@ -255,6 +263,7 @@ bool vdec_open(void) {
     }
     { char buf[80]; snprintf(buf, sizeof(buf), "vdec_cb_opd32: code=0x%08x toc=0x%08x fn=0x%08x",
         (unsigned)s_vdec_cb_opd32.func, (unsigned)s_vdec_cb_opd32.rtoc, (unsigned)closure.fn); plog(buf); }
+    crash_log("v7 vdecOpen");
     plog("vdec_open: vdecOpen");
     s32 oret = vdecOpen(&codec, &cfg, &closure, &s_vdec);
     if (oret != 0) {
@@ -262,26 +271,36 @@ bool vdec_open(void) {
         plog(buf); return false;
     }
 
+    crash_log("v8 startSequence");
     plog("vdec_open: startSequence");
     s32 sret = vdecStartSequence(s_vdec);
     { char buf[64]; snprintf(buf, sizeof(buf), "vdec_open: startSequence ret=%d", (int)sret); plog(buf); }
     if (sret != 0) { plog("vdec_open: startSequence FAILED"); return false; }
+    crash_log("v9 vdec_open done");
     plog("vdec_open: done");
     return true;
 }
 
 void vdec_close(void) {
+    crash_log("c1 vdec_close enter");
     if (s_vdec) {
+        crash_log("c2 vdecEndSequence");
         vdecEndSequence(s_vdec);
+        crash_log("c3 vdecClose");
         vdecClose(s_vdec);
         s_vdec = 0;
     }
+    crash_log("c4 free vdec_mem");
     if (s_vdec_mem)  { free(s_vdec_mem);  s_vdec_mem  = NULL; }
+    crash_log("c5 free au_bufs");
     for (int i = 0; i < AU_BUF_COUNT; i++) {
         if (s_au_bufs[i]) { free(s_au_bufs[i]); s_au_bufs[i] = NULL; }
     }
+    crash_log("c6 unload H264");
     sysModuleUnload(SYSMODULE_VDEC_H264);
+    crash_log("c7 unload VDEC");
     sysModuleUnload(SYSMODULE_VDEC);
+    crash_log("c8 vdec_close done");
 }
 
 static void vdec_submit(const u8 *data, int len, u64 pts) {

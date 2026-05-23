@@ -9,6 +9,8 @@
 #include <audio/audio.h>
 #include <sys/event_queue.h>
 
+extern void crash_log(const char *msg);
+
 static u32               s_audio_port  = 0;
 static sys_event_queue_t s_audio_eq    = {0};
 static sys_ipc_key_t     s_audio_key   = 0;
@@ -44,9 +46,11 @@ bool audio_clock_valid(void) {
 }
 
 void audio_open(void) {
+    crash_log("a1 audio_open enter");
     int rc;
     char buf[128];
 
+    crash_log("a2 sysAudioInit");
     rc = audioInit();
     snprintf(buf, sizeof(buf), "audio: sysAudioInit rc=0x%x", rc);
     plog(buf);
@@ -57,6 +61,7 @@ void audio_open(void) {
     p.numBlocks   = AUDIO_BLOCK_8;
     p.attrib      = 0;
     p.level       = 1.0f;
+    crash_log("a3 sysAudioPortOpen");
     rc = audioPortOpen(&p, &s_audio_port);
     snprintf(buf, sizeof(buf), "audio: sysAudioPortOpen rc=0x%x port=%u", rc, s_audio_port);
     plog(buf);
@@ -112,6 +117,7 @@ void audio_open(void) {
     snprintf(buf, sizeof(buf), "audio: audioSetNotifyEventQueue rc=0x%x", rc);
     plog(buf);
 
+    crash_log("a4 sysAudioPortStart");
     rc = audioPortStart(s_audio_port);
     snprintf(buf, sizeof(buf), "audio: sysAudioPortStart rc=0x%x", rc);
     plog(buf);
@@ -120,6 +126,7 @@ void audio_open(void) {
     { sys_event_t ev; while (sysEventQueueReceive(s_audio_eq, &ev, 1) == 0) { } }
 
     s_audio_ok = true;
+    crash_log("a5 audio_open done");
 }
 
 // Called from the dedicated audio thread in a loop — one block per call.
@@ -168,14 +175,19 @@ bool audio_write_pcm(void) {
 }
 
 void audio_close(void) {
+    crash_log("ax1 audio_close enter");
     if (!s_audio_ok) return;
+    crash_log("ax2 sysAudioPortStop");
     audioPortStop(s_audio_port);
     audioRemoveNotifyEventQueue(s_audio_key);
+    crash_log("ax3 sysAudioPortClose");
     audioPortClose(s_audio_port);
     sysEventQueueDestroy(s_audio_eq, 0);
+    crash_log("ax4 sysAudioQuit");
     audioQuit();
     s_audio_ok   = false;
     s_data_start = 0;
     s_num_blocks = 0;
     s_write_blk  = 0;
+    crash_log("ax5 audio_close done");
 }

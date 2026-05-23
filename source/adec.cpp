@@ -9,6 +9,8 @@
 #include <sys/cond.h>
 #include <sys/thread.h>
 
+extern void crash_log(const char *msg);
+
 // ~683 ms of stereo audio at 48 kHz.  Power of two for cheap modulo.
 #define PCM_RING_CAP 32768
 
@@ -168,7 +170,9 @@ static void adec_thread_fn(void *arg) {
 }
 
 void adec_start(void) {
+    crash_log("ad1 adec_start enter");
     sys_mutex_attr_t mattr;
+    crash_log("ad2 mutex/cond create");
     sysMutexAttrInitialize(mattr);
     sysMutexCreate(&s_pes_mtx, &mattr);
     sys_cond_attr_t cattr;
@@ -176,20 +180,27 @@ void adec_start(void) {
     sysCondCreate(&s_pes_cond, s_pes_mtx, &cattr);
     s_pes_q_rd = s_pes_q_wr = s_pes_q_n = 0;
     s_adec_run = true;
+    crash_log("ad3 sysThreadCreate");
     sysThreadCreate(&s_adec_thread, adec_thread_fn, NULL,
                     750, 0x10000, THREAD_JOINABLE, (char*)"jf_adec");
+    crash_log("ad4 adec_start done");
 }
 
 void adec_stop(void) {
+    crash_log("adx1 adec_stop enter");
     sysMutexLock(s_pes_mtx, 0);
     s_adec_run = false;
+    crash_log("adx2 signal stop");
     sysCondSignal(s_pes_cond);
     sysMutexUnlock(s_pes_mtx);
+    crash_log("adx3 sysThreadJoin");
     u64 retval;
     sysThreadJoin(s_adec_thread, &retval);
+    crash_log("adx4 mutex/cond destroy");
     sysCondDestroy(s_pes_cond);
     sysMutexDestroy(s_pes_mtx);
     sysMutexDestroy(s_pcm_mtx);
+    crash_log("adx5 adec_stop done");
 }
 
 int adec_pcm_available(void) { return s_n; }

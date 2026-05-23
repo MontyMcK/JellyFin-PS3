@@ -41,7 +41,7 @@ static void sysutil_exit_callback(u64 status, u64 param, void *usrdata) {
 // -------------------------------------------------------
 
 static FILE *g_clog = NULL;
-static void crash_log(const char *msg) {
+void crash_log(const char *msg) {
     if (!g_clog) g_clog = fopen("/dev_hdd0/tmp/crash_log.txt", "w");
     if  (g_clog) { fprintf(g_clog, "%s\n", msg); fflush(g_clog); }
 }
@@ -52,6 +52,11 @@ static void crash_log(const char *msg) {
 
 int main(int argc, const char *argv[]) {
     (void)argc; (void)argv;
+
+    {
+        FILE *f = fopen("/dev_hdd0/tmp/launch_test.txt", "w");
+        if (f) { fprintf(f, "main() reached\n"); fclose(f); }
+    }
 
     crash_log("1 memalign");
     void *host_addr = memalign(1024*1024, HOST_SIZE);
