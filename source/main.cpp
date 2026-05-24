@@ -15,7 +15,7 @@
 #include "jellyfin_api.h"
 #include "plog.h"
 
-SYS_PROCESS_PARAM(1001, 0x100000);
+SYS_PROCESS_PARAM(1001, 0x8000000);
 
 // Defined here; declared extern in ui.h so all other modules can read it.
 u32 running = 0;

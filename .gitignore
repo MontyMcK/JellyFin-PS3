@@ -5,3 +5,9 @@ build/
 *.map
 *.o
 *.d
+*.pkg
+*.gnpdrm.pkg
+*.self
+*.elf
+*.map
+obj/
