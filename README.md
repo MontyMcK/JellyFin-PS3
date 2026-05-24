@@ -1,60 +1,92 @@
-<p align="center">
-  <img src="ICON0.PNG" width="200"/>
-</p>
+![JellyFin PS3 banner](ICON0.PNG)
 
-# JellyFin PS3 Client
+# JellyFin PS3
 
-A native PS3 homebrew Jellyfin client written in C++ using PSL1GHT, targeting Evilnat CFW or HEN.
+A native PS3 homebrew Jellyfin client written in C using PSL1GHT, targeting Evilnat CFW or HEN.
+
+Goal: consumer-quality media playback on PS3 — the second-best media player on the platform, modelled architecturally on Movian.
+
+---
 
 ## Features
 
-- XMB-style main menu with animated wave background
+- XMB-style UI with animated wave background
 - Browse Movies, TV Shows, and Collections libraries
 - TV show browser — Series → Seasons → Episodes
 - Collections browser — Collection → Movies
-- Search across your entire Jellyfin library
+- Live search across your Jellyfin library (fires on every keystroke)
 - Custom on-screen keyboard for login and search
-- Open Sans font rendering via stb_truetype
-- Material Icons tab icons
-- HTTP streaming of transcoded video via MPEG-TS
+- Open Sans + Material Icons font rendering via stb_truetype
 - Hardware H.264 decode via PS3 VDEC (SPU-accelerated)
-- 24fps frame-paced display with Bresenham 2:3 pulldown and hardware vsync
+- Movian-style temporal frame blending — smooth 60fps display loop with crossfade between decoded 24fps frames
+- Bresenham 2:3 pulldown, locked to hardware vsync via `gcmSetVBlankHandler`
+- AV sync locked to within ±5ms using audio PTS clock + EMA smoothing
 - MP3 audio decode via minimp3 with PCM ring buffer
 - Interleaved stereo DMA audio output at 48kHz
-- Double-buffered RSX GPU blit via vertex/fragment shaders
-- Async logging system
+- Double-buffered RSX GPU blit via custom vertex/fragment shaders
+- Jellyfin PlaybackInfo POST with PS3 H.264 transcode profile (720p)
+- `.pkg` packaging via PSL1GHT built-in `ppu_rules` flow (APPID: `JFPS30000`)
+- Crash log written to `/dev_hdd0/game/JFPS30000/USRDIR/crash_log.txt`
+- Async ring-buffer logging system
+
+---
 
 ## Requirements
 
 - PS3 with Evilnat CFW or HEN (CEX)
-- PSL1GHT toolchain (`ppu-g++` at `/usr/local/ps3dev/ppu/bin/`)
-- Jellyfin server accessible from your PS3 (local network recommended, port-forwarded remote server also works)
+- PSL1GHT toolchain (`ppu-gcc` at `/usr/local/ps3dev/ppu/bin/`)
+- Jellyfin server reachable from your PS3 (local network recommended; port-forwarded remote also works)
+- `sfo.xml` at `~/ps3dev/ps3py/sfo.xml` (used by `ppu_rules` for `.pkg` target)
+
+---
 
 ## Building
 
 ```bash
+# Build SELF only
 make clean && make
+
+# Build installable PKG
+make pkg
 ```
 
-Output: `jellyfin-ps3.self`
+Output: `JellyFin---PS3.self` and `JellyFin---PS3.pkg`
 
-Transfer to PS3 via FTP or USB and launch through webMAN or multiMAN.
+Transfer the SELF to your PS3 via FTP or USB and launch through webMAN or multiMAN, or install the PKG directly.
+
+---
 
 ## Controls
 
 ### Menus
-| Button | Action |
-|--------|--------|
-| X | Select |
-| O | Back |
-| D-pad | Navigate |
-| L1 / R1 | Cycle tabs |
-| Triangle | Info overlay |
+
+| Button      | Action                          |
+|-------------|---------------------------------|
+| X           | Select / confirm                |
+| O           | Back                            |
+| D-pad       | Navigate                        |
+| L1 / R1     | Cycle tabs                      |
+| Triangle    | Item info overlay               |
+| L1 / R1     | Prev/next page (season browser) |
 
 ### Media Player
-| Button | Action |
-|--------|--------|
-| Start | Exit player |
+
+| Button | Action     |
+|--------|------------|
+| Start  | Stop / exit player |
+
+### Search
+
+| Button   | Action                              |
+|----------|-------------------------------------|
+| D-pad    | Move cursor on keyboard / in results|
+| X        | Type character / play result        |
+| Triangle | Toggle caps lock                    |
+| O / CLEAR| Reset search, return to keyboard    |
+| Down     | Jump from keyboard to results       |
+| Up       | Jump from first result back to keyboard |
+
+---
 
 ## Video Pipeline
 
@@ -67,40 +99,43 @@ HTTP stream (MPEG-TS)
         │
         ▼
   video_feed_ts()
-  TS demuxer → PAT/PMT parsing → PES reassembly
+  TS demuxer → PAT/PMT → PES reassembly
         │
         ├─ Audio PES → adec_push_pes() → minimp3 → PCM ring buffer
         │
-        └─ Video PES → vdecDecodeAu() → VDEC (SPU-accelerated H.264)
+        └─ Video PES → vdecDecodeAu() → VDEC (SPU H.264)
                 │
                 ▼
          VDEC callback
-         vdec_pull_frame() → YUV frame → ARGB conversion
+         vdec_pull_frame() → YUV → ARGB
                 │
                 ▼
-         Jitter buffer (16 slots, ~32 MB)
-         PTS stored per slot
+         Jitter buffer (16 slots, ~28 MB at 720p)
+         PTS + per-frame duration stored per slot
                 │
                 ▼
          Upload thread (priority 850)
          memcpy → RSX-local texture (double-buffered)
+         Also uploads frame B for blend
                 │
                 ▼
-         Display thread
-         timing_flip_due() ← Bresenham accumulator (24000/1001 fps)
-         gcmSetVBlankHandler ← hardware vsync at 60000/1001 Hz
+         Display loop (Movian-style, 60fps)
+         timing_flip_due() ← Bresenham accumulator
+         gcmSetVBlankHandler ← hardware vsync at 59.94 Hz
                 │
                 ▼
          RSX GPU blit
-         vertex + fragment shaders → fullscreen quad
+         Crossfade shader blends frame A → B mid-pulldown
          rsxSync() → flip()
 ```
 
-**FPS detection:** VDEC `frame_rate_code` maps to exact fractional fps (ISO 13818-2 table). Display refresh rate queried dynamically via `videoGetState` — 59.94Hz detected and used in Bresenham accumulator for correct 2:3 pulldown cadence.
+**FPS detection:** VDEC `frame_rate_code` maps to exact fractional fps (ISO 13818-2). Display refresh rate queried via `videoGetState` — 59.94 Hz detected and used for Bresenham accumulator.
 
-**Frame pacing:** Bresenham accumulator fires `s_flip_trigger` at the exact vblank edge where a new frame is due. Display thread consumes the trigger via `timing_flip_due()`. `flip_late` logged if the trigger is consumed more than one vblank late.
+**Temporal blending:** Each decoded frame carries a remaining duration (us). The display loop consumes vblank periods from that budget. When a frame's remaining duration falls below one vblank period and the next frame is available, the shader crossfades A→B based on the fractional time remaining — eliminating judder on 24fps content without a fixed pulldown pattern.
 
-**GPU blit:** RSX vertex/fragment shaders scale the YUV→ARGB texture to fit the display. `rsxSync()` before `flip()` ensures the RSX finishes all blit work before the framebuffer is presented.
+**AV sync:** `avsync_compute_diff()` computes video PTS minus audio PTS. An EMA smooths it over time; `avsync_biased_period()` nudges each vblank period ±5000 µs to correct drift. Locked = |EMA| < 41 667 µs (~1 frame at 24fps).
+
+---
 
 ## Audio Pipeline
 
@@ -113,8 +148,8 @@ Audio PES packets (MP3, type 0x03)
         │
         ▼
   minimp3 decode loop
-  mp3dec_decode_frame() → 1152 samples per frame
-  short PCM → float32, interleaved L/R pairs
+  mp3dec_decode_frame() → 1152 samples/frame
+  short PCM → float32, interleaved L/R
         │
         ▼
   PCM ring buffer (8192 sample-pairs, ~170ms at 48kHz)
@@ -125,72 +160,85 @@ Audio PES packets (MP3, type 0x03)
   Blocks up to 100ms waiting for 256 samples
         │
         ▼
-  PS3 audio DMA (8 blocks, 256 samples each, 48kHz)
-  Interleaved layout: L0 R0 L1 R1 ... (per SDK spec)
+  PS3 audio DMA (8 blocks × 256 samples, 48kHz)
+  Interleaved layout: L0 R0 L1 R1 … (per SDK spec)
 ```
 
-**Sample rate:** PS3 audio hardware runs at 48kHz. Stream is requested at 48kHz via `AudioSampleRate=48000` in the stream URL.
+**AV clock:** `audio_get_clock_us()` returns PTS-based time once the first PES with a valid PTS is decoded; falls back to DMA block counter at startup.
 
-**DMA layout:** PS3 audio expects interleaved samples (L R L R). Each DMA block is 256 sample-pairs written as sequential float32 pairs. Audio thread blocks until a full 256-sample block is available before writing, preventing silence gaps that would corrupt pitch.
-
-**Audio clock:** `audio_get_clock_us()` returns `(s_audio_blocks * 256ULL * 1000000ULL) / 48000ULL` — microseconds of audio played since start. Used as AV sync reference. PTS stored per jitter buffer slot via `s_jbuf_pts[]`.
+---
 
 ## Threading Model
 
-| Thread | Priority | Role |
-|--------|----------|------|
-| Display (main) | default | Bresenham gate, RSX blit, flip |
-| Decode | 800 | TS demux, VDEC submit, jitter buffer fill |
-| Upload | 850 | memcpy jitter buffer → RSX texture |
-| Audio | 750 | DMA event loop, PCM ring drain |
+| Thread         | Priority | Role                                         |
+|----------------|----------|----------------------------------------------|
+| Display (main) | default  | Bresenham gate, RSX blit, flip, input poll   |
+| Decode         | 800      | TS demux, VDEC submit, jitter buffer fill     |
+| Upload         | 850      | memcpy jitter buffer → RSX texture (A + B)   |
+| Audio          | 750      | DMA event loop, PCM ring drain               |
+| Async log      | default  | Ring-buffer drain to player_log.txt          |
+
+---
 
 ## File Structure
 
 ```
-jellyfin-ps3/
+JellyFin---PS3/
+├── Makefile
+├── ICON0.PNG
 └── source/
-    ├── main.cpp              # Entry point
-    ├── player.cpp/h          # Media player — thread management, display loop, frame pacing
-    ├── video.cpp/h           # VDEC init, H.264 decode, jitter buffer, FPS detection
-    ├── audio.cpp/h           # Audio port, DMA ring buffer, audio thread
+    ├── main.cpp              # Entry point, crash_log
+    ├── player.cpp/h          # Playback orchestrator — thread management, display loop
+    ├── video.cpp/h           # VDEC init, H.264 decode, jitter buffer, fps detection
+    ├── audio.cpp/h           # Audio port, DMA ring buffer, audio thread, PTS clock
     ├── adec.cpp/h            # MP3 decode via minimp3, PCM ring buffer
-    ├── stream.cpp/h          # HTTP MPEG-TS stream reader
+    ├── stream.cpp/h          # HTTP MPEG-TS reader (chunked transfer, TS ring buffer)
     ├── http.cpp/h            # HTTP client
-    ├── jellyfin_api.cpp/h    # Jellyfin REST API (auth, libraries, items)
-    ├── ui.cpp/h              # XMB UI, font rendering, OSK, browse/search screens
-    ├── bitmap.cpp/h          # Bitmap/image loading
-    ├── timing.cpp/h          # Frame pacing, Bresenham accumulator, hardware vsync
-    ├── rsxutil.cpp/h         # RSX GPU helpers, shader blit
+    ├── jellyfin_api.cpp/h    # Jellyfin REST API (auth, libraries, items, PlaybackInfo)
+    ├── ui.cpp/h              # Main menu, browse/search loop, OSK, tab detection
+    ├── ui_visuals.cpp/h      # XMB draw calls — tabs, item lists, keyboard, search results
+    ├── ui_wave.cpp/h         # Animated wave background (RSX)
+    ├── bitmap.cpp/h          # Image loading
+    ├── timing.cpp/h          # Frame pacing, Bresenham accumulator, AV sync EMA
+    ├── rsxutil.cpp/h         # RSX helpers, shader blit
+    ├── video_shaders.h       # Vertex/fragment shader ucode (YUV→ARGB + crossfade blend)
+    ├── wave_shaders.h        # Wave background shader ucode
     ├── plog.h                # Async logging
     ├── minimp3.h             # Embedded MP3 decoder
-    ├── stb_truetype.h        # TTF font rasterizer
+    ├── stb_truetype.h        # TTF rasterizer
     ├── opensans_regular.h    # Open Sans Regular (embedded)
     ├── opensans_bold.h       # Open Sans Bold (embedded)
     ├── material_icons.h      # Material Icons (embedded)
     └── font8x8.xpm           # Fallback bitmap font
 ```
 
+---
+
 ## Status
 
-Work in progress. Library browsing, login, TV show browser, collections browser, and video playback are functional.
+| Feature                  | Status                                                            |
+|--------------------------|-------------------------------------------------------------------|
+| Login / Auth             | ✅ Working                                                        |
+| Movie browsing           | ✅ Working                                                        |
+| TV show browsing         | ✅ Working (Series → Seasons → Episodes)                          |
+| Collections browsing     | ✅ Working                                                        |
+| Search                   | ✅ Working (live, keystroke-driven)                               |
+| Item info overlay        | ✅ Working (overview, rating, genres, studios, video/audio info)  |
+| Video playback           | ✅ Working (720p H.264, Movian-style 60fps display loop)          |
+| Temporal frame blending  | ✅ Working (crossfade shader, eliminates 2:3 judder)              |
+| Audio playback           | ✅ Working (48kHz stereo MP3, zero silence blocks)                |
+| AV sync                  | ✅ Locked (±5ms via PTS clock + EMA bias)                         |
+| PlaybackInfo / transcode | ✅ Working (H.264 720p profile, PlaySessionId extracted)          |
+| PKG packaging            | ✅ Working (`make pkg`, APPID `JFPS30000`)                        |
+| Music library            | ⚠️ not implemented                                                |
 
-| Feature | Status |
-|---------|--------|
-| Login / Auth | ✅ Working |
-| Movie browsing | ✅ Working |
-| TV show browsing | ✅ Working |
-| Collections browsing | ✅ Working |
-| Search | ✅ Working |
-| Video playback | ✅ Working (24fps, hardware vsync, RSX GPU blit) |
-| Audio playback | ✅ Working (48kHz stereo, zero silence blocks) |
-| AV sync | ✅ Working (audio clock infrastructure in place) |
-| Frame pacing | ✅ Working |
-| Jellyfin transcoding | ⚠️ PlaybackInfo session flow in progress |
+---
 
-## Known Limitations
+## Logging
 
-- 24fps content on 60Hz displays has inherent 2:3 pulldown cadence — this will be addressed by PTS-driven scheduling
-- Jellyfin PlaybackInfo POST returns 404 in some configurations, falling back to direct stream
+During playback, async log output is written to `player_log.txt` in the app's working directory. The crash log at `/dev_hdd0/game/JFPS30000/USRDIR/crash_log.txt` is written synchronously at key lifecycle checkpoints and survives crashes that prevent the async logger from flushing.
+
+---
 
 ## License
 
