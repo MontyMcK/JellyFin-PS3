@@ -1,5 +1,6 @@
-![JellyFin PS3 banner](ICON0.PNG)
-
+<div align="center">
+  <img src="ICON0.PNG" alt="JellyFin PS3 banner">
+</div>
 # JellyFin PS3
 
 A native PS3 homebrew Jellyfin client written in C using PSL1GHT, targeting Evilnat CFW or HEN.
