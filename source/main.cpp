@@ -13,6 +13,7 @@
 #include "ui.h"
 #include "http.h"
 #include "jellyfin_api.h"
+#include "thumbnail_cache.h"
 #include "plog.h"
 
 SYS_PROCESS_PARAM(1001, 0x8000000);
@@ -95,6 +96,8 @@ int main(int argc, const char *argv[]) {
     crash_log("9 running=1");
     running = 1;
 
+    thumb_cache_init();
+
     crash_log("10 load_config");
     load_config();
     {
@@ -128,6 +131,7 @@ int main(int argc, const char *argv[]) {
     }
 
     crash_log("14 done");
+    thumb_cache_shutdown();
     http_end();
     ui_cleanup();
     plog_stop();

@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 
 #define HTTP_USER_AGENT  "JellyfinPS3/0.1"
 #define RESPONSE_SIZE    (128*1024)
@@ -12,3 +13,8 @@ void http_end(void);
 // Response body written to out[0..out_size-1].
 int  http_request(int is_post, const char *url, const char *body,
                   const char *token, char *out, int out_size);
+
+// Fetches a binary resource (e.g. JPEG image) into caller-supplied buffer.
+// Returns number of bytes written, or -1 on failure.
+int http_fetch_binary(const char *url, const char *token,
+                      uint8_t *out, int out_size);

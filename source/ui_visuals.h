@@ -14,6 +14,7 @@
 #define XMB_TAB_COUNT       6
 
 #define XMB_ITEMS_MAX 50
+#define XMB_PAGE_SIZE 25
 
 typedef struct {
     const char *label;
@@ -68,6 +69,11 @@ typedef struct { const char *label; char value; } SpecialKey;
 // Items visible simultaneously in the list area
 #define XMB_ITEMS_VIS ((int)((display_height - XMB_CONTENT_Y - XMB_BOTTOM_PAD) / XMB_ROW_STRIDE))
 
+// Jump bar (narrow letter column to the left of the item list)
+#define JBAR_ENTRIES 27
+#define JBAR_W       20
+#define JBAR_GAP      8
+
 // OSK constants (pixels)
 #define OSK_KEY_W    80
 #define OSK_KEY_H    44
@@ -101,10 +107,16 @@ extern int     g_tv_sub_sel;
 extern int     g_tv_sub_scroll;
 extern int     g_tv_sub_count;
 extern XMBItem g_tv_sub_items[XMB_ITEMS_MAX];
+extern int     g_tv_sub_start;
+extern int     g_tv_sub_total;
 extern int     g_col_sub_sel;
 extern int     g_col_sub_scroll;
 extern int     g_col_sub_count;
 extern XMBItem g_col_sub_items[XMB_ITEMS_MAX];
+extern int     g_col_sub_start;
+extern int     g_col_sub_total;
+extern int     g_tab_start[XMB_TAB_COUNT];
+extern int     g_tab_total[XMB_TAB_COUNT];
 extern int     g_osk_row;
 extern int     g_osk_col;
 extern bool    g_osk_sym;
@@ -118,6 +130,11 @@ extern int     OSK_Y0;
 extern int     kb_row;
 extern int     kb_col;
 extern bool    kb_caps;
+
+// Jump bar state (defined in ui.cpp)
+extern bool g_jumpbar_active;
+extern int  g_jumpbar_sel;
+extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 
 // -------------------------------------------------------
 // Functions implemented in ui_visuals.cpp
@@ -137,3 +154,4 @@ void xmb_rsx_draw_osk(void);
 void xmb_cpu_draw_osk(void);
 void xmb_cpu_draw_search_results(void);
 void draw_keyboard(const char *prompt, const char *input, bool is_password);
+void xmb_draw_jumpbar(int tab);
