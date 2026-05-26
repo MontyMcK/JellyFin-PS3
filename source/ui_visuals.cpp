@@ -9,6 +9,7 @@
 
 #include "ui_visuals.h"
 #include "bitmap.h"
+#include "thumbnail_cache.h"
 #include "font8x8.xpm"
 #include "timing.h"
 #include "opensans_regular.h"
@@ -495,7 +496,8 @@ void xmb_draw_item_list(int tab) {
 
         if (i == 0 && g_scroll_top > 0)
             drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
-        if (i == vis-1 && g_scroll_top + vis < count)
+        if (i == vis-1 && (g_scroll_top + vis < count ||
+                           g_tab_start[tab] + count < g_tab_total[tab]))
             drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
     }
 }
@@ -520,9 +522,26 @@ void xmb_cpu_draw_items(int tab) {
                      4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
 
+        const XMBItem *it = &g_items[tab][idx];
         int thumb_x = list_x + 16;
         int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
-        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        thumb_request(it->id);
+        const Bitmap *th = thumb_get(it->id);
+        if (th) {
+            u32 *fb = color_buffer[curr_fb];
+            int stride = (int)display_width;
+            for (int row = 0; row < (int)XMB_THUMB_H; row++) {
+                int sy = thumb_y + row;
+                if (sy < 0 || sy >= (int)display_height) continue;
+                for (int col = 0; col < (int)XMB_THUMB_W; col++) {
+                    int sx = thumb_x + col;
+                    if (sx < 0 || sx >= (int)display_width) continue;
+                    fb[sy * stride + sx] = th->pixels[row * XMB_THUMB_W + col];
+                }
+            }
+        } else {
+            drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        }
 
         int badge_x = list_x + XMB_LIST_W - 80;
         int badge_y = iy + (XMB_ROW_H - 22) / 2;
@@ -545,9 +564,26 @@ void xmb_cpu_draw_sub(void) {
                      (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
             drawRect((u32)(list_x - 5), (u32)iy, 4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
+        const XMBItem *it = &g_tv_sub_items[idx];
         int thumb_x = list_x + 16;
         int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
-        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        thumb_request(it->id);
+        const Bitmap *th = thumb_get(it->id);
+        if (th) {
+            u32 *fb = color_buffer[curr_fb];
+            int stride = (int)display_width;
+            for (int row = 0; row < (int)XMB_THUMB_H; row++) {
+                int sy = thumb_y + row;
+                if (sy < 0 || sy >= (int)display_height) continue;
+                for (int col = 0; col < (int)XMB_THUMB_W; col++) {
+                    int sx = thumb_x + col;
+                    if (sx < 0 || sx >= (int)display_width) continue;
+                    fb[sy * stride + sx] = th->pixels[row * XMB_THUMB_W + col];
+                }
+            }
+        } else {
+            drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        }
         int badge_x = list_x + XMB_LIST_W - 80;
         int badge_y = iy + (XMB_ROW_H - 22) / 2;
         drawRect((u32)badge_x, (u32)badge_y, 66, 22, XMB_BADGE_BG);
@@ -575,7 +611,8 @@ void xmb_draw_sub_list(void) {
         }
         if (i == 0 && g_tv_sub_scroll > 0)
             drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
-        if (i == vis-1 && g_tv_sub_scroll + vis < g_tv_sub_count)
+        if (i == vis-1 && (g_tv_sub_scroll + vis < g_tv_sub_count ||
+                           g_tv_sub_start + g_tv_sub_count < g_tv_sub_total))
             drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
     }
 }
@@ -595,9 +632,26 @@ void xmb_cpu_draw_col_sub(void) {
                      (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
             drawRect((u32)(list_x - 5), (u32)iy, 4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
+        const XMBItem *it = &g_col_sub_items[idx];
         int thumb_x = list_x + 16;
         int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
-        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        thumb_request(it->id);
+        const Bitmap *th = thumb_get(it->id);
+        if (th) {
+            u32 *fb = color_buffer[curr_fb];
+            int stride = (int)display_width;
+            for (int row = 0; row < (int)XMB_THUMB_H; row++) {
+                int sy = thumb_y + row;
+                if (sy < 0 || sy >= (int)display_height) continue;
+                for (int col = 0; col < (int)XMB_THUMB_W; col++) {
+                    int sx = thumb_x + col;
+                    if (sx < 0 || sx >= (int)display_width) continue;
+                    fb[sy * stride + sx] = th->pixels[row * XMB_THUMB_W + col];
+                }
+            }
+        } else {
+            drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        }
         int badge_x = list_x + XMB_LIST_W - 80;
         int badge_y = iy + (XMB_ROW_H - 22) / 2;
         drawRect((u32)badge_x, (u32)badge_y, 66, 22, XMB_BADGE_BG);
@@ -625,7 +679,8 @@ void xmb_draw_col_sub_list(void) {
         }
         if (i == 0 && g_col_sub_scroll > 0)
             drawTTF(display_width - 20, (u32)iy, "^", 8, 0x00FFFFFF);
-        if (i == vis-1 && g_col_sub_scroll + vis < g_col_sub_count)
+        if (i == vis-1 && (g_col_sub_scroll + vis < g_col_sub_count ||
+                           g_col_sub_start + g_col_sub_count < g_col_sub_total))
             drawTTF(display_width - 20, (u32)iy, "v", 8, 0x00FFFFFF);
     }
 }
@@ -743,6 +798,43 @@ void xmb_rsx_draw_osk(void) {
     }
 }
 
+// Alphabetical jump bar rendered to the left of the item list.
+// Always visible on library tabs at depth 0; letters are dimmed when unfocused,
+// accent-coloured on the selected entry when g_jumpbar_active is true.
+void xmb_draw_jumpbar(int /*tab*/) {
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+    int vis    = XMB_ITEMS_VIS;
+
+    int bar_top = XMB_CONTENT_Y;
+    int bar_bot = XMB_CONTENT_Y + vis * XMB_ROW_STRIDE - XMB_ROW_GAP;
+    int bar_h   = bar_bot - bar_top;
+    int jbar_x  = list_x - JBAR_GAP - JBAR_W;
+    if (jbar_x < 0) jbar_x = 0;
+
+    // Step height evenly divides the bar; font fills each slot (1.2× gives glyph ascender
+    // room without adjacent letters visually overlapping on TV at viewing distance).
+    float entry_h = (float)bar_h / (float)JBAR_ENTRIES;
+    float font_px = entry_h * 1.2f;
+    if (font_px < 12.0f) font_px = 12.0f;
+    if (font_px > 28.0f) font_px = 28.0f;
+
+    static const char * const jbar_labels[JBAR_ENTRIES] = {
+        "#","A","B","C","D","E","F","G","H","I","J","K","L","M",
+        "N","O","P","Q","R","S","T","U","V","W","X","Y","Z"
+    };
+
+    for (int i = 0; i < JBAR_ENTRIES; i++) {
+        int ey = bar_top + (int)(i * entry_h);
+        int ty = ey + (int)((entry_h - font_px) * 0.5f);
+        if (ty < 0) ty = 0;
+        if ((u32)ty >= display_height) continue;
+        bool sel = g_jumpbar_active && (i == g_jumpbar_sel);
+        u32 color = sel ? 0x00FFFFFFUL : 0x00554477UL;
+        drawTTF((u32)jbar_x, (u32)ty, jbar_labels[i], font_px, color);
+    }
+}
+
 // CPU draws for search results list (thumbs + selection highlight)
 void xmb_cpu_draw_search_results(void) {
     int results_y = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
@@ -761,8 +853,25 @@ void xmb_cpu_draw_search_results(void) {
             drawRect((u32)(list_x - 5), (u32)iy,
                      4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
+        const XMBItem *it = &g_search_results[idx];
         int thumb_x = list_x + 16;
         int thumb_y = iy + (XMB_ROW_H - XMB_THUMB_H) / 2;
-        drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        thumb_request(it->id);
+        const Bitmap *th = thumb_get(it->id);
+        if (th) {
+            u32 *fb = color_buffer[curr_fb];
+            int stride = (int)display_width;
+            for (int row = 0; row < (int)XMB_THUMB_H; row++) {
+                int sy = thumb_y + row;
+                if (sy < 0 || sy >= (int)display_height) continue;
+                for (int col = 0; col < (int)XMB_THUMB_W; col++) {
+                    int sx = thumb_x + col;
+                    if (sx < 0 || sx >= (int)display_width) continue;
+                    fb[sy * stride + sx] = th->pixels[row * XMB_THUMB_W + col];
+                }
+            }
+        } else {
+            drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
+        }
     }
 }
