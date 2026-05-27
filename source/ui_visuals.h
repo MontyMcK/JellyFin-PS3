@@ -137,6 +137,11 @@ extern int  g_jumpbar_sel;
 extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 
 // -------------------------------------------------------
+// Hints bar
+// -------------------------------------------------------
+typedef struct { char glyph; const char *label; } Hint;
+
+// -------------------------------------------------------
 // Functions implemented in ui_visuals.cpp
 // -------------------------------------------------------
 void visuals_cleanup(void);
@@ -155,3 +160,5 @@ void xmb_cpu_draw_osk(void);
 void xmb_cpu_draw_search_results(void);
 void draw_keyboard(const char *prompt, const char *input, bool is_password);
 void xmb_draw_jumpbar(int tab);
+void draw_hints_bar(const Hint *hints, int n);
+void draw_topbar_lr(void);

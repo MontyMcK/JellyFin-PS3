@@ -1,0 +1,51 @@
+Iconic PSx - Windows/Mac TrueType
+
+tracertong.co.uk
+
+===================================================================
+The characters are as follows:-
+1 - Right arrow
+2 - Left arrow
+3 - Up arrow
+4 - Down arrow
+5 - Diagonal Up Right arrow
+6 - Diagonal Down Right arrow
+7 - Diagonal Up Left arrow
+8 - Diagonal Down Left arrow
+0 - Triangle, Square, Circle, Cross
+
+Shift 1-8 are outline versions of the above arrows.
+
+Where (eg. a/A) denotes Chars are the same Upper & Lowercase.
+
+a/A - START
+b/B - SELECT
+c/C - Circle Button
+d/D - D-Pad
+e/E - D-Pad LEFT
+f/F - D-Pad UP
+g/G - D-Pad DOWN
+i/I - D-Pad RIGHT
+l - L1 Button
+L - L2 Button
+m - SONY logo
+O - L3 Button
+P - Playstation 'PS' logo
+p - New 'PS3' logo
+o - R3 Button
+q - PS3 logo type
+Q - Playstation 3
+r - R1 Button
+R - R2 Button
+h/H - Home Logo
+n/N - Playstation Network logo - PSN
+
+s/S - Square Button
+t/T - Triangle Button
+x/X - X Button
+
+Punctuation chars included are . , ( ) - + < > /
+
+===================================================================
+
+Playstation and all it's iterations are the sole copyright of Sony.

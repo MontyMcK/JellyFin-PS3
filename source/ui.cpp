@@ -995,7 +995,10 @@ static bool xmb_handle_input_browse(void) {
                     drawTTF(X + 160, Y, detail.studios, 24, 0x00FFFFFF);
                 }
             }
-            drawTTF(XMB_ITEM_PAD, (u32)(display_height - XMB_BOTTOM_PAD + 16), "O BACK", 28, 0x00FFFFFF);
+            {
+                static const Hint h[] = {{'C',"BACK"}};
+                draw_hints_bar(h, 1);
+            }
             flip();
             info_frames++;
             if ((info_frames % 30) == 0) {
@@ -1220,12 +1223,7 @@ void ui_run_xmb(void) {
         }
 
         drawTTF(XMB_ITEM_PAD, 16, "JELLYFIN-PS3", 28, 0x007C3CEA, true);
-        {
-            char hints[32];
-            snprintf(hints, sizeof(hints), "< L1   R1 >");
-            int hx = (int)display_width - (int)(strlen(hints) * 8) - XMB_ITEM_PAD;
-            drawTTF((u32)(hx > 0 ? hx : 0), 24, hints, 14, 0x00FFFFFF);
-        }
+        draw_topbar_lr();
 
         {
             const char *tab_name = g_tabs[g_active_tab].label;
@@ -1267,9 +1265,32 @@ void ui_run_xmb(void) {
             xmb_draw_jumpbar(tab);
         }
 
-        drawTTF(XMB_ITEM_PAD,
-                (u32)(display_height - XMB_BOTTOM_PAD + 16),
-                "X SELECT   O BACK   /\\ INFO", 21, 0x00FFFFFF);
+        // Contextual hints bar — centered, Iconic PSx glyphs + OpenSans labels
+        {
+            bool in_tv_sub  = (tab == XMB_TAB_TV          && g_tv_depth  > 0);
+            bool in_col_sub = (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0);
+
+            if (tab == XMB_TAB_SETTINGS) {
+                /* no interactive content — omit hints */
+            } else if (tab == XMB_TAB_SEARCH) {
+                if (g_search_focus_results) {
+                    static const Hint h[] = {{'D',"NAV"},{'X',"PLAY"},{'C',"BACK"}};
+                    draw_hints_bar(h, 3);
+                } else {
+                    static const Hint h[] = {{'D',"NAV"},{'X',"TYPE"},{'C',"CLEAR"}};
+                    draw_hints_bar(h, 3);
+                }
+            } else if (in_tv_sub || in_col_sub) {
+                static const Hint h[] = {{'D',"NAV"},{'X',"SELECT"},{'C',"BACK"}};
+                draw_hints_bar(h, 3);
+            } else if (g_jumpbar_active) {
+                static const Hint h[] = {{'D',"NAV"},{'X',"FILTER"},{'C',"CANCEL"}};
+                draw_hints_bar(h, 3);
+            } else {
+                static const Hint h[] = {{'D',"NAV"},{'E',"JUMP"},{'X',"SELECT"},{'C',"BACK"},{'T',"INFO"}};
+                draw_hints_bar(h, 5);
+            }
+        }
 
         xmb_draw_tabs();
 

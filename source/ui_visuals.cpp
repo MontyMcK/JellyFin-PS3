@@ -15,6 +15,7 @@
 #include "opensans_regular.h"
 #include "opensans_bold.h"
 #include "material_icons.h"
+#include "iconic_psx.h"
 #include "plog.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -41,6 +42,8 @@ static stbtt_fontinfo  s_font_bold;
 static bool            s_ttf_bold_ok = false;
 static stbtt_fontinfo  s_icons;
 static bool            s_icons_ok    = false;
+static stbtt_fontinfo  s_iconic;
+static bool            s_iconic_ok   = false;
 
 // -------------------------------------------------------
 // Keyboard data (extern in ui_visuals.h, used in ui.cpp too)
@@ -423,6 +426,8 @@ void ttf_init(void) {
         s_ttf_bold_ok = true;
     if (stbtt_InitFont(&s_icons, (unsigned char*)MaterialIcons_Regular_ttf, 0))
         s_icons_ok = true;
+    if (stbtt_InitFont(&s_iconic, (unsigned char*)Iconic_PSx_ttf, 0))
+        s_iconic_ok = true;
 }
 
 void visuals_cleanup(void) {
@@ -833,6 +838,107 @@ void xmb_draw_jumpbar(int /*tab*/) {
         u32 color = sel ? 0x00FFFFFFUL : 0x00554477UL;
         drawTTF((u32)jbar_x, (u32)ty, jbar_labels[i], font_px, color);
     }
+}
+
+// -------------------------------------------------------
+// Controller hints bar (font-based)
+// -------------------------------------------------------
+
+// Draw one Iconic PSx glyph (single ASCII char) at (x,y).
+static void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color) {
+    if (!s_iconic_ok) return;
+    int cp = (unsigned char)glyph;
+    float scale = stbtt_ScaleForPixelHeight(&s_iconic, px);
+    int ascent;
+    stbtt_GetFontVMetrics(&s_iconic, &ascent, NULL, NULL);
+    int baseline = (int)((float)ascent * scale);
+    int w, h, xoff, yoff;
+    unsigned char *bm = stbtt_GetCodepointBitmap(
+        &s_iconic, scale, scale, cp, &w, &h, &xoff, &yoff);
+    if (!bm) return;
+    u32 r_fg = (color >> 16) & 0xFF;
+    u32 g_fg = (color >>  8) & 0xFF;
+    u32 b_fg =  color        & 0xFF;
+    int dx0 = (int)x + xoff;
+    int dy0 = (int)y + baseline + yoff;
+    for (int gy = 0; gy < h; gy++) {
+        int sy = dy0 + gy;
+        if (sy < 0 || (u32)sy >= display_height) continue;
+        u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
+        for (int gx = 0; gx < w; gx++) {
+            int sx = dx0 + gx;
+            if (sx < 0 || (u32)sx >= display_width) continue;
+            u32 a = bm[gy * w + gx];
+            if (a == 0) continue;
+            if (a == 255) { row[sx] = color; continue; }
+            u32 bg   = row[sx];
+            u32 r_bg = (bg >> 16) & 0xFF;
+            u32 g_bg = (bg >>  8) & 0xFF;
+            u32 b_bg =  bg        & 0xFF;
+            row[sx] = (((a*r_fg + (255-a)*r_bg)/255) << 16) |
+                      (((a*g_fg + (255-a)*g_bg)/255) <<  8) |
+                       ((a*b_fg + (255-a)*b_bg)/255);
+        }
+    }
+    stbtt_FreeBitmap(bm, NULL);
+}
+
+// Return the advance width in pixels for one Iconic PSx glyph.
+static int iconic_adv_px(char glyph, float px) {
+    if (!s_iconic_ok) return (int)px;
+    float sc = stbtt_ScaleForPixelHeight(&s_iconic, px);
+    int adv;
+    stbtt_GetCodepointHMetrics(&s_iconic, (unsigned char)glyph, &adv, NULL);
+    return (int)((float)adv * sc);
+}
+
+// Render an array of (glyph, label) hint pairs as a centered horizontal row
+// at the bottom of the screen.  Glyphs drawn in tab-icon colour; labels in white.
+void draw_hints_bar(const Hint *hints, int n) {
+    if (n <= 0) return;
+
+    const float icon_px = 33.0f;
+    const float text_px = 24.0f;
+    const int   gap_it  =  8;   // pixels between icon and its label
+    const int   gap_sep = 28;   // pixels between hint pairs
+
+    // Measure total width
+    int total_w = 0;
+    for (int i = 0; i < n; i++) {
+        total_w += iconic_adv_px(hints[i].glyph, icon_px);
+        total_w += gap_it;
+        total_w += ttf_text_width(hints[i].label, text_px);
+        if (i < n - 1) total_w += gap_sep;
+    }
+
+    int x = ((int)display_width - total_w) / 2;
+    if (x < (int)XMB_ITEM_PAD) x = (int)XMB_ITEM_PAD;
+    int y = (int)display_height - (int)XMB_BOTTOM_PAD + 18;
+    if (y < 0 || (u32)y >= display_height) return;
+
+    for (int i = 0; i < n; i++) {
+        draw_iconic_glyph((u32)x, (u32)y, hints[i].glyph, icon_px, 0x00ae99d6);
+        x += iconic_adv_px(hints[i].glyph, icon_px) + gap_it;
+        drawTTF((u32)x, (u32)(y + 5), hints[i].label, text_px, 0x00FFFFFF);
+        x += ttf_text_width(hints[i].label, text_px);
+        if (i < n - 1) x += gap_sep;
+    }
+}
+
+// Render L1 + R1 Iconic PSx glyphs right-aligned in the top bar.
+void draw_topbar_lr(void) {
+    if (!s_iconic_ok) return;
+    const float icon_px = 40.0f;
+    int w_l     = iconic_adv_px('l', icon_px);
+    int w_r     = iconic_adv_px('r', icon_px);
+    int total_w = w_l + 4 + w_r;
+    int x = ((int)display_width - total_w) / 2;
+    if (x < 0) x = 0;
+    int y = (XMB_TOPBAR_H - (int)icon_px) / 2;
+    if (y < 0) y = 0;
+    draw_iconic_glyph((u32)x, (u32)y, 'l', icon_px, 0x00ae99d6);
+    x += w_l + 4;
+    draw_iconic_glyph((u32)x, (u32)y, 'r', icon_px, 0x00ae99d6);
 }
 
 // CPU draws for search results list (thumbs + selection highlight)
