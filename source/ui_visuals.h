@@ -88,7 +88,7 @@ extern const char     *KB_ROWS[KB_LETTER_ROWS];
 extern const SpecialKey SPECIAL[SPECIAL_N];
 
 // -------------------------------------------------------
-// OSK data (defined in ui.cpp, used by draw functions)
+// OSK data (defined in ui/ui_search.cpp, used by draw functions)
 // -------------------------------------------------------
 extern const char *OSK_LETTERS[OSK_ROWS_N];
 extern const char *OSK_SYMBOLS[OSK_ROWS_N];
@@ -103,12 +103,21 @@ extern bool    g_items_loaded[XMB_TAB_COUNT];
 extern int     g_active_tab;
 extern int     g_sel;
 extern int     g_scroll_top;
+extern u64     g_info_cooldown_until;
+extern int     g_tv_depth;
+extern char    g_tv_series_id[64];
+extern char    g_tv_series_name[128];
+extern char    g_tv_season_id[64];
+extern char    g_tv_season_name[64];
 extern int     g_tv_sub_sel;
 extern int     g_tv_sub_scroll;
 extern int     g_tv_sub_count;
 extern XMBItem g_tv_sub_items[XMB_ITEMS_MAX];
 extern int     g_tv_sub_start;
 extern int     g_tv_sub_total;
+extern int     g_col_depth;
+extern char    g_col_id[64];
+extern char    g_col_name[128];
 extern int     g_col_sub_sel;
 extern int     g_col_sub_scroll;
 extern int     g_col_sub_count;
@@ -144,8 +153,12 @@ typedef struct { char glyph; const char *label; } Hint;
 // -------------------------------------------------------
 // Functions implemented in ui_visuals.cpp
 // -------------------------------------------------------
+void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color);
+int  iconic_adv_px(char glyph, float px);
+
 void visuals_cleanup(void);
 void ttf_init(void);
+void ttf_prewarm_hud(void);
 int  ttf_text_width(const char *text, float px);
 void xmb_draw_tabs(void);
 void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14);
