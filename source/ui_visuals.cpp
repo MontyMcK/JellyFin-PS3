@@ -430,6 +430,65 @@ void ttf_init(void) {
         s_iconic_ok = true;
 }
 
+// Warm the malloc pool and stbtt i-cache for every glyph the HUD will ever draw.
+// Must be called before the first hud_draw() call — no pixel writes, just
+// alloc+rasterize+free for each codepoint at each size used by player_hud.cpp.
+void ttf_prewarm_hud(void) {
+    // OpenSans Regular: seek-increment (13px), time labels + audio track label (18px).
+    // Full printable ASCII at 18px covers all possible track name characters.
+    if (s_ttf_ok) {
+        static const struct { const char *chars; float px; } reg[] = {
+            { "+/- 0123456789smni",  13.0f },
+            { " !\"#$%&'()*+,-./"
+              "0123456789:;<=>?@"
+              "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+              "[\\]^_`"
+              "abcdefghijklmnopqrstuvwxyz{|}~", 18.0f },
+        };
+        for (int s = 0; s < 2; s++) {
+            float sc = stbtt_ScaleForPixelHeight(&s_font, reg[s].px);
+            for (const char *cp = reg[s].chars; *cp; cp++) {
+                int w, h, xo, yo;
+                unsigned char *bm = stbtt_GetCodepointBitmap(
+                    &s_font, sc, sc, (unsigned char)*cp, &w, &h, &xo, &yo);
+                if (bm) stbtt_FreeBitmap(bm, NULL);
+            }
+        }
+    }
+    // OpenSans Bold: "CC" label (20px).
+    if (s_ttf_bold_ok) {
+        float sc = stbtt_ScaleForPixelHeight(&s_font_bold, 20.0f);
+        for (const char *cp = "C"; *cp; cp++) {
+            int w, h, xo, yo;
+            unsigned char *bm = stbtt_GetCodepointBitmap(
+                &s_font_bold, sc, sc, (unsigned char)*cp, &w, &h, &xo, &yo);
+            if (bm) stbtt_FreeBitmap(bm, NULL);
+        }
+    }
+    // Material Icons: music note codepoint (24px).
+    if (s_icons_ok) {
+        float sc = stbtt_ScaleForPixelHeight(&s_icons, 24.0f);
+        int w, h, xo, yo;
+        unsigned char *bm = stbtt_GetCodepointBitmap(
+            &s_icons, sc, sc, 0xE405, &w, &h, &xo, &yo);
+        if (bm) stbtt_FreeBitmap(bm, NULL);
+    }
+    // Iconic PSx: rewind 'L' and fast-forward 'R' at ROW_ICON_PX (24px).
+    // Play/pause now uses CPU-drawn primitives — no Iconic glyph needed.
+    if (s_iconic_ok) {
+        static const struct { int cp; float px; } iconic[] = {
+            { 'L', 24.0f }, { 'R', 24.0f },
+        };
+        for (int i = 0; i < 2; i++) {
+            float sc = stbtt_ScaleForPixelHeight(&s_iconic, iconic[i].px);
+            int w, h, xo, yo;
+            unsigned char *bm = stbtt_GetCodepointBitmap(
+                &s_iconic, sc, sc, iconic[i].cp, &w, &h, &xo, &yo);
+            if (bm) stbtt_FreeBitmap(bm, NULL);
+        }
+    }
+}
+
 void visuals_cleanup(void) {
     bitmapDestroy(&fontBitmap);
 }
@@ -845,7 +904,7 @@ void xmb_draw_jumpbar(int /*tab*/) {
 // -------------------------------------------------------
 
 // Draw one Iconic PSx glyph (single ASCII char) at (x,y).
-static void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color) {
+void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color) {
     if (!s_iconic_ok) return;
     int cp = (unsigned char)glyph;
     float scale = stbtt_ScaleForPixelHeight(&s_iconic, px);
@@ -884,7 +943,7 @@ static void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color) {
 }
 
 // Return the advance width in pixels for one Iconic PSx glyph.
-static int iconic_adv_px(char glyph, float px) {
+int iconic_adv_px(char glyph, float px) {
     if (!s_iconic_ok) return (int)px;
     float sc = stbtt_ScaleForPixelHeight(&s_iconic, px);
     int adv;

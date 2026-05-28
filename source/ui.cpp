@@ -18,7 +18,7 @@
 
 ButtonState btn_cur  = {0};
 ButtonState btn_prev = {0};
-u64 g_info_cooldown_until = 0;  // microseconds; ignore triangle until this time
+u64 g_info_cooldown_until = 0;
 
 void update_buttons(padData *pad) {
     btn_prev         = btn_cur;
@@ -136,20 +136,20 @@ int  g_sel        = 0;
 int  g_scroll_top = 0;
 
 // TV sub-screen state (Series→Seasons→Episodes)
-static int  g_tv_depth       = 0;
-static char g_tv_series_id[64];
-static char g_tv_series_name[128];
-static char g_tv_season_id[64];
-static char g_tv_season_name[64];
+int  g_tv_depth       = 0;
+char g_tv_series_id[64];
+char g_tv_series_name[128];
+char g_tv_season_id[64];
+char g_tv_season_name[64];
 XMBItem g_tv_sub_items[XMB_ITEMS_MAX];
 int     g_tv_sub_count  = 0;
 int     g_tv_sub_sel    = 0;
 int     g_tv_sub_scroll = 0;
 
 // Collections sub-screen state (Collection→Movies)
-static int  g_col_depth      = 0;
-static char g_col_id[64];
-static char g_col_name[128];
+int  g_col_depth      = 0;
+char g_col_id[64];
+char g_col_name[128];
 XMBItem g_col_sub_items[XMB_ITEMS_MAX];
 int     g_col_sub_count  = 0;
 int     g_col_sub_sel    = 0;
@@ -165,31 +165,6 @@ int g_tv_sub_total  = 0;
 int g_col_sub_start = 0;
 int g_col_sub_total = 0;
 
-// Search OSK state
-const char *OSK_LETTERS[OSK_ROWS_N] = {
-    "1234567890",
-    "QWERTYUIOP",
-    "ASDFGHJKL",
-    "ZXCVBNM",
-};
-const char *OSK_SYMBOLS[OSK_ROWS_N] = {
-    "!@#$%^&*()",
-    "-_=+[]{}|\\",
-    ":;\"'`~<>?",
-    ".,/!",
-};
-int  g_osk_row    = 0;
-int  g_osk_col    = 0;
-bool g_osk_sym    = false;
-bool g_search_focus_results = false;
-int  g_search_sel           = 0;
-int  g_search_scroll        = 0;
-char g_search_buf[64];
-int  g_search_results_count = 0;
-XMBItem g_search_results[XMB_ITEMS_MAX];
-
-int OSK_Y0 = 0;
-
 // Jump bar state
 bool g_jumpbar_active = false;
 int  g_jumpbar_sel    = 1;
@@ -199,8 +174,8 @@ char g_tab_name_filter[XMB_TAB_COUNT][4];
 // XMB JSON parsing helpers (local, avoids changing jellyfin_api.cpp)
 // -------------------------------------------------------
 
-static int xmb_json_str_range(const char *start, int len,
-                               const char *key, char *out, int out_size) {
+int xmb_json_str_range(const char *start, int len,
+                        const char *key, char *out, int out_size) {
     char search[64];
     snprintf(search, sizeof(search), "\"%s\":\"", key);
     int slen = strlen(search);
@@ -219,8 +194,8 @@ static int xmb_json_str_range(const char *start, int len,
     return 0;
 }
 
-static int xmb_json_int_range(const char *start, int len,
-                               const char *key, int def) {
+int xmb_json_int_range(const char *start, int len,
+                        const char *key, int def) {
     char search[64];
     snprintf(search, sizeof(search), "\"%s\":", key);
     int slen = strlen(search);
@@ -237,8 +212,8 @@ static int xmb_json_int_range(const char *start, int len,
     return def;
 }
 
-static long long xmb_json_ll_range(const char *start, int len,
-                                    const char *key, long long def) {
+long long xmb_json_ll_range(const char *start, int len,
+                              const char *key, long long def) {
     char search[64];
     snprintf(search, sizeof(search), "\"%s\":", key);
     int slen = strlen(search);
@@ -257,8 +232,8 @@ static long long xmb_json_ll_range(const char *start, int len,
     return def;
 }
 
-static int xmb_json_first_arr_str(const char *start, int len,
-                                   const char *key, char *out, int out_size) {
+int xmb_json_first_arr_str(const char *start, int len,
+                             const char *key, char *out, int out_size) {
     char search[64];
     snprintf(search, sizeof(search), "\"%s\":[\"", key);
     int slen = strlen(search);
@@ -277,7 +252,7 @@ static int xmb_json_first_arr_str(const char *start, int len,
     return 0;
 }
 
-static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
+int parse_xmb_items(const char *json, XMBItem *arr, int max) {
     const char *p = strstr(json, "\"Items\":[");
     if (!p) return 0;
     p += 9;
@@ -334,821 +309,16 @@ static int parse_xmb_items(const char *json, XMBItem *arr, int max) {
 }
 
 // -------------------------------------------------------
-// XMB API fetch helpers
-// -------------------------------------------------------
-
-static void xmb_detect_tabs(void) {
-    char url[512];
-    snprintf(url, sizeof(url), "%s/Users/%s/Views", g_server, g_userid);
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status != 200) return;
-
-    const char *p = strstr(responseBuffer, "\"Items\":[");
-    if (!p) return;
-    p += 9;
-
-    while (*p) {
-        while (*p && *p != '{' && *p != ']') p++;
-        if (!*p || *p == ']') break;
-        const char *obj = p;
-        int depth = 0; bool in_str = false, esc = false;
-        while (*p) {
-            char c = *p;
-            if (esc) { esc = false; }
-            else if (in_str) { if (c=='\\') esc=true; else if (c=='"') in_str=false; }
-            else { if (c=='"') in_str=true; else if (c=='{') depth++; else if (c=='}') { if (--depth==0){p++;break;} } }
-            p++;
-        }
-        int olen = (int)(p - obj);
-
-        char ct[32] = "", id[64] = "";
-        xmb_json_str_range(obj, olen, "CollectionType", ct, sizeof(ct));
-        xmb_json_str_range(obj, olen, "Id",             id, sizeof(id));
-
-        if      (strcmp(ct, "movies")   == 0) { g_tabs[XMB_TAB_MOVIES].enabled=true;      strncpy(g_tabs[XMB_TAB_MOVIES].library_id,      id, 63); }
-        else if (strcmp(ct, "tvshows")  == 0) { g_tabs[XMB_TAB_TV].enabled=true;           strncpy(g_tabs[XMB_TAB_TV].library_id,          id, 63); }
-        else if (strcmp(ct, "music")    == 0) { g_tabs[XMB_TAB_MUSIC].enabled=true;        strncpy(g_tabs[XMB_TAB_MUSIC].library_id,       id, 63); }
-        else if (strcmp(ct, "boxsets")  == 0) { g_tabs[XMB_TAB_COLLECTIONS].enabled=true;  strncpy(g_tabs[XMB_TAB_COLLECTIONS].library_id, id, 63); }
-    }
-}
-
-static void xmb_build_items_url(char *url, int url_size, int tab,
-                                 int start_index, int limit) {
-    const char *filt = g_tab_name_filter[tab];
-    const char *lid  = g_tabs[tab].library_id;
-    if (filt[0] == '#') {
-        snprintf(url, url_size,
-            "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
-            "&SortBy=SortName&SortOrder=Ascending"
-            "&NameLessThan=A"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
-            g_server, g_userid, lid, start_index, limit);
-    } else if (filt[0]) {
-        snprintf(url, url_size,
-            "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
-            "&SortBy=SortName&SortOrder=Ascending"
-            "&NameStartsWith=%c"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
-            g_server, g_userid, lid, start_index, limit,
-            (char)toupper((unsigned char)filt[0]));
-    } else {
-        snprintf(url, url_size,
-            "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
-            "&SortBy=SortName&SortOrder=Ascending"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
-            g_server, g_userid, lid, start_index, limit);
-    }
-}
-
-static void xmb_fetch_tab_items(int tab) {
-    if (g_items_loaded[tab]) return;
-    g_item_count[tab] = 0;
-    g_tab_start[tab]  = 0;
-    g_tab_total[tab]  = 0;
-
-    const char *lib_id = g_tabs[tab].library_id;
-    if (!lib_id[0]) { g_items_loaded[tab] = true; return; }
-
-    char url[512];
-    xmb_build_items_url(url, sizeof(url), tab, 0, XMB_ITEMS_MAX);
-
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status == 200) {
-        g_item_count[tab] = parse_xmb_items(responseBuffer, g_items[tab], XMB_ITEMS_MAX);
-        g_tab_total[tab]  = xmb_json_int_range(responseBuffer,
-            (int)strlen(responseBuffer), "TotalRecordCount", g_item_count[tab]);
-    }
-    g_items_loaded[tab] = true;
-}
-
-static void xmb_do_search(void) {
-    g_search_results_count = 0;
-    if (!g_search_buf[0]) return;
-
-    char encoded[192];
-    url_encode_query(g_search_buf, encoded, sizeof(encoded));
-
-    char url[512];
-    snprintf(url, sizeof(url),
-        "%s/Users/%s/Items?searchTerm=%s&Recursive=true"
-        "&IncludeItemTypes=Movie,Series,Episode&Limit=%d"
-        "&SortBy=SortName&SortOrder=Ascending"
-        "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
-        g_server, g_userid, encoded, XMB_ITEMS_MAX);
-
-    char dbg[512];
-    snprintf(dbg, sizeof(dbg), "search url: %s", url);
-    plog(dbg);
-
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status == 200)
-        g_search_results_count = parse_xmb_items(responseBuffer, g_search_results, XMB_ITEMS_MAX);
-
-    snprintf(dbg, sizeof(dbg), "search status: %d count: %d",
-             status, g_search_results_count);
-    plog(dbg);
-
-    {
-        char dbg2[400];
-        snprintf(dbg2, sizeof(dbg2),
-            "search: term='%s' status=%d count=%d",
-            g_search_buf,
-            status,
-            g_search_results_count);
-        plog(dbg2);
-
-        if (status != 200) {
-            char errbuf[320];
-            snprintf(errbuf, sizeof(errbuf),
-                "search_err: %.300s", responseBuffer);
-            plog(errbuf);
-        } else if (g_search_results_count == 0) {
-            char respbuf[224];
-            snprintf(respbuf, sizeof(respbuf),
-                "search_empty_resp: %.200s", responseBuffer);
-            plog(respbuf);
-        }
-    }
-}
-
-static int xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
-                               int start_index, int *out_total) {
-    char url[512];
-    snprintf(url, sizeof(url),
-        "%s/Shows/%s/Seasons?userId=%s&StartIndex=%d&Limit=%d"
-        "&Fields=ProductionYear,RunTimeTicks",
-        g_server, series_id, g_userid, start_index, max);
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status != 200) return 0;
-    int n = parse_xmb_items(responseBuffer, arr, max);
-    if (out_total)
-        *out_total = xmb_json_int_range(responseBuffer,
-            (int)strlen(responseBuffer), "TotalRecordCount", n + start_index);
-    return n;
-}
-
-static int xmb_fetch_episodes(const char *series_id, const char *season_id,
-                               XMBItem *arr, int max,
-                               int start_index, int *out_total) {
-    char url[512];
-    snprintf(url, sizeof(url),
-        "%s/Shows/%s/Episodes?seasonId=%s&userId=%s"
-        "&StartIndex=%d&Limit=%d"
-        "&Fields=ProductionYear,RunTimeTicks,Genres,Container",
-        g_server, series_id, season_id, g_userid, start_index, max);
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status != 200) return 0;
-    int count = parse_xmb_items(responseBuffer, arr, max);
-    for (int i = 0; i < count; i++)
-        strncpy(arr[i].type, "Episode", sizeof(arr[i].type)-1);
-    if (out_total)
-        *out_total = xmb_json_int_range(responseBuffer,
-            (int)strlen(responseBuffer), "TotalRecordCount", count + start_index);
-    return count;
-}
-
-static int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, int max,
-                                       int start_index, int *out_total) {
-    char url[512];
-    snprintf(url, sizeof(url),
-        "%s/Users/%s/Items?ParentId=%s"
-        "&StartIndex=%d&Limit=%d"
-        "&Fields=Genres,RunTimeTicks,ProductionYear,Container"
-        "&SortBy=SortName&SortOrder=Ascending",
-        g_server, g_userid, collection_id, start_index, max);
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status != 200) return 0;
-    int n = parse_xmb_items(responseBuffer, arr, max);
-    if (out_total)
-        *out_total = xmb_json_int_range(responseBuffer,
-            (int)strlen(responseBuffer), "TotalRecordCount", n + start_index);
-    return n;
-}
-
-// -------------------------------------------------------
-// OSK helpers
-// -------------------------------------------------------
-
-static int osk_row_len(int r) {
-    if (r >= OSK_ROWS_N) {
-        return 3;
-    }
-    const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
-    int base = strlen(rows[r]);
-    if (!g_osk_sym && r == OSK_ROWS_N - 1) base++;
-    if  (g_osk_sym && r == OSK_ROWS_N - 1) base++;
-    return base;
-}
-
-static char osk_current_char(void) {
-    if (g_osk_row >= OSK_ROWS_N) {
-        return 0;
-    }
-    const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
-    const char *row   = rows[g_osk_row];
-    int base_len = strlen(row);
-    bool is_toggle = (g_osk_row == OSK_ROWS_N-1 && g_osk_col == base_len);
-    if (is_toggle) return 0;
-    if (g_osk_col < base_len) return row[g_osk_col];
-    return 0;
-}
-
-// -------------------------------------------------------
-// Sliding-window pagination helpers
-// Returns index of first new item, or -1 if nothing was fetched.
-// -------------------------------------------------------
-
-static int xmb_slide_tab_forward(int tab) {
-    int keep = g_item_count[tab] - XMB_PAGE_SIZE;
-    if (keep < 0) keep = 0;
-    if (keep > 0)
-        memmove(g_items[tab], g_items[tab] + XMB_PAGE_SIZE, keep * sizeof(XMBItem));
-    g_tab_start[tab] += XMB_PAGE_SIZE;
-    g_item_count[tab]  = keep;
-
-    int fetch_start = g_tab_start[tab] + g_item_count[tab];
-    char url[512];
-    xmb_build_items_url(url, sizeof(url), tab, fetch_start, XMB_PAGE_SIZE);
-
-    int new_count = 0;
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status == 200) {
-        new_count = parse_xmb_items(responseBuffer,
-                                     g_items[tab] + g_item_count[tab], XMB_PAGE_SIZE);
-        g_item_count[tab] += new_count;
-        g_tab_total[tab] = xmb_json_int_range(responseBuffer,
-            (int)strlen(responseBuffer), "TotalRecordCount", g_tab_total[tab]);
-    }
-    return new_count > 0 ? keep : -1;
-}
-
-static int xmb_slide_tv_sub_forward(void) {
-    int keep = g_tv_sub_count - XMB_PAGE_SIZE;
-    if (keep < 0) keep = 0;
-    if (keep > 0)
-        memmove(g_tv_sub_items, g_tv_sub_items + XMB_PAGE_SIZE, keep * sizeof(XMBItem));
-    g_tv_sub_start  += XMB_PAGE_SIZE;
-    g_tv_sub_count   = keep;
-
-    int fetch_start = g_tv_sub_start + g_tv_sub_count;
-    int new_total   = g_tv_sub_total;
-    int new_count   = 0;
-    if (g_tv_depth == 1)
-        new_count = xmb_fetch_seasons(g_tv_series_id,
-                                       g_tv_sub_items + g_tv_sub_count,
-                                       XMB_PAGE_SIZE, fetch_start, &new_total);
-    else
-        new_count = xmb_fetch_episodes(g_tv_series_id, g_tv_season_id,
-                                        g_tv_sub_items + g_tv_sub_count,
-                                        XMB_PAGE_SIZE, fetch_start, &new_total);
-    g_tv_sub_count += new_count;
-    g_tv_sub_total  = new_total;
-    return new_count > 0 ? keep : -1;
-}
-
-static int xmb_slide_col_sub_forward(void) {
-    int keep = g_col_sub_count - XMB_PAGE_SIZE;
-    if (keep < 0) keep = 0;
-    if (keep > 0)
-        memmove(g_col_sub_items, g_col_sub_items + XMB_PAGE_SIZE, keep * sizeof(XMBItem));
-    g_col_sub_start += XMB_PAGE_SIZE;
-    g_col_sub_count  = keep;
-
-    int fetch_start = g_col_sub_start + g_col_sub_count;
-    int new_total   = g_col_sub_total;
-    int new_count   = xmb_fetch_collection_items(g_col_id,
-                                                  g_col_sub_items + g_col_sub_count,
-                                                  XMB_PAGE_SIZE, fetch_start, &new_total);
-    g_col_sub_count += new_count;
-    g_col_sub_total  = new_total;
-    return new_count > 0 ? keep : -1;
-}
-
-// -------------------------------------------------------
-// XMB input
-// -------------------------------------------------------
-
-static void xmb_switch_tab(int new_tab) {
-    if (new_tab < 0 || new_tab >= XMB_TAB_COUNT) return;
-    if (!g_tabs[new_tab].enabled) return;
-    // If the current tab was paginated forward or jump-filtered, invalidate it
-    // so it refetches cleanly from the top when the user returns.
-    int old = g_active_tab;
-    if (old != XMB_TAB_SEARCH && old != XMB_TAB_MUSIC && old != XMB_TAB_SETTINGS
-        && (g_tab_start[old] > 0 || g_tab_name_filter[old][0])) {
-        g_items_loaded[old]       = false;
-        g_item_count[old]         = 0;
-        g_tab_start[old]          = 0;
-        g_tab_total[old]          = 0;
-        g_tab_name_filter[old][0] = '\0';
-    }
-    g_jumpbar_active = false;
-    g_active_tab = new_tab;
-    g_sel = 0;
-    g_scroll_top = 0;
-    g_tv_depth = 0; g_tv_sub_sel = 0; g_tv_sub_scroll = 0; g_tv_sub_start = 0; g_tv_sub_total = 0;
-    g_col_depth = 0; g_col_sub_sel = 0; g_col_sub_scroll = 0; g_col_sub_start = 0; g_col_sub_total = 0;
-    if (new_tab == XMB_TAB_SEARCH) {
-        g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
-    }
-}
-
-static int xmb_next_enabled(int start, int dir) {
-    int t = start + dir;
-    while (t >= 0 && t < XMB_TAB_COUNT) {
-        if (g_tabs[t].enabled) return t;
-        t += dir;
-    }
-    return start;
-}
-
-static bool xmb_handle_input_browse(void) {
-    static bool s_movie_just_exited = false;
-    int tab = g_active_tab;
-    int vis = XMB_ITEMS_VIS;
-
-    if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
-    if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
-
-    // TV sub-screen (depth > 0): seasons or episodes list
-    if (tab == XMB_TAB_TV && g_tv_depth > 0) {
-        if (BTN_PRESSED(circle)) {
-            g_tv_depth--;
-            g_tv_sub_sel = 0; g_tv_sub_scroll = 0; g_tv_sub_start = 0; g_tv_sub_total = 0;
-            return false;
-        }
-        if (BTN_PRESSED(up)) {
-            if (g_tv_sub_sel > 0) {
-                g_tv_sub_sel--;
-                if (g_tv_sub_sel < g_tv_sub_scroll) g_tv_sub_scroll = g_tv_sub_sel;
-            }
-        }
-        if (BTN_PRESSED(down)) {
-            if (g_tv_sub_sel < g_tv_sub_count - 1) {
-                g_tv_sub_sel++;
-                if (g_tv_sub_sel >= g_tv_sub_scroll + vis)
-                    g_tv_sub_scroll = g_tv_sub_sel - vis + 1;
-            } else if (g_tv_sub_start + g_tv_sub_count < g_tv_sub_total) {
-                int first = xmb_slide_tv_sub_forward();
-                if (first >= 0) { g_tv_sub_sel = first; g_tv_sub_scroll = first; }
-            }
-        }
-        if (BTN_PRESSED(cross) && g_tv_sub_count > 0 && g_tv_sub_sel < g_tv_sub_count) {
-            const XMBItem *it = &g_tv_sub_items[g_tv_sub_sel];
-            if (g_tv_depth == 1) {
-                strncpy(g_tv_season_id,   it->id,   sizeof(g_tv_season_id)-1);
-                strncpy(g_tv_season_name, it->name, sizeof(g_tv_season_name)-1);
-                g_tv_sub_start = 0; g_tv_sub_total = 0;
-                g_tv_sub_count = xmb_fetch_episodes(g_tv_series_id, g_tv_season_id,
-                                                     g_tv_sub_items, XMB_ITEMS_MAX,
-                                                     0, &g_tv_sub_total);
-                g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
-            } else {
-                JFItem jf; memset(&jf, 0, sizeof(jf));
-                strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
-                strncpy(jf.name, it->name, sizeof(jf.name)-1);
-                strncpy(jf.type, it->type, sizeof(jf.type)-1);
-                show_player(&jf);
-                g_tv_depth = 0;
-                g_tv_sub_sel = 0;
-                g_tv_sub_scroll = 0;
-            }
-        }
-        return false;
-    }
-
-    // Collections sub-screen (depth > 0): movies inside a collection
-    if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
-        if (BTN_PRESSED(circle)) {
-            g_col_depth = 0;
-            g_col_sub_sel = 0; g_col_sub_scroll = 0; g_col_sub_start = 0; g_col_sub_total = 0;
-            return false;
-        }
-        if (BTN_PRESSED(up)) {
-            if (g_col_sub_sel > 0) {
-                g_col_sub_sel--;
-                if (g_col_sub_sel < g_col_sub_scroll) g_col_sub_scroll = g_col_sub_sel;
-            }
-        }
-        if (BTN_PRESSED(down)) {
-            if (g_col_sub_sel < g_col_sub_count - 1) {
-                g_col_sub_sel++;
-                if (g_col_sub_sel >= g_col_sub_scroll + vis)
-                    g_col_sub_scroll = g_col_sub_sel - vis + 1;
-            } else if (g_col_sub_start + g_col_sub_count < g_col_sub_total) {
-                int first = xmb_slide_col_sub_forward();
-                if (first >= 0) { g_col_sub_sel = first; g_col_sub_scroll = first; }
-            }
-        }
-        if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
-            const XMBItem *it = &g_col_sub_items[g_col_sub_sel];
-            JFItem jf; memset(&jf, 0, sizeof(jf));
-            strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
-            strncpy(jf.name, it->name, sizeof(jf.name)-1);
-            strncpy(jf.type, it->type, sizeof(jf.type)-1);
-            show_player(&jf);
-            g_col_depth = 0;
-            g_col_sub_sel = 0;
-            g_col_sub_scroll = 0;
-        }
-        return false;
-    }
-
-    // Jump bar (library tabs at depth 0): exclusively owns all dpad while active.
-    // jbar_mode is computed once so the else-branch below is guaranteed to run only
-    // when the jump bar does NOT have focus — no implicit reliance on early-return order.
-    bool jbar_mode = g_jumpbar_active &&
-        (tab == XMB_TAB_MOVIES || tab == XMB_TAB_TV ||
-         tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS);
-
-    if (jbar_mode) {
-        if (BTN_PRESSED(up))
-            g_jumpbar_sel = (g_jumpbar_sel - 1 + JBAR_ENTRIES) % JBAR_ENTRIES;
-        if (BTN_PRESSED(down))
-            g_jumpbar_sel = (g_jumpbar_sel + 1) % JBAR_ENTRIES;
-        if (BTN_PRESSED(right) || BTN_PRESSED(circle))
-            g_jumpbar_active = false;
-        if (BTN_PRESSED(cross)) {
-            if (g_jumpbar_sel == 0) {
-                g_tab_name_filter[tab][0] = '#';
-                g_tab_name_filter[tab][1] = '\0';
-            } else {
-                g_tab_name_filter[tab][0] = (char)('A' + g_jumpbar_sel - 1);
-                g_tab_name_filter[tab][1] = '\0';
-            }
-            g_items_loaded[tab] = false;
-            g_item_count[tab]   = 0;
-            g_tab_start[tab]    = 0;
-            g_tab_total[tab]    = 0;
-            g_sel               = 0;
-            g_scroll_top        = 0;
-            g_jumpbar_active    = false;
-        }
-        return false;
-    }
-
-    // Normal browse (depth 0) — jump bar is NOT active; item list owns dpad.
-    if (BTN_PRESSED(circle)) return false;
-
-    int count = g_item_count[tab];
-
-    if (BTN_PRESSED(up)) {
-        if (g_sel > 0) {
-            g_sel--;
-            if (g_sel < g_scroll_top) g_scroll_top = g_sel;
-        }
-    }
-    if (BTN_PRESSED(down)) {
-        if (g_sel < count - 1) {
-            g_sel++;
-            if (g_sel >= g_scroll_top + vis) g_scroll_top = g_sel - vis + 1;
-        } else if (g_tab_start[tab] + count < g_tab_total[tab]) {
-            int first = xmb_slide_tab_forward(tab);
-            if (first >= 0) { g_sel = first; g_scroll_top = first; }
-        }
-    }
-
-    // Left transfers focus to jump bar; right has nothing to the right of the list.
-    if (BTN_PRESSED(left) && (tab == XMB_TAB_MOVIES || tab == XMB_TAB_TV ||
-                               tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS)) {
-        const char *filt = g_tab_name_filter[tab];
-        if (filt[0] == '#') {
-            g_jumpbar_sel = 0;
-        } else if (filt[0] >= 'A' && filt[0] <= 'Z') {
-            g_jumpbar_sel = 1 + (filt[0] - 'A');
-        } else if (count > 0) {
-            int idx = (g_sel < count) ? g_sel : 0;
-            char c = (char)toupper((unsigned char)g_items[tab][idx].name[0]);
-            g_jumpbar_sel = (c >= 'A' && c <= 'Z') ? 1 + (c - 'A') : 0;
-        } else {
-            g_jumpbar_sel = 1;
-        }
-        g_jumpbar_active = true;
-        return false;
-    }
-
-    if (s_movie_just_exited) { s_movie_just_exited = false; return false; }
-
-    if (BTN_PRESSED(cross) && count > 0 && g_sel < count) {
-        const XMBItem *it = &g_items[tab][g_sel];
-        if (tab == XMB_TAB_TV && strcmp(it->type, "Series") == 0) {
-            strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
-            strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
-            g_tv_sub_start = 0; g_tv_sub_total = 0;
-            g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items, XMB_ITEMS_MAX,
-                                                0, &g_tv_sub_total);
-            g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
-        } else if (tab == XMB_TAB_COLLECTIONS) {
-            strncpy(g_col_id,   it->id,   sizeof(g_col_id)-1);
-            strncpy(g_col_name, it->name, sizeof(g_col_name)-1);
-            g_col_sub_start = 0; g_col_sub_total = 0;
-            g_col_sub_count = xmb_fetch_collection_items(g_col_id, g_col_sub_items, XMB_ITEMS_MAX,
-                                                          0, &g_col_sub_total);
-            g_col_depth = 1; g_col_sub_sel = 0; g_col_sub_scroll = 0;
-        } else {
-            JFItem jf; memset(&jf, 0, sizeof(jf));
-            strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
-            strncpy(jf.name, it->name, sizeof(jf.name)-1);
-            strncpy(jf.type, it->type, sizeof(jf.type)-1);
-            show_player(&jf);
-            s_movie_just_exited = true;
-            init_btns();
-            return false;
-        }
-    }
-
-    // Log outer-loop button state every time we're about to detect triangle
-    if (btn_cur.triangle || btn_prev.triangle) {
-        char dbg[200];
-        snprintf(dbg, sizeof(dbg),
-            "outer: triangle state cur=%d prev=%d (BTN_PRESSED would be %d)",
-            btn_cur.triangle, btn_prev.triangle,
-            (btn_cur.triangle && !btn_prev.triangle) ? 1 : 0);
-        plog(dbg);
-    }
-    u64 now_us = timing_get_us();
-    if (BTN_PRESSED(triangle) && count > 0 && g_sel < count
-        && now_us >= g_info_cooldown_until) {
-        const XMBItem *it = &g_items[tab][g_sel];
-        {
-            char dbg[260];
-            snprintf(dbg, sizeof(dbg),
-                "info: ENTER tab=%d sel=%d cnt=%d "
-                "btn_cur(tri=%d cir=%d crs=%d) btn_prev(tri=%d cir=%d crs=%d) "
-                "name='%.40s'",
-                tab, g_sel, count,
-                btn_cur.triangle, btn_cur.circle, btn_cur.cross,
-                btn_prev.triangle, btn_prev.circle, btn_prev.cross,
-                it->name);
-            plog(dbg);
-        }
-        // Drain RSX commands before the inner loop writes new wave geometry.
-        rsxSync();
-        flip();
-        init_btns();
-        {
-            char dbg[200];
-            snprintf(dbg, sizeof(dbg),
-                "info: after init_btns btn_cur(tri=%d cir=%d crs=%d) "
-                "btn_prev(tri=%d cir=%d crs=%d)",
-                btn_cur.triangle, btn_cur.circle, btn_cur.cross,
-                btn_prev.triangle, btn_prev.circle, btn_prev.cross);
-            plog(dbg);
-        }
-        XMBItemDetail detail;
-        memset(&detail, 0, sizeof(detail));
-        jellyfin_fetch_item_detail(it->id, &detail);
-        int info_frames = 0;
-        int info_exit_reason = 0;  // 1=circle, 2=triangle, 3=loop ended without exit
-        bool exit_armed = false;  // require buttons released before honoring exit
-        while (running) {
-            waitflip();
-            sysUtilCheckCallback();
-            padInfo pi; padData pd;
-            ioPadGetInfo(&pi);
-            for (int i = 0; i < MAX_PADS; i++) {
-                if (!pi.status[i]) continue;
-                ioPadGetData(i, &pd); update_buttons(&pd);
-                // First frame in the loop: only become "armed" once we see
-                // circle and triangle both released. This prevents stale
-                // press detection from the parent context exiting us.
-                if (!exit_armed) {
-                    if (!btn_cur.circle && !btn_cur.triangle) {
-                        exit_armed = true;
-                    }
-                    continue;  // don't check exit conditions yet
-                }
-                if (BTN_PRESSED(circle))   { info_exit_reason = 1; goto info_done; }
-                if (BTN_PRESSED(triangle)) { info_exit_reason = 2; goto info_done; }
-            }
-            clearScreen(XMB_BG);
-            wave_draw();
-            rsxSync();
-            {
-                u32 X = XMB_ITEM_PAD;
-                u32 Y = XMB_TOPBAR_H + 10;
-                // Title
-                drawTTF(X, Y, it->name, 56, 0x00FFFFFF);
-                Y += 80;
-                // Year · runtime · rating · community score
-                char meta_line[256];
-                snprintf(meta_line, sizeof(meta_line), "%s  %s  %s  %s",
-                         it->year_str,
-                         it->duration_str,
-                         detail.official_rating[0] ? detail.official_rating : "",
-                         detail.community_rating[0] ? detail.community_rating : "");
-                drawTTF(X, Y, meta_line, 28, 0x00AAAAAA);
-                Y += 56;
-                // Video stream info
-                if (detail.video_info[0]) {
-                    drawTTF(X,       Y, "Video:", 24, 0x00888888);
-                    drawTTF(X + 160, Y, detail.video_info, 24, 0x00FFFFFF);
-                    Y += 40;
-                }
-                // Audio stream info
-                if (detail.audio_info[0]) {
-                    drawTTF(X,       Y, "Audio:", 24, 0x00888888);
-                    drawTTF(X + 160, Y, detail.audio_info, 24, 0x00FFFFFF);
-                    Y += 48;
-                }
-                // Tagline
-                if (detail.tagline[0]) {
-                    drawTTF(X, Y, detail.tagline, 32, 0x00AACCFF);
-                    Y += 56;
-                }
-                // Overview — manual word-wrap, up to 6 lines
-                if (detail.overview[0]) {
-                    const int max_cpl   = 40;
-                    const int max_lines = 6;
-                    const char *p = detail.overview;
-                    int lines_drawn = 0;
-                    while (*p && lines_drawn < max_lines) {
-                        int line_len = (int)strlen(p);
-                        if (line_len > max_cpl) {
-                            int i;
-                            for (i = max_cpl; i > 0; i--)
-                                if (p[i] == ' ') break;
-                            if (i == 0) i = max_cpl;
-                            char buf[128];
-                            snprintf(buf, sizeof(buf), "%.*s", i, p);
-                            drawTTF(X, Y, buf, 24, 0x00FFFFFF);
-                            p += i;
-                            if (*p == ' ') p++;
-                        } else {
-                            drawTTF(X, Y, p, 24, 0x00FFFFFF);
-                            p += line_len;
-                        }
-                        Y += 36;
-                        lines_drawn++;
-                    }
-                    Y += 16;
-                }
-                // Genres
-                if (detail.genres[0]) {
-                    drawTTF(X,       Y, "Genres:", 24, 0x00888888);
-                    drawTTF(X + 160, Y, detail.genres, 24, 0x00FFFFFF);
-                    Y += 40;
-                }
-                // Studios
-                if (detail.studios[0]) {
-                    drawTTF(X,       Y, "Studios:", 24, 0x00888888);
-                    drawTTF(X + 160, Y, detail.studios, 24, 0x00FFFFFF);
-                }
-            }
-            {
-                static const Hint h[] = {{'C',"BACK"}};
-                draw_hints_bar(h, 1);
-            }
-            flip();
-            info_frames++;
-            if ((info_frames % 30) == 0) {
-                char dbg[80];
-                snprintf(dbg, sizeof(dbg), "info: frame=%d", info_frames);
-                plog(dbg);
-            }
-        }
-        info_exit_reason = 3;
-        info_done:
-        {
-            char dbg[200];
-            snprintf(dbg, sizeof(dbg),
-                "info: EXIT reason=%d frames=%d "
-                "btn_cur(tri=%d cir=%d crs=%d) btn_prev(tri=%d cir=%d crs=%d)",
-                info_exit_reason, info_frames,
-                btn_cur.triangle, btn_cur.circle, btn_cur.cross,
-                btn_prev.triangle, btn_prev.circle, btn_prev.cross);
-            plog(dbg);
-        }
-        g_info_cooldown_until = timing_get_us() + 500000;  // 500ms cooldown
-        init_btns();
-    }
-    return false;
-}
-
-static bool xmb_handle_input_search(void) {
-    char prev_buf[sizeof(g_search_buf)];
-    strcpy(prev_buf, g_search_buf);
-
-    if (BTN_PRESSED(l1)) { g_search_focus_results = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
-    if (BTN_PRESSED(r1)) { g_search_focus_results = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
-    if (BTN_PRESSED(circle) && !g_search_buf[0]) {
-        xmb_switch_tab(xmb_next_enabled(g_active_tab, +1));
-        return false;
-    }
-    if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; g_search_focus_results = false; return false; }
-
-    int row_count = OSK_ROWS_N + 1;
-
-    if (!g_search_focus_results) {
-        if (BTN_PRESSED(up)) {
-            if (g_osk_row == 0) {
-                g_osk_row = row_count - 1;
-            } else {
-                g_osk_row--;
-            }
-            int ml = osk_row_len(g_osk_row);
-            if (g_osk_col >= ml) g_osk_col = ml - 1;
-        }
-        if (BTN_PRESSED(down)) {
-            if (g_osk_row == row_count - 1) {
-                if (g_search_results_count > 0) {
-                    g_search_focus_results = true;
-                    g_search_sel    = 0;
-                    g_search_scroll = 0;
-                } else {
-                    g_osk_row = 0;
-                }
-            } else {
-                g_osk_row++;
-                int ml = osk_row_len(g_osk_row);
-                if (g_osk_col >= ml) g_osk_col = ml - 1;
-            }
-        }
-        if (BTN_PRESSED(left)) {
-            int ml = osk_row_len(g_osk_row);
-            g_osk_col = (g_osk_col - 1 + ml) % ml;
-        }
-        if (BTN_PRESSED(right)) {
-            int ml = osk_row_len(g_osk_row);
-            g_osk_col = (g_osk_col + 1) % ml;
-        }
-    } else {
-        if (BTN_PRESSED(up)) {
-            if (g_search_sel == 0) {
-                g_search_focus_results = false;
-                g_osk_row = row_count - 1;
-                int ml = osk_row_len(g_osk_row);
-                if (g_osk_col >= ml) g_osk_col = ml - 1;
-            } else {
-                g_search_sel--;
-                if (g_search_sel < g_search_scroll) g_search_scroll = g_search_sel;
-            }
-        }
-        if (BTN_PRESSED(down)) {
-            if (g_search_sel < g_search_results_count - 1) {
-                g_search_sel++;
-                if (g_search_sel >= g_search_scroll + 6)
-                    g_search_scroll = g_search_sel - 5;
-            }
-        }
-        if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {
-            const XMBItem *it = &g_search_results[g_search_sel];
-            JFItem jf; memset(&jf, 0, sizeof(jf));
-            strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
-            strncpy(jf.name, it->name, sizeof(jf.name)-1);
-            strncpy(jf.type, it->type, sizeof(jf.type)-1);
-            show_player(&jf);
-            return false;
-        }
-    }
-
-    if (!g_search_focus_results && BTN_PRESSED(cross)) {
-        if (g_osk_row == OSK_ROWS_N) {
-            if (g_osk_col == 0) {
-                int len = strlen(g_search_buf);
-                if (len < (int)sizeof(g_search_buf)-1) { g_search_buf[len]=' '; g_search_buf[len+1]='\0'; }
-            } else if (g_osk_col == 1) {
-                int len = strlen(g_search_buf);
-                if (len > 0) g_search_buf[len-1] = '\0';
-            } else {
-                g_search_buf[0] = '\0';
-                g_search_results_count = 0;
-                g_search_focus_results = false;
-            }
-        } else {
-            const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
-            int base_len = strlen(rows[g_osk_row]);
-            if (g_osk_row == OSK_ROWS_N - 1 && g_osk_col == base_len) {
-                g_osk_sym = !g_osk_sym;
-                g_osk_col = 0;
-            } else {
-                char ch = osk_current_char();
-                if (ch) {
-                    int len = strlen(g_search_buf);
-                    if (len < (int)sizeof(g_search_buf)-1) {
-                        g_search_buf[len] = ch;
-                        g_search_buf[len+1] = '\0';
-                    }
-                }
-            }
-        }
-    }
-
-    if (strcmp(prev_buf, g_search_buf) != 0) {
-        if (g_search_buf[0]) {
-            xmb_do_search();
-        } else {
-            g_search_results_count = 0;
-            g_search_focus_results = false;
-        }
-    }
-
-    return false;
-}
-
-// -------------------------------------------------------
 // XMB main loop
 // -------------------------------------------------------
+
+// Defined in ui/ui_nav.cpp
+void xmb_detect_tabs(void);
+void xmb_fetch_tab_items(int tab);
+bool xmb_handle_input_browse(void);
+
+// Defined in ui/ui_search.cpp
+bool xmb_handle_input_search(void);
 
 void ui_run_xmb(void) {
     memset(g_items, 0, sizeof(g_items));
@@ -1265,7 +435,7 @@ void ui_run_xmb(void) {
             xmb_draw_jumpbar(tab);
         }
 
-        // Contextual hints bar — centered, Iconic PSx glyphs + OpenSans labels
+        // Contextual hints bar
         {
             bool in_tv_sub  = (tab == XMB_TAB_TV          && g_tv_depth  > 0);
             bool in_col_sub = (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0);
