@@ -312,7 +312,7 @@ void show_player(const JFItem *item) {
         if (!playing) break;
 
         {
-            HudAction act = hud_handle_input(l2_pressed, r2_pressed);
+            HudAction act = hud_handle_input(l2_pressed, r2_pressed, paused);
             if (act == HUD_ACTION_TOGGLE_PAUSE) {
                 paused = !paused;
                 { sys_ppu_thread_t cur_tid = 0;
@@ -539,9 +539,8 @@ void show_player(const JFItem *item) {
             }
         }
 
-        // HUD overlay — CPU writes on top of the RSX-rendered video frame
+        // HUD overlay — rsxSync() is called inside hud_draw() after the GPU dim quad.
         if (hud_is_visible() && frame_count > 0) {
-            rsxSync();
             hud_draw(audio_get_clock_us(), paused);
         }
 

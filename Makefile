@@ -14,9 +14,11 @@ include $(PSL1GHT)/ppu_rules
 #---------------------------------------------------------------------------
 TARGET      := $(notdir $(CURDIR))
 BUILD       := obj
-SOURCES     := source source/util source/ui source/api source/player
+SOURCES     := source source/audio source/gfx source/net source/api source/player \
+               source/ui source/util source/cache source/video
 DATA        := data
-INCLUDES    := source
+INCLUDES    := source/audio source/gfx source/net source/api source/player \
+               source/ui source/util source/cache source/video
 
 TITLE       := Jellyfin PS3
 APPID       := JFPS30000

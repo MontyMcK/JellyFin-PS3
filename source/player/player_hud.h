@@ -13,9 +13,11 @@ typedef enum {
 // audio_label: current audio track description; NULL or "" defaults to "Audio"
 void      hud_init(u32 total_secs, const char *audio_label);
 void      hud_shutdown(void);
+void      hud_gpu_init(void);
+void      hud_gpu_shutdown(void);
 
 // Process input for one frame.  l2/r2 are edge-detected presses from raw padData.
-HudAction hud_handle_input(bool l2_pressed, bool r2_pressed);
+HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused);
 
 // Signed seek delta in seconds.  Valid only when last action == HUD_ACTION_SEEK.
 int       hud_seek_delta(void);

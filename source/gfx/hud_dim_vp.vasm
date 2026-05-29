@@ -1,0 +1,4 @@
+!!VP2.0
+MOV result.position, vertex.position;
+MOV result.color, vertex.color;
+END

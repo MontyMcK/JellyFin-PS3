@@ -2,8 +2,11 @@
 #include <string.h>
 
 #include <ppu-types.h>
+#include <rsx/rsx.h>
+#include <rsx/gcm_sys.h>
 
 #include "player_hud.h"
+#include "hud_dim_shaders.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "rsxutil.h"
@@ -62,6 +65,12 @@ static int  s_seek_delta = 0;
 static int  s_focus      = -1;   // -1=none, 0..FOCUS_COUNT-1=focused slot
 static int  s_incr_idx   = 0;    // 0=10s  1=30s  2=5min
 
+// RSX resources for the GPU-drawn dim quad
+static u8  *s_hud_vbuf    = NULL;
+static u32  s_hud_vbuf_off = 0;
+static u32 *s_hud_fp_buf  = NULL;
+static u32  s_hud_fp_off  = 0;
+
 static const int  s_incr_vals[3]  = { 10, 30, 300 };
 static const char *s_incr_strs[3] = { "10s", "30s", "5min" };
 
@@ -74,19 +83,62 @@ static void show_hud(void) {
     s_show_us = timing_get_us();
 }
 
+// GPU quad — darkens the framebuffer region using SRC_ALPHA / ONE_MINUS_SRC_ALPHA blend.
+// Equivalent to the old PPU loop: existing_pixel * (255 - alpha) / 255.
+// Caller must call rsxSync() after this returns and before any CPU pixel writes.
 static void draw_dim_rect(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
-    u32 y_end = ry + rh; if (y_end > display_height) y_end = display_height;
-    u32 x_end = rx + rw; if (x_end > display_width)  x_end = display_width;
-    u8 inv = (u8)(255 - (int)alpha);
-    for (u32 row = ry; row < y_end; row++) {
-        u32 *line = color_buffer[curr_fb] + row * display_width;
-        for (u32 col = rx; col < x_end; col++) {
-            u32 p = line[col];
-            line[col] = ((((p >> 16) & 0xFF) * inv / 255) << 16) |
-                        ((((p >>  8) & 0xFF) * inv / 255) <<  8) |
-                         (( p        & 0xFF) * inv / 255);
-        }
-    }
+    if (!s_hud_vbuf || !s_hud_fp_buf) return;
+
+    float W = (float)display_width;
+    float H = (float)display_height;
+    float x0 = (float)rx         / W * 2.0f - 1.0f;
+    float x1 = (float)(rx + rw)  / W * 2.0f - 1.0f;
+    float y0 = 1.0f - (float)ry        / H * 2.0f;
+    float y1 = 1.0f - (float)(ry + rh) / H * 2.0f;
+
+    // Write 4 vertices into the RSX-mapped buffer (TL, TR, BL, BR — TRIANGLE_STRIP).
+    typedef struct { float x, y, z, w; u8 r, g, b, a; } Vert;
+    Vert *v = (Vert*)s_hud_vbuf;
+    v[0].x=x0; v[0].y=y0; v[0].z=0.f; v[0].w=1.f; v[0].r=0; v[0].g=0; v[0].b=0; v[0].a=alpha;
+    v[1].x=x1; v[1].y=y0; v[1].z=0.f; v[1].w=1.f; v[1].r=0; v[1].g=0; v[1].b=0; v[1].a=alpha;
+    v[2].x=x0; v[2].y=y1; v[2].z=0.f; v[2].w=1.f; v[2].r=0; v[2].g=0; v[2].b=0; v[2].a=alpha;
+    v[3].x=x1; v[3].y=y1; v[3].z=0.f; v[3].w=1.f; v[3].r=0; v[3].g=0; v[3].b=0; v[3].a=alpha;
+
+    rsxVertexProgram  *vpo = (rsxVertexProgram*) hud_dim_vp_data;
+    rsxFragmentProgram *fpo = (rsxFragmentProgram*) hud_dim_fp_data;
+
+    void *vp_ucode; u32 vp_size;
+    rsxVertexProgramGetUCode(vpo, &vp_ucode, &vp_size);
+    rsxLoadVertexProgram(context, vpo, vp_ucode);
+    rsxSetVertexAttribOutputMask(context, vpo->output_mask);
+    rsxLoadFragmentProgramLocation(context, fpo, s_hud_fp_off, GCM_LOCATION_RSX);
+
+    rsxSetDepthTestEnable(context, GCM_FALSE);
+    rsxSetDepthWriteEnable(context, GCM_FALSE);
+    rsxSetColorMask(context,
+        GCM_COLOR_MASK_R | GCM_COLOR_MASK_G |
+        GCM_COLOR_MASK_B | GCM_COLOR_MASK_A);
+
+    rsxSetBlendFunc(context,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
+    rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
+    rsxSetBlendEnable(context, GCM_TRUE);
+
+    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
+        s_hud_vbuf_off, 20, 4, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
+        s_hud_vbuf_off + 16, 20, 4, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
+
+    rsxInvalidateVertexCache(context);
+    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+
+    rsxSetBlendEnable(context, GCM_FALSE);
+
+    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
+        0, 0, 0, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
+    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
+        0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
 }
 
 static void draw_circle(int cx, int cy, int r, u32 color) {
@@ -157,6 +209,23 @@ static u32 ctrl_color(int slot) {
 // Public API
 // -------------------------------------------------------
 
+void hud_gpu_init(void) {
+    s_hud_vbuf = (u8*)rsxMemalign(128, 4 * 20);
+    rsxAddressToOffset(s_hud_vbuf, &s_hud_vbuf_off);
+
+    rsxFragmentProgram *fpo = (rsxFragmentProgram*)hud_dim_fp_data;
+    void *fp_ucode; u32 fp_size;
+    rsxFragmentProgramGetUCode(fpo, &fp_ucode, &fp_size);
+    s_hud_fp_buf = (u32*)rsxMemalign(256, fp_size);
+    memcpy(s_hud_fp_buf, fp_ucode, fp_size);
+    rsxAddressToOffset(s_hud_fp_buf, &s_hud_fp_off);
+}
+
+void hud_gpu_shutdown(void) {
+    if (s_hud_vbuf)   { rsxFree(s_hud_vbuf);   s_hud_vbuf   = NULL; }
+    if (s_hud_fp_buf) { rsxFree(s_hud_fp_buf);  s_hud_fp_buf = NULL; }
+}
+
 void hud_init(u32 total_secs, const char *audio_label) {
     s_total_secs = total_secs;
     snprintf(s_audio_label, sizeof(s_audio_label), "%s",
@@ -166,13 +235,17 @@ void hud_init(u32 total_secs, const char *audio_label) {
     s_seek_delta = 0;
     s_focus      = -1;
     s_incr_idx   = 0;
+    hud_gpu_init();
 }
 
-void hud_shutdown(void) { s_visible = false; }
+void hud_shutdown(void) {
+    s_visible = false;
+    hud_gpu_shutdown();
+}
 bool hud_is_visible(void) { return s_visible; }
 int  hud_seek_delta(void) { return s_seek_delta; }
 
-HudAction hud_handle_input(bool l2_pressed, bool r2_pressed) {
+HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     s_seek_delta = 0;
 
     // Any button activity wakes the HUD.
@@ -181,8 +254,8 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed) {
         btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right)
         show_hud();
 
-    // Auto-hide after timeout.
-    if (s_visible && (timing_get_us() - s_show_us) >= HUD_SHOW_US) {
+    // Auto-hide after timeout — only when playing; stay visible indefinitely while paused.
+    if (s_visible && !paused && (timing_get_us() - s_show_us) >= HUD_SHOW_US) {
         s_visible = false;
         s_focus   = -1;
         return HUD_ACTION_NONE;
@@ -242,6 +315,7 @@ void hud_draw(u64 elapsed_us, bool paused) {
     int strip_y = dh - HUD_STRIP_H;
     if (strip_y < 0) strip_y = 0;
     draw_dim_rect(0, (u32)strip_y, (u32)dw, (u32)(dh - strip_y), 185);
+    rsxSync();  // wait for GPU dim quad to finish before CPU pixel writes
 
     // ---- Row centres ----
     int ctrl_cy  = dh - CTRL_Y_OFF;    // transport / seek bar row
