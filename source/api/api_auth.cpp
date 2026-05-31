@@ -94,16 +94,10 @@ int do_login(void) {
     flip();
 
     init_btns();
-    padInfo padinfo; padData paddata;
     while (running) {
         sysUtilCheckCallback();
-        ioPadGetInfo(&padinfo);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!padinfo.status[i]) continue;
-            ioPadGetData(i, &paddata);
-            update_buttons(&paddata);
-            if (BTN_PRESSED(cross)) return 0;
-        }
+        poll_buttons();
+        if (BTN_PRESSED(cross)) return 0;
     }
     return 0;
 }

@@ -18,22 +18,16 @@ static int show_list(JFItem *arr, int count, const char *title,
                      bool has_prev, bool has_next) {
     int sel = 0, top = 0;
     init_btns();
-    padInfo pi; padData pd;
 
     while (running) {
         sysUtilCheckCallback();
-        ioPadGetInfo(&pi);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!pi.status[i]) continue;
-            ioPadGetData(i, &pd);
-            update_buttons(&pd);
-            if (BTN_PRESSED(up))   { if (sel > 0)         { sel--; if (sel < top)          top = sel; } }
-            if (BTN_PRESSED(down)) { if (sel < count - 1) { sel++; if (sel >= top+JF_PAGE) top = sel-JF_PAGE+1; } }
-            if (BTN_PRESSED(cross))              return sel;
-            if (BTN_PRESSED(circle))             return -1;
-            if (BTN_PRESSED(l1) && has_prev)     return -2;
-            if (BTN_PRESSED(r1) && has_next)     return -3;
-        }
+        poll_buttons();
+        if (BTN_PRESSED(up))   { if (sel > 0)         { sel--; if (sel < top)          top = sel; } }
+        if (BTN_PRESSED(down)) { if (sel < count - 1) { sel++; if (sel >= top+JF_PAGE) top = sel-JF_PAGE+1; } }
+        if (BTN_PRESSED(cross))              return sel;
+        if (BTN_PRESSED(circle))             return -1;
+        if (BTN_PRESSED(l1) && has_prev)     return -2;
+        if (BTN_PRESSED(r1) && has_next)     return -3;
 
         drawHeader();
         drawTextf(40, 65, "%.72s", title);
@@ -95,14 +89,10 @@ static void browse_level(const char *parent_id, const char *title, int depth) {
                 drawText(40, 130, "O: back");
                 flip();
                 init_btns();
-                padInfo pi; padData pd;
                 while (running) {
-                    sysUtilCheckCallback(); ioPadGetInfo(&pi);
-                    for (int i = 0; i < MAX_PADS; i++) {
-                        if (!pi.status[i]) continue;
-                        ioPadGetData(i, &pd); update_buttons(&pd);
-                        if (BTN_PRESSED(circle)) return;
-                    }
+                    sysUtilCheckCallback();
+                    poll_buttons();
+                    if (BTN_PRESSED(circle)) return;
                 }
                 return;
             }
@@ -139,14 +129,10 @@ void show_library_browser(void) {
         drawText(40, 130, "O: back");
         flip();
         init_btns();
-        padInfo pi; padData pd;
         while (running) {
-            sysUtilCheckCallback(); ioPadGetInfo(&pi);
-            for (int i = 0; i < MAX_PADS; i++) {
-                if (!pi.status[i]) continue;
-                ioPadGetData(i, &pd); update_buttons(&pd);
-                if (BTN_PRESSED(circle)) return;
-            }
+            sysUtilCheckCallback();
+            poll_buttons();
+            if (BTN_PRESSED(circle)) return;
         }
         return;
     }
@@ -182,14 +168,10 @@ void show_search(void) {
         drawText(40, 130, "O: back");
         flip();
         init_btns();
-        padInfo pi; padData pd;
         while (running) {
-            sysUtilCheckCallback(); ioPadGetInfo(&pi);
-            for (int i = 0; i < MAX_PADS; i++) {
-                if (!pi.status[i]) continue;
-                ioPadGetData(i, &pd); update_buttons(&pd);
-                if (BTN_PRESSED(circle)) return;
-            }
+            sysUtilCheckCallback();
+            poll_buttons();
+            if (BTN_PRESSED(circle)) return;
         }
         return;
     }

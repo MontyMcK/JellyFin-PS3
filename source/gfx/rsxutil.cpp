@@ -142,8 +142,11 @@ void rsxSync(void)
 {
 	rsxSetWriteBackendLabel(context, GCM_LABEL_INDEX, sLabelVal);
 	rsxFlushBuffer(context);
-	while (*(vu32*)gcmGetLabelAddress(GCM_LABEL_INDEX) != sLabelVal)
+	int iters = 3334; // ~100 ms at 30 us/poll
+	while (*(vu32*)gcmGetLabelAddress(GCM_LABEL_INDEX) != sLabelVal) {
 		usleep(30);
+		if (--iters <= 0) break;
+	}
 	++sLabelVal;
 }
 

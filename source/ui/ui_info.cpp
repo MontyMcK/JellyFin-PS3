@@ -50,16 +50,11 @@ void xmb_show_item_info(const XMBItem *it) {
     while (running) {
         waitflip();
         sysUtilCheckCallback();
-        padInfo pi; padData pd;
-        ioPadGetInfo(&pi);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!pi.status[i]) continue;
-            ioPadGetData(i, &pd); update_buttons(&pd);
-            if (!exit_armed) {
-                if (!btn_cur.circle && !btn_cur.triangle)
-                    exit_armed = true;
-                continue;
-            }
+        poll_buttons();
+        if (!exit_armed) {
+            if (!btn_cur.circle && !btn_cur.triangle)
+                exit_armed = true;
+        } else {
             if (BTN_PRESSED(circle))   { info_exit_reason = 1; goto info_done; }
             if (BTN_PRESSED(triangle)) { info_exit_reason = 2; goto info_done; }
         }
