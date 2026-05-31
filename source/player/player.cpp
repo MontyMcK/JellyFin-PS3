@@ -41,15 +41,10 @@ static void show_error(const char *line1, const char *line2) {
     drawText(40, 160, "O: back");
     flip();
     init_btns();
-    padInfo pi; padData pd;
     while (running) {
         sysUtilCheckCallback();
-        ioPadGetInfo(&pi);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!pi.status[i]) continue;
-            ioPadGetData(i, &pd); update_buttons(&pd);
-            if (BTN_PRESSED(circle)) return;
-        }
+        poll_buttons();
+        if (BTN_PRESSED(circle)) return;
     }
 }
 
@@ -292,22 +287,12 @@ void show_player(const JFItem *item) {
           if (s_loop_iter_us) s_loop_frame_dur = now - s_loop_iter_us;
           s_loop_iter_us = now; }
 
-        padInfo pi; padData pd;
-        static u8 s_prev_l2 = 0, s_prev_r2 = 0;
-        bool l2_pressed = false, r2_pressed = false;
-        ioPadGetInfo(&pi);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!pi.status[i]) continue;
-            ioPadGetData(i, &pd); update_buttons(&pd);
-            l2_pressed |= (!s_prev_l2 && pd.BTN_L2);
-            r2_pressed |= (!s_prev_r2 && pd.BTN_R2);
-            s_prev_l2 = pd.BTN_L2;
-            s_prev_r2 = pd.BTN_R2;
-            if (BTN_PRESSED(start)) {
-                if (!playing) break;
-                plog("playing=0 reason=user_stop");
-                playing = false; break;
-            }
+        poll_buttons();
+        bool l2_pressed = BTN_PRESSED(l2);
+        bool r2_pressed = BTN_PRESSED(r2);
+        if (BTN_PRESSED(start)) {
+            plog("playing=0 reason=user_stop");
+            playing = false;
         }
         if (!playing) break;
 

@@ -34,16 +34,43 @@ void update_buttons(padData *pad) {
     btn_cur.select   = pad->BTN_SELECT;
     btn_cur.l1       = pad->BTN_L1;
     btn_cur.r1       = pad->BTN_R1;
+    btn_cur.l2       = pad->BTN_L2;
+    btn_cur.r2       = pad->BTN_R2;
+}
+
+bool poll_buttons(void) {
+    padInfo pi;
+    ioPadGetInfo(&pi);
+    padData merged; memset(&merged, 0, sizeof(merged));
+    bool any = false;
+    for (int i = 0; i < MAX_PADS; i++) {
+        if (!pi.status[i]) continue;
+        padData pd;
+        ioPadGetData(i, &pd);
+        if (!pd.len) continue;
+        merged.BTN_UP       |= pd.BTN_UP;
+        merged.BTN_DOWN     |= pd.BTN_DOWN;
+        merged.BTN_LEFT     |= pd.BTN_LEFT;
+        merged.BTN_RIGHT    |= pd.BTN_RIGHT;
+        merged.BTN_CROSS    |= pd.BTN_CROSS;
+        merged.BTN_CIRCLE   |= pd.BTN_CIRCLE;
+        merged.BTN_SQUARE   |= pd.BTN_SQUARE;
+        merged.BTN_TRIANGLE |= pd.BTN_TRIANGLE;
+        merged.BTN_START    |= pd.BTN_START;
+        merged.BTN_SELECT   |= pd.BTN_SELECT;
+        merged.BTN_L1       |= pd.BTN_L1;
+        merged.BTN_R1       |= pd.BTN_R1;
+        merged.BTN_L2       |= pd.BTN_L2;
+        merged.BTN_R2       |= pd.BTN_R2;
+        any = true;
+    }
+    merged.len = 1;
+    update_buttons(&merged);
+    return any;
 }
 
 void init_btns(void) {
-    padInfo pi; padData pd;
-    ioPadGetInfo(&pi);
-    for (int i = 0; i < MAX_PADS; i++) {
-        if (!pi.status[i]) continue;
-        ioPadGetData(i, &pd);
-        update_buttons(&pd);
-    }
+    poll_buttons();
     btn_prev = btn_cur;
 }
 
@@ -71,42 +98,36 @@ int get_input(char *out, int max_len, const char *prompt, bool is_password) {
     out[0]  = '\0';
     kb_row  = 0; kb_col = 0; kb_caps = false;
 
-    padInfo padinfo; padData paddata;
     init_btns();
 
     while (running) {
         sysUtilCheckCallback();
-        ioPadGetInfo(&padinfo);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!padinfo.status[i]) continue;
-            ioPadGetData(i, &paddata);
-            update_buttons(&paddata);
+        poll_buttons();
 
-            int rlen = row_len(kb_row);
+        int rlen = row_len(kb_row);
 
-            if (BTN_PRESSED(up)) {
-                kb_row = (kb_row - 1 + TOTAL_ROWS) % TOTAL_ROWS;
-                int nl = row_len(kb_row); if (kb_col >= nl) kb_col = nl - 1;
-            }
-            if (BTN_PRESSED(down)) {
-                kb_row = (kb_row + 1) % TOTAL_ROWS;
-                int nl = row_len(kb_row); if (kb_col >= nl) kb_col = nl - 1;
-            }
-            if (BTN_PRESSED(left))  kb_col = (kb_col - 1 + rlen) % rlen;
-            if (BTN_PRESSED(right)) kb_col = (kb_col + 1) % rlen;
-
-            if (BTN_PRESSED(triangle)) kb_caps = !kb_caps;
-
-            if (BTN_PRESSED(cross)) {
-                char ch = current_key_value();
-                if (ch == '\r') return 1;
-                if (ch == '\b') { int len = strlen(out); if (len > 0) out[len-1] = '\0'; }
-                else            { int len = strlen(out); if (len < max_len-1) { out[len]=ch; out[len+1]='\0'; } }
-            }
-            if (BTN_PRESSED(square)) { int len = strlen(out); if (len > 0) out[len-1] = '\0'; }
-            if (BTN_PRESSED(start))  return 1;
-            if (BTN_PRESSED(select)) return -1;
+        if (BTN_PRESSED(up)) {
+            kb_row = (kb_row - 1 + TOTAL_ROWS) % TOTAL_ROWS;
+            int nl = row_len(kb_row); if (kb_col >= nl) kb_col = nl - 1;
         }
+        if (BTN_PRESSED(down)) {
+            kb_row = (kb_row + 1) % TOTAL_ROWS;
+            int nl = row_len(kb_row); if (kb_col >= nl) kb_col = nl - 1;
+        }
+        if (BTN_PRESSED(left))  kb_col = (kb_col - 1 + rlen) % rlen;
+        if (BTN_PRESSED(right)) kb_col = (kb_col + 1) % rlen;
+
+        if (BTN_PRESSED(triangle)) kb_caps = !kb_caps;
+
+        if (BTN_PRESSED(cross)) {
+            char ch = current_key_value();
+            if (ch == '\r') return 1;
+            if (ch == '\b') { int len = strlen(out); if (len > 0) out[len-1] = '\0'; }
+            else            { int len = strlen(out); if (len < max_len-1) { out[len]=ch; out[len+1]='\0'; } }
+        }
+        if (BTN_PRESSED(square)) { int len = strlen(out); if (len > 0) out[len-1] = '\0'; }
+        if (BTN_PRESSED(start))  return 1;
+        if (BTN_PRESSED(select)) return -1;
 
         draw_keyboard(prompt, out, is_password);
     }
@@ -349,7 +370,6 @@ void ui_run_xmb(void) {
     OSK_Y0 = XMB_CONTENT_Y + 58;
 
     init_btns();
-    padInfo padinfo; padData paddata;
 
     while (running) {
         waitflip();
@@ -361,12 +381,7 @@ void ui_run_xmb(void) {
         if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS)
             if (!g_items_loaded[tab]) xmb_fetch_tab_items(tab);
 
-        ioPadGetInfo(&padinfo);
-        for (int i = 0; i < MAX_PADS; i++) {
-            if (!padinfo.status[i]) continue;
-            ioPadGetData(i, &paddata);
-            update_buttons(&paddata);
-        }
+        poll_buttons();
         bool should_exit = false;
         if (tab == XMB_TAB_SEARCH)
             should_exit = xmb_handle_input_search();

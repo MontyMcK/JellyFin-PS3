@@ -135,10 +135,10 @@ static void draw_dim_rect(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
 
     rsxSetBlendEnable(context, GCM_FALSE);
 
+    // Re-point COLOR0 at the buffer base with stride 0 (GPU reads vertex 0's
+    // colour for every index). Zeroing offset/size wedges RSX on hardware.
     rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
-        0, 0, 0, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
-    rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
-        0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+        s_hud_vbuf_off + 16, 0, 4, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
 }
 
 static void draw_circle(int cx, int cy, int r, u32 color) {

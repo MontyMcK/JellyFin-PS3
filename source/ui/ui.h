@@ -11,7 +11,7 @@ typedef struct {
     u8 up, down, left, right;
     u8 cross, circle, square, triangle;
     u8 start, select;
-    u8 l1, r1;
+    u8 l1, r1, l2, r2;
 } ButtonState;
 
 // -------------------------------------------------------
@@ -38,6 +38,10 @@ extern ButtonState btn_prev;
 #define BTN_PRESSED(b) (btn_cur.b && !btn_prev.b)
 
 void update_buttons(padData *pad);
+
+// Reads all active pad slots, ORs their button data into one merged padData,
+// calls update_buttons() exactly once. Returns true if any pad was active.
+bool poll_buttons(void);
 
 // Seed btn_prev = btn_cur from the live pad so held buttons
 // from a previous screen don't fire as new presses.
