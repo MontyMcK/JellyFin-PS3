@@ -189,7 +189,7 @@ The audio clock drives the seek bar, so the bar jumps to the new position automa
 
 ---
 
-## HUD Overlay and the dim strip
+## HUD Overlay and the dim strip **Work in progress**
 
 The in-player HUD draws a darkened strip along the bottom of the screen behind the controls. Getting this right was non-trivial on RSX:
 
