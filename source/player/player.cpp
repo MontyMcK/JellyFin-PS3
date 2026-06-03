@@ -1,3 +1,12 @@
+
+
+
+
+
+
+
+
+
 // player.cpp — Jellyfin PS3 media player orchestrator
 
 #include <stdio.h>
@@ -30,6 +39,14 @@
 
 extern void crash_log(const char *msg);
 
+// Uncomment to use brute-force vdec_close/vdec_open on seek instead of
+// EndSequence/StartSequence.  Slower (~200 ms) but guarantees clean SPU state.
+// #define SEEK_REOPEN_VDEC 1
+
+// Set true before the seek flush window, false after the decode thread is
+// respawned.  Declared extern in player_internal.h; read by upload_thread_fn.
+volatile bool s_seeking = false;
+
 // -------------------------------------------------------
 // Helper — wait for O with error message
 // -------------------------------------------------------
@@ -49,12 +66,42 @@ static void show_error(const char *line1, const char *line2) {
 }
 
 // -------------------------------------------------------
+// Stream URL builder — used for the initial open and for every seek.
+// start_ticks is in Jellyfin's 100-ns units (seconds * 10,000,000).
+// The query string is otherwise identical so the server keeps the same
+// transcode session and we only change the start offset.
+// -------------------------------------------------------
+static void build_stream_url(char *url, int url_sz,
+                             const JFItem *item, u32 req_w, u32 req_h,
+                             const char *session_id, u64 start_ticks) {
+    int n = snprintf(url, url_sz,
+        "%s/Videos/%s/stream.ts"
+        "?VideoCodec=h264"
+        "&VideoProfile=baseline"
+        "&VideoLevel=31"
+        "&MaxWidth=%u&MaxHeight=%u"
+        "&VideoBitrate=4000000"
+        "&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000"
+        "&MaxAudioChannels=2"
+        "&MaxFramerate=30"
+        "&DeviceId=ps3&Static=false"
+        "&MediaSourceId=%s"
+        "&StartTimeTicks=%llu",
+        g_server, item->id, req_w, req_h, item->id,
+        (unsigned long long)start_ticks);
+    if (session_id && session_id[0] && n > 0 && n < url_sz) {
+        snprintf(url + n, url_sz - n, "&PlaySessionId=%s", session_id);
+    }
+}
+
+// -------------------------------------------------------
 // show_player — public entry point
 // -------------------------------------------------------
 
 void show_player(const JFItem *item) {
     crash_log("p1 enter");
     plog("show_player: enter");
+    plog("show_player: BUILD=seek-diag-1");
     init_btns();
     {
         static bool s_logged_cbufs = false;
@@ -72,28 +119,14 @@ void show_player(const JFItem *item) {
     u32 req_w = display_width  < 1280 ? display_width  : 1280;
     u32 req_h = display_height < 720  ? display_height : 720;
 
-    char url[640];
-    snprintf(url, sizeof(url),
-        "%s/Videos/%s/stream.ts"
-        "?VideoCodec=h264"
-        "&VideoProfile=baseline"
-        "&VideoLevel=31"
-        "&MaxWidth=%u&MaxHeight=%u"
-        "&VideoBitrate=4000000"
-        "&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000"
-        "&MaxAudioChannels=2"
-        "&MaxFramerate=30"
-        "&DeviceId=ps3&Static=false"
-        "&MediaSourceId=%s",
-    g_server, item->id, req_w, req_h, item->id);
-
     char session_id[64] = "";
-    if (jellyfin_get_play_session_id(item->id, session_id, sizeof(session_id))) {
-        int ul = strlen(url);
-        snprintf(url + ul, sizeof(url) - ul, "&PlaySessionId=%s", session_id);
-    } else {
+    if (!jellyfin_get_play_session_id(item->id, session_id, sizeof(session_id))) {
         plog("show_player: PlaybackInfo failed, streaming without PlaySessionId");
+        session_id[0] = '\0';
     }
+
+    char url[640];
+    build_stream_url(url, sizeof(url), item, req_w, req_h, session_id, 0);
     plog(url);
 
     drawHeader();
@@ -180,6 +213,7 @@ void show_player(const JFItem *item) {
     u8            ts_pkt[TS_PACKET_SIZE];
     volatile bool playing    = true;
     volatile bool paused     = false;
+    volatile bool dec_run    = true;   // decode-thread stop flag (toggled on seek)
     bool          first_pkt  = true;
     int           frame_count = 0;
     int           rd          = 0;
@@ -223,7 +257,7 @@ void show_player(const JFItem *item) {
     timing_register_vblank();
 
     // ---- Spawn decode thread (Step 2) ----
-    DecodeCtx        dec_ctx = { &playing, &frame_count, sock };
+    DecodeCtx        dec_ctx = { &playing, &frame_count, sock, &dec_run };
     sys_ppu_thread_t dec_tid = 0;
     if (playing) {
         int trc = sysThreadCreate(&dec_tid, decode_thread_fn,
@@ -311,9 +345,127 @@ void show_player(const JFItem *item) {
                       (unsigned long long)s_loop_frame_dur);
                   plog(buf); }
             } else if (act == HUD_ACTION_SEEK) {
-                char buf[64];
-                snprintf(buf, sizeof(buf), "hud: seek %+d s", hud_seek_delta());
-                plog(buf);
+                int delta = hud_seek_delta();
+                {
+                    char buf[64];
+                    snprintf(buf, sizeof(buf), "hud: seek %+d s (begin)", delta);
+                    plog(buf);
+                }
+                crash_log("sk1 seek begin");
+
+                // Compute target time from the current audio clock.
+                s64 cur_us    = (s64)audio_get_clock_us();
+                s64 target_us = cur_us + (s64)delta * 1000000LL;
+                if (target_us < 0) target_us = 0;
+                u64 start_ticks = (u64)target_us * 10ULL;  // us -> 100-ns ticks
+
+                // 1) Stop the decode thread so nothing feeds VDEC mid-flush.
+                //    Use the decode-only flag so the audio + upload threads
+                //    keep running (they idle on empty buffers), matching
+                //    Movian's flush-while-primary model.
+                bool was_paused = paused;
+                paused    = true;              // gate audio output during the seek
+                s_seeking = true;              // gate upload thread during flush window
+                dec_run   = false;             // signal ONLY the decode thread
+                __asm__ volatile("sync" ::: "memory");
+                if (dec_tid) {
+                    u64 tret;
+                    sysThreadJoin(dec_tid, &tret);
+                    dec_tid = 0;
+                }
+                crash_log("sk2 dec joined");
+
+                // 2) Flush decoder + audio + jitter buffer (Movian mp_flush).
+#ifdef SEEK_REOPEN_VDEC
+                // Brute-force path: tear down and rebuild the decoder instead
+                // of EndSequence/StartSequence.  Avoids any stale SPU state.
+                vdec_close();
+                crash_log("sk2a vdec_close done");
+                if (!vdec_open()) {
+                    crash_log("sk2b vdec_open FAILED");
+                    s_seeking = false;
+                    playing   = false;
+                    break;
+                }
+                crash_log("sk2c vdec_open done");
+                vdec_reset_counters();
+#else
+                vdec_flush();
+#endif
+                adec_flush();
+                crash_log("jc1 jbuf_clear");
+                jbuf_clear();
+                crash_log("jc2 jbuf_clear done");
+                video_reset_demux();
+                avsync_reset();
+                s_vid_frame_ready = false;
+                s_vid_b_present   = false;
+                crash_log("sk3 flushed");
+
+                // 3) Re-request the stream at the new offset.
+                netClose(sock);
+                char surl[640];
+                build_stream_url(surl, sizeof(surl), item, req_w, req_h,
+                                 session_id, start_ticks);
+                plog(surl);
+                int nsock = stream_open(surl);
+                if (nsock < 0) {
+                    plog("seek: stream_open FAILED");
+                    crash_log("sk_fail reopen");
+                    playing = false;           // give up cleanly; loop will exit
+                    break;
+                }
+                sock = nsock;
+                { struct { u32 sec; u32 usec; } tv = { 0, 5000 };
+                  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
+                crash_log("sk4 reopened");
+
+                // 4) Re-prime: decode a few frames before resuming display so
+                //    the jitter buffer is non-empty (mirrors initial pre-fill).
+                {
+                    u8 spkt[TS_PACKET_SIZE];
+                    int guard = 0;
+                    while (jbuf_count() < JBUF_PREFILL && running &&
+                           !s_vdec_error && guard < 20000) {
+                        sysUtilCheckCallback();
+                        int srd = stream_read(sock, spkt, TS_PACKET_SIZE);
+                        if (srd < 0) { plog("seek: prefill eof"); break; }
+                        if (srd > 0) video_feed_ts(spkt);
+                        guard++;
+                    }
+                }
+                crash_log("sk5 prefilled");
+
+                // 5) Respawn the decode thread with the new socket.
+                dec_run = true;
+                dec_ctx.sock = sock;
+                {
+                    int trc = sysThreadCreate(&dec_tid, decode_thread_fn,
+                                              (void *)&dec_ctx,
+                                              800, 128 * 1024,
+                                              0, "jf_decode");
+                    if (trc != 0) {
+                        char buf[64];
+                        snprintf(buf, sizeof(buf),
+                                 "seek: dec thread_create FAILED rc=%d", trc);
+                        plog(buf);
+                        playing = false;
+                        break;
+                    }
+                }
+
+                // 6) Resume (unless the user had paused before seeking).
+                s_seeking = false;             // upload thread may resume
+                paused    = was_paused;
+                {
+                    char buf[80];
+                    snprintf(buf, sizeof(buf),
+                             "hud: seek done target=%llds clk_was=%llds",
+                             (long long)(target_us / 1000000),
+                             (long long)(cur_us / 1000000));
+                    plog(buf);
+                }
+                crash_log("sk6 seek done");
             } else if (act == HUD_ACTION_AUDIO_TRACK) {
                 plog("hud: audio track selected");
             } else if (act == HUD_ACTION_SUBTITLE) {
@@ -524,9 +676,25 @@ void show_player(const JFItem *item) {
             }
         }
 
-        // HUD overlay — rsxSync() is called inside hud_draw() after the GPU dim quad.
+        // HUD overlay.
+        // The HUD's draw_dim_rect() reprograms RSX vertex/fragment state and
+        // rebinds attributes.  If the video draw above is still in flight when
+        // that happens, the RSX wedges (the dim quad collides with the video
+        // path's TEX0 fetch).  When playing, do_pop triggers the rsxSync() at
+        // line 651, so the pipeline is already fenced.  When PAUSED, do_pop is
+        // always false (the consume gate requires !paused), so that sync is
+        // skipped and the HUD is the first thing to touch RSX after an unfenced
+        // vid_gpu_draw -> hard freeze at "hud_draw: A pre dim_rect".
+        // Fence unconditionally here so the HUD never races the video commands.
         if (hud_is_visible() && frame_count > 0) {
+            static int s_hg = 0;
+            if (s_hg < 12) { 
+                char b[80]; snprintf(b,sizeof(b),"hud_gate: vis paused=%d fr=%d",(int)paused,frame_count);
+                plog(b); s_hg++;
+            }
+            rsxSync();  // ensure prior vid_gpu_draw is complete before HUD reprograms RSX
             hud_draw(audio_get_clock_us(), paused);
+            { static int s_hg2 = 0; if (s_hg2 < 12) { plog("hud_gate: draw returned"); s_hg2++; } }
         }
 
         flip();
