@@ -51,6 +51,12 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
 bool jellyfin_get_play_session_id(const char *item_id,
                                    char *out_session_id, int out_len);
 
+// Log out of the current session.  Best-effort notifies the server
+// (POST /Sessions/Logout), clears the in-memory credentials, and removes the
+// saved config so the next launch returns to the login screen.  The server URL
+// is preserved so the user only needs to re-enter their credentials.
+void jellyfin_logout(void);
+
 // Screens (each blocks until the user navigates away)
 int  do_login(void);
 void show_library_browser(void);

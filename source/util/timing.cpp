@@ -191,3 +191,8 @@ s64 avsync_biased_period(s64 nominal_vblank_us) {
     if (delta_us > 5000) delta_us = 5000;
     return nominal_vblank_us - (smooth > 0 ? delta_us : -delta_us);
 }
+
+void avsync_reset(void) {
+    s_avsync_smooth_us   = 0;
+    s_avsync_initialized = false;
+}

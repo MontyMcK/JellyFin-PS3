@@ -46,6 +46,9 @@ void xmb_switch_tab(int new_tab) {
     if (new_tab == XMB_TAB_SEARCH) {
         g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
     }
+    if (new_tab == XMB_TAB_SETTINGS) {
+        g_settings_sel = 0; g_settings_confirm = false;
+    }
 }
 
 int xmb_next_enabled(int start, int dir) {
@@ -277,6 +280,25 @@ bool xmb_handle_input_browse(void) {
     static bool s_movie_just_exited = false;
     int tab = g_active_tab;
     int vis = XMB_ITEMS_VIS;
+
+    // Settings tab — account actions (Log Out).
+    if (tab == XMB_TAB_SETTINGS) {
+        if (g_settings_confirm) {
+            // Modal confirm: swallow all other input until resolved.
+            if (BTN_PRESSED(cross)) {
+                jellyfin_logout();
+                return true;   // exit the XMB; main loop returns to the login screen
+            }
+            if (BTN_PRESSED(circle)) g_settings_confirm = false;
+            return false;
+        }
+        if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
+        if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
+        if (BTN_PRESSED(up)   && g_settings_sel > 0)                      g_settings_sel--;
+        if (BTN_PRESSED(down) && g_settings_sel < XMB_SETTINGS_COUNT - 1) g_settings_sel++;
+        if (BTN_PRESSED(cross) && g_settings_sel == 0) g_settings_confirm = true;  // Log Out
+        return false;
+    }
 
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }

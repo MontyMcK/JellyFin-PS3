@@ -10,6 +10,9 @@ void adec_start(void);
 // Signal the audio decode thread to stop and join it.  Call before audio_close().
 void adec_stop(void);
 
+// Drain PES queue and PCM ring without stopping the decode thread.  Call on seek.
+void adec_flush(void);
+
 // Feed a complete audio PES packet (PES header included).
 // Strips the header, runs mp3dec_decode_frame() on every frame found in the
 // payload, and pushes the resulting stereo PCM into the ring buffer.

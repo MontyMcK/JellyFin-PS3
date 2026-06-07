@@ -8,6 +8,7 @@
 #include <rsx/rsx.h>
 
 #include "ui_visuals.h"
+#include "jellyfin_api.h"
 #include "bitmap.h"
 #include "thumbnail_cache.h"
 #include "font8x8.xpm"
@@ -45,21 +46,26 @@ static bool            s_icons_ok    = false;
 static stbtt_fontinfo  s_iconic;
 static bool            s_iconic_ok   = false;
 
-// -------------------------------------------------------
-// Keyboard data (extern in ui_visuals.h, used in ui.cpp too)
-// -------------------------------------------------------
+// Gamma LUTs for correct anti-aliasing.  Blending coverage in linear light
+// (instead of straight 8-bit sRGB) stops the soft glyph edges from going muddy
+// grey/dark — which otherwise reads as a faint black outline, especially for
+// white text on the dark on-screen-keyboard keys.
+static u8   s_g2l[256];   // sRGB byte -> linear (gamma 2.0)
+static u8   s_l2g[256];   // linear    -> sRGB byte
+static bool s_gamma_ok = false;
 
-const char *KB_ROWS[KB_LETTER_ROWS] = {
-    "1234567890",
-    "qwertyuiop",
-    "asdfghjkl",
-    "zxcvbnm",
-};
+static void gamma_init(void) {
+    for (int i = 0; i < 256; i++) {
+        s_g2l[i] = (u8)((i * i) / 255);
+        s_l2g[i] = (u8)(sqrtf((float)i / 255.0f) * 255.0f + 0.5f);
+    }
+    s_gamma_ok = true;
+}
 
-const SpecialKey SPECIAL[SPECIAL_N] = {
-    {"SPC",' '}, {".",'.'},  {":",':'}, {"/",'/'},
-    {"@",'@'},   {"-",'-'},  {"_",'_'}, {"DEL",'\b'}, {"OK",'\r'},
-};
+// Composite one foreground channel over a background channel at coverage a.
+static inline u8 aa_blend(u8 a, u8 fg, u8 bg) {
+    return s_l2g[(a * s_g2l[fg] + (255 - a) * s_g2l[bg]) / 255];
+}
 
 // -------------------------------------------------------
 // Tab icon codepoints (Material Icons)
@@ -292,12 +298,9 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
                     if (a == 0) continue;
                     if (a == 255) { row[sx] = color; continue; }
                     u32 bg   = row[sx];
-                    u32 r_bg = (bg >> 16) & 0xFF;
-                    u32 g_bg = (bg >>  8) & 0xFF;
-                    u32 b_bg =  bg        & 0xFF;
-                    u32 r_out = (a * r_fg + (255 - a) * r_bg) / 255;
-                    u32 g_out = (a * g_fg + (255 - a) * g_bg) / 255;
-                    u32 b_out = (a * b_fg + (255 - a) * b_bg) / 255;
+                    u32 r_out = aa_blend(a, r_fg, (bg >> 16) & 0xFF);
+                    u32 g_out = aa_blend(a, g_fg, (bg >>  8) & 0xFF);
+                    u32 b_out = aa_blend(a, b_fg,  bg        & 0xFF);
                     row[sx] = (r_out << 16) | (g_out << 8) | b_out;
                 }
             }
@@ -352,72 +355,11 @@ void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
 }
 
 // -------------------------------------------------------
-// Legacy on-screen keyboard (used by login / server-url screens)
-// -------------------------------------------------------
-
-static int row_len_kb(int r) {
-    return (r < KB_LETTER_ROWS) ? (int)strlen(KB_ROWS[r]) : SPECIAL_N;
-}
-
-void draw_keyboard(const char *prompt, const char *input, bool is_password) {
-    drawHeader();
-    drawTTF(40, 85, prompt, 14, 0x00FFFFFF);
-
-    char display[256] = "";
-    int ilen = strlen(input);
-    if (is_password) {
-        memset(display, '*', ilen);
-        display[ilen] = '\0';
-    } else {
-        if (ilen > 34) strncpy(display, input + ilen - 34, 35);
-        else           strncpy(display, input, 255);
-    }
-    char input_line[260];
-    snprintf(input_line, sizeof(input_line), "> %s_", display);
-    drawTTF(40, 115, input_line, 14, 0x00FFFFFF);
-    if (kb_caps) drawTTF(40, 115+LINE_HEIGHT*2, "CAPS ON", 14, 0x00FFFFFF);
-
-    int kb_x = 50, kb_y = 175;
-    int key_h = LINE_HEIGHT + 8;
-
-    for (int r = 0; r < TOTAL_ROWS; r++) {
-        int key_w = (r < KB_LETTER_ROWS) ? (CHAR_SIZE + 16) : (CHAR_SIZE * 3 + 8);
-        int rlen  = row_len_kb(r);
-        for (int c = 0; c < rlen; c++) {
-            int  xk  = kb_x + c * key_w;
-            int  yk  = kb_y + r * key_h;
-            bool sel = (r == kb_row && c == kb_col);
-
-            char buf[8];
-            const char *label;
-            if (r < KB_LETTER_ROWS) {
-                char ch = KB_ROWS[r][c];
-                buf[0] = kb_caps ? (char)toupper(ch) : ch;
-                buf[1] = '\0';
-                label  = buf;
-            } else {
-                label = SPECIAL[c].label;
-            }
-
-            if (sel) {
-                char sel_buf[12];
-                snprintf(sel_buf, sizeof(sel_buf), "[%s]", label);
-                drawTTF((u32)(xk - CHAR_SIZE), (u32)yk, sel_buf, 14, 0x00FFFFFF);
-            } else {
-                drawTTF((u32)xk, (u32)yk, label, 14, 0x00FFFFFF);
-            }
-        }
-    }
-
-    drawTTF(40, 660, "Dpad:move  X:type  Tri:caps  Sq:del  START:done  SEL:cancel", 12, 0x00FFFFFF);
-    flip();
-}
-
-// -------------------------------------------------------
 // Lifecycle
 // -------------------------------------------------------
 
 void ttf_init(void) {
+    gamma_init();
     bitmapSetXpm(&fontBitmap, font8x8_xpm);
     s_font_buf = (unsigned char*)OpenSans_Regular_ttf;
     if (stbtt_InitFont(&s_font, s_font_buf, 0))
@@ -1038,5 +980,74 @@ void xmb_cpu_draw_search_results(void) {
         } else {
             drawRect((u32)thumb_x, (u32)thumb_y, XMB_THUMB_W, XMB_THUMB_H, XMB_THUMB_DIM);
         }
+    }
+}
+
+// -------------------------------------------------------
+// Settings tab — account info card + selectable action rows.
+// Only "Log Out" exists for now (XMB_SETTINGS_COUNT == 1).
+// -------------------------------------------------------
+static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out" };
+
+// Y of the i-th action row, below the account info card.
+static int settings_row_y(int i) {
+    return XMB_CONTENT_Y + 120 + i * XMB_ROW_STRIDE;
+}
+
+// CPU phase: account card background + selection highlight (or confirm dim).
+void xmb_cpu_draw_settings(void) {
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+
+    if (g_settings_confirm) {
+        // Solid backdrop behind the confirmation prompt.
+        drawRect(0, (u32)XMB_CONTENT_Y, display_width,
+                 display_height - XMB_CONTENT_Y - XMB_BOTTOM_PAD, XMB_HIGHLIGHT);
+        return;
+    }
+
+    // Account info card.
+    drawRect((u32)list_x, (u32)XMB_CONTENT_Y, (u32)XMB_LIST_W, 96, XMB_THUMB_DIM);
+
+    // Highlight the selected action row.
+    for (int i = 0; i < XMB_SETTINGS_COUNT; i++) {
+        if (i != g_settings_sel) continue;
+        int iy = settings_row_y(i);
+        drawRect((u32)list_x, (u32)iy, (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
+        drawRect((u32)(list_x - 5), (u32)iy, 4, (u32)XMB_ROW_H, XMB_ACCENT);
+    }
+}
+
+// RSX phase: account text, action labels, confirm prompt.
+void xmb_draw_settings(void) {
+    int W      = (int)display_width;
+    int list_x = (W - XMB_LIST_W) / 2;
+    int tx     = list_x + 20;
+
+    // Account info.
+    drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 22), "ACCOUNT", 14, 0x00A090C0);
+    char line[320];
+    snprintf(line, sizeof(line), "Signed in as %s",
+             g_username[0] ? g_username : "(unknown)");
+    drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 44), line, 20, 0x00FFFFFF);
+    snprintf(line, sizeof(line), "Server  %s",
+             g_server[0] ? g_server : "(none)");
+    drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 72), line, 14, 0x00A0A0A0);
+
+    // Action rows.
+    for (int i = 0; i < XMB_SETTINGS_COUNT; i++) {
+        int iy = settings_row_y(i);
+        drawTTF((u32)tx, (u32)(iy + 26), SETTINGS_LABELS[i], 22, 0x00FFFFFF);
+    }
+
+    // Confirmation prompt.
+    if (g_settings_confirm) {
+        int cy = XMB_CONTENT_Y + 140;
+        const char *q = "Log out of this account?";
+        int qw = ttf_text_width(q, 24);
+        drawTTF((u32)((W - qw) / 2), (u32)cy, q, 24, 0x00FFFFFF);
+        const char *h = "X  Log Out        O  Cancel";
+        int hw = ttf_text_width(h, 18);
+        drawTTF((u32)((W - hw) / 2), (u32)(cy + 44), h, 18, 0x00C0B0E0);
     }
 }

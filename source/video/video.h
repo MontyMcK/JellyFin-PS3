@@ -10,8 +10,17 @@
 bool vdec_open(void);
 void vdec_close(void);
 
+// EndSequence + StartSequence without close/reopen — faster seek flush.
+void vdec_flush(void);
+
+// Reset counter variables only (used after vdec_close/vdec_open on seek).
+void vdec_reset_counters(void);
+
 // Reset all video + TS demux state for a new playback session.
 void video_reset(void);
+
+// Reset only the TS demux state (leaves VDEC and jbuf intact).
+void video_reset_demux(void);
 
 // Feed one raw 188-byte TS packet: demux → submit H.264 AU to VDEC →
 // try to pull a decoded frame into the jitter buffer.
@@ -21,6 +30,7 @@ bool video_feed_ts(const u8 *pkt);
 // ---- Jitter buffer ----
 bool         jbuf_alloc(u32 fw, u32 fh);
 void         jbuf_free(void);
+void         jbuf_clear(void);     // drain all frames without freeing memory
 const u8    *jbuf_peek(void);
 void         jbuf_pop(void);
 u32          jbuf_fw(void);

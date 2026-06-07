@@ -27,6 +27,25 @@ int load_config(void) {
     return (g_server[0] && g_token[0]);
 }
 
+void jellyfin_logout(void) {
+    // Best-effort: tell the server to invalidate this access token.  Ignore the
+    // result — we clear local state regardless so the user is always logged out.
+    if (g_server[0] && g_token[0]) {
+        char url[512];
+        snprintf(url, sizeof(url), "%s/Sessions/Logout", g_server);
+        http_request(1, url, "{}", g_token, responseBuffer, RESPONSE_SIZE);
+    }
+
+    // Clear in-memory credentials.  Keep g_server so the user only re-enters
+    // their username and password, not the server URL.
+    g_token[0]    = '\0';
+    g_userid[0]   = '\0';
+    g_username[0] = '\0';
+
+    // Remove the saved config so a restart does not auto-login.
+    remove("/dev_hdd0/tmp/jellyfin_config.txt");
+}
+
 static void trim(char *s) {
     int len = strlen(s);
     while (len > 0 && (s[len-1]==' '||s[len-1]=='\n'||s[len-1]=='\r'||s[len-1]=='\t'))

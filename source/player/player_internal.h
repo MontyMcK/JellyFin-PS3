@@ -10,6 +10,7 @@ struct DecodeCtx {
     volatile bool *playing;
     int           *frame_count;  // read-only for heartbeat (benign race)
     int            sock;
+    volatile bool *dec_run;      // seek-only stop flag; cleared to pause just this thread
 };
 
 struct AudioCtx {

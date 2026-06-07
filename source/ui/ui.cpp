@@ -75,28 +75,177 @@ void init_btns(void) {
 }
 
 // -------------------------------------------------------
-// Legacy on-screen keyboard state
+// On-screen keyboard (login / text entry)
+//
+// Matches the look of the XMB search bar OSK, but adds an on-screen SHIFT key
+// (iOS/Android style) for upper/lower case plus a #+= key for symbols, so any
+// username, password, or URL — including special characters — can be typed.
 // -------------------------------------------------------
 
-int  kb_row  = 0;
-int  kb_col  = 0;
-bool kb_caps = false;
+namespace {
 
-static int row_len(int r) {
-    return (r < KB_LETTER_ROWS) ? (int)strlen(KB_ROWS[r]) : SPECIAL_N;
+enum OKind { OK_CHAR, OK_SHIFT, OK_SYM, OK_BACK, OK_SPACE, OK_ENTER };
+
+struct OKey {
+    OKind       kind;
+    char        ch;     // OK_CHAR: the already-cased character to insert
+    const char *label;  // non-char keys: button caption
+    int         cols;   // width in OSK step units
+};
+
+struct ORow {
+    OKey keys[12];
+    int  n;
+};
+
+const int   OSK_MAX_ROWS = 6;       // letters use 5 rows, symbols use 6
+const float OSK_LBL_PX   = 31.5f;   // 150% of the 21px search-bar OSK labels
+
+OKey okey(OKind kind, char ch, const char *label, int cols) {
+    OKey k; k.kind = kind; k.ch = ch; k.label = label; k.cols = cols;
+    return k;
 }
 
-static char current_key_value(void) {
-    if (kb_row < KB_LETTER_ROWS) {
-        char c = KB_ROWS[kb_row][kb_col];
-        return kb_caps ? (char)toupper(c) : c;
+// Build the keyboard layout for the current mode (symbols vs letters) and case.
+// Returns the number of rows used (including the bottom action row).
+int osk_build(ORow rows[OSK_MAX_ROWS], bool sym, bool caps) {
+    for (int i = 0; i < OSK_MAX_ROWS; i++) rows[i].n = 0;
+
+    int nr;   // number of content rows (action row is appended after)
+    if (!sym) {
+        static const char *R0 = "1234567890";
+        static const char *R1 = "qwertyuiop";
+        static const char *R2 = "asdfghjkl";
+        static const char *R3 = "zxcvbnm";
+        for (const char *p = R0; *p; p++) rows[0].keys[rows[0].n++] = okey(OK_CHAR, *p, 0, 1);
+        for (const char *p = R1; *p; p++) rows[1].keys[rows[1].n++] = okey(OK_CHAR, caps ? (char)toupper(*p) : *p, 0, 1);
+        for (const char *p = R2; *p; p++) rows[2].keys[rows[2].n++] = okey(OK_CHAR, caps ? (char)toupper(*p) : *p, 0, 1);
+        rows[3].keys[rows[3].n++] = okey(OK_SHIFT, 0, "CAPS", 2);
+        for (const char *p = R3; *p; p++) rows[3].keys[rows[3].n++] = okey(OK_CHAR, caps ? (char)toupper(*p) : *p, 0, 1);
+        rows[3].keys[rows[3].n++] = okey(OK_BACK, 0, "<", 2);
+        nr = 4;
+    } else {
+        static const char *R0 = "1234567890";   // numbers row on the symbols page too
+        static const char *R1 = "!@#$%^&*()";
+        static const char *R2 = "-_=+[]{}|\\";
+        static const char *R3 = ":;\"'`~<>?";
+        static const char *R4 = ".,/?";
+        for (const char *p = R0; *p; p++) rows[0].keys[rows[0].n++] = okey(OK_CHAR, *p, 0, 1);
+        for (const char *p = R1; *p; p++) rows[1].keys[rows[1].n++] = okey(OK_CHAR, *p, 0, 1);
+        for (const char *p = R2; *p; p++) rows[2].keys[rows[2].n++] = okey(OK_CHAR, *p, 0, 1);
+        for (const char *p = R3; *p; p++) rows[3].keys[rows[3].n++] = okey(OK_CHAR, *p, 0, 1);
+        for (const char *p = R4; *p; p++) rows[4].keys[rows[4].n++] = okey(OK_CHAR, *p, 0, 1);
+        rows[4].keys[rows[4].n++] = okey(OK_BACK, 0, "<", 2);
+        nr = 5;
     }
-    return SPECIAL[kb_col].value;
+    rows[nr].keys[rows[nr].n++] = okey(OK_SYM,   0, sym ? "ABC" : "#+=", 2);
+    rows[nr].keys[rows[nr].n++] = okey(OK_SPACE, 0, "SPACE", 5);
+    rows[nr].keys[rows[nr].n++] = okey(OK_ENTER, 0, "ENTER", 3);
+    return nr + 1;
 }
+
+int orow_units(const ORow *r) {
+    int u = 0;
+    for (int i = 0; i < r->n; i++) u += r->keys[i].cols;
+    return u;
+}
+
+void osk_draw(const char *prompt, const char *input, bool is_password,
+              const ORow rows[OSK_MAX_ROWS], int nrows, int sr, int sc, bool caps) {
+    int W       = (int)display_width;
+    int total_w = 10 * OSK_STEP_X - OSK_GAP;
+    int barx    = (W - total_w) / 2;
+    int y0      = XMB_CONTENT_Y + 58;
+
+    waitflip();
+    clearScreen(XMB_BG);
+    wave_draw();
+    rsxSync();
+
+    // Divider under the title bar.
+    u32 *div = color_buffer[curr_fb] + (u32)XMB_DIVIDER_Y * display_width;
+    for (u32 x = 0; x < display_width; x++) div[x] = XMB_DIVIDER_CLR;
+
+    // Input field background.
+    drawRect((u32)barx, (u32)(XMB_CONTENT_Y + 8), (u32)total_w, 40, 0x001A1040);
+
+    // Key cells (CPU rects).
+    for (int r = 0; r < nrows; r++) {
+        int rw = orow_units(&rows[r]) * OSK_STEP_X - OSK_GAP;
+        int cx = (W - rw) / 2;
+        int ry = y0 + r * OSK_STEP_Y;
+        for (int c = 0; c < rows[r].n; c++) {
+            const OKey *k = &rows[r].keys[c];
+            int kw  = k->cols * OSK_STEP_X - OSK_GAP;
+            u32 col = (r == sr && c == sc) ? XMB_KEY_SEL : XMB_KEY_NORMAL;
+            if (k->kind == OK_SHIFT && caps) col = XMB_ACCENT;
+            drawRect((u32)cx, (u32)ry, (u32)kw, OSK_KEY_H, col);
+            cx += k->cols * OSK_STEP_X;
+        }
+    }
+
+    // Title + prompt (RSX).
+    drawTTF(XMB_ITEM_PAD, 16, "JELLYFIN-PS3", 28, XMB_ACCENT);
+    {
+        int pw = ttf_text_width(prompt, 24);
+        int px = W / 2 - pw / 2;
+        if (px < (int)XMB_ITEM_PAD) px = (int)XMB_ITEM_PAD;
+        drawTTF((u32)px, (u32)(XMB_DIVIDER_Y + 14), prompt, 24, 0x00FFFFFF);
+    }
+
+    // Current text (masked for passwords) with a blinking cursor.
+    {
+        char shown[80];
+        int  ilen = strlen(input);
+        if (is_password) {
+            int n = ilen > 60 ? 60 : ilen;
+            memset(shown, '*', n);
+            shown[n] = '\0';
+        } else {
+            const char *src = ilen > 60 ? input + ilen - 60 : input;
+            snprintf(shown, sizeof(shown), "%s", src);
+        }
+        bool cur = ((timing_get_us() / 500000) & 1) == 0;
+        char disp[96];
+        snprintf(disp, sizeof(disp), "%s%s", shown, cur ? "_" : " ");
+        const float typed_px = 27.0f;   // 150% of the original 18px
+        int tw = ttf_text_width(disp, typed_px);
+        int tx = W / 2 - tw / 2;
+        if (tx < barx + 6) tx = barx + 6;
+        drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 12), disp, typed_px, 0x00FFFFFF);
+    }
+
+    // Key labels (RSX).
+    for (int r = 0; r < nrows; r++) {
+        int rw = orow_units(&rows[r]) * OSK_STEP_X - OSK_GAP;
+        int cx = (W - rw) / 2;
+        int ry = y0 + r * OSK_STEP_Y + (OSK_KEY_H - (int)OSK_LBL_PX) / 2;
+        for (int c = 0; c < rows[r].n; c++) {
+            const OKey *k = &rows[r].keys[c];
+            int  kw = k->cols * OSK_STEP_X - OSK_GAP;
+            char chbuf[2] = { k->ch, '\0' };
+            const char *lbl = (k->kind == OK_CHAR) ? chbuf : k->label;
+            int lw = ttf_text_width(lbl, OSK_LBL_PX);
+            int lx = cx + (kw - lw) / 2;
+            drawTTF((u32)lx, (u32)ry, lbl, OSK_LBL_PX, 0x00FFFFFF);
+            cx += k->cols * OSK_STEP_X;
+        }
+    }
+
+    // Hints.
+    static const Hint hints[] = {{'D',"MOVE"},{'X',"SELECT"},{'C',"CANCEL"}};
+    draw_hints_bar(hints, 3);
+
+    flip();
+}
+
+} // namespace
 
 int get_input(char *out, int max_len, const char *prompt, bool is_password) {
-    out[0]  = '\0';
-    kb_row  = 0; kb_col = 0; kb_caps = false;
+    out[0] = '\0';
+
+    int  sr = 1, sc = 0;            // start on the top letter row
+    bool caps = false, sym = false;
 
     init_btns();
 
@@ -104,32 +253,50 @@ int get_input(char *out, int max_len, const char *prompt, bool is_password) {
         sysUtilCheckCallback();
         poll_buttons();
 
-        int rlen = row_len(kb_row);
+        ORow rows[OSK_MAX_ROWS];
+        int  nrows = osk_build(rows, sym, caps);
 
+        // Navigation.
         if (BTN_PRESSED(up)) {
-            kb_row = (kb_row - 1 + TOTAL_ROWS) % TOTAL_ROWS;
-            int nl = row_len(kb_row); if (kb_col >= nl) kb_col = nl - 1;
+            sr = (sr - 1 + nrows) % nrows;
+            if (sc >= rows[sr].n) sc = rows[sr].n - 1;
         }
         if (BTN_PRESSED(down)) {
-            kb_row = (kb_row + 1) % TOTAL_ROWS;
-            int nl = row_len(kb_row); if (kb_col >= nl) kb_col = nl - 1;
+            sr = (sr + 1) % nrows;
+            if (sc >= rows[sr].n) sc = rows[sr].n - 1;
         }
-        if (BTN_PRESSED(left))  kb_col = (kb_col - 1 + rlen) % rlen;
-        if (BTN_PRESSED(right)) kb_col = (kb_col + 1) % rlen;
+        if (BTN_PRESSED(left))  sc = (sc - 1 + rows[sr].n) % rows[sr].n;
+        if (BTN_PRESSED(right)) sc = (sc + 1) % rows[sr].n;
 
-        if (BTN_PRESSED(triangle)) kb_caps = !kb_caps;
-
-        if (BTN_PRESSED(cross)) {
-            char ch = current_key_value();
-            if (ch == '\r') return 1;
-            if (ch == '\b') { int len = strlen(out); if (len > 0) out[len-1] = '\0'; }
-            else            { int len = strlen(out); if (len < max_len-1) { out[len]=ch; out[len+1]='\0'; } }
-        }
-        if (BTN_PRESSED(square)) { int len = strlen(out); if (len > 0) out[len-1] = '\0'; }
+        // Button shortcuts: Square = backspace, Start = confirm, Select/Circle = cancel.
+        if (BTN_PRESSED(square)) { int l = strlen(out); if (l > 0) out[l-1] = '\0'; }
         if (BTN_PRESSED(start))  return 1;
-        if (BTN_PRESSED(select)) return -1;
+        if (BTN_PRESSED(select) || BTN_PRESSED(circle)) return -1;
 
-        draw_keyboard(prompt, out, is_password);
+        // Activate the highlighted key.
+        if (BTN_PRESSED(cross)) {
+            const OKey *k = &rows[sr].keys[sc];
+            switch (k->kind) {
+            case OK_CHAR: {
+                int l = strlen(out);
+                if (l < max_len - 1) { out[l] = k->ch; out[l+1] = '\0'; }
+                break;
+            }
+            case OK_SHIFT: caps = !caps; break;
+            case OK_SYM:   sym = !sym; sc = 0; break;
+            case OK_BACK:  { int l = strlen(out); if (l > 0) out[l-1] = '\0'; break; }
+            case OK_SPACE: { int l = strlen(out); if (l < max_len - 1) { out[l] = ' '; out[l+1] = '\0'; } break; }
+            case OK_ENTER: return 1;
+            }
+            // The layout (and row count) may have changed; re-clamp selection.
+            nrows = osk_build(rows, sym, caps);
+            if (sr >= nrows)      sr = nrows - 1;
+            if (sc >= rows[sr].n) sc = rows[sr].n - 1;
+            if (sc < 0)           sc = 0;
+        }
+
+        nrows = osk_build(rows, sym, caps);
+        osk_draw(prompt, out, is_password, rows, nrows, sr, sc, caps);
     }
     return -1;
 }
@@ -190,6 +357,10 @@ int g_col_sub_total = 0;
 bool g_jumpbar_active = false;
 int  g_jumpbar_sel    = 1;
 char g_tab_name_filter[XMB_TAB_COUNT][4];
+
+// Settings tab state
+int  g_settings_sel     = 0;
+bool g_settings_confirm = false;
 
 // -------------------------------------------------------
 // XMB JSON parsing helpers (local, avoids changing jellyfin_api.cpp)
@@ -350,6 +521,8 @@ void ui_run_xmb(void) {
     memset(g_tab_name_filter, 0, sizeof(g_tab_name_filter));
     g_jumpbar_active = false;
     g_jumpbar_sel    = 1;
+    g_settings_sel     = 0;
+    g_settings_confirm = false;
     memset(g_search_buf, 0, sizeof(g_search_buf));
     g_search_results_count = 0;
     g_active_tab = XMB_TAB_MOVIES;
@@ -398,7 +571,9 @@ void ui_run_xmb(void) {
         if (tab == XMB_TAB_SEARCH) {
             xmb_cpu_draw_osk();
             xmb_cpu_draw_search_results();
-        } else if (tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS) {
+        } else if (tab == XMB_TAB_SETTINGS) {
+            xmb_cpu_draw_settings();
+        } else if (tab != XMB_TAB_MUSIC) {
             if (tab == XMB_TAB_TV && g_tv_depth > 0)
                 xmb_cpu_draw_sub();
             else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0)
@@ -419,9 +594,11 @@ void ui_run_xmb(void) {
 
         if (tab == XMB_TAB_SEARCH) {
             xmb_rsx_draw_osk();
-        } else if (tab == XMB_TAB_MUSIC || tab == XMB_TAB_SETTINGS) {
+        } else if (tab == XMB_TAB_SETTINGS) {
+            xmb_draw_settings();
+        } else if (tab == XMB_TAB_MUSIC) {
             drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 40), "Coming soon", 22, 0x00FFFFFF);
-            if (tab == XMB_TAB_MUSIC) xmb_draw_jumpbar(tab);
+            xmb_draw_jumpbar(tab);
         } else if (tab == XMB_TAB_TV && g_tv_depth > 0) {
             char crumb[256];
             if (g_tv_depth == 1)
@@ -456,7 +633,13 @@ void ui_run_xmb(void) {
             bool in_col_sub = (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0);
 
             if (tab == XMB_TAB_SETTINGS) {
-                /* no interactive content — omit hints */
+                if (g_settings_confirm) {
+                    static const Hint h[] = {{'X',"CONFIRM"},{'C',"CANCEL"}};
+                    draw_hints_bar(h, 2);
+                } else {
+                    static const Hint h[] = {{'D',"NAV"},{'X',"SELECT"}};
+                    draw_hints_bar(h, 2);
+                }
             } else if (tab == XMB_TAB_SEARCH) {
                 if (g_search_focus_results) {
                     static const Hint h[] = {{'D',"NAV"},{'X',"PLAY"},{'C',"BACK"}};

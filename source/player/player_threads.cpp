@@ -36,7 +36,7 @@ void decode_thread_fn(void *arg) {
     u64  hb_last_us            = timing_get_us();
     int  hb_fr_last            = 0;
 
-    while (running && *playing && !s_vdec_error) {
+    while (running && *playing && *ctx->dec_run && !s_vdec_error) {
         if (jbuf_count() >= JBUF_SIZE) {
             usleep(1000);
             continue;

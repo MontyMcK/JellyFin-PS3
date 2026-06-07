@@ -303,6 +303,27 @@ void vdec_close(void) {
     crash_log("c8 vdec_close done");
 }
 
+void vdec_flush(void) {
+    if (!s_vdec) return;
+    vdecEndSequence(s_vdec);
+    s_au_submitted = 0;
+    s_got_sps      = false;
+    s_au_buf_idx   = 0;
+    s_frames_ready = 0;
+    s_au_done      = 0;
+    s_vdec_error   = false;
+    vdecStartSequence(s_vdec);
+}
+
+void vdec_reset_counters(void) {
+    s_au_submitted = 0;
+    s_got_sps      = false;
+    s_au_buf_idx   = 0;
+    s_frames_ready = 0;
+    s_au_done      = 0;
+    s_vdec_error   = false;
+}
+
 static void vdec_submit(const u8 *data, int len, u64 pts) {
     if (len <= 0 || len > AU_BUF_SIZE) return;
     {
@@ -423,6 +444,12 @@ void jbuf_free(void) {
     }
     s_jb_wr = s_jb_rd = s_jb_n = 0;
     sysMutexDestroy(s_jbuf_mtx);
+}
+
+void jbuf_clear(void) {
+    sysMutexLock(s_jbuf_mtx, 0);
+    s_jb_rd = s_jb_wr = s_jb_n = 0;
+    sysMutexUnlock(s_jbuf_mtx);
 }
 
 const u8 *jbuf_peek(void)     { return (s_jb_n > 0) ? s_jbuf_data[s_jb_rd] : NULL; }
@@ -630,6 +657,10 @@ void video_reset(void) {
     s_au_done      = 0;
     s_vdec_error   = false;
     s_timing_ready = false;
+}
+
+void video_reset_demux(void) {
+    memset(&s_ts, 0, sizeof(s_ts));
 }
 
 bool video_feed_ts(const u8 *pkt) {

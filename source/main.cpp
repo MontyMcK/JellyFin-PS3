@@ -127,7 +127,9 @@ int main(int argc, const char *argv[]) {
 
         crash_log("13 show_main_menu");
         show_main_menu();
-        if (!g_token[0]) g_server[0] = '\0';
+        // If the menu returned with no token, the user logged out. Keep the
+        // server URL (jellyfin_logout preserves it) so the loop goes straight
+        // back to the login screen rather than asking for the server again.
     }
 
     crash_log("14 done");

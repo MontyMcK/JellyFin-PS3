@@ -24,15 +24,6 @@ typedef struct {
 } XMBTab;
 
 // -------------------------------------------------------
-// Keyboard constants (shared between ui.cpp and ui_visuals.cpp)
-// -------------------------------------------------------
-#define KB_LETTER_ROWS 4
-#define SPECIAL_N      9
-#define TOTAL_ROWS     (KB_LETTER_ROWS + 1)
-
-typedef struct { const char *label; char value; } SpecialKey;
-
-// -------------------------------------------------------
 // OSK constants
 // -------------------------------------------------------
 #define OSK_ROWS_N 4
@@ -80,12 +71,6 @@ typedef struct { const char *label; char value; } SpecialKey;
 #define OSK_GAP       8
 #define OSK_STEP_X   (OSK_KEY_W + OSK_GAP)
 #define OSK_STEP_Y   (OSK_KEY_H + OSK_GAP)
-
-// -------------------------------------------------------
-// Keyboard data (defined in ui_visuals.cpp)
-// -------------------------------------------------------
-extern const char     *KB_ROWS[KB_LETTER_ROWS];
-extern const SpecialKey SPECIAL[SPECIAL_N];
 
 // -------------------------------------------------------
 // OSK data (defined in ui/ui_search.cpp, used by draw functions)
@@ -136,14 +121,16 @@ extern char    g_search_buf[64];
 extern int     g_search_results_count;
 extern XMBItem g_search_results[XMB_ITEMS_MAX];
 extern int     OSK_Y0;
-extern int     kb_row;
-extern int     kb_col;
-extern bool    kb_caps;
 
 // Jump bar state (defined in ui.cpp)
 extern bool g_jumpbar_active;
 extern int  g_jumpbar_sel;
 extern char g_tab_name_filter[XMB_TAB_COUNT][4];
+
+// Settings tab state (defined in ui.cpp)
+#define XMB_SETTINGS_COUNT 1   // number of selectable settings entries
+extern int  g_settings_sel;        // highlighted settings entry
+extern bool g_settings_confirm;    // true while the logout confirm prompt is up
 
 // -------------------------------------------------------
 // Hints bar
@@ -171,7 +158,8 @@ void xmb_draw_col_sub_list(void);
 void xmb_rsx_draw_osk(void);
 void xmb_cpu_draw_osk(void);
 void xmb_cpu_draw_search_results(void);
-void draw_keyboard(const char *prompt, const char *input, bool is_password);
 void xmb_draw_jumpbar(int tab);
 void draw_hints_bar(const Hint *hints, int n);
 void draw_topbar_lr(void);
+void xmb_cpu_draw_settings(void);   // CPU phase: highlight rect
+void xmb_draw_settings(void);       // RSX phase: account info + entries

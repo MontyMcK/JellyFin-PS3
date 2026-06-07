@@ -50,3 +50,6 @@ bool avsync_is_locked(void);
 // by the smoothed AV diff. Pass the nominal vblank period; the
 // returned value will be within ±5000us of it.
 s64 avsync_biased_period(s64 nominal_vblank_us);
+
+// Reset AV sync EMA state.  Call on seek so post-seek drift is measured fresh.
+void avsync_reset(void);

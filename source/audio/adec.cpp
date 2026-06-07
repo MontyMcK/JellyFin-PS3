@@ -186,6 +186,18 @@ void adec_start(void) {
     crash_log("ad4 adec_start done");
 }
 
+void adec_flush(void) {
+    sysMutexLock(s_pes_mtx, 0);
+    s_pes_q_rd = s_pes_q_wr = s_pes_q_n = 0;
+    sysMutexUnlock(s_pes_mtx);
+    sysMutexLock(s_pcm_mtx, 0);
+    mp3dec_init(&s_dec);
+    s_wr = s_rd = s_n = 0;
+    s_next_pcm_pts_us = s_read_pts_us = 0;
+    s_pts_valid = false;
+    sysMutexUnlock(s_pcm_mtx);
+}
+
 void adec_stop(void) {
     crash_log("adx1 adec_stop enter");
     sysMutexLock(s_pes_mtx, 0);
