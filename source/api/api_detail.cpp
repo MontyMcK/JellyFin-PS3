@@ -226,8 +226,23 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out) {
     return true;
 }
 
+void jellyfin_stop_transcode(const char *session_id) {
+    if (!g_server[0] || !session_id || !session_id[0]) return;
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Videos/ActiveEncodings?deviceId=ps3&playSessionId=%s",
+        g_server, session_id);
+    int status = http_request(HTTP_DELETE, url, NULL, g_token,
+                              responseBuffer, RESPONSE_SIZE);
+    char buf[80];
+    snprintf(buf, sizeof(buf), "stop_transcode: http %d session=%s", status, session_id);
+    plog(buf);
+}
+
 bool jellyfin_get_play_session_id(const char *item_id,
-                                   char *out_session_id, int out_len) {
+                                   char *out_session_id, int out_len,
+                                   unsigned *out_total_secs) {
+    if (out_total_secs) *out_total_secs = 0;
     if (!g_server[0] || !g_userid[0] || !g_token[0]) {
         plog("playbackinfo: missing server/user/token");
         return false;
@@ -297,6 +312,15 @@ bool jellyfin_get_play_session_id(const char *item_id,
         snprintf(errbuf, sizeof(errbuf), "playbackinfo_err: %.256s", responseBuffer);
         plog(errbuf);
         return false;
+    }
+
+    // Media duration (RunTimeTicks is in 100-ns units → 10,000,000 ticks/sec).
+    if (out_total_secs) {
+        double ticks = json_get_double(responseBuffer, "RunTimeTicks", 0.0);
+        if (ticks > 0.0) *out_total_secs = (unsigned)(ticks / 10000000.0);
+        char buf[64];
+        snprintf(buf, sizeof(buf), "playbackinfo: runtime=%us", *out_total_secs);
+        plog(buf);
     }
 
     if (!json_get_string(responseBuffer, "PlaySessionId", out_session_id, out_len)) {

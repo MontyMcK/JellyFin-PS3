@@ -207,9 +207,17 @@ static int read_response(int sock, char *buf, int cap,
 static int build_headers(char *req, int cap, const char *method,
                          const char *path, const char *host, int port,
                          const char *token, const char *accept, int blen) {
+    // Always send the full client identity (Client/Device/DeviceId/Version),
+    // appending the access token when we have one.  Sending only the token —
+    // without DeviceId — means Jellyfin can't bind the request to a device
+    // session: the PS3 never appears in the dashboard, and the PlaySessionId
+    // used for seeking isn't tied to a tracked session, so StartTimeTicks is
+    // ignored and seeks fall back to offset 0.  stream.cpp already does this.
     char auth[400];
     if (token && token[0])
-        snprintf(auth, sizeof(auth), "MediaBrowser Token=\"%s\"", token);
+        snprintf(auth, sizeof(auth),
+            "MediaBrowser Client=\"PS3\", Device=\"PS3\","
+            " DeviceId=\"ps3\", Version=\"0.1\", Token=\"%s\"", token);
     else
         snprintf(auth, sizeof(auth),
             "MediaBrowser Client=\"PS3\", Device=\"PS3\","
@@ -244,7 +252,7 @@ void http_end(void) {
     sysModuleUnload(SYSMODULE_NET);
 }
 
-int http_request(int is_post, const char *url, const char *body,
+int http_request(int method, const char *url, const char *body,
                  const char *token, char *out, int out_size) {
     char host[256]; int port; char path[512];
     url_parse(url, host, sizeof(host), &port, path, sizeof(path));
@@ -252,9 +260,11 @@ int http_request(int is_post, const char *url, const char *body,
     int sock = http_connect(host, port);
     if (sock < 0) return -1;
 
-    int  blen = (is_post && body) ? (int)strlen(body) : 0;
+    const char *verb = (method == HTTP_POST)   ? "POST"   :
+                       (method == HTTP_DELETE) ? "DELETE" : "GET";
+    int  blen = (method == HTTP_POST && body) ? (int)strlen(body) : 0;
     char req[2048];
-    int  rlen = build_headers(req, sizeof(req), is_post ? "POST" : "GET",
+    int  rlen = build_headers(req, sizeof(req), verb,
                               path, host, port, token, "application/json", blen);
     send_all(sock, req, rlen);
     if (blen > 0) send_all(sock, body, blen);

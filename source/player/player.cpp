@@ -39,9 +39,11 @@
 
 extern void crash_log(const char *msg);
 
-// Uncomment to use brute-force vdec_close/vdec_open on seek instead of
-// EndSequence/StartSequence.  Slower (~200 ms) but guarantees clean SPU state.
-// #define SEEK_REOPEN_VDEC 1
+// Use brute-force vdec_close/vdec_open on seek instead of EndSequence/
+// StartSequence.  Slower (~200 ms) but guarantees clean SPU state — the
+// in-place EndSequence/StartSequence flush leaves the decoder unable to
+// produce frames after a seek (video freezes while audio keeps playing).
+#define SEEK_REOPEN_VDEC 1
 
 // Set true before the seek flush window, false after the decode thread is
 // respawned.  Declared extern in player_internal.h; read by upload_thread_fn.
@@ -62,6 +64,19 @@ static void show_error(const char *line1, const char *line2) {
         sysUtilCheckCallback();
         poll_buttons();
         if (BTN_PRESSED(circle)) return;
+    }
+}
+
+// plog() truncates every line at 127 chars, so a 400+ char stream URL is cut
+// off well before StartTimeTicks/PlaySessionId.  Log it in ~100-char chunks so
+// the full query string is visible on the wire.
+static void plog_url(const char *tag, const char *url) {
+    int len = (int)strlen(url);
+    char buf[128];
+    int part = 0;
+    for (int off = 0; off < len; off += 100, part++) {
+        snprintf(buf, sizeof(buf), "%s[%d]: %.100s", tag, part, url + off);
+        plog(buf);
     }
 }
 
@@ -119,15 +134,17 @@ void show_player(const JFItem *item) {
     u32 req_w = display_width  < 1280 ? display_width  : 1280;
     u32 req_h = display_height < 720  ? display_height : 720;
 
-    char session_id[64] = "";
-    if (!jellyfin_get_play_session_id(item->id, session_id, sizeof(session_id))) {
+    char     session_id[64] = "";
+    unsigned total_secs     = 0;
+    if (!jellyfin_get_play_session_id(item->id, session_id, sizeof(session_id),
+                                      &total_secs)) {
         plog("show_player: PlaybackInfo failed, streaming without PlaySessionId");
         session_id[0] = '\0';
     }
 
     char url[640];
     build_stream_url(url, sizeof(url), item, req_w, req_h, session_id, 0);
-    plog(url);
+    plog_url("url", url);
 
     drawHeader();
     drawTextf(40, 100, "%.70s", item->name);
@@ -218,7 +235,14 @@ void show_player(const JFItem *item) {
     int           frame_count = 0;
     int           rd          = 0;
 
-    hud_init(0, NULL);
+    // Absolute media time (us) corresponding to the current stream's PTS 0.
+    // Jellyfin restarts the transcode PTS at 0 on the initial open and on every
+    // seek, so the audio clock alone is stream-relative. Absolute position is
+    // play_base_us + audio_get_clock_us(); the base advances on each seek.
+    u64           play_base_us   = 0;
+    int           seek_dbg_frames = 0;   // >0: log HUD elapsed for this many frames
+
+    hud_init(total_secs, NULL);
     plog("hud: prewarm start");
     ttf_prewarm_hud();
     plog("hud: prewarm done");
@@ -309,6 +333,16 @@ void show_player(const JFItem *item) {
     // Detection timeout tracking for Bresenham fallback initialisation
     u64 det_timeout_start = 0;
 
+    // --- Seek debounce -------------------------------------------------------
+    // A transcode reopen is expensive (it laggs the whole player), so mashing
+    // FF/REW must not fire one reopen per press.  Each press only accumulates a
+    // pending offset and (re)arms a 1s cooldown; playback keeps running until the
+    // user stops pressing, then a SINGLE reopen jumps to the final target.
+    const u64 SEEK_COOLDOWN_US = 1000000ULL;   // 1 second of no presses
+    s32  s_seek_pending_secs   = 0;            // accumulated delta, signed seconds
+    u64  s_seek_arm_us         = 0;            // timing_get_us() of most recent press
+    bool s_seek_armed          = false;
+
     crash_log("p10 loop");
     // ---- Main (display) loop ----
     while (running && playing && !s_vdec_error) {
@@ -332,6 +366,27 @@ void show_player(const JFItem *item) {
 
         {
             HudAction act = hud_handle_input(l2_pressed, r2_pressed, paused);
+
+            // Debounce: a FF/REW press only accumulates the offset and (re)arms
+            // the cooldown — it does NOT reopen the stream yet.
+            if (act == HUD_ACTION_SEEK) {
+                s_seek_pending_secs += hud_seek_delta();
+                s_seek_arm_us        = timing_get_us();
+                s_seek_armed         = true;
+                act                  = HUD_ACTION_NONE;   // swallow; fire later
+                char ab[80];
+                snprintf(ab, sizeof(ab), "seek: armed pending=%+ds (fire in 1s)",
+                         (int)s_seek_pending_secs);
+                plog(ab);
+            }
+            // Once the user has stopped pressing for the cooldown, perform the
+            // single accumulated seek through the existing reopen path below.
+            if (act == HUD_ACTION_NONE && s_seek_armed &&
+                timing_get_us() - s_seek_arm_us >= SEEK_COOLDOWN_US) {
+                s_seek_armed = false;
+                act          = HUD_ACTION_SEEK;
+            }
+
             if (act == HUD_ACTION_TOGGLE_PAUSE) {
                 paused = !paused;
                 { sys_ppu_thread_t cur_tid = 0;
@@ -345,7 +400,8 @@ void show_player(const JFItem *item) {
                       (unsigned long long)s_loop_frame_dur);
                   plog(buf); }
             } else if (act == HUD_ACTION_SEEK) {
-                int delta = hud_seek_delta();
+                int delta = s_seek_pending_secs;   // total accumulated during cooldown
+                s_seek_pending_secs = 0;
                 {
                     char buf[64];
                     snprintf(buf, sizeof(buf), "hud: seek %+d s (begin)", delta);
@@ -353,11 +409,29 @@ void show_player(const JFItem *item) {
                 }
                 crash_log("sk1 seek begin");
 
-                // Compute target time from the current audio clock.
-                s64 cur_us    = (s64)audio_get_clock_us();
+                // Compute target from the ABSOLUTE position (base + stream clock),
+                // not the stream-relative audio clock — otherwise each seek would
+                // be measured from the post-seek stream's PTS 0 and walk backward.
+                s64 cur_us    = (s64)play_base_us + (s64)audio_get_clock_us();
                 s64 target_us = cur_us + (s64)delta * 1000000LL;
                 if (target_us < 0) target_us = 0;
+                if (total_secs > 0 &&
+                    target_us > (s64)total_secs * 1000000LL)
+                    target_us = (s64)total_secs * 1000000LL;
                 u64 start_ticks = (u64)target_us * 10ULL;  // us -> 100-ns ticks
+                {
+                    char buf[176];
+                    snprintf(buf, sizeof(buf),
+                        "seek_calc: base=%llus clk=%llus delta=%ds -> target=%llus "
+                        "ticks=%llu total=%us",
+                        (unsigned long long)(play_base_us / 1000000ULL),
+                        (unsigned long long)(audio_get_clock_us() / 1000000ULL),
+                        delta,
+                        (unsigned long long)((u64)target_us / 1000000ULL),
+                        (unsigned long long)start_ticks,
+                        total_secs);
+                    plog(buf);
+                }
 
                 // 1) Stop the decode thread so nothing feeds VDEC mid-flush.
                 //    Use the decode-only flag so the audio + upload threads
@@ -404,10 +478,34 @@ void show_player(const JFItem *item) {
 
                 // 3) Re-request the stream at the new offset.
                 netClose(sock);
+                // Kill the existing transcode first, otherwise Jellyfin keeps
+                // serving the in-progress job (which started at offset 0) and
+                // the seek appears to reset to 0:00 instead of honouring the
+                // new StartTimeTicks.
+                jellyfin_stop_transcode(session_id);
+                // Stopping the transcode is not enough on its own: re-requesting
+                // stream.ts with the SAME PlaySessionId makes Jellyfin reuse the
+                // existing transcode job (which began at offset 0), so
+                // StartTimeTicks is silently ignored and the video restarts from
+                // 0:00.  Mint a fresh PlaySessionId via PlaybackInfo so the server
+                // spins up a brand-new transcode anchored at the seek target.
+                {
+                    char new_session[64] = "";
+                    if (jellyfin_get_play_session_id(item->id, new_session,
+                                                     sizeof(new_session), NULL) &&
+                        new_session[0]) {
+                        snprintf(session_id, sizeof(session_id), "%s", new_session);
+                        char sb[96];
+                        snprintf(sb, sizeof(sb), "seek: new session=%s", session_id);
+                        plog(sb);
+                    } else {
+                        plog("seek: PlaybackInfo failed, reusing old session");
+                    }
+                }
                 char surl[640];
                 build_stream_url(surl, sizeof(surl), item, req_w, req_h,
                                  session_id, start_ticks);
-                plog(surl);
+                plog_url("surl", surl);
                 int nsock = stream_open(surl);
                 if (nsock < 0) {
                     plog("seek: stream_open FAILED");
@@ -416,6 +514,9 @@ void show_player(const JFItem *item) {
                     break;
                 }
                 sock = nsock;
+                // The new stream's PTS restarts at ~0, so its clock now maps to
+                // absolute media time target_us.
+                play_base_us = (u64)target_us;
                 { struct { u32 sec; u32 usec; } tv = { 0, 5000 };
                   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
                 crash_log("sk4 reopened");
@@ -435,6 +536,20 @@ void show_player(const JFItem *item) {
                     }
                 }
                 crash_log("sk5 prefilled");
+                {
+                    // What timestamps did Jellyfin actually return for the new
+                    // stream?  If audio/video PTS come back near 0, the transcode
+                    // restarted at the offset with a reset clock (expected). If
+                    // they come back near `target`, Jellyfin kept absolute PTS.
+                    char buf[160];
+                    snprintf(buf, sizeof(buf),
+                        "seek_post: jbuf=%d aud_pts=%lluus vid_pts=%lluus base=%llus",
+                        jbuf_count(),
+                        (unsigned long long)audio_get_clock_us(),
+                        (unsigned long long)jbuf_peek_pts_us(),
+                        (unsigned long long)(play_base_us / 1000000ULL));
+                    plog(buf);
+                }
 
                 // 5) Respawn the decode thread with the new socket.
                 dec_run = true;
@@ -466,6 +581,7 @@ void show_player(const JFItem *item) {
                     plog(buf);
                 }
                 crash_log("sk6 seek done");
+                seek_dbg_frames = 120;   // log resumed position for ~2s
             } else if (act == HUD_ACTION_AUDIO_TRACK) {
                 plog("hud: audio track selected");
             } else if (act == HUD_ACTION_SUBTITLE) {
@@ -676,6 +792,22 @@ void show_player(const JFItem *item) {
             }
         }
 
+        // Post-seek diagnostic: what position is the HUD actually showing?
+        if (seek_dbg_frames > 0) {
+            seek_dbg_frames--;
+            if (seek_dbg_frames % 15 == 0) {
+                u64 clk = audio_get_clock_us();
+                char buf[128];
+                snprintf(buf, sizeof(buf),
+                    "seek_dbg: shown=%llus (base=%llus + clk=%llus) jbuf=%d paused=%d",
+                    (unsigned long long)((play_base_us + clk) / 1000000ULL),
+                    (unsigned long long)(play_base_us / 1000000ULL),
+                    (unsigned long long)(clk / 1000000ULL),
+                    jbuf_count(), (int)paused);
+                plog(buf);
+            }
+        }
+
         // HUD overlay.
         // The HUD's draw_dim_rect() reprograms RSX vertex/fragment state and
         // rebinds attributes.  If the video draw above is still in flight when
@@ -693,7 +825,14 @@ void show_player(const JFItem *item) {
                 plog(b); s_hg++;
             }
             rsxSync();  // ensure prior vid_gpu_draw is complete before HUD reprograms RSX
-            hud_draw(audio_get_clock_us(), paused);
+            // While a seek is armed, show where the accumulated skip will land so
+            // the user can keep tapping toward the right spot before it fires.
+            u64 hud_elapsed = play_base_us + audio_get_clock_us();
+            if (s_seek_armed) {
+                s64 prev = (s64)hud_elapsed + (s64)s_seek_pending_secs * 1000000LL;
+                hud_elapsed = prev < 0 ? 0 : (u64)prev;
+            }
+            hud_draw(hud_elapsed, paused);
             { static int s_hg2 = 0; if (s_hg2 < 12) { plog("hud_gate: draw returned"); s_hg2++; } }
         }
 

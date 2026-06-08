@@ -48,8 +48,17 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
 // POST /Users/{userId}/Items/{item_id}/PlaybackInfo with a PS3 device profile.
 // Extracts PlaySessionId from the response.
 // Returns true and fills out_session_id on success; false on any failure.
+// out_total_secs (may be NULL) receives the media duration in seconds, parsed
+// from the response's RunTimeTicks; set to 0 if unavailable.
 bool jellyfin_get_play_session_id(const char *item_id,
-                                   char *out_session_id, int out_len);
+                                   char *out_session_id, int out_len,
+                                   unsigned *out_total_secs);
+
+// Stop the active transcoding job for this play session
+// (DELETE /Videos/ActiveEncodings).  Must be called before re-requesting the
+// stream at a new StartTimeTicks, otherwise Jellyfin keeps serving the existing
+// transcode (which began at offset 0) and the seek appears to reset to 0:00.
+void jellyfin_stop_transcode(const char *session_id);
 
 // Log out of the current session.  Best-effort notifies the server
 // (POST /Sessions/Logout), clears the in-memory credentials, and removes the

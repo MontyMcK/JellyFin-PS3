@@ -11,6 +11,7 @@
 #include "ui_visuals.h"
 #include "rsxutil.h"
 #include "plog.h"
+#include "plog.h"
 #include "timing.h"
 
 extern void crash_log(const char *msg);
@@ -72,6 +73,17 @@ static u64  s_show_us    = 0;
 static int  s_seek_delta = 0;
 static int  s_focus      = -1;   // -1=none, 0..FOCUS_COUNT-1=focused slot
 static int  s_incr_idx   = 0;    // 0=10s  1=30s  2=5min
+
+// Auto-repeat for held FF/REW: after holding past the delay, emit a seek every
+// interval until released.  The player's debounce accumulates these, so holding
+// scrubs the bar forward quickly and commits to one reopen on release.
+#define SEEK_REPEAT_DELAY_US    500000ULL   // hold 0.5s before repeat kicks in
+#define SEEK_REPEAT_INTERVAL_US 250000ULL   // then repeat 4x/sec
+#define SEEK_RELEASE_GRACE_US   150000ULL   // ignore analog-trigger flicker dropouts
+static int s_seek_repeat_dir    = 0;        // -1=rew, +1=ff, 0=none held
+static u64 s_seek_hold_start_us = 0;        // when the current hold began
+static u64 s_seek_last_fire_us  = 0;        // last auto-repeat emission
+static u64 s_seek_last_active_us = 0;       // last frame the button read as held
 
 // RSX resources for the GPU-drawn dim quad
 static u8  *s_hud_vbuf    = NULL;
@@ -356,7 +368,8 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
 
     // Any button activity wakes the HUD.
     if (btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
-        btn_cur.l1 || btn_cur.r1 || l2_pressed || r2_pressed ||
+        btn_cur.l1 || btn_cur.r1 || btn_cur.l2 || btn_cur.r2 ||
+        l2_pressed || r2_pressed ||
         btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right)
         show_hud();
 
@@ -403,8 +416,40 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
         if (BTN_PRESSED(up))   { if (s_incr_idx < 2) s_incr_idx++; return HUD_ACTION_NONE; }
         if (BTN_PRESSED(down)) { if (s_incr_idx > 0) s_incr_idx--; return HUD_ACTION_NONE; }
         int incr = s_incr_vals[s_incr_idx];
-        if (BTN_PRESSED(left)  || l2_pressed) { s_seek_delta = -incr; return HUD_ACTION_SEEK; }
-        if (BTN_PRESSED(right) || r2_pressed) { s_seek_delta = +incr; return HUD_ACTION_SEEK; }
+
+        // FF/REW with hold-to-repeat.  R2/L2 are ANALOG triggers whose digital bit
+        // flickers off for a frame near the press threshold, so we cannot use the
+        // raw edge (it re-fires erratically) nor reset on a single 0-frame (it
+        // would cancel the hold every flicker).  Instead we keep a sticky
+        // direction that survives brief dropouts (SEEK_RELEASE_GRACE_US), and
+        // drive BOTH the initial fire and the repeats from it.
+        int raw_dir = 0;
+        if      (btn_cur.right || btn_cur.r2) raw_dir = +1;
+        else if (btn_cur.left  || btn_cur.l2) raw_dir = -1;
+        u64 now = timing_get_us();
+        if (raw_dir != 0) s_seek_last_active_us = now;
+
+        if (raw_dir != 0 && raw_dir != s_seek_repeat_dir) {
+            // Genuine new hold (direction changed, or first press after a real
+            // release) — fire once immediately.
+            s_seek_repeat_dir    = raw_dir;
+            s_seek_hold_start_us = now;
+            s_seek_last_fire_us  = now;
+            s_seek_delta         = raw_dir * incr;
+            return HUD_ACTION_SEEK;
+        }
+        if (raw_dir == 0 && s_seek_repeat_dir != 0 &&
+            now - s_seek_last_active_us >= SEEK_RELEASE_GRACE_US) {
+            s_seek_repeat_dir = 0;                        // confirmed release
+        }
+        if (s_seek_repeat_dir != 0 &&
+            now - s_seek_hold_start_us >= SEEK_REPEAT_DELAY_US &&
+            now - s_seek_last_fire_us  >= SEEK_REPEAT_INTERVAL_US) {
+            s_seek_last_fire_us = now;
+            s_seek_delta = s_seek_repeat_dir * incr;
+            return HUD_ACTION_SEEK;                       // auto-repeat
+        }
+
         if (BTN_PRESSED(cross)) return HUD_ACTION_TOGGLE_PAUSE;
     }
 
