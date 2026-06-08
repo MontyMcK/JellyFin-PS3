@@ -338,10 +338,17 @@ void show_player(const JFItem *item) {
     // FF/REW must not fire one reopen per press.  Each press only accumulates a
     // pending offset and (re)arms a 1s cooldown; playback keeps running until the
     // user stops pressing, then a SINGLE reopen jumps to the final target.
-    const u64 SEEK_COOLDOWN_US = 1000000ULL;   // 1 second of no presses
+    const u64 SEEK_COOLDOWN_US = 1000000ULL;   // 1 second of no presses (taps)
     s32  s_seek_pending_secs   = 0;            // accumulated delta, signed seconds
     u64  s_seek_arm_us         = 0;            // timing_get_us() of most recent press
     bool s_seek_armed          = false;
+
+    // Hold-to-FF/REW: while the seek button stays physically held, step the video
+    // forward/back repeatedly (a fast-forward loop) instead of a single skip.
+    const u64 SEEK_HOLD_DELAY_US = 500000ULL;  // hold this long before looping
+    const u64 SEEK_HOLD_STEP_US  = 250000ULL;  // gap between loop steps
+    int  s_hold_dir     = 0;                   // -1=rew, +1=ff, 0=not held
+    u64  s_hold_next_us = 0;                    // when the next loop step may fire
 
     // When a seek lands while the video is PAUSED, the normal display gate (which
     // requires !paused) won't swap in the new frame, so the screen would stay
@@ -373,22 +380,42 @@ void show_player(const JFItem *item) {
         {
             HudAction act = hud_handle_input(l2_pressed, r2_pressed, paused);
 
-            // Debounce: a FF/REW press only accumulates the offset and (re)arms
-            // the cooldown — it does NOT reopen the stream yet.
+            // A discrete tap from the HUD accumulates one step and arms a short
+            // debounce so rapid taps batch into a single reopen.
             if (act == HUD_ACTION_SEEK) {
                 s_seek_pending_secs += hud_seek_delta();
                 s_seek_arm_us        = timing_get_us();
                 s_seek_armed         = true;
-                act                  = HUD_ACTION_NONE;   // swallow; fire later
-                char ab[80];
-                snprintf(ab, sizeof(ab), "seek: armed pending=%+ds (fire in 1s)",
-                         (int)s_seek_pending_secs);
-                plog(ab);
+                act                  = HUD_ACTION_NONE;   // swallow; commit below
             }
-            // Once the user has stopped pressing for the cooldown, perform the
-            // single accumulated seek through the existing reopen path below.
-            if (act == HUD_ACTION_NONE && s_seek_armed &&
-                timing_get_us() - s_seek_arm_us >= SEEK_COOLDOWN_US) {
+
+            // Hold-to-FF/REW: read the pad directly (the HUD's one-event-per-press
+            // path can't express a sustained hold, and R2/L2 analog triggers
+            // flicker their digital bit).  After an initial delay, keep queueing a
+            // step on a fixed cadence so the video loops forward/back while held.
+            {
+                int hold_dir = 0;
+                if      (btn_cur.r2 || btn_cur.right) hold_dir = +1;
+                else if (btn_cur.l2 || btn_cur.left)  hold_dir = -1;
+                u64 now_hold = timing_get_us();
+                if (hold_dir == 0) {
+                    s_hold_dir = 0;                              // released
+                } else if (hold_dir != s_hold_dir) {
+                    s_hold_dir     = hold_dir;                   // new hold
+                    s_hold_next_us = now_hold + SEEK_HOLD_DELAY_US;
+                } else if (now_hold >= s_hold_next_us) {
+                    s_seek_pending_secs += hold_dir * 10;        // queue next step
+                    s_seek_armed   = true;
+                    s_seek_arm_us  = 0;                          // 0 => commit now
+                    s_hold_next_us = now_hold + 24ULL * 3600ULL * 1000000ULL; // re-set after seek
+                }
+            }
+
+            // Commit the pending seek: hold steps commit immediately (arm_us==0),
+            // taps commit once the debounce cooldown elapses.
+            if (act == HUD_ACTION_NONE && s_seek_armed && s_seek_pending_secs != 0 &&
+                (s_seek_arm_us == 0 ||
+                 timing_get_us() - s_seek_arm_us >= SEEK_COOLDOWN_US)) {
                 s_seek_armed = false;
                 act          = HUD_ACTION_SEEK;
             }
@@ -589,6 +616,10 @@ void show_player(const JFItem *item) {
                 crash_log("sk6 seek done");
                 seek_dbg_frames = 120;   // log resumed position for ~2s
                 if (paused) s_show_seek_frame = true;  // reveal target while paused
+                // If the button is still held, schedule the next loop step a short
+                // gap from now (after this reopen) so the FF/REW keeps stepping.
+                if (s_hold_dir != 0)
+                    s_hold_next_us = timing_get_us() + SEEK_HOLD_STEP_US;
             } else if (act == HUD_ACTION_AUDIO_TRACK) {
                 plog("hud: audio track selected");
             } else if (act == HUD_ACTION_SUBTITLE) {
