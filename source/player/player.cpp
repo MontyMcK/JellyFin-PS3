@@ -343,6 +343,12 @@ void show_player(const JFItem *item) {
     u64  s_seek_arm_us         = 0;            // timing_get_us() of most recent press
     bool s_seek_armed          = false;
 
+    // When a seek lands while the video is PAUSED, the normal display gate (which
+    // requires !paused) won't swap in the new frame, so the screen would stay
+    // frozen on the pre-seek image.  This one-shot forces a single flip after a
+    // paused seek so the user sees the target position.
+    bool s_show_seek_frame     = false;
+
     crash_log("p10 loop");
     // ---- Main (display) loop ----
     while (running && playing && !s_vdec_error) {
@@ -582,6 +588,7 @@ void show_player(const JFItem *item) {
                 }
                 crash_log("sk6 seek done");
                 seek_dbg_frames = 120;   // log resumed position for ~2s
+                if (paused) s_show_seek_frame = true;  // reveal target while paused
             } else if (act == HUD_ACTION_AUDIO_TRACK) {
                 plog("hud: audio track selected");
             } else if (act == HUD_ACTION_SUBTITLE) {
@@ -760,7 +767,14 @@ void show_player(const JFItem *item) {
             __asm__ volatile("sync" ::: "memory");
             s_vid_frame_ready = false;
             s_vid_disp_idx ^= 1;
+        } else if (s_show_seek_frame && paused && s_vid_frame_ready) {
+            // Paused seek: display the target frame exactly once, staying paused.
+            __asm__ volatile("sync" ::: "memory");
+            s_vid_frame_ready = false;
+            s_vid_disp_idx ^= 1;
+            s_show_seek_frame = false;
         }
+        if (do_pop) s_show_seek_frame = false;   // playing again; clear any leftover
 
         // Re-draw every vblank. s_vid_disp_idx advances on do_pop or silent_flip.
         if (frame_count > 0) {
@@ -771,10 +785,14 @@ void show_player(const JFItem *item) {
 
         {
             static int s_vb_log_n = 0;
-            static int s_vb_log_start_fr = -1;
-            // Skip first 60 frames (startup), then log 200 vblanks
-            if (frame_count >= 60 && frame_count < 260 && s_timing_ready) {
-                if (s_vb_log_start_fr < 0) s_vb_log_start_fr = frame_count;
+            static int s_vb_last_fr = -1;
+            // Log at most 200 lines, one per DISTINCT frame, after startup.
+            // Guard against frame_count freezing (e.g. a post-seek stall) — that
+            // would otherwise spam an identical line every loop iteration and
+            // thrash the HDD with log writes.
+            if (frame_count >= 60 && s_timing_ready &&
+                s_vb_log_n < 200 && frame_count != s_vb_last_fr) {
+                s_vb_last_fr = frame_count;
                 u64 now_us = timing_get_us();
                 char buf[160];
                 snprintf(buf, sizeof(buf),
