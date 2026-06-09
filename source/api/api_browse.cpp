@@ -22,8 +22,8 @@ static int show_list(JFItem *arr, int count, const char *title,
     while (running) {
         sysUtilCheckCallback();
         poll_buttons();
-        if (BTN_PRESSED(up))   { if (sel > 0)         { sel--; if (sel < top)          top = sel; } }
-        if (BTN_PRESSED(down)) { if (sel < count - 1) { sel++; if (sel >= top+JF_PAGE) top = sel-JF_PAGE+1; } }
+        if (BTN_REPEAT(up))   { if (sel > 0)         { sel--; if (sel < top)          top = sel; } }
+        if (BTN_REPEAT(down)) { if (sel < count - 1) { sel++; if (sel >= top+JF_PAGE) top = sel-JF_PAGE+1; } }
         if (BTN_PRESSED(cross))              return sel;
         if (BTN_PRESSED(circle))             return -1;
         if (BTN_PRESSED(l1) && has_prev)     return -2;

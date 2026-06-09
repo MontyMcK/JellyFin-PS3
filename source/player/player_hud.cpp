@@ -369,51 +369,8 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
         s_focus   = -1;
         return HUD_ACTION_NONE;
     }
-    if (!s_visible) return HUD_ACTION_NONE;
-
-    // Triangle: toggle focus mode (enter at play/pause slot, exit if already in focus).
-    if (BTN_PRESSED(triangle)) {
-        s_focus = (s_focus < 0) ? FOCUS_PP : -1;
-        return HUD_ACTION_NONE;
-    }
-
-    // Circle: cancel focus mode.
-    if (BTN_PRESSED(circle) && s_focus >= 0) {
-        s_focus = -1;
-        return HUD_ACTION_NONE;
-    }
-
-    if (s_focus >= 0) {
-        // Left/right navigate all 5 slots (wraps).
-        if (BTN_PRESSED(left))  {
-            s_focus = (s_focus > 0) ? s_focus - 1 : FOCUS_COUNT - 1;
-            return HUD_ACTION_NONE;
-        }
-        if (BTN_PRESSED(right)) {
-            s_focus = (s_focus < FOCUS_COUNT - 1) ? s_focus + 1 : 0;
-            return HUD_ACTION_NONE;
-        }
-        if (BTN_PRESSED(cross)) {
-            if (s_focus == FOCUS_PP)    return HUD_ACTION_TOGGLE_PAUSE;
-            if (s_focus == FOCUS_AUDIO) return HUD_ACTION_AUDIO_TRACK;
-            if (s_focus == FOCUS_CC)    return HUD_ACTION_SUBTITLE;
-            int incr = s_incr_vals[s_incr_idx];
-            if (s_focus == FOCUS_REW)   { s_seek_delta = -incr; return HUD_ACTION_SEEK; }
-            if (s_focus == FOCUS_FF)    { s_seek_delta = +incr; return HUD_ACTION_SEEK; }
-        }
-    } else {
-        // Unfocused: up/down changes increment; left/right/L2/R2 seeks; cross pauses.
-        if (BTN_PRESSED(up))   { if (s_incr_idx < 2) s_incr_idx++; return HUD_ACTION_NONE; }
-        if (BTN_PRESSED(down)) { if (s_incr_idx > 0) s_incr_idx--; return HUD_ACTION_NONE; }
-        int incr = s_incr_vals[s_incr_idx];
-        // Discrete tap only.  Sustained holds are handled in the main player loop
-        // (it reads the pad directly and drives the FF/REW loop), so the HUD just
-        // reports the initial press here.
-        if (BTN_PRESSED(left)  || l2_pressed) { s_seek_delta = -incr; return HUD_ACTION_SEEK; }
-        if (BTN_PRESSED(right) || r2_pressed) { s_seek_delta = +incr; return HUD_ACTION_SEEK; }
-        if (BTN_PRESSED(cross)) return HUD_ACTION_TOGGLE_PAUSE;
-    }
-
+    // All player input (FF/REW tap + hold-scrub) is handled in the main loop off
+    // R2/L2 and the D-pad.  The HUD only shows the bar — it consumes no buttons.
     return HUD_ACTION_NONE;
 }
 

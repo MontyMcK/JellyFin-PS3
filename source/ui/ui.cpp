@@ -64,6 +64,12 @@ bool poll_buttons(void) {
         merged.BTN_R2       |= pd.BTN_R2;
         any = true;
     }
+    // If no pad delivered a fresh packet this frame, keep the last known button
+    // state (the controller simply hasn't sent new data yet) — exactly like a game
+    // does, so a held trigger reads as continuously held instead of flickering.
+    // Still advance btn_prev so the BTN_PRESSED edge doesn't re-fire every idle
+    // frame (which would spam taps/pause for any held button).
+    if (!any) { btn_prev = btn_cur; return false; }
     merged.len = 1;
     update_buttons(&merged);
     return any;
@@ -72,6 +78,27 @@ bool poll_buttons(void) {
 void init_btns(void) {
     poll_buttons();
     btn_prev = btn_cur;
+}
+
+// Auto-repeat for held navigation buttons.  Returns true on the initial press,
+// then every NAV_REPEAT_US after an initial NAV_DELAY_US for as long as the button
+// is held — giving menus a steady, controllable scroll instead of one-per-tap.
+bool btn_nav_repeat(bool held, int slot) {
+    static u64  next_us[NAV_REPEAT_SLOTS] = { 0 };
+    static bool active[NAV_REPEAT_SLOTS]  = { false };
+    if (slot < 0 || slot >= NAV_REPEAT_SLOTS) return false;
+    if (!held) { active[slot] = false; return false; }
+    u64 now = timing_get_us();
+    if (!active[slot]) {                       // first press
+        active[slot]  = true;
+        next_us[slot] = now + NAV_DELAY_US;
+        return true;
+    }
+    if (now >= next_us[slot]) {                // repeat tick
+        next_us[slot] = now + NAV_REPEAT_US;
+        return true;
+    }
+    return false;
 }
 
 // -------------------------------------------------------
@@ -257,16 +284,16 @@ int get_input(char *out, int max_len, const char *prompt, bool is_password) {
         int  nrows = osk_build(rows, sym, caps);
 
         // Navigation.
-        if (BTN_PRESSED(up)) {
+        if (BTN_REPEAT(up)) {
             sr = (sr - 1 + nrows) % nrows;
             if (sc >= rows[sr].n) sc = rows[sr].n - 1;
         }
-        if (BTN_PRESSED(down)) {
+        if (BTN_REPEAT(down)) {
             sr = (sr + 1) % nrows;
             if (sc >= rows[sr].n) sc = rows[sr].n - 1;
         }
-        if (BTN_PRESSED(left))  sc = (sc - 1 + rows[sr].n) % rows[sr].n;
-        if (BTN_PRESSED(right)) sc = (sc + 1) % rows[sr].n;
+        if (BTN_REPEAT(left))  sc = (sc - 1 + rows[sr].n) % rows[sr].n;
+        if (BTN_REPEAT(right)) sc = (sc + 1) % rows[sr].n;
 
         // Button shortcuts: Square = backspace, Start = confirm, Select/Circle = cancel.
         if (BTN_PRESSED(square)) { int l = strlen(out); if (l > 0) out[l-1] = '\0'; }

@@ -123,7 +123,7 @@ bool xmb_handle_input_search(void) {
     int row_count = OSK_ROWS_N + 1;
 
     if (!g_search_focus_results) {
-        if (BTN_PRESSED(up)) {
+        if (BTN_REPEAT(up)) {
             if (g_osk_row == 0) {
                 g_osk_row = row_count - 1;
             } else {
@@ -132,7 +132,7 @@ bool xmb_handle_input_search(void) {
             int ml = osk_row_len(g_osk_row);
             if (g_osk_col >= ml) g_osk_col = ml - 1;
         }
-        if (BTN_PRESSED(down)) {
+        if (BTN_REPEAT(down)) {
             if (g_osk_row == row_count - 1) {
                 if (g_search_results_count > 0) {
                     g_search_focus_results = true;
@@ -147,16 +147,16 @@ bool xmb_handle_input_search(void) {
                 if (g_osk_col >= ml) g_osk_col = ml - 1;
             }
         }
-        if (BTN_PRESSED(left)) {
+        if (BTN_REPEAT(left)) {
             int ml = osk_row_len(g_osk_row);
             g_osk_col = (g_osk_col - 1 + ml) % ml;
         }
-        if (BTN_PRESSED(right)) {
+        if (BTN_REPEAT(right)) {
             int ml = osk_row_len(g_osk_row);
             g_osk_col = (g_osk_col + 1) % ml;
         }
     } else {
-        if (BTN_PRESSED(up)) {
+        if (BTN_REPEAT(up)) {
             if (g_search_sel == 0) {
                 g_search_focus_results = false;
                 g_osk_row = row_count - 1;
@@ -167,7 +167,7 @@ bool xmb_handle_input_search(void) {
                 if (g_search_sel < g_search_scroll) g_search_scroll = g_search_sel;
             }
         }
-        if (BTN_PRESSED(down)) {
+        if (BTN_REPEAT(down)) {
             if (g_search_sel < g_search_results_count - 1) {
                 g_search_sel++;
                 if (g_search_sel >= g_search_scroll + 6)

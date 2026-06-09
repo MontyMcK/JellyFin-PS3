@@ -333,22 +333,33 @@ void show_player(const JFItem *item) {
     // Detection timeout tracking for Bresenham fallback initialisation
     u64 det_timeout_start = 0;
 
-    // --- Seek debounce -------------------------------------------------------
-    // A transcode reopen is expensive (it laggs the whole player), so mashing
-    // FF/REW must not fire one reopen per press.  Each press only accumulates a
-    // pending offset and (re)arms a 1s cooldown; playback keeps running until the
-    // user stops pressing, then a SINGLE reopen jumps to the final target.
-    const u64 SEEK_COOLDOWN_US = 1000000ULL;   // 1 second of no presses (taps)
-    s32  s_seek_pending_secs   = 0;            // accumulated delta, signed seconds
-    u64  s_seek_arm_us         = 0;            // timing_get_us() of most recent press
-    bool s_seek_armed          = false;
-
-    // Hold-to-FF/REW: while the seek button stays physically held, step the video
-    // forward/back repeatedly (a fast-forward loop) instead of a single skip.
-    const u64 SEEK_HOLD_DELAY_US = 500000ULL;  // hold this long before looping
-    const u64 SEEK_HOLD_STEP_US  = 250000ULL;  // gap between loop steps
-    int  s_hold_dir     = 0;                   // -1=rew, +1=ff, 0=not held
-    u64  s_hold_next_us = 0;                    // when the next loop step may fire
+    // --- Seek (FF/REW) ---------------------------------------------------------
+    // Driven by the plain DIGITAL r2/l2 bit (no analog pressure), grace-bridged to
+    // ride out the bit's frame-to-frame flicker:
+    //   * quick TAP  -> +10s skip, batched by a 1s gate so taps stack into one
+    //                   reopen further ahead.
+    //   * HOLD       -> pause and scrub the seek bar +25s/-25s every 250ms.  While
+    //                   held NOTHING is fetched — only the bar moves; the single
+    //                   reopen to the scrubbed spot happens when the user releases.
+    // The D-pad also gives +10s taps via the HUD.
+    enum SeekState { SEEK_IDLE, SEEK_PRESS, SEEK_SCRUB };
+    const u64 SEEK_HOLD_DELAY_US = 400000ULL;   // held longer than this -> scrub
+    const u64 SEEK_SCRUB_STEP_US = 250000ULL;   // one scrub step per 250ms
+    const s32 SEEK_SCRUB_SECS    = 25;          // +25s per scrub step
+    const s32 SEEK_TAP_SECS      = 10;          // +10s per quick tap
+    const u64 SEEK_GRACE_US      = 250000ULL;   // bridge digital-bit flicker
+    const u64 SEEK_TAP_GATE_US   = 1000000ULL;  // batch window for quick taps
+    SeekState s_seek_state     = SEEK_IDLE;
+    int  s_seek_dir            = 0;            // +1 = fwd, -1 = back
+    bool s_seek_dpad           = false;        // this press is the D-pad (scrubs slower)
+    u64  s_press_us            = 0;            // when the current press began
+    u64  s_seek_active_us      = 0;            // last frame the trigger read as down
+    u64  s_scrub_step_us       = 0;            // last scrub accumulation time
+    s32  s_seek_pending_secs   = 0;            // queued offset, seconds
+    u64  s_tap_gate_us         = 0;            // tap batch deadline (0 => none)
+    bool s_commit_now          = false;        // release -> commit the reopen now
+    bool s_scrub_resume        = false;        // was playing when this scrub began
+    bool s_resume_after_seek   = false;        // unpause once the seek lands
 
     // When a seek lands while the video is PAUSED, the normal display gate (which
     // requires !paused) won't swap in the new frame, so the screen would stay
@@ -380,44 +391,99 @@ void show_player(const JFItem *item) {
         {
             HudAction act = hud_handle_input(l2_pressed, r2_pressed, paused);
 
-            // A discrete tap from the HUD accumulates one step and arms a short
-            // debounce so rapid taps batch into a single reopen.
+            // D-pad / focus-mode taps come through the HUD; queue them like any
+            // tap.  R2/L2 are NOT handled here — the state machine below owns them
+            // off the analog pressure, so their flickery digital edge can't fire
+            // spurious taps.
             if (act == HUD_ACTION_SEEK) {
                 s_seek_pending_secs += hud_seek_delta();
-                s_seek_arm_us        = timing_get_us();
-                s_seek_armed         = true;
-                act                  = HUD_ACTION_NONE;   // swallow; commit below
+                s_tap_gate_us        = timing_get_us() + SEEK_TAP_GATE_US;
+                act                  = HUD_ACTION_NONE;
             }
 
-            // Hold-to-FF/REW: read the pad directly (the HUD's one-event-per-press
-            // path can't express a sustained hold, and R2/L2 analog triggers
-            // flicker their digital bit).  After an initial delay, keep queueing a
-            // step on a fixed cadence so the video loops forward/back while held.
+            // ---- R2/L2 + D-pad: quick tap = +10s skip; hold = pause + scrub ----
+            // R2/L2 and the D-pad share one path; the D-pad just scrubs at half the
+            // speed.  These are the ONLY player controls (plus START to stop).
             {
-                int hold_dir = 0;
-                if      (btn_cur.r2 || btn_cur.right) hold_dir = +1;
-                else if (btn_cur.l2 || btn_cur.left)  hold_dir = -1;
-                u64 now_hold = timing_get_us();
-                if (hold_dir == 0) {
-                    s_hold_dir = 0;                              // released
-                } else if (hold_dir != s_hold_dir) {
-                    s_hold_dir     = hold_dir;                   // new hold
-                    s_hold_next_us = now_hold + SEEK_HOLD_DELAY_US;
-                } else if (now_hold >= s_hold_next_us) {
-                    s_seek_pending_secs += hold_dir * 10;        // queue next step
-                    s_seek_armed   = true;
-                    s_seek_arm_us  = 0;                          // 0 => commit now
-                    s_hold_next_us = now_hold + 24ULL * 3600ULL * 1000000ULL; // re-set after seek
+                int  dir   = 0;
+                bool dpad  = false;
+                if      (btn_cur.r2)    dir = +1;
+                else if (btn_cur.l2)    dir = -1;
+                else if (btn_cur.right) { dir = +1; dpad = true; }
+                else if (btn_cur.left)  { dir = -1; dpad = true; }
+                u64 now = timing_get_us();
+                if (dir != 0) s_seek_active_us = now;
+                // Ride over brief 1-frame dropouts so a real hold isn't chopped.
+                if (dir == 0 && s_seek_dir != 0 && now - s_seek_active_us < SEEK_GRACE_US)
+                    dir = s_seek_dir;
+
+                switch (s_seek_state) {
+                case SEEK_IDLE:
+                    if (dir != 0) {
+                        s_seek_state = SEEK_PRESS;
+                        s_seek_dir   = dir;
+                        s_seek_dpad  = dpad;
+                        s_press_us   = now;
+                    }
+                    break;
+
+                case SEEK_PRESS:
+                    if (dir == 0) {
+                        // Quick press/release = TAP: +10s, batched by the 1s gate.
+                        s_seek_pending_secs += s_seek_dir * SEEK_TAP_SECS;
+                        s_tap_gate_us = now + SEEK_TAP_GATE_US;
+                        s_seek_state  = SEEK_IDLE;
+                        s_seek_dir    = 0;
+                    } else if (now - s_press_us >= SEEK_HOLD_DELAY_US) {
+                        // Held: pause and scrub.  Nothing is fetched while held — the
+                        // bar just moves; the reopen waits for release.
+                        s_seek_state    = SEEK_SCRUB;
+                        s_seek_dir      = dir;
+                        s_scrub_resume  = !paused;
+                        paused          = true;
+                        s_scrub_step_us = now - SEEK_SCRUB_STEP_US;   // first step now
+                        s_tap_gate_us   = 0;
+                        plog("seek: scrub begin");
+                    } else {
+                        s_seek_dir = dir;             // allow F<->B before it commits
+                    }
+                    break;
+
+                case SEEK_SCRUB:
+                    if (dir == 0) {
+                        // Released: NOW fetch — one reopen to the scrubbed spot, resume.
+                        s_seek_state = SEEK_IDLE;
+                        s_seek_dir   = 0;
+                        if (s_seek_pending_secs != 0) {
+                            s_commit_now        = true;
+                            s_resume_after_seek = s_scrub_resume;
+                        } else {
+                            paused = !s_scrub_resume;
+                        }
+                        plog("seek: scrub end");
+                    } else {
+                        s_seek_dir = dir;
+                        // D-pad scrubs at half speed (one step per 500ms vs 250ms).
+                        u64 step_us = s_seek_dpad ? SEEK_SCRUB_STEP_US * 2
+                                                  : SEEK_SCRUB_STEP_US;
+                        if (now - s_scrub_step_us >= step_us) {
+                            s_scrub_step_us = now;
+                            s_seek_pending_secs += dir * SEEK_SCRUB_SECS;   // move bar +25s
+                        }
+                    }
+                    break;
                 }
             }
 
-            // Commit the pending seek: hold steps commit immediately (arm_us==0),
-            // taps commit once the debounce cooldown elapses.
-            if (act == HUD_ACTION_NONE && s_seek_armed && s_seek_pending_secs != 0 &&
-                (s_seek_arm_us == 0 ||
-                 timing_get_us() - s_seek_arm_us >= SEEK_COOLDOWN_US)) {
-                s_seek_armed = false;
-                act          = HUD_ACTION_SEEK;
+            // Commit one reopen: on scrub release, or when the tap gate expires.
+            // Never mid-scrub — a hold only moves the bar until the user lets go.
+            if (act == HUD_ACTION_NONE && s_seek_pending_secs != 0 &&
+                s_seek_state != SEEK_SCRUB &&
+                (s_commit_now ||
+                 (s_tap_gate_us != 0 && timing_get_us() >= s_tap_gate_us))) {
+                s_commit_now  = false;
+                s_tap_gate_us = 0;
+                act           = HUD_ACTION_SEEK;
             }
 
             if (act == HUD_ACTION_TOGGLE_PAUSE) {
@@ -616,10 +682,12 @@ void show_player(const JFItem *item) {
                 crash_log("sk6 seek done");
                 seek_dbg_frames = 120;   // log resumed position for ~2s
                 if (paused) s_show_seek_frame = true;  // reveal target while paused
-                // If the button is still held, schedule the next loop step a short
-                // gap from now (after this reopen) so the FF/REW keeps stepping.
-                if (s_hold_dir != 0)
-                    s_hold_next_us = timing_get_us() + SEEK_HOLD_STEP_US;
+                // A scrub paused the video to race the position; now that its seek
+                // has landed, resume playback if it had been playing.
+                if (s_resume_after_seek) {
+                    paused = false;
+                    s_resume_after_seek = false;
+                }
             } else if (act == HUD_ACTION_AUDIO_TRACK) {
                 plog("hud: audio track selected");
             } else if (act == HUD_ACTION_SUBTITLE) {
@@ -877,7 +945,7 @@ void show_player(const JFItem *item) {
             // While a seek is armed, show where the accumulated skip will land so
             // the user can keep tapping toward the right spot before it fires.
             u64 hud_elapsed = play_base_us + audio_get_clock_us();
-            if (s_seek_armed) {
+            if (s_seek_pending_secs != 0) {   // tap armed or scrubbing: preview target
                 s64 prev = (s64)hud_elapsed + (s64)s_seek_pending_secs * 1000000LL;
                 hud_elapsed = prev < 0 ? 0 : (u64)prev;
             }

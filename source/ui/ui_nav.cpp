@@ -294,8 +294,8 @@ bool xmb_handle_input_browse(void) {
         }
         if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
         if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
-        if (BTN_PRESSED(up)   && g_settings_sel > 0)                      g_settings_sel--;
-        if (BTN_PRESSED(down) && g_settings_sel < XMB_SETTINGS_COUNT - 1) g_settings_sel++;
+        if (BTN_REPEAT(up)   && g_settings_sel > 0)                      g_settings_sel--;
+        if (BTN_REPEAT(down) && g_settings_sel < XMB_SETTINGS_COUNT - 1) g_settings_sel++;
         if (BTN_PRESSED(cross) && g_settings_sel == 0) g_settings_confirm = true;  // Log Out
         return false;
     }
@@ -310,13 +310,13 @@ bool xmb_handle_input_browse(void) {
             g_tv_sub_sel = 0; g_tv_sub_scroll = 0; g_tv_sub_start = 0; g_tv_sub_total = 0;
             return false;
         }
-        if (BTN_PRESSED(up)) {
+        if (BTN_REPEAT(up)) {
             if (g_tv_sub_sel > 0) {
                 g_tv_sub_sel--;
                 if (g_tv_sub_sel < g_tv_sub_scroll) g_tv_sub_scroll = g_tv_sub_sel;
             }
         }
-        if (BTN_PRESSED(down)) {
+        if (BTN_REPEAT(down)) {
             if (g_tv_sub_sel < g_tv_sub_count - 1) {
                 g_tv_sub_sel++;
                 if (g_tv_sub_sel >= g_tv_sub_scroll + vis)
@@ -357,13 +357,13 @@ bool xmb_handle_input_browse(void) {
             g_col_sub_sel = 0; g_col_sub_scroll = 0; g_col_sub_start = 0; g_col_sub_total = 0;
             return false;
         }
-        if (BTN_PRESSED(up)) {
+        if (BTN_REPEAT(up)) {
             if (g_col_sub_sel > 0) {
                 g_col_sub_sel--;
                 if (g_col_sub_sel < g_col_sub_scroll) g_col_sub_scroll = g_col_sub_sel;
             }
         }
-        if (BTN_PRESSED(down)) {
+        if (BTN_REPEAT(down)) {
             if (g_col_sub_sel < g_col_sub_count - 1) {
                 g_col_sub_sel++;
                 if (g_col_sub_sel >= g_col_sub_scroll + vis)
@@ -393,9 +393,9 @@ bool xmb_handle_input_browse(void) {
          tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS);
 
     if (jbar_mode) {
-        if (BTN_PRESSED(up))
+        if (BTN_REPEAT(up))
             g_jumpbar_sel = (g_jumpbar_sel - 1 + JBAR_ENTRIES) % JBAR_ENTRIES;
-        if (BTN_PRESSED(down))
+        if (BTN_REPEAT(down))
             g_jumpbar_sel = (g_jumpbar_sel + 1) % JBAR_ENTRIES;
         if (BTN_PRESSED(right) || BTN_PRESSED(circle))
             g_jumpbar_active = false;
@@ -423,13 +423,13 @@ bool xmb_handle_input_browse(void) {
 
     int count = g_item_count[tab];
 
-    if (BTN_PRESSED(up)) {
+    if (BTN_REPEAT(up)) {
         if (g_sel > 0) {
             g_sel--;
             if (g_sel < g_scroll_top) g_scroll_top = g_sel;
         }
     }
-    if (BTN_PRESSED(down)) {
+    if (BTN_REPEAT(down)) {
         if (g_sel < count - 1) {
             g_sel++;
             if (g_sel >= g_scroll_top + vis) g_scroll_top = g_sel - vis + 1;

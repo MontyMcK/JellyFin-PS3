@@ -37,6 +37,14 @@ extern ButtonState btn_prev;
 // True only on the frame the button transitions 0→1
 #define BTN_PRESSED(b) (btn_cur.b && !btn_prev.b)
 
+// Auto-repeat for held navigation (menus).  True on the initial press, then again
+// at a steady rate while the button stays held — for scrolling lists/grids.
+enum { NAV_up, NAV_down, NAV_left, NAV_right, NAV_REPEAT_SLOTS };
+#define NAV_DELAY_US   350000ULL   // hold this long before repeat kicks in
+#define NAV_REPEAT_US  140000ULL   // then ~7 steps/sec (raise to slow it down)
+bool btn_nav_repeat(bool held, int slot);
+#define BTN_REPEAT(b)  btn_nav_repeat(btn_cur.b, NAV_##b)
+
 void update_buttons(padData *pad);
 
 // Reads all active pad slots, ORs their button data into one merged padData,
