@@ -44,6 +44,29 @@ typedef struct {
 
 bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
 
+// -------------------------------------------------------
+// Selectable media streams (audio tracks + subtitles)
+// -------------------------------------------------------
+#define JF_MAX_STREAMS 8
+
+typedef struct {
+    int  index;       // Jellyfin MediaStream Index (for AudioStreamIndex= etc.)
+    char label[64];   // DisplayTitle, e.g. "English - EAC3 - 5.1 - Default"
+} JFStream;
+
+typedef struct {
+    JFStream audio[JF_MAX_STREAMS];
+    int      n_audio;
+    int      default_audio;   // position in audio[] of the IsDefault track (or 0)
+    JFStream subs[JF_MAX_STREAMS];
+    int      n_subs;
+} JFTracks;
+
+// GET the item's MediaStreams and fill out with every audio and subtitle
+// stream (index + display label).  Returns true if the fetch succeeded
+// (counts may still be 0).
+bool jellyfin_fetch_tracks(const char *item_id, JFTracks *out);
+
 // Playback session
 // POST /Users/{userId}/Items/{item_id}/PlaybackInfo with a PS3 device profile.
 // Extracts PlaySessionId from the response.

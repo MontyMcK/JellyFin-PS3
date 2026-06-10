@@ -11,6 +11,15 @@
 #include <net/net.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+#include <sysutil/sysutil.h>
+
+extern u32 running;
+
+// How long to wait for the server's response headers.  A burn-in request
+// (SubtitleMethod=Encode) makes Jellyfin extract the subtitle track from the
+// source file before the transcode produces any output, and headers are only
+// sent once it does — on a big MKV that can take a minute or more.
+#define STREAM_HDR_DEADLINE_US  120000000ULL
 
 static bool s_chunked      = false;
 static int  s_chunk_remain = -1;
@@ -67,17 +76,50 @@ int stream_open(const char *url) {
         path, host, port, auth);
     netSend(sock, req, rlen, 0);
 
+    // 500 ms receive timeout — lets the header wait below poll instead of
+    // blocking forever, and remains in effect for the stream (caller can
+    // tighten it after connecting).
+    { struct { u32 sec; u32 usec; } tv = { 0, 500000 };
+      setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
+
     char hdr[4096]; int htotal = 0;
+    u64 hdr_t0     = timing_get_us();
+    u64 hdr_log_us = hdr_t0;
     while (htotal < (int)sizeof(hdr)-1) {
-        if (netRecv(sock, hdr + htotal, 1, 0) != 1) { netClose(sock); return -1; }
-        htotal++;
-        if (htotal >= 4 && memcmp(hdr + htotal - 4, "\r\n\r\n", 4) == 0) break;
+        int n = netRecv(sock, hdr + htotal, 1, 0);
+        if (n == 1) {
+            htotal++;
+            if (htotal >= 4 && memcmp(hdr + htotal - 4, "\r\n\r\n", 4) == 0) break;
+            continue;
+        }
+        if (n == 0) {
+            plog("stream_open: closed before headers");
+            netClose(sock); return -1;
+        }
+        // n < 0: receive timeout — the server hasn't started responding yet.
+        // Keep the system callback pumped so quit still works, and give up
+        // at the deadline instead of freezing the player.
+        sysUtilCheckCallback();
+        if (!running) { netClose(sock); return -1; }
+        u64 now = timing_get_us();
+        if (now - hdr_t0 >= STREAM_HDR_DEADLINE_US) {
+            plog("stream_open: header timeout");
+            netClose(sock); return -1;
+        }
+        if (now - hdr_log_us >= 5000000ULL) {
+            hdr_log_us = now;
+            char buf[64];
+            snprintf(buf, sizeof(buf), "stream_open: waiting for server (%llus)",
+                     (unsigned long long)((now - hdr_t0) / 1000000ULL));
+            plog(buf);
+        }
     }
     hdr[htotal] = '\0';
 
+    int status = 0;
     if (strncmp(hdr, "HTTP/", 5) == 0) {
         char *sp = strchr(hdr, ' ');
-        if (sp && atoi(sp+1) != 200) { netClose(sock); return -1; }
+        if (sp) status = atoi(sp + 1);
     }
 
     s_chunked      = (strstr(hdr, "chunked") != NULL);
@@ -85,19 +127,11 @@ int stream_open(const char *url) {
     s_chdr_n       = 0;
     s_ctrail       = 0;
     {
-        char status[16] = "?";
-        if (strncmp(hdr, "HTTP/", 5) == 0) {
-            char *sp = strchr(hdr, ' ');
-            if (sp) { strncpy(status, sp+1, 12); status[12] = '\0'; }
-        }
         char buf[64];
-        snprintf(buf, sizeof(buf), "stream_open: status=%s chunked=%d", status, (int)s_chunked);
+        snprintf(buf, sizeof(buf), "stream_open: status=%d chunked=%d", status, (int)s_chunked);
         plog(buf);
     }
-
-    // 500 ms receive timeout — caller can tighten this after connecting
-    struct { u32 sec; u32 usec; } tv = { 0, 500000 };
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (status != 200) { netClose(sock); return -1; }
 
     return sock;
 }

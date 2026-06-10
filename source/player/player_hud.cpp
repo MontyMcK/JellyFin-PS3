@@ -30,10 +30,8 @@ extern void crash_log(const char *msg);
 #define HUD_FOCUSED         0x00FFFFFFUL   // white for focused control
 #define HUD_SHOW_US         4000000ULL
 
-#define HUD_STRIP_H         130
-#define CTRL_Y_OFF           68            // transport row centre from screen bottom
-#define AUDIO_Y_OFF          98            // audio/CC row centre from screen bottom
-#define INCR_Y_OFF          116            // seek-increment label bottom from screen bottom
+#define HUD_STRIP_H          64
+#define CTRL_Y_OFF  (HUD_STRIP_H / 2)      // control row centred in the strip
 #define TRACK_H               4
 #define SCRUB_R               6
 #define LEFT_PAD             50
@@ -42,16 +40,23 @@ extern void crash_log(const char *msg);
 #define TIME_GAP             12            // gap between time label edge and seek bar
 #define RCTRL_GAP            12            // gap between remaining time and right controls
 
-#define ROW_ICON_PX          24.0f         // L/R iconic glyph size
+#define ROW_ICON_PX          36.0f         // L2/R2 iconic glyph size
 #define ROW_TEXT_PX          18.0f         // time + audio label text size
 #define MUSIC_ICON_PX        24.0f
 #define CC_TEXT_PX           20.0f
-#define INCR_PX              13.0f
 #define ICON_LABEL_GAP        6
 #define AUDIO_SEP            16            // horizontal gap between audio btn and CC btn
 
 #define PP_H                 22            // play/pause primitive bounding height (px)
 #define PP_W                 22            // play/pause primitive bounding width  (px)
+
+// Popup menu (track selection)
+#define MENU_MAX              9            // JF_MAX_STREAMS subs + "Off"
+#define MENU_TITLE_PX      22.0f
+#define MENU_TITLE_H         38            // title row height incl. padding
+#define MENU_ROW_H           30
+#define MENU_PAD             16            // popup inner padding
+#define MENU_DOT_COL         22            // width of the current-entry dot column
 
 #define MATERIAL_MUSIC_NOTE  0xE405
 
@@ -73,6 +78,17 @@ static u64  s_show_us    = 0;
 static int  s_seek_delta = 0;
 static int  s_focus      = -1;   // -1=none, 0..FOCUS_COUNT-1=focused slot
 static int  s_incr_idx   = 0;    // 0=10s  1=30s  2=5min
+static bool s_cc_active  = false; // subtitles on -> underline the CC button
+
+// Popup menu state.  Items are caller-owned pointers (track labels live in
+// the player's static JFTracks, so they outlive the menu).
+static bool        s_menu_visible = false;
+static char        s_menu_title[24];
+static const char *s_menu_items[MENU_MAX];
+static int         s_menu_n      = 0;
+static int         s_menu_sel    = 0;   // cursor row
+static int         s_menu_cur    = 0;   // active entry (accent dot)
+static int         s_menu_choice = -1;  // last X-selected row
 
 
 // RSX resources for the GPU-drawn dim quad
@@ -82,7 +98,6 @@ static u32 *s_hud_fp_buf  = NULL;
 static u32  s_hud_fp_off  = 0;
 
 static const int  s_incr_vals[3]  = { 10, 30, 300 };
-static const char *s_incr_strs[3] = { "10s", "30s", "5min" };
 
 // -------------------------------------------------------
 // Private helpers
@@ -337,12 +352,16 @@ void hud_gpu_shutdown(void) {
 void hud_init(u32 total_secs, const char *audio_label) {
     s_total_secs = total_secs;
     snprintf(s_audio_label, sizeof(s_audio_label), "%s",
-             (audio_label && audio_label[0]) ? audio_label : "Audio");
-    s_visible    = false;
-    s_show_us    = 0;
-    s_seek_delta = 0;
-    s_focus      = -1;
-    s_incr_idx   = 0;
+             (audio_label && audio_label[0]) ? audio_label : "AUDIO");
+    s_visible      = false;
+    s_show_us      = 0;
+    s_seek_delta   = 0;
+    s_focus        = -1;
+    s_incr_idx     = 0;
+    s_cc_active    = false;
+    s_menu_visible = false;
+    s_menu_n       = 0;
+    s_menu_choice  = -1;
     hud_gpu_init();
 }
 
@@ -353,24 +372,98 @@ void hud_shutdown(void) {
 bool hud_is_visible(void) { return s_visible; }
 int  hud_seek_delta(void) { return s_seek_delta; }
 
+void hud_set_audio_label(const char *label) {
+    snprintf(s_audio_label, sizeof(s_audio_label), "%s",
+             (label && label[0]) ? label : "AUDIO");
+}
+
+void hud_set_cc_active(bool active) { s_cc_active = active; }
+
+void hud_open_menu(const char *title, const char *const *items,
+                   int n_items, int current) {
+    if (n_items > MENU_MAX) n_items = MENU_MAX;
+    snprintf(s_menu_title, sizeof(s_menu_title), "%s", title ? title : "");
+    for (int i = 0; i < n_items; i++) s_menu_items[i] = items[i];
+    s_menu_n   = n_items;
+    s_menu_cur = (current >= 0 && current < n_items) ? current : 0;
+    s_menu_sel = s_menu_cur;
+    s_menu_visible = (n_items > 0);
+    show_hud();
+}
+
+int hud_menu_choice(void) { return s_menu_choice; }
+
 HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     s_seek_delta = 0;
 
     // Any button activity wakes the HUD.
+    bool was_hidden = !s_visible;
     if (btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
         btn_cur.l1 || btn_cur.r1 || btn_cur.l2 || btn_cur.r2 ||
         l2_pressed || r2_pressed ||
-        btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right)
+        btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right) {
         show_hud();
+        // First button while the bar was hidden just reveals it, with the
+        // play/pause control focused by default.
+        if (was_hidden) s_focus = FOCUS_PP;
+    }
 
     // Auto-hide after timeout — only when playing; stay visible indefinitely while paused.
     if (s_visible && !paused && (timing_get_us() - s_show_us) >= HUD_SHOW_US) {
-        s_visible = false;
-        s_focus   = -1;
+        s_visible      = false;
+        s_focus        = -1;
+        s_menu_visible = false;
         return HUD_ACTION_NONE;
     }
-    // All player input (FF/REW tap + hold-scrub) is handled in the main loop off
-    // R2/L2 and the D-pad.  The HUD only shows the bar — it consumes no buttons.
+    if (!s_visible) return HUD_ACTION_NONE;
+
+    // While a popup menu is open it owns the input: up/down move the cursor,
+    // X picks the entry, circle closes without picking.
+    if (s_menu_visible) {
+        if (BTN_PRESSED(up)) {
+            if (s_menu_sel > 0) s_menu_sel--;
+        } else if (BTN_PRESSED(down)) {
+            if (s_menu_sel < s_menu_n - 1) s_menu_sel++;
+        } else if (BTN_PRESSED(cross)) {
+            s_menu_visible = false;
+            s_menu_choice  = s_menu_sel;
+            return HUD_ACTION_MENU_SELECT;
+        } else if (BTN_PRESSED(circle)) {
+            s_menu_visible = false;
+        }
+        return HUD_ACTION_NONE;
+    }
+
+    // D-pad left/right move the focus cursor across the control row, in screen
+    // order: REW · PLAY/PAUSE · FF · AUDIO · CC.  This is how you reach the
+    // AUDIO and CC controls.  R2/L2 (handled in the main loop) still scrub.
+    // The reveal press above is swallowed so the bar only navigates once it's
+    // already showing.
+    if (!was_hidden) {
+        if (BTN_PRESSED(left)) {
+            if (s_focus < 0)      s_focus = FOCUS_PP;
+            else if (s_focus > 0) s_focus--;
+            return HUD_ACTION_NONE;
+        }
+        if (BTN_PRESSED(right)) {
+            if (s_focus < 0)                   s_focus = FOCUS_PP;
+            else if (s_focus < FOCUS_COUNT - 1) s_focus++;
+            return HUD_ACTION_NONE;
+        }
+    }
+
+    // X (cross) activates the focused control.
+    if (BTN_PRESSED(cross)) {
+        switch (s_focus) {
+        case FOCUS_REW:   s_seek_delta = -s_incr_vals[s_incr_idx]; return HUD_ACTION_SEEK;
+        case FOCUS_FF:    s_seek_delta = +s_incr_vals[s_incr_idx]; return HUD_ACTION_SEEK;
+        case FOCUS_AUDIO: return HUD_ACTION_AUDIO_TRACK;
+        case FOCUS_CC:    return HUD_ACTION_SUBTITLE;
+        case FOCUS_PP:
+        default:          return HUD_ACTION_TOGGLE_PAUSE;
+        }
+    }
+
     return HUD_ACTION_NONE;
 }
 
@@ -399,9 +492,10 @@ void hud_draw(u64 elapsed_us, bool paused) {
     if (dl) plog("hud_draw: C post rsxSync");
 #endif
 
-    // ---- Row centres ----
-    int ctrl_cy  = dh - CTRL_Y_OFF;    // transport / seek bar row
-    int audio_cy = dh - AUDIO_Y_OFF;   // audio + CC row (above seek bar)
+    // ---- Row centre ----
+    // Everything — transport, seek bar, times, AUDIO, CC — shares one row.
+    int ctrl_cy  = dh - CTRL_Y_OFF;
+    int audio_cy = ctrl_cy;
 
     // ---- Time strings (needed for seek bar layout) ----
     u32 elapsed_secs = (u32)(elapsed_us / 1000000ULL);
@@ -457,14 +551,6 @@ void hud_draw(u64 elapsed_us, bool paused) {
     if (rem_w > 0)
         drawTTF((u32)rem_x, (u32)time_y, rem_str, ROW_TEXT_PX, HUD_ACCENT);
 
-    // ---- Seek-increment indicator (small, right-aligned, above audio row) ----
-    {
-        char ibuf[12];
-        snprintf(ibuf, sizeof(ibuf), "+/- %s", s_incr_strs[s_incr_idx]);
-        int iw = ttf_text_width(ibuf, INCR_PX);
-        drawTTF((u32)(dw - RIGHT_PAD - iw), (u32)(dh - INCR_Y_OFF), ibuf, INCR_PX, 0x00888888);
-    }
-
     // ---- Left transport controls ----
     // Iconic glyphs: y = top of glyph = ctrl_cy - half icon height.
     int icon_y = ctrl_cy - (int)(ROW_ICON_PX * 0.5f);
@@ -478,7 +564,7 @@ void hud_draw(u64 elapsed_us, bool paused) {
 
     draw_iconic_glyph((u32)lx, (u32)icon_y, 'R', ROW_ICON_PX, ctrl_color(FOCUS_FF));
 
-    // ---- Audio / CC (above seek bar, right-aligned) ----
+    // ---- Audio / CC (right of the seek bar, same row) ----
     int audio_icon_y = audio_cy - (int)(MUSIC_ICON_PX * 0.5f);
     int audio_text_y = audio_cy - (int)(ROW_TEXT_PX   * 0.5f);
     int cc_text_y    = audio_cy - (int)(CC_TEXT_PX    * 0.5f);
@@ -493,4 +579,53 @@ void hud_draw(u64 elapsed_us, bool paused) {
 
     drawTTF((u32)rx, (u32)cc_text_y, "CC", CC_TEXT_PX,
             ctrl_color(FOCUS_CC), /*bold=*/true);
+    // Subtitles on: accent underline beneath the CC button.
+    if (s_cc_active)
+        drawRect((u32)rx, (u32)(cc_text_y + (int)CC_TEXT_PX + 3),
+                 (u32)w_cc, 2, HUD_ACCENT);
+
+    // ---- Popup menu (track selection), bottom-right above the strip ----
+    if (s_menu_visible && s_menu_n > 0) {
+        int max_w = ttf_text_width(s_menu_title, MENU_TITLE_PX);
+        for (int i = 0; i < s_menu_n; i++) {
+            int tw = MENU_DOT_COL + ttf_text_width(s_menu_items[i], ROW_TEXT_PX);
+            if (tw > max_w) max_w = tw;
+        }
+        int mw = max_w + 2 * MENU_PAD;
+        if (mw > dw - 2 * RIGHT_PAD) mw = dw - 2 * RIGHT_PAD;
+        int mh  = MENU_TITLE_H + s_menu_n * MENU_ROW_H + MENU_PAD;
+        int mx1 = dw - RIGHT_PAD;
+        int mx0 = mx1 - mw;
+        int my1 = dh - HUD_STRIP_H - 6;
+        int my0 = my1 - mh;
+        if (my0 < 6) my0 = 6;
+
+#if defined(HUD_DIM_CPU)
+        dim_rect_cpu((u32)mx0, (u32)my0, (u32)mw, (u32)(my1 - my0), 225);
+#elif defined(HUD_DIM_GPU_ARRAY)
+        draw_dim_rect((u32)mx0, (u32)my0, (u32)mw, (u32)(my1 - my0), 225);
+        rsxSync();
+#else
+        draw_dim_rect_inline((u32)mx0, (u32)my0, (u32)mw, (u32)(my1 - my0), 225);
+        rsxSync();
+#endif
+
+        drawTTF((u32)(mx0 + MENU_PAD),
+                (u32)(my0 + (MENU_TITLE_H - (int)MENU_TITLE_PX) / 2),
+                s_menu_title, MENU_TITLE_PX, HUD_ACCENT, /*bold=*/true);
+
+        for (int i = 0; i < s_menu_n; i++) {
+            int row_y0 = my0 + MENU_TITLE_H + i * MENU_ROW_H;
+            int row_cy = row_y0 + MENU_ROW_H / 2;
+            if (i == s_menu_sel)
+                drawRect((u32)(mx0 + 4), (u32)row_y0,
+                         (u32)(mw - 8), MENU_ROW_H, HUD_ACCENT_DIM);
+            if (i == s_menu_cur)
+                draw_circle(mx0 + MENU_PAD + 5, row_cy, 4, HUD_ACCENT);
+            drawTTF((u32)(mx0 + MENU_PAD + MENU_DOT_COL),
+                    (u32)(row_cy - (int)(ROW_TEXT_PX * 0.5f)),
+                    s_menu_items[i], ROW_TEXT_PX,
+                    (i == s_menu_sel) ? HUD_FOCUSED : 0x00AAAAAAUL);
+        }
+    }
 }

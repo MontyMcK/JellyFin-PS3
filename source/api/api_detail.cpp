@@ -187,6 +187,114 @@ static void parse_media_streams(const char *json,
         snprintf(audio_out, alen, "%s", first_audio);
 }
 
+// Integer field within a JSON object slice; def on missing/non-numeric.
+static int json_get_int_in_range(const char *start, int len,
+                                 const char *key, int def) {
+    char search[48];
+    int slen = snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *p = start, *end = start + len;
+    while (p + slen < end) {
+        if (memcmp(p, search, slen) == 0) {
+            p += slen;
+            while (p < end && *p == ' ') p++;
+            if (p < end && (*p == '-' || (*p >= '0' && *p <= '9')))
+                return atoi(p);
+            return def;
+        }
+        p++;
+    }
+    return def;
+}
+
+// Bool field within a JSON object slice; false on missing.
+static bool json_get_bool_in_range(const char *start, int len,
+                                   const char *key) {
+    char search[48];
+    int slen = snprintf(search, sizeof(search), "\"%s\":", key);
+    const char *p = start, *end = start + len;
+    while (p + slen < end) {
+        if (memcmp(p, search, slen) == 0) {
+            p += slen;
+            while (p < end && *p == ' ') p++;
+            return (p + 4 <= end && memcmp(p, "true", 4) == 0);
+        }
+        p++;
+    }
+    return false;
+}
+
+bool jellyfin_fetch_tracks(const char *item_id, JFTracks *out) {
+    memset(out, 0, sizeof(*out));
+
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Users/%s/Items/%s?Fields=MediaStreams",
+        g_server, g_userid, item_id);
+
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "fetch_tracks: http %d", status);
+        plog(buf);
+        return false;
+    }
+
+    const char *arr = strstr(responseBuffer, "\"MediaStreams\":");
+    if (!arr) { plog("fetch_tracks: no MediaStreams"); return false; }
+    arr += sizeof("\"MediaStreams\":") - 1;
+    while (*arr == ' ') arr++;
+    if (*arr != '[') return false;
+    arr++;
+
+    const char *p = arr;
+    while (*p && *p != ']') {
+        while (*p && *p != '{' && *p != ']') p++;
+        if (!*p || *p == ']') break;
+        const char *obj_start = p;
+        int depth = 0; bool in_str = false, esc = false;
+        while (*p) {
+            char c = *p;
+            if (esc) { esc = false; }
+            else if (in_str) { if (c=='\\') esc=true; else if (c=='"') in_str=false; }
+            else { if (c=='"') in_str=true; else if (c=='{') depth++; else if (c=='}') { if (!--depth) { p++; break; } } }
+            p++;
+        }
+        int olen = (int)(p - obj_start);
+
+        char stype[16] = "";
+        json_get_in_range(obj_start, olen, "Type", stype, sizeof(stype));
+        int idx = json_get_int_in_range(obj_start, olen, "Index", -1);
+        if (idx < 0) continue;
+
+        char disp[64] = "";
+        json_get_in_range(obj_start, olen, "DisplayTitle", disp, sizeof(disp));
+        if (!disp[0])
+            json_get_in_range(obj_start, olen, "Language", disp, sizeof(disp));
+
+        if (strcmp(stype, "Audio") == 0 && out->n_audio < JF_MAX_STREAMS) {
+            JFStream *s = &out->audio[out->n_audio];
+            s->index = idx;
+            snprintf(s->label, sizeof(s->label), "%s",
+                     disp[0] ? disp : "Audio");
+            if (json_get_bool_in_range(obj_start, olen, "IsDefault"))
+                out->default_audio = out->n_audio;
+            out->n_audio++;
+        } else if (strcmp(stype, "Subtitle") == 0 && out->n_subs < JF_MAX_STREAMS) {
+            JFStream *s = &out->subs[out->n_subs];
+            s->index = idx;
+            snprintf(s->label, sizeof(s->label), "%s",
+                     disp[0] ? disp : "Subtitle");
+            out->n_subs++;
+        }
+    }
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "fetch_tracks: %d audio, %d subs",
+             out->n_audio, out->n_subs);
+    plog(buf);
+    return true;
+}
+
 bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out) {
     memset(out, 0, sizeof(*out));
 
@@ -300,7 +408,17 @@ bool jellyfin_get_play_session_id(const char *item_id,
             "]"
           "}],"
           "\"ContainerProfiles\":[],"
-          "\"SubtitleProfiles\":[]"
+          // No on-device subtitle renderer: ask the server to burn subs into
+          // the video (Method=Encode) for every common format.
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
         "}}";
 
     int status = http_request(1, url, body, g_token, responseBuffer, RESPONSE_SIZE);

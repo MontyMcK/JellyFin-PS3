@@ -86,9 +86,13 @@ static void plog_url(const char *tag, const char *url) {
 // The query string is otherwise identical so the server keeps the same
 // transcode session and we only change the start offset.
 // -------------------------------------------------------
+// audio_idx / sub_idx are Jellyfin MediaStream indices; -1 omits the param
+// (server default audio / no subtitles).  Subtitles are burned in server-side
+// (SubtitleMethod=Encode) since the PS3 client has no subtitle renderer.
 static void build_stream_url(char *url, int url_sz,
                              const JFItem *item, u32 req_w, u32 req_h,
-                             const char *session_id, u64 start_ticks) {
+                             const char *session_id, u64 start_ticks,
+                             int audio_idx, int sub_idx) {
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
@@ -104,6 +108,11 @@ static void build_stream_url(char *url, int url_sz,
         "&StartTimeTicks=%llu",
         g_server, item->id, req_w, req_h, item->id,
         (unsigned long long)start_ticks);
+    if (audio_idx >= 0 && n > 0 && n < url_sz)
+        n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
+    if (sub_idx >= 0 && n > 0 && n < url_sz)
+        n += snprintf(url + n, url_sz - n,
+                      "&SubtitleStreamIndex=%d&SubtitleMethod=Encode", sub_idx);
     if (session_id && session_id[0] && n > 0 && n < url_sz) {
         snprintf(url + n, url_sz - n, "&PlaySessionId=%s", session_id);
     }
@@ -142,8 +151,18 @@ void show_player(const JFItem *item) {
         session_id[0] = '\0';
     }
 
-    char url[640];
-    build_stream_url(url, sizeof(url), item, req_w, req_h, session_id, 0);
+    // Selectable audio/subtitle tracks (HUD AUDIO + CC buttons cycle these).
+    // cur_* are positions in the tracks arrays; -1 = server default / off.
+    static JFTracks tracks;            // ~2KB — keep off the stack
+    bool have_tracks = jellyfin_fetch_tracks(item->id, &tracks);
+    int  cur_audio = (have_tracks && tracks.n_audio > 0) ? tracks.default_audio : -1;
+    int  cur_sub   = -1;               // subtitles start off
+    #define CUR_AUDIO_IDX() ((cur_audio >= 0) ? tracks.audio[cur_audio].index : -1)
+    #define CUR_SUB_IDX()   ((cur_sub   >= 0) ? tracks.subs[cur_sub].index   : -1)
+
+    char url[768];
+    build_stream_url(url, sizeof(url), item, req_w, req_h, session_id, 0,
+                     CUR_AUDIO_IDX(), CUR_SUB_IDX());
     plog_url("url", url);
 
     drawHeader();
@@ -242,6 +261,8 @@ void show_player(const JFItem *item) {
     u64           play_base_us   = 0;
     int           seek_dbg_frames = 0;   // >0: log HUD elapsed for this many frames
 
+    // The button always reads "AUDIO" — track names are too long for the HUD
+    // row; the selected track is plogged when cycled.
     hud_init(total_secs, NULL);
     plog("hud: prewarm start");
     ttf_prewarm_hud();
@@ -342,6 +363,11 @@ void show_player(const JFItem *item) {
     //                   held NOTHING is fetched — only the bar moves; the single
     //                   reopen to the scrubbed spot happens when the user releases.
     // The D-pad also gives +10s taps via the HUD.
+    // Which popup menu the HUD is showing — decides what a
+    // HUD_ACTION_MENU_SELECT applies to.
+    enum MenuKind { MENU_NONE, MENU_AUDIO, MENU_SUBS };
+    MenuKind s_menu_kind = MENU_NONE;
+
     enum SeekState { SEEK_IDLE, SEEK_PRESS, SEEK_SCRUB };
     const u64 SEEK_HOLD_DELAY_US = 400000ULL;   // held longer than this -> scrub
     const u64 SEEK_SCRUB_STEP_US = 250000ULL;   // one scrub step per 250ms
@@ -389,10 +415,10 @@ void show_player(const JFItem *item) {
         if (!playing) break;
 
         {
+            // The HUD owns the D-pad (focus navigation) and X (activates the
+            // focused control: play/pause, REW/FF, AUDIO, or CC), returning the
+            // action to perform.
             HudAction act = hud_handle_input(l2_pressed, r2_pressed, paused);
-
-            // X (cross) toggles pause.
-            if (BTN_PRESSED(cross)) act = HUD_ACTION_TOGGLE_PAUSE;
 
             // D-pad / focus-mode taps come through the HUD; queue them like any
             // tap.  R2/L2 are NOT handled here — the state machine below owns them
@@ -404,16 +430,73 @@ void show_player(const JFItem *item) {
                 act                  = HUD_ACTION_NONE;
             }
 
-            // ---- R2/L2 + D-pad: quick tap = +10s skip; hold = pause + scrub ----
-            // R2/L2 and the D-pad share one path; the D-pad just scrubs at half the
-            // speed.  These are the ONLY player controls (plus START to stop).
+            // ---- AUDIO / CC: pop up the track menu (the HUD owns its
+            // navigation; X on an entry comes back as HUD_ACTION_MENU_SELECT).
+            // Picking a different track reopens the stream at the current
+            // position with the new AudioStreamIndex/SubtitleStreamIndex.
+            // The reopen IS the seek path with delta 0 — same stop-transcode +
+            // fresh-PlaySessionId dance, just different URL params.
+            if (act == HUD_ACTION_AUDIO_TRACK) {
+                act = HUD_ACTION_NONE;
+                if (have_tracks && tracks.n_audio > 0) {
+                    const char *items[JF_MAX_STREAMS];
+                    for (int i = 0; i < tracks.n_audio; i++)
+                        items[i] = tracks.audio[i].label;
+                    s_menu_kind = MENU_AUDIO;
+                    hud_open_menu("Audio", items, tracks.n_audio, cur_audio);
+                } else {
+                    plog("hud: audio - no tracks");
+                }
+            } else if (act == HUD_ACTION_SUBTITLE) {
+                act = HUD_ACTION_NONE;
+                if (have_tracks && tracks.n_subs > 0) {
+                    const char *items[JF_MAX_STREAMS + 1];
+                    items[0] = "Off";
+                    for (int i = 0; i < tracks.n_subs; i++)
+                        items[1 + i] = tracks.subs[i].label;
+                    s_menu_kind = MENU_SUBS;
+                    hud_open_menu("Subtitles", items, tracks.n_subs + 1,
+                                  cur_sub + 1);
+                } else {
+                    plog("hud: subs - none available");
+                }
+            } else if (act == HUD_ACTION_MENU_SELECT) {
+                act = HUD_ACTION_NONE;
+                int sel = hud_menu_choice();
+                if (s_menu_kind == MENU_AUDIO &&
+                    sel >= 0 && sel < tracks.n_audio && sel != cur_audio) {
+                    cur_audio = sel;
+                    act = HUD_ACTION_SEEK;     // 0-delta reopen applies the track
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), "hud: audio -> [%d] %s",
+                             tracks.audio[cur_audio].index,
+                             tracks.audio[cur_audio].label);
+                    plog(buf);
+                } else if (s_menu_kind == MENU_SUBS &&
+                           sel >= 0 && sel <= tracks.n_subs &&
+                           sel - 1 != cur_sub) {
+                    cur_sub = sel - 1;         // entry 0 = "Off" -> -1
+                    hud_set_cc_active(cur_sub >= 0);
+                    act = HUD_ACTION_SEEK;     // 0-delta reopen applies the sub
+                    char buf[96];
+                    if (cur_sub >= 0)
+                        snprintf(buf, sizeof(buf), "hud: subs -> [%d] %s",
+                                 tracks.subs[cur_sub].index,
+                                 tracks.subs[cur_sub].label);
+                    else
+                        snprintf(buf, sizeof(buf), "hud: subs -> off");
+                    plog(buf);
+                }
+            }
+
+            // ---- R2/L2: quick tap = +10s skip; hold = pause + scrub ----
+            // The D-pad no longer scrubs here — left/right drive HUD focus
+            // navigation (see hud_handle_input).  R2/L2 are the scrub controls.
             {
                 int  dir   = 0;
                 bool dpad  = false;
                 if      (btn_cur.r2)    dir = +1;
                 else if (btn_cur.l2)    dir = -1;
-                else if (btn_cur.right) { dir = +1; dpad = true; }
-                else if (btn_cur.left)  { dir = -1; dpad = true; }
                 u64 now = timing_get_us();
                 if (dir != 0) s_seek_active_us = now;
                 // Ride over brief 1-frame dropouts so a real hold isn't chopped.
@@ -604,9 +687,10 @@ void show_player(const JFItem *item) {
                         plog("seek: PlaybackInfo failed, reusing old session");
                     }
                 }
-                char surl[640];
+                char surl[768];
                 build_stream_url(surl, sizeof(surl), item, req_w, req_h,
-                                 session_id, start_ticks);
+                                 session_id, start_ticks,
+                                 CUR_AUDIO_IDX(), CUR_SUB_IDX());
                 plog_url("surl", surl);
                 int nsock = stream_open(surl);
                 if (nsock < 0) {
@@ -691,11 +775,9 @@ void show_player(const JFItem *item) {
                     paused = false;
                     s_resume_after_seek = false;
                 }
-            } else if (act == HUD_ACTION_AUDIO_TRACK) {
-                plog("hud: audio track selected");
-            } else if (act == HUD_ACTION_SUBTITLE) {
-                plog("hud: subtitle toggled");
             }
+            // (HUD_ACTION_AUDIO_TRACK / HUD_ACTION_SUBTITLE are converted to a
+            // 0-delta HUD_ACTION_SEEK above — the reopen applies the new track.)
         }
 
         // fps detection timeout — needed only to initialise the Bresenham fallback
