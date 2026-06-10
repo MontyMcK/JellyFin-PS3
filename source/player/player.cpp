@@ -391,6 +391,9 @@ void show_player(const JFItem *item) {
         {
             HudAction act = hud_handle_input(l2_pressed, r2_pressed, paused);
 
+            // X (cross) toggles pause.
+            if (BTN_PRESSED(cross)) act = HUD_ACTION_TOGGLE_PAUSE;
+
             // D-pad / focus-mode taps come through the HUD; queue them like any
             // tap.  R2/L2 are NOT handled here — the state machine below owns them
             // off the analog pressure, so their flickery digital edge can't fire
