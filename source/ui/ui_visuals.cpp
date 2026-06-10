@@ -884,6 +884,26 @@ void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color) {
     stbtt_FreeBitmap(bm, NULL);
 }
 
+// Draw one Iconic PSx glyph with its ink vertically centred on cy.
+// draw_iconic_glyph()'s y is the top of the em box, but a glyph's ink only
+// covers part of that, so em-box centring sits visibly off — centre on the
+// actual bitmap box instead.
+void draw_iconic_glyph_vcentered(u32 x, int cy, char glyph, float px, u32 color) {
+    if (!s_iconic_ok) return;
+    float scale = stbtt_ScaleForPixelHeight(&s_iconic, px);
+    int ascent;
+    stbtt_GetFontVMetrics(&s_iconic, &ascent, NULL, NULL);
+    int baseline = (int)((float)ascent * scale);
+    int x0, y0, x1, y1;
+    stbtt_GetCodepointBitmapBox(&s_iconic, (unsigned char)glyph,
+                                scale, scale, &x0, &y0, &x1, &y1);
+    // draw_iconic_glyph puts the ink top at y + baseline + y0; pick y so the
+    // ink spans [cy - h/2, cy + h/2).
+    int y = cy - (y1 - y0) / 2 - baseline - y0;
+    if (y < 0) y = 0;
+    draw_iconic_glyph(x, (u32)y, glyph, px, color);
+}
+
 // Return the advance width in pixels for one Iconic PSx glyph.
 int iconic_adv_px(char glyph, float px) {
     if (!s_iconic_ok) return (int)px;

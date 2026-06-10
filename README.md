@@ -28,12 +28,15 @@ Goal: consumer-quality media playback on PS3, the second-best media player on th
 - MP3 audio decode via minimp3 with PCM ring buffer
 - Interleaved stereo DMA audio output at 48kHz
 - Double-buffered RSX GPU blit via custom vertex and fragment shaders
-- In-player HUD overlay with scrubbable seek bar, play/pause, rewind and fast-forward
-- Seek, rewind, and skip via server-side re-request (Jellyfin StartTimeTicks), with full decoder, audio, and jitter-buffer flush
+- In-player HUD: one compact strip with a focusable control row (rewind, play/pause, fast-forward, AUDIO, CC), seek bar, and elapsed/remaining times
+- Audio track and subtitle selection via popup menus (Jellyfin AudioStreamIndex / SubtitleStreamIndex); subtitles are burned in server-side (SubtitleMethod=Encode) since the PS3 has no subtitle renderer
+- Title overlay in the top-left while paused
+- Seek: R2/L2 tap skips 10s (rapid taps batch into one jump), hold pauses and scrubs the bar in 25s steps with a single reposition on release
+- Every reposition (seek or track change) stops the server transcode, mints a fresh PlaySessionId via PlaybackInfo, and re-requests stream.ts at the target StartTimeTicks, with full decoder, audio, and jitter-buffer flush
 - Jellyfin PlaybackInfo POST with PS3 H.264 transcode profile (720p)
 - .pkg packaging via PSL1GHT built-in ppu_rules flow (APPID JFPS30000)
-- Crash log written to /dev_hdd0/game/JFPS30000/USRDIR/crash_log.txt
-- Async ring-buffer logging system
+- Crash log written synchronously to /dev_hdd0/tmp/crash_log.txt
+- Async ring-buffer logging system (player log at /dev_hdd0/tmp/player_log.txt)
 
 ---
 
@@ -71,25 +74,26 @@ Transfer the SELF to your PS3 via FTP or USB and launch through webMAN or multiM
 | X           | Select / confirm                |
 | O           | Back                            |
 | D-pad       | Navigate                        |
-| L1 / R1     | Cycle tabs                      |
+| L1 / R1     | Cycle tabs (prev/next page in the season browser) |
 | Triangle    | Item info overlay               |
-| L1 / R1     | Prev/next page (season browser) |
 
 ### Media Player
 
-Press any button during playback to bring up the HUD. The HUD auto-hides after a few seconds of no input.
+Press any button during playback to bring up the HUD. It auto-hides after 4 seconds while playing and stays up while paused.
 
-| Button         | Action                                                        |
-|----------------|---------------------------------------------------------------|
-| Start          | Stop / exit player                                            |
-| X (HUD hidden) | Show HUD                                                      |
-| Left / Right   | Seek back / forward by the selected increment                 |
-| L2 / R2        | Seek back / forward by the selected increment                 |
-| Up / Down      | Change seek increment (10s / 30s / 5min)                      |
-| X (on Rew/FF)  | Seek using the focused rewind or fast-forward button          |
-| X (on Pause)   | Toggle play / pause                                           |
+| Button          | Action                                                                  |
+|-----------------|-------------------------------------------------------------------------|
+| Start           | Stop / exit player                                                      |
+| Left / Right    | Move focus across the control row (Rew · Play/Pause · FF · AUDIO · CC) |
+| X               | Activate the focused control (the reveal press is swallowed)           |
+| X on Rew / FF   | Seek -10s / +10s                                                        |
+| X on AUDIO / CC | Open the audio / subtitle track popup menu                              |
+| R2 / L2 (tap)   | Skip +10s / -10s (taps within 1s batch into one seek)                   |
+| R2 / L2 (hold)  | Pause and scrub the seek bar; the seek fires once on release            |
 
-Seeking, rewind, and skip all use the same path: the player re-requests the transcode stream at the new position, flushes the decoder, audio, and jitter buffer, then resumes. The seek bar position follows the audio PTS clock, so it tracks the real playback time after a seek.
+Track menu: D-pad Up/Down to highlight, X to select, O to close. The active entry carries an accent dot; the CC menu has an Off entry at the top, and an active subtitle underlines the CC button. Picking a different track reopens the stream at the current position with the new track applied (subtitles can take a while to start the first time — the server extracts the track before the burn-in transcode begins).
+
+Seeking, skipping, and track changes all use the same path: the player re-requests the transcode stream at the new position, flushes the decoder, audio, and jitter buffer, then resumes. The seek bar position follows the audio PTS clock (offset by the seek base), so it tracks the real playback time after a seek.
 
 ### Search
 
@@ -189,7 +193,7 @@ The audio clock drives the seek bar, so the bar jumps to the new position automa
 
 ---
 
-## HUD Overlay and the dim strip **Work in progress**
+## HUD Overlay and the dim strip
 
 The in-player HUD draws a darkened strip along the bottom of the screen behind the controls. Getting this right was non-trivial on RSX:
 
@@ -332,7 +336,8 @@ JellyFin---PS3/
 | Audio playback           | Working (48kHz stereo MP3, zero silence blocks)                   |
 | AV sync                  | Locked (plus or minus 5ms via PTS clock + EMA bias)               |
 | HUD overlay              | Working (inline GPU dim quad, no freeze, full-speed)              |
-| Seek / rewind / skip     | Working (StartTimeTicks re-request + full pipeline flush)         |
+| Seek / rewind / skip     | Working (tap-to-skip + hold-to-scrub, StartTimeTicks re-request + full pipeline flush) |
+| Audio / subtitle tracks  | Working (popup menus; subtitles burned in server-side)            |
 | PlaybackInfo / transcode | Working (H.264 720p profile, PlaySessionId extracted)             |
 | PKG packaging            | Working (make pkg, APPID JFPS30000)                               |
 | Music library            | Not implemented                                                   |
@@ -341,7 +346,7 @@ JellyFin---PS3/
 
 ## Logging
 
-During playback, async log output is written to player_log.txt in the app's working directory. The crash log at /dev_hdd0/game/JFPS30000/USRDIR/crash_log.txt is written synchronously at key lifecycle checkpoints (including per-step seek and HUD checkpoints) and survives crashes that prevent the async logger from flushing. Reading it from the bottom up pinpoints the exact step that failed on hardware.
+During playback, async log output is written to /dev_hdd0/tmp/player_log.txt. The crash log at /dev_hdd0/tmp/crash_log.txt is written synchronously at key lifecycle checkpoints (including per-step seek and HUD checkpoints) and survives crashes that prevent the async logger from flushing. Reading it from the bottom up pinpoints the exact step that failed on hardware.
 
 ---
 

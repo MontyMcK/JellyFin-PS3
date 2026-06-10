@@ -141,6 +141,7 @@ typedef struct { char glyph; const char *label; } Hint;
 // Functions implemented in ui_visuals.cpp
 // -------------------------------------------------------
 void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color);
+void draw_iconic_glyph_vcentered(u32 x, int cy, char glyph, float px, u32 color);
 int  iconic_adv_px(char glyph, float px);
 
 void visuals_cleanup(void);

@@ -50,6 +50,10 @@ extern void crash_log(const char *msg);
 #define PP_H                 22            // play/pause primitive bounding height (px)
 #define PP_W                 22            // play/pause primitive bounding width  (px)
 
+// Title overlay (top-left while paused)
+#define TITLE_PX           24.0f           // a touch under the subtitle size
+#define TITLE_TOP_PAD        34
+
 // Popup menu (track selection)
 #define MENU_MAX              9            // JF_MAX_STREAMS subs + "Off"
 #define MENU_TITLE_PX      22.0f
@@ -73,6 +77,7 @@ extern void crash_log(const char *msg);
 // -------------------------------------------------------
 static u32  s_total_secs = 0;
 static char s_audio_label[64];
+static char s_title[128];
 static bool s_visible    = false;
 static u64  s_show_us    = 0;
 static int  s_seek_delta = 0;
@@ -362,6 +367,7 @@ void hud_init(u32 total_secs, const char *audio_label) {
     s_menu_visible = false;
     s_menu_n       = 0;
     s_menu_choice  = -1;
+    s_title[0]     = '\0';
     hud_gpu_init();
 }
 
@@ -378,6 +384,10 @@ void hud_set_audio_label(const char *label) {
 }
 
 void hud_set_cc_active(bool active) { s_cc_active = active; }
+
+void hud_set_title(const char *title) {
+    snprintf(s_title, sizeof(s_title), "%s", title ? title : "");
+}
 
 void hud_open_menu(const char *title, const char *const *items,
                    int n_items, int current) {
@@ -473,6 +483,26 @@ void hud_draw(u64 elapsed_us, bool paused) {
     int dw = (int)display_width;
     int dh = (int)display_height;
 
+    // ---- Title (top-left, only while paused) ----
+    if (paused && s_title[0]) {
+        int tw = ttf_text_width(s_title, TITLE_PX);
+        if (tw > dw - 2 * LEFT_PAD) tw = dw - 2 * LEFT_PAD;
+#if defined(HUD_DIM_CPU)
+        dim_rect_cpu((u32)(LEFT_PAD - 12), (u32)(TITLE_TOP_PAD - 8),
+                     (u32)(tw + 24), (u32)((int)TITLE_PX + 16), 185);
+#elif defined(HUD_DIM_GPU_ARRAY)
+        draw_dim_rect((u32)(LEFT_PAD - 12), (u32)(TITLE_TOP_PAD - 8),
+                      (u32)(tw + 24), (u32)((int)TITLE_PX + 16), 185);
+        rsxSync();
+#else
+        draw_dim_rect_inline((u32)(LEFT_PAD - 12), (u32)(TITLE_TOP_PAD - 8),
+                             (u32)(tw + 24), (u32)((int)TITLE_PX + 16), 185);
+        rsxSync();
+#endif
+        drawTTF((u32)LEFT_PAD, (u32)TITLE_TOP_PAD, s_title, TITLE_PX,
+                HUD_FOCUSED);
+    }
+
     // ---- Background strip ----
     int strip_y = dh - HUD_STRIP_H;
     if (strip_y < 0) strip_y = 0;
@@ -552,17 +582,18 @@ void hud_draw(u64 elapsed_us, bool paused) {
         drawTTF((u32)rem_x, (u32)time_y, rem_str, ROW_TEXT_PX, HUD_ACCENT);
 
     // ---- Left transport controls ----
-    // Iconic glyphs: y = top of glyph = ctrl_cy - half icon height.
-    int icon_y = ctrl_cy - (int)(ROW_ICON_PX * 0.5f);
+    // Iconic glyphs: ink vertically centred on the control row.
     int lx = LEFT_PAD;
 
-    draw_iconic_glyph((u32)lx, (u32)icon_y, 'L', ROW_ICON_PX, ctrl_color(FOCUS_REW));
+    draw_iconic_glyph_vcentered((u32)lx, ctrl_cy, 'L', ROW_ICON_PX,
+                                ctrl_color(FOCUS_REW));
     lx += w_rew + CTRL_GAP;
 
     draw_pp_symbol(lx + PP_W / 2, ctrl_cy, paused, ctrl_color(FOCUS_PP));
     lx += PP_W + CTRL_GAP;
 
-    draw_iconic_glyph((u32)lx, (u32)icon_y, 'R', ROW_ICON_PX, ctrl_color(FOCUS_FF));
+    draw_iconic_glyph_vcentered((u32)lx, ctrl_cy, 'R', ROW_ICON_PX,
+                                ctrl_color(FOCUS_FF));
 
     // ---- Audio / CC (right of the seek bar, same row) ----
     int audio_icon_y = audio_cy - (int)(MUSIC_ICON_PX * 0.5f);

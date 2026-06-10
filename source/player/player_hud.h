@@ -36,6 +36,9 @@ void      hud_set_audio_label(const char *label);
 // Mark the CC button active (subtitles on) — draws an accent underline.
 void      hud_set_cc_active(bool active);
 
+// Item title — shown top-left while playback is paused.
+void      hud_set_title(const char *title);
+
 // Open a popup menu above the control bar (e.g. track selection).  The HUD
 // copies the item POINTERS only — the strings must outlive the menu.
 // current marks the active entry (accent dot); it is also the initial cursor.

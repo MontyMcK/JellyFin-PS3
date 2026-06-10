@@ -264,6 +264,7 @@ void show_player(const JFItem *item) {
     // The button always reads "AUDIO" — track names are too long for the HUD
     // row; the selected track is plogged when cycled.
     hud_init(total_secs, NULL);
+    hud_set_title(item->name);
     plog("hud: prewarm start");
     ttf_prewarm_hud();
     plog("hud: prewarm done");
