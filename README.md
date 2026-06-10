@@ -295,22 +295,53 @@ JellyFin---PS3/
     |-- net/
     |   `-- http.cpp/h             # HTTP client
     |-- player/
-    |   |-- player.cpp/h           # Playback orchestrator, display loop, seek control
-    |   |-- player_internal.h      # Shared player state, DecodeCtx
-    |   |-- player_threads.cpp     # Decode / upload / audio thread bodies
-    |   |-- player_gpu.cpp         # vid_gpu_draw wrapper
-    |   |-- player_rsx.cpp/h       # RSX frame draw (blit + crossfade)
-    |   |-- player_hud.cpp/h       # HUD overlay, seek bar, dim strip, input mapping
-    |   `-- stream.cpp/h           # HTTP MPEG-TS reader (chunked transfer, TS ring)
+    |   |-- player.h               # Public entry point (show_player)
+    |   |-- player_hud.h           # Public HUD API (actions, draw, menus)
+    |   |-- player_internal.h      # PlayerState, thread contexts, internal API
+    |   |-- core/
+    |   |   |-- player.cpp         # Orchestrator: session setup, display loop, teardown
+    |   |   |-- player_session.cpp # Stream URL builder, error screen, prefill
+    |   |   |-- player_menu.cpp    # AUDIO / CC track popup handling
+    |   |   |-- player_seek.cpp    # R2/L2 tap/hold machine + flush-and-reopen seek
+    |   |   `-- player_display.cpp # Blend gate, frame swap, HUD overlay, diagnostics
+    |   |-- hud/
+    |   |   |-- hud_core.cpp       # HUD state, input, focus navigation, public API
+    |   |   |-- hud_dim.cpp        # Dim quad (inline GPU / CPU / array-fetch paths)
+    |   |   `-- hud_draw.cpp       # Seek bar, transport row, popup menu rendering
+    |   |-- gpu/
+    |   |   |-- player_gpu.cpp     # RSX buffer alloc/free, vid_gpu_draw wrapper
+    |   |   `-- player_rsx.cpp/h   # RSX frame draw (blit + crossfade)
+    |   |-- threads/
+    |   |   `-- player_threads.cpp # Decode / upload / audio thread bodies + spawn
+    |   `-- stream/
+    |       `-- stream.cpp/h       # HTTP MPEG-TS reader (chunked transfer, TS ring)
     |-- ui/
-    |   |-- ui.cpp/h               # Main menu, browse/search loop, OSK, tab detection
-    |   |-- ui_nav.cpp             # Navigation logic
-    |   |-- ui_search.cpp          # Search loop
-    |   |-- ui_info.cpp            # Item info overlay
-    |   |-- ui_visuals.cpp/h       # XMB draw calls
-    |   |-- ui_wave.cpp/h          # Animated wave background (RSX)
-    |   |-- material_icons.h       # Material Icons (embedded)
-    |   `-- iconic_psx.h           # PSX-style iconography
+    |   |-- ui.cpp/h               # UI lifecycle (init / RSX state restore / cleanup)
+    |   |-- ui_visuals.h           # Shared XMB layout constants, state externs, draw API
+    |   |-- ui_internal.h          # Cross-file declarations internal to the UI module
+    |   |-- input/
+    |   |   `-- ui_input.cpp       # Multi-pad polling, edge detection, nav auto-repeat
+    |   |-- osk/
+    |   |   `-- ui_osk_login.cpp   # Login on-screen keyboard (get_input)
+    |   |-- xmb/
+    |   |   |-- ui_xmb.cpp         # XMB main loop (input dispatch + draw phases)
+    |   |   |-- ui_xmb_state.cpp   # Tab/item/navigation globals
+    |   |   |-- ui_nav.cpp         # Tab switching + browse input handlers
+    |   |   |-- ui_fetch.cpp       # Library fetch + sliding-window pagination
+    |   |   |-- ui_search.cpp      # Search tab input + live search
+    |   |   |-- ui_info.cpp        # Triangle item info overlay
+    |   |   `-- ui_json.cpp        # JSON parsing helpers (parse_xmb_items)
+    |   |-- render/
+    |   |   |-- ui_text.cpp        # Fonts: TTF/icons/iconic rendering, prewarm
+    |   |   |-- ui_draw.cpp        # Primitives: clears, CPU rects, unicode decode
+    |   |   |-- ui_widgets.cpp     # Tab bar, jump bar, hints bar, topbar L1/R1
+    |   |   |-- ui_lists.cpp       # Item/sub-list rows, thumbnails, meta line
+    |   |   |-- ui_osk_draw.cpp    # Search OSK + results rendering
+    |   |   |-- ui_settings.cpp    # Settings tab rendering
+    |   |   `-- ui_wave.cpp/h      # Animated wave background (RSX)
+    |   `-- fonts/
+    |       |-- material_icons.h   # Material Icons (embedded)
+    |       `-- iconic_psx.h       # PSX-style iconography
     |-- util/
     |   |-- timing.cpp/h           # Frame pacing, Bresenham accumulator, AV sync EMA
     |   `-- plog.cpp/h             # Async ring-buffer logging

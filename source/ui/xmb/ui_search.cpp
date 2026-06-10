@@ -3,8 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "ui.h"
-#include "ui_visuals.h"
+#include "ui_internal.h"
 #include "jellyfin_api.h"
 #include "player.h"
 #include "plog.h"
@@ -33,13 +32,6 @@ int  g_search_results_count = 0;
 XMBItem g_search_results[XMB_ITEMS_MAX];
 
 int OSK_Y0 = 0;
-
-// Forward declarations (defined in ui/ui_nav.cpp)
-void xmb_switch_tab(int new_tab);
-int  xmb_next_enabled(int start, int dir);
-
-// Defined in ui.cpp
-int parse_xmb_items(const char *json, XMBItem *arr, int max);
 
 static int osk_row_len(int r) {
     if (r >= OSK_ROWS_N)

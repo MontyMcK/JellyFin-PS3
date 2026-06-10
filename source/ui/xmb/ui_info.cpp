@@ -7,15 +7,12 @@
 #include <sysutil/sysutil.h>
 #include <io/pad.h>
 
-#include "ui.h"
-#include "ui_visuals.h"
+#include "ui_internal.h"
 #include "ui_wave.h"
 #include "jellyfin_api.h"
 #include "rsxutil.h"
 #include "timing.h"
 #include "plog.h"
-
-extern u64 g_info_cooldown_until;
 
 void xmb_show_item_info(const XMBItem *it) {
     {

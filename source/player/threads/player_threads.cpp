@@ -1,4 +1,5 @@
-// Decode, audio, and upload thread functions.
+// Decode, audio, and upload thread functions, plus the decode-thread
+// spawn helper shared by the initial open and the post-seek respawn.
 
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,31 @@
 #include "player_internal.h"
 
 extern u32 running;
+
+// -------------------------------------------------------
+// Decode-thread spawn — initial open and post-seek respawn
+// -------------------------------------------------------
+
+bool player_spawn_decode(PlayerState *ps) {
+    if (!ps->playing) return false;
+    ps->dec_ctx.playing     = &ps->playing;
+    ps->dec_ctx.frame_count = &ps->frame_count;
+    ps->dec_ctx.sock        = ps->sock;
+    ps->dec_ctx.dec_run     = &ps->dec_run;
+    ps->dec_run = true;
+    int trc = sysThreadCreate(&ps->dec_tid, decode_thread_fn,
+                              (void *)&ps->dec_ctx,
+                              800, 128 * 1024,
+                              0, "jf_decode");
+    if (trc != 0) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "player: dec thread_create FAILED rc=%d", trc);
+        plog(buf);
+        ps->playing = false;
+        return false;
+    }
+    return true;
+}
 
 // -------------------------------------------------------
 // Decode thread  (Steps 2, 5c, 8b)
