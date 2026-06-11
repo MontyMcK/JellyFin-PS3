@@ -112,12 +112,13 @@ void decode_thread_fn(void *arg) {
             char buf[160];
             long avg_ms = stall_ep_count ? stall_ep_dur_total_us / stall_ep_count / 1000 : 0;
             snprintf(buf, sizeof(buf),
-                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f netq=%d",
+                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d",
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
-                display_fps, 0);
+                display_fps, s_au_inflight_max);
             plog(buf);
+            s_au_inflight_max = 0;
             stall_ep_count = stall_ep_dur_max_us = stall_ep_dur_total_us = 0;
         }
     }

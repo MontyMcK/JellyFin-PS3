@@ -122,6 +122,17 @@ static int ts_process(TSState *ts, const u8 *pkt,
         if (ts->pes_started && plen > 0) {
             int room = (int)sizeof(ts->pes_buf) - ts->pes_len;
             int copy = plen < room ? plen : room;
+            if (copy < plen) {
+                // Truncated PES = corrupted AU = corruption until next IDR.
+                static int s_trunc_log = 0;
+                if (s_trunc_log < 20) {
+                    s_trunc_log++;
+                    char buf[64];
+                    snprintf(buf, sizeof(buf),
+                        "PES_TRUNC: video PES > %d bytes", (int)sizeof(ts->pes_buf));
+                    plog(buf);
+                }
+            }
             memcpy(ts->pes_buf + ts->pes_len, pay, copy);
             ts->pes_len += copy;
         }
@@ -188,6 +199,13 @@ volatile int  s_frames_ready = 0;
 volatile int  s_au_done      = 0;
 int           s_au_submitted = 0;
 static bool   s_got_sps      = false;
+
+// In-flight AU tracking (diagnostic): AUs actually handed to VDEC minus
+// AUDONE callbacks received.  If this reaches AU_BUF_COUNT at buffer-reuse
+// time, vdec_submit is overwriting a buffer the decoder may still be
+// reading — bitstream corruption that smears until the next IDR.
+static int   s_au_sent         = 0;
+volatile int s_au_inflight_max = 0;
 
 static u32 vdec_cb(u32 handle, u32 msgtype, u32 msgdata, u32 arg) {
     (void)handle; (void)msgdata; (void)arg;
@@ -311,6 +329,7 @@ void vdec_flush(void) {
     s_au_buf_idx   = 0;
     s_frames_ready = 0;
     s_au_done      = 0;
+    s_au_sent      = 0;
     s_vdec_error   = false;
     vdecStartSequence(s_vdec);
 }
@@ -321,11 +340,25 @@ void vdec_reset_counters(void) {
     s_au_buf_idx   = 0;
     s_frames_ready = 0;
     s_au_done      = 0;
+    s_au_sent      = 0;
     s_vdec_error   = false;
 }
 
 static void vdec_submit(const u8 *data, int len, u64 pts) {
-    if (len <= 0 || len > AU_BUF_SIZE) return;
+    if (len > AU_BUF_SIZE) {
+        // Dropped AU = missing reference frame = corruption until next IDR.
+        static int s_drop_log = 0;
+        if (s_drop_log < 20) {
+            s_drop_log++;
+            char buf[80];
+            snprintf(buf, sizeof(buf),
+                "AU_DROP: len=%d > buf=%d au#%d (corrupt until IDR)",
+                len, AU_BUF_SIZE, s_au_submitted);
+            plog(buf);
+        }
+        return;
+    }
+    if (len <= 0) return;
     {
         static int s_in_pts_log = 0;
         if (s_in_pts_log < 10) {
@@ -360,6 +393,44 @@ static void vdec_submit(const u8 *data, int len, u64 pts) {
     s_au_submitted++;
 
     if (!s_got_sps) return;
+
+    // VDEC reads the submitted AU buffer asynchronously and signals AUDONE
+    // when finished.  Movian blocks on that callback before releasing the
+    // buffer; do the same here — wait until the slot we are about to reuse
+    // has been consumed, or its old bitstream gets overwritten mid-read
+    // (= corrupted macroblocks smearing until the next IDR).
+    {
+        int inflight = s_au_sent - s_au_done;
+        if (inflight > s_au_inflight_max) s_au_inflight_max = inflight;
+        int waits = 0;
+        while (s_au_sent - s_au_done >= AU_BUF_COUNT && waits < 500) {
+            usleep(1000);
+            waits++;
+        }
+        if (waits > 0) {
+            static int s_wait_log = 0;
+            if (s_wait_log < 20) {
+                s_wait_log++;
+                char buf[80];
+                snprintf(buf, sizeof(buf), "au_wait: %dms inflight=%d au#%d",
+                         waits, inflight, s_au_submitted);
+                plog(buf);
+            }
+        }
+        if (s_au_sent - s_au_done >= AU_BUF_COUNT) {
+            // AUDONE never came (decoder wedged?) — overwrite anyway rather
+            // than hang playback, but make it loud in the log.
+            static int s_ovw_log = 0;
+            if (s_ovw_log < 40) {
+                s_ovw_log++;
+                char buf[96];
+                snprintf(buf, sizeof(buf),
+                    "AU_OVERWRITE: inflight=%d >= bufs=%d au#%d (after wait)",
+                    s_au_sent - s_au_done, AU_BUF_COUNT, s_au_submitted);
+                plog(buf);
+            }
+        }
+    }
 
     u8 *au_buf = s_au_bufs[s_au_buf_idx % AU_BUF_COUNT];
     s_au_buf_idx++;
@@ -398,6 +469,7 @@ static void vdec_submit(const u8 *data, int len, u64 pts) {
         plog(buf);
         return;
     }
+    s_au_sent++;
 }
 
 // -------------------------------------------------------
@@ -655,6 +727,8 @@ void video_reset(void) {
     s_au_buf_idx   = 0;
     s_frames_ready = 0;
     s_au_done      = 0;
+    s_au_sent      = 0;
+    s_au_inflight_max = 0;
     s_vdec_error   = false;
     s_timing_ready = false;
 }

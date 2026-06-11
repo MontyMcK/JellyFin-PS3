@@ -57,6 +57,11 @@ extern int           s_au_submitted;
 extern volatile int  s_au_done;
 extern volatile int  s_frames_ready;
 
+// Peak (sent - AUDONE) seen since last heartbeat; reaching AU_BUF_COUNT (4)
+// means an AU buffer was overwritten while VDEC could still be reading it.
+// The heartbeat logs and resets it.
+extern volatile int  s_au_inflight_max;
+
 // Set true once fps detection completes and timing_init has been called
 // with the detected rate; display loop must not pop frames until then.
 extern volatile bool s_timing_ready;

@@ -27,6 +27,13 @@ static char s_chdr[32];
 static int  s_chdr_n      = 0;
 static int  s_ctrail       = 0;
 
+// Partial-read carry: bytes already consumed from the TCP stream when a
+// receive timeout interrupts a packet read.  Without this, returning 0
+// mid-packet DISCARDS those bytes — the TS stream desyncs and the decoder
+// conceals the resulting garbage with stale macroblocks until the next IDR.
+static u8   s_carry[188];   // one TS packet — the only read size callers use
+static int  s_carry_n = 0;
+
 int stream_open(const char *url) {
     const char *p = url;
     if (strncmp(p, "http://", 7) == 0) p += 7;
@@ -126,6 +133,7 @@ int stream_open(const char *url) {
     s_chunk_remain = -1;
     s_chdr_n       = 0;
     s_ctrail       = 0;
+    s_carry_n      = 0;
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "stream_open: status=%d chunked=%d", status, (int)s_chunked);
@@ -136,19 +144,40 @@ int stream_open(const char *url) {
     return sock;
 }
 
+// Stash the partial packet so the next call resumes instead of losing bytes.
+static int stream_save_carry(const u8 *buf, int got) {
+    if (got > 0 && got <= (int)sizeof(s_carry)) {
+        memcpy(s_carry, buf, got);
+        s_carry_n = got;
+        static int s_carry_log = 0;
+        if (s_carry_log < 20) {
+            s_carry_log++;
+            char lb[48];
+            snprintf(lb, sizeof(lb), "stream_carry: saved=%d", got);
+            plog(lb);
+        }
+    }
+    return 0;
+}
+
 int stream_read(int sock, u8 *buf, int size) {
     int got = 0;
+    // Resume a packet interrupted by a receive timeout on a previous call.
+    if (s_carry_n > 0) {
+        got = s_carry_n <= size ? s_carry_n : size;
+        memcpy(buf, s_carry, got);
+        s_carry_n = 0;
+    }
     while (got < size) {
         if (!s_chunked) {
             u64 t0 = timing_get_us();
             int n = netRecv(sock, buf + got, size - got, 0);
             u64 dt = timing_get_us() - t0;
-            if (n <= 0) {
-                char lb[48];
-                snprintf(lb, sizeof(lb), "net_error: rc=%d", n);
-                plog(lb);
-                return (n == 0) ? -1 : 0;
+            if (n == 0) {
+                plog("net_error: rc=0 (closed)");
+                return -1;
             }
+            if (n < 0) return stream_save_carry(buf, got);   // timeout: resume later
             if (dt > 50000) {
                 char lb[64];
                 snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
@@ -163,7 +192,7 @@ int stream_read(int sock, u8 *buf, int size) {
             u8 c;
             int n = netRecv(sock, &c, 1, 0);
             if (n == 0) return -1;
-            if (n <  0) return  0;
+            if (n <  0) return stream_save_carry(buf, got);   // timeout: resume later
             s_ctrail--;
             continue;
         }
@@ -172,7 +201,7 @@ int stream_read(int sock, u8 *buf, int size) {
             u8 c;
             int n = netRecv(sock, &c, 1, 0);
             if (n == 0) return -1;
-            if (n <  0) return  0;
+            if (n <  0) return stream_save_carry(buf, got);   // timeout: resume later
             if (c == '\n') {
                 int llen = s_chdr_n;
                 while (llen > 0 && (s_chdr[llen-1] == '\r' || s_chdr[llen-1] == ' '))
@@ -192,12 +221,11 @@ int stream_read(int sock, u8 *buf, int size) {
         u64 t0 = timing_get_us();
         int n = netRecv(sock, buf + got, want, 0);
         u64 dt = timing_get_us() - t0;
-        if (n <= 0) {
-            char lb[48];
-            snprintf(lb, sizeof(lb), "net_error: rc=%d", n);
-            plog(lb);
-            return (n == 0) ? -1 : 0;
+        if (n == 0) {
+            plog("net_error: rc=0 (closed)");
+            return -1;
         }
+        if (n < 0) return stream_save_carry(buf, got);   // timeout: resume later
         if (dt > 50000) {
             char lb[64];
             snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",

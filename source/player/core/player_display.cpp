@@ -13,6 +13,10 @@
 #include "plog.h"
 #include "rsxutil.h"
 
+// A/B test knob: define to disable the temporal crossfade entirely (every
+// frame displays as pure-A, Bresenham pulldown only).  Ghosting on flat-color
+// content (cartoons) that disappears with this set implicates the blend.
+
 // fps detection timeout — needed only to initialise the Bresenham fallback.
 static void check_fps_fallback(PlayerState *ps) {
     if (s_timing_ready) return;
@@ -25,6 +29,7 @@ static void check_fps_fallback(PlayerState *ps) {
 }
 
 // Refresh-rate stability diagnostic: poll videoGetState every 300 vblanks.
+// Fuck Ninja
 static void log_refresh_rate(void) {
     static u64  s_rr_vblank   = 0;
     static u16  s_last_rr     = 0;
@@ -89,7 +94,11 @@ void player_display_frame(PlayerState *ps) {
         { u64 vpts = jbuf_peek_pts_us(); (void)avsync_compute_diff(vpts); }
 
         s64  dur_a = jbuf_peek_dur();
+#ifdef VID_DISABLE_BLEND
+        bool b_ok  = false;   // force pure-A: no crossfade ever
+#else
         bool b_ok  = (jbuf_peek_next() != NULL) && s_vid_b_present;
+#endif
 
         if (!b_ok || dur_a >= vblank_period_us) {
             // Pure-A: consume one vblank period, pop if frame exhausted
