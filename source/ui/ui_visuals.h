@@ -6,12 +6,13 @@
 // XMB tab indices
 // -------------------------------------------------------
 #define XMB_TAB_SEARCH      0
-#define XMB_TAB_MOVIES      1
-#define XMB_TAB_TV          2
-#define XMB_TAB_MUSIC       3
-#define XMB_TAB_COLLECTIONS 4
-#define XMB_TAB_SETTINGS    5
-#define XMB_TAB_COUNT       6
+#define XMB_TAB_RESUME      1   // Continue Watching
+#define XMB_TAB_MOVIES      2
+#define XMB_TAB_TV          3
+#define XMB_TAB_MUSIC       4
+#define XMB_TAB_COLLECTIONS 5
+#define XMB_TAB_SETTINGS    6
+#define XMB_TAB_COUNT       7
 
 #define XMB_ITEMS_MAX 50
 #define XMB_PAGE_SIZE 25
@@ -50,7 +51,7 @@ typedef struct {
 #define XMB_THUMB_H     74
 #define XMB_ITEM_PAD    40
 
-// Centered narrow list layout
+// Centered narrow list layout (search results keep this style)
 #define XMB_LIST_W      780                         // ~60% of 1280
 #define XMB_ROW_H        88                         // row visual height
 #define XMB_ROW_GAP      16                         // vertical gap between rows
@@ -59,6 +60,40 @@ typedef struct {
 
 // Items visible simultaneously in the list area
 #define XMB_ITEMS_VIS ((int)((display_height - XMB_CONTENT_Y - XMB_BOTTOM_PAD) / XMB_ROW_STRIDE))
+
+// -------------------------------------------------------
+// Card grid layout (library tabs: Continue/Movies/TV/Collections)
+// 2 rows of cards.  Poster screens (Movies, TV series/seasons,
+// Collections) use portrait 2:3 cards; Continue Watching and episode
+// lists use landscape 16:9 stills — matching the image type Jellyfin
+// serves for each, so nothing gets cropped or stretched.  Every card
+// shows its title in the band below it, with the SELECTED card's
+// title drawn bigger/bold plus a meta line.
+// -------------------------------------------------------
+#define XMB_GRID_ROWS       2
+#define XMB_PORTRAIT_COLS   5
+#define XMB_LANDSCAPE_COLS  3
+#define XMB_CARD_GAP_X   24
+#define XMB_CARD_TEXT_H  50                         // text band under each row
+// Cards are sized to fill the space between the content area and the hints
+// bar at any resolution.  The 26px reserve covers the breadcrumb offset on
+// sub-screens so the bottom row's text band never runs into the hints bar.
+#define XMB_GRID_AVAIL_H ((int)display_height - XMB_BOTTOM_PAD - XMB_GRID_Y0 - 26)
+#define XMB_CARD_H_FIT   (XMB_GRID_AVAIL_H / XMB_GRID_ROWS - XMB_CARD_TEXT_H - 6)
+#define XMB_CARD_W_CAP   ((int)display_width * 300 / 1280)
+#define XMB_GRID_Y0      (XMB_CONTENT_Y + 8)
+
+// Resolved grid geometry for one tab (depends on tab + sub-screen depth).
+typedef struct {
+    bool portrait;      // 2:3 poster cards vs 16:9 landscape stills
+    int  cols, vis;     // columns and visible card count (cols * rows)
+    int  card_w, card_h;
+    int  stride;        // row stride incl. text band
+    int  grid_w, x0;    // total grid width and centered left edge
+} GridGeom;
+
+bool xmb_tab_uses_portrait(int tab);
+void xmb_grid_geom(int tab, GridGeom *gg);
 
 // Jump bar (narrow letter column to the left of the item list)
 #define JBAR_ENTRIES 27
@@ -150,12 +185,15 @@ void ttf_prewarm_hud(void);
 int  ttf_text_width(const char *text, float px);
 void xmb_draw_tabs(void);
 void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14);
-void xmb_draw_item_list(int tab);
-void xmb_cpu_draw_items(int tab);
-void xmb_cpu_draw_sub(void);
-void xmb_draw_sub_list(void);
-void xmb_cpu_draw_col_sub(void);
-void xmb_draw_col_sub_list(void);
+
+// Card grid (library tabs).  Two phases per frame (after rsxSync):
+//   cpu   — card images (CPU blit from main RAM), placeholders, selection
+//           border, progress strips, next-page prefetch
+//   text  — titles under every card (selected emphasized) + scroll arrows
+void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
+                  int sel, int scroll, int y0);
+void xmb_grid_text(const GridGeom *gg, const XMBItem *items, int count,
+                   int sel, int scroll, int y0, bool more_below);
 void xmb_rsx_draw_osk(void);
 void xmb_cpu_draw_osk(void);
 void xmb_cpu_draw_search_results(void);

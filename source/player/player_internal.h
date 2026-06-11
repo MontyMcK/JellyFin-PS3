@@ -31,6 +31,10 @@ void decode_thread_fn(void *arg);
 void audio_thread_fn(void *arg);
 void upload_thread_fn(void *arg);
 
+// Playback-state reporter — posts position to Jellyfin every ~10 s so the
+// server's Continue Watching list tracks PS3 playback.  arg = PlayerState*.
+void progress_thread_fn(void *arg);
+
 // -------------------------------------------------------
 // Per-session player state, shared between the core/ files.
 // One instance lives in show_player() for the playback session.

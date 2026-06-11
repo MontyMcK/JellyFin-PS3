@@ -30,6 +30,40 @@ static void xmb_reset_state(void) {
     g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
 }
 
+// Resolve the card-grid view for the current tab: grid geometry, which item
+// array, count, selection, scroll, grid origin, and whether more rows exist
+// below.  Returns false for tabs that don't use the grid
+// (search/settings/music).
+static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
+                          int *count, int *sel, int *scroll, int *y0,
+                          bool *more_below) {
+    if (tab == XMB_TAB_SEARCH || tab == XMB_TAB_SETTINGS || tab == XMB_TAB_MUSIC)
+        return false;
+    xmb_grid_geom(tab, gg);
+    if (tab == XMB_TAB_TV && g_tv_depth > 0) {
+        *items = g_tv_sub_items;  *count = g_tv_sub_count;
+        *sel   = g_tv_sub_sel;    *scroll = g_tv_sub_scroll;
+        *y0    = XMB_GRID_Y0 + 26;
+        *more_below = g_tv_sub_scroll + gg->vis < g_tv_sub_count ||
+                      g_tv_sub_start + g_tv_sub_count < g_tv_sub_total;
+        return true;
+    }
+    if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
+        *items = g_col_sub_items; *count = g_col_sub_count;
+        *sel   = g_col_sub_sel;   *scroll = g_col_sub_scroll;
+        *y0    = XMB_GRID_Y0 + 26;
+        *more_below = g_col_sub_scroll + gg->vis < g_col_sub_count ||
+                      g_col_sub_start + g_col_sub_count < g_col_sub_total;
+        return true;
+    }
+    *items = g_items[tab];  *count = g_item_count[tab];
+    *sel   = g_sel;         *scroll = g_scroll_top;
+    *y0    = XMB_GRID_Y0;
+    *more_below = g_scroll_top + gg->vis < g_item_count[tab] ||
+                  g_tab_start[tab] + g_item_count[tab] < g_tab_total[tab];
+    return true;
+}
+
 // CPU draw phase — direct framebuffer writes, runs after rsxSync().
 static void xmb_draw_cpu_phase(int tab) {
     // Divider line
@@ -41,13 +75,10 @@ static void xmb_draw_cpu_phase(int tab) {
         xmb_cpu_draw_search_results();
     } else if (tab == XMB_TAB_SETTINGS) {
         xmb_cpu_draw_settings();
-    } else if (tab != XMB_TAB_MUSIC) {
-        if (tab == XMB_TAB_TV && g_tv_depth > 0)
-            xmb_cpu_draw_sub();
-        else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0)
-            xmb_cpu_draw_col_sub();
-        else
-            xmb_cpu_draw_items(tab);
+    } else {
+        GridGeom gg; const XMBItem *items; int count, sel, scroll, y0; bool more;
+        if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0, &more))
+            xmb_grid_cpu(&gg, items, count, sel, scroll, y0);
     }
 }
 
@@ -69,33 +100,41 @@ static void xmb_draw_text_phase(int tab) {
         xmb_draw_settings();
     } else if (tab == XMB_TAB_MUSIC) {
         drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 40), "Coming soon", 22, 0x00FFFFFF);
-        xmb_draw_jumpbar(tab);
-    } else if (tab == XMB_TAB_TV && g_tv_depth > 0) {
-        char crumb[256];
-        if (g_tv_depth == 1)
-            snprintf(crumb, sizeof(crumb), "%s > Seasons", g_tv_series_name);
-        else
-            snprintf(crumb, sizeof(crumb), "%s > %s > Episodes",
-                     g_tv_series_name, g_tv_season_name);
-        drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
-        if (g_tv_sub_count == 0)
-            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 46), "No items.", 16, 0x00FFFFFF);
-        else
-            xmb_draw_sub_list();
-    } else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
-        char crumb[256];
-        snprintf(crumb, sizeof(crumb), "%s > Movies", g_col_name);
-        drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
-        if (g_col_sub_count == 0)
-            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 46), "No items.", 16, 0x00FFFFFF);
-        else
-            xmb_draw_col_sub_list();
     } else {
-        if (g_items_loaded[tab] && g_item_count[tab] == 0)
-            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 20), "No items.", 16, 0x00FFFFFF);
-        else
-            xmb_draw_item_list(tab);
-        xmb_draw_jumpbar(tab);
+        // Card-grid tabs: breadcrumb (sub-screens), empty text, grid labels.
+        if (tab == XMB_TAB_TV && g_tv_depth > 0) {
+            char crumb[256];
+            if (g_tv_depth == 1)
+                snprintf(crumb, sizeof(crumb), "%s > Seasons", g_tv_series_name);
+            else
+                snprintf(crumb, sizeof(crumb), "%s > %s > Episodes",
+                         g_tv_series_name, g_tv_season_name);
+            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
+        } else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
+            char crumb[256];
+            snprintf(crumb, sizeof(crumb), "%s > Movies", g_col_name);
+            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
+        }
+
+        GridGeom gg; const XMBItem *items; int count, sel, scroll, y0; bool more;
+        if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0, &more)) {
+            bool sub = (tab == XMB_TAB_TV && g_tv_depth > 0) ||
+                       (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0);
+            if (count == 0) {
+                bool loaded = sub || g_items_loaded[tab];
+                if (loaded)
+                    drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 46),
+                            tab == XMB_TAB_RESUME ? "Nothing in progress."
+                                                  : "No items.",
+                            16, 0x00FFFFFF);
+            } else {
+                xmb_grid_text(&gg, items, count, sel, scroll, y0, more);
+            }
+            // Letter jump bar on library tabs at depth 0 (not the resume
+            // list — it isn't alphabetical).
+            if (!sub && tab != XMB_TAB_RESUME)
+                xmb_draw_jumpbar(tab);
+        }
     }
 }
 
@@ -126,6 +165,9 @@ static void xmb_draw_hints(int tab) {
     } else if (g_jumpbar_active) {
         static const Hint h[] = {{'D',"NAV"},{'X',"FILTER"},{'C',"CANCEL"}};
         draw_hints_bar(h, 3);
+    } else if (tab == XMB_TAB_RESUME) {
+        static const Hint h[] = {{'D',"NAV"},{'X',"RESUME"},{'C',"BACK"},{'T',"INFO"}};
+        draw_hints_bar(h, 4);
     } else {
         static const Hint h[] = {{'D',"NAV"},{'E',"JUMP"},{'X',"SELECT"},{'C',"BACK"},{'T',"INFO"}};
         draw_hints_bar(h, 5);

@@ -80,6 +80,26 @@ void xmb_fetch_tab_items(int tab) {
     g_tab_start[tab]  = 0;
     g_tab_total[tab]  = 0;
 
+    // Continue Watching — the server's resume list (no library / pagination;
+    // items carry UserData with PlaybackPositionTicks + PlayedPercentage).
+    if (tab == XMB_TAB_RESUME) {
+        char url[512];
+        snprintf(url, sizeof(url),
+            "%s/Users/%s/Items/Resume?Limit=%d&Recursive=true"
+            "&MediaTypes=Video"
+            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
+            g_server, g_userid, XMB_ITEMS_MAX);
+        int status = http_request(0, url, NULL, g_token,
+                                  responseBuffer, RESPONSE_SIZE);
+        if (status == 200) {
+            g_item_count[tab] = parse_xmb_items(responseBuffer,
+                                                g_items[tab], XMB_ITEMS_MAX);
+            g_tab_total[tab]  = g_item_count[tab];
+        }
+        g_items_loaded[tab] = true;
+        return;
+    }
+
     const char *lib_id = g_tabs[tab].library_id;
     if (!lib_id[0]) { g_items_loaded[tab] = true; return; }
 

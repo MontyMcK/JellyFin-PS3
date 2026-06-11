@@ -39,6 +39,9 @@ void xmb_switch_tab(int new_tab) {
     if (new_tab == XMB_TAB_SETTINGS) {
         g_settings_sel = 0; g_settings_confirm = false;
     }
+    // The resume list changes after every playback — refetch on entry.
+    if (new_tab == XMB_TAB_RESUME)
+        g_items_loaded[XMB_TAB_RESUME] = false;
 }
 
 int xmb_next_enabled(int start, int dir) {
@@ -51,12 +54,13 @@ int xmb_next_enabled(int start, int dir) {
 }
 
 // Launch the player for one list item, mapping XMBItem -> JFItem.
-static void xmb_play_item(const XMBItem *it) {
+// resume_secs > 0 starts playback at that position (Continue Watching).
+static void xmb_play_item(const XMBItem *it, u32 resume_secs) {
     JFItem jf; memset(&jf, 0, sizeof(jf));
     strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
     strncpy(jf.name, it->name, sizeof(jf.name)-1);
     strncpy(jf.type, it->type, sizeof(jf.type)-1);
-    show_player(&jf);
+    show_player(&jf, resume_secs);
 }
 
 // -------------------------------------------------------
@@ -83,28 +87,47 @@ static bool xmb_input_settings(void) {
     return false;
 }
 
-// TV sub-screen (Series -> Seasons -> Episodes).
-static void xmb_input_tv_sub(int vis) {
+// TV sub-screen (Series -> Seasons -> Episodes) — card grid.
+static void xmb_input_tv_sub(void) {
+    GridGeom gg;
+    xmb_grid_geom(XMB_TAB_TV, &gg);
+    const int C   = gg.cols;
+    const int VIS = gg.vis;
     if (BTN_PRESSED(circle)) {
         g_tv_depth--;
         g_tv_sub_sel = 0; g_tv_sub_scroll = 0; g_tv_sub_start = 0; g_tv_sub_total = 0;
         return;
     }
     if (BTN_REPEAT(up)) {
-        if (g_tv_sub_sel > 0) {
-            g_tv_sub_sel--;
-            if (g_tv_sub_sel < g_tv_sub_scroll) g_tv_sub_scroll = g_tv_sub_sel;
+        if (g_tv_sub_sel >= C) {
+            g_tv_sub_sel -= C;
+            if (g_tv_sub_sel < g_tv_sub_scroll)
+                g_tv_sub_scroll = (g_tv_sub_sel / C) * C;
         }
     }
     if (BTN_REPEAT(down)) {
-        if (g_tv_sub_sel < g_tv_sub_count - 1) {
-            g_tv_sub_sel++;
-            if (g_tv_sub_sel >= g_tv_sub_scroll + vis)
-                g_tv_sub_scroll = g_tv_sub_sel - vis + 1;
+        if (g_tv_sub_sel + C < g_tv_sub_count) {
+            g_tv_sub_sel += C;
+            if (g_tv_sub_sel >= g_tv_sub_scroll + VIS)
+                g_tv_sub_scroll += C;
+        } else if (g_tv_sub_sel / C < (g_tv_sub_count - 1) / C) {
+            g_tv_sub_sel = g_tv_sub_count - 1;
+            if (g_tv_sub_sel >= g_tv_sub_scroll + VIS)
+                g_tv_sub_scroll += C;
         } else if (g_tv_sub_start + g_tv_sub_count < g_tv_sub_total) {
             int first = xmb_slide_tv_sub_forward();
-            if (first >= 0) { g_tv_sub_sel = first; g_tv_sub_scroll = first; }
+            if (first >= 0) {
+                g_tv_sub_sel    = first;
+                g_tv_sub_scroll = (first / C) * C;
+            }
         }
+    }
+    if (BTN_REPEAT(right)) {
+        if ((g_tv_sub_sel % C) < C - 1 && g_tv_sub_sel + 1 < g_tv_sub_count)
+            g_tv_sub_sel++;
+    }
+    if (BTN_REPEAT(left)) {
+        if ((g_tv_sub_sel % C) > 0) g_tv_sub_sel--;
     }
     if (BTN_PRESSED(cross) && g_tv_sub_count > 0 && g_tv_sub_sel < g_tv_sub_count) {
         const XMBItem *it = &g_tv_sub_items[g_tv_sub_sel];
@@ -117,7 +140,7 @@ static void xmb_input_tv_sub(int vis) {
                                                  0, &g_tv_sub_total);
             g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
         } else {
-            xmb_play_item(it);
+            xmb_play_item(it, 0);
             g_tv_depth = 0;
             g_tv_sub_sel = 0;
             g_tv_sub_scroll = 0;
@@ -125,31 +148,50 @@ static void xmb_input_tv_sub(int vis) {
     }
 }
 
-// Collections sub-screen (Collection -> Movies).
-static void xmb_input_col_sub(int vis) {
+// Collections sub-screen (Collection -> Movies) — card grid.
+static void xmb_input_col_sub(void) {
+    GridGeom gg;
+    xmb_grid_geom(XMB_TAB_COLLECTIONS, &gg);
+    const int C   = gg.cols;
+    const int VIS = gg.vis;
     if (BTN_PRESSED(circle)) {
         g_col_depth = 0;
         g_col_sub_sel = 0; g_col_sub_scroll = 0; g_col_sub_start = 0; g_col_sub_total = 0;
         return;
     }
     if (BTN_REPEAT(up)) {
-        if (g_col_sub_sel > 0) {
-            g_col_sub_sel--;
-            if (g_col_sub_sel < g_col_sub_scroll) g_col_sub_scroll = g_col_sub_sel;
+        if (g_col_sub_sel >= C) {
+            g_col_sub_sel -= C;
+            if (g_col_sub_sel < g_col_sub_scroll)
+                g_col_sub_scroll = (g_col_sub_sel / C) * C;
         }
     }
     if (BTN_REPEAT(down)) {
-        if (g_col_sub_sel < g_col_sub_count - 1) {
-            g_col_sub_sel++;
-            if (g_col_sub_sel >= g_col_sub_scroll + vis)
-                g_col_sub_scroll = g_col_sub_sel - vis + 1;
+        if (g_col_sub_sel + C < g_col_sub_count) {
+            g_col_sub_sel += C;
+            if (g_col_sub_sel >= g_col_sub_scroll + VIS)
+                g_col_sub_scroll += C;
+        } else if (g_col_sub_sel / C < (g_col_sub_count - 1) / C) {
+            g_col_sub_sel = g_col_sub_count - 1;
+            if (g_col_sub_sel >= g_col_sub_scroll + VIS)
+                g_col_sub_scroll += C;
         } else if (g_col_sub_start + g_col_sub_count < g_col_sub_total) {
             int first = xmb_slide_col_sub_forward();
-            if (first >= 0) { g_col_sub_sel = first; g_col_sub_scroll = first; }
+            if (first >= 0) {
+                g_col_sub_sel    = first;
+                g_col_sub_scroll = (first / C) * C;
+            }
         }
     }
+    if (BTN_REPEAT(right)) {
+        if ((g_col_sub_sel % C) < C - 1 && g_col_sub_sel + 1 < g_col_sub_count)
+            g_col_sub_sel++;
+    }
+    if (BTN_REPEAT(left)) {
+        if ((g_col_sub_sel % C) > 0) g_col_sub_sel--;
+    }
     if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
-        xmb_play_item(&g_col_sub_items[g_col_sub_sel]);
+        xmb_play_item(&g_col_sub_items[g_col_sub_sel], 0);
         g_col_depth = 0;
         g_col_sub_sel = 0;
         g_col_sub_scroll = 0;
@@ -189,44 +231,60 @@ static void xmb_input_jumpbar(int tab) {
 bool xmb_handle_input_browse(void) {
     static bool s_movie_just_exited = false;
     int tab = g_active_tab;
-    int vis = XMB_ITEMS_VIS;
 
     if (tab == XMB_TAB_SETTINGS) return xmb_input_settings();
 
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
 
-    if (tab == XMB_TAB_TV && g_tv_depth > 0)           { xmb_input_tv_sub(vis);  return false; }
-    if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) { xmb_input_col_sub(vis); return false; }
+    if (tab == XMB_TAB_TV && g_tv_depth > 0)           { xmb_input_tv_sub();  return false; }
+    if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) { xmb_input_col_sub(); return false; }
 
     bool jbar_mode = g_jumpbar_active &&
         (tab == XMB_TAB_MOVIES || tab == XMB_TAB_TV ||
          tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS);
     if (jbar_mode) { xmb_input_jumpbar(tab); return false; }
 
-    // Normal browse
+    // Normal browse — 3-column card grid.
     if (BTN_PRESSED(circle)) return false;
 
     int count = g_item_count[tab];
+    GridGeom gg;
+    xmb_grid_geom(tab, &gg);
+    const int C   = gg.cols;
+    const int VIS = gg.vis;
 
     if (BTN_REPEAT(up)) {
-        if (g_sel > 0) {
-            g_sel--;
-            if (g_sel < g_scroll_top) g_scroll_top = g_sel;
+        if (g_sel >= C) {
+            g_sel -= C;
+            if (g_sel < g_scroll_top) g_scroll_top = (g_sel / C) * C;
         }
     }
     if (BTN_REPEAT(down)) {
-        if (g_sel < count - 1) {
-            g_sel++;
-            if (g_sel >= g_scroll_top + vis) g_scroll_top = g_sel - vis + 1;
+        if (g_sel + C < count) {
+            g_sel += C;
+            if (g_sel >= g_scroll_top + VIS) g_scroll_top += C;
+        } else if (g_sel / C < (count - 1) / C) {
+            g_sel = count - 1;          // partial last row
+            if (g_sel >= g_scroll_top + VIS) g_scroll_top += C;
         } else if (g_tab_start[tab] + count < g_tab_total[tab]) {
+            // Infinite scroll: slide the window forward one page.
             int first = xmb_slide_tab_forward(tab);
-            if (first >= 0) { g_sel = first; g_scroll_top = first; }
+            if (first >= 0) {
+                g_sel        = first;
+                g_scroll_top = (first / C) * C;
+            }
         }
     }
-
-    if (BTN_PRESSED(left) && (tab == XMB_TAB_MOVIES || tab == XMB_TAB_TV ||
-                               tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS)) {
+    if (BTN_REPEAT(right)) {
+        if ((g_sel % C) < C - 1 && g_sel + 1 < count) g_sel++;
+    }
+    if (BTN_REPEAT(left) && (g_sel % C) > 0) {
+        g_sel--;
+    } else if (BTN_PRESSED(left) && (g_sel % C) == 0 &&
+               (tab == XMB_TAB_MOVIES || tab == XMB_TAB_TV ||
+                tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS)) {
+        // Left at the first column opens the letter jump bar.
         const char *filt = g_tab_name_filter[tab];
         if (filt[0] == '#') {
             g_jumpbar_sel = 0;
@@ -262,7 +320,8 @@ bool xmb_handle_input_browse(void) {
                                                           0, &g_col_sub_total);
             g_col_depth = 1; g_col_sub_sel = 0; g_col_sub_scroll = 0;
         } else {
-            xmb_play_item(it);
+            // Continue Watching launches at the saved position.
+            xmb_play_item(it, tab == XMB_TAB_RESUME ? it->resume_secs : 0);
             s_movie_just_exited = true;
             init_btns();
             return false;

@@ -3,7 +3,6 @@
 
 #include "ui_visuals.h"
 
-// Blit one cached thumbnail (XMB_THUMB_W x XMB_THUMB_H) into the framebuffer
-// at (x, y), requesting it first; falls back to a dim placeholder rectangle
-// while the cache fills.  CPU draw — call after rsxSync().
-void xmb_blit_thumb(const char *item_id, int x, int y);
+// CPU-blit one cached thumbnail scaled to w x h at (x, y); dim placeholder
+// while the cache fills.  Call after rsxSync (ui_lists.cpp).
+void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y, int w, int h);

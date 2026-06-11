@@ -29,7 +29,7 @@
 
 extern void crash_log(const char *msg);
 
-void show_player(const JFItem *item) {
+void show_player(const JFItem *item, u32 resume_secs) {
     crash_log("p1 enter");
     plog("show_player: enter");
     plog("show_player: BUILD=seek-diag-1");
@@ -72,8 +72,20 @@ void show_player(const JFItem *item) {
     if (ps.have_tracks && ps.tracks.n_audio > 0)
         ps.cur_audio = ps.tracks.default_audio;
 
+    // Continue Watching: open the transcode at the saved position.  The new
+    // stream's PTS starts at 0, so play_base_us anchors the absolute clock —
+    // the same mechanism every seek uses.
+    if (ps.total_secs > 0 && resume_secs >= ps.total_secs)
+        resume_secs = 0;             // stale position at/past the end: restart
+    ps.play_base_us = (u64)resume_secs * 1000000ULL;
+    if (resume_secs > 0) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "resume: start at %us", resume_secs);
+        plog(buf);
+    }
+
     char url[768];
-    build_stream_url(url, sizeof(url), &ps, 0);
+    build_stream_url(url, sizeof(url), &ps, (u64)resume_secs * 10000000ULL);
     plog_url("url", url);
 
     drawHeader();
@@ -217,6 +229,20 @@ void show_player(const JFItem *item) {
         }
     }
 
+    // ---- Spawn progress reporter — keeps server resume position current ----
+    jellyfin_report_playing(item->id, ps.session_id, ps.play_base_us * 10ULL);
+    sys_ppu_thread_t prog_tid = 0;
+    if (ps.playing) {
+        int trc = sysThreadCreate(&prog_tid, progress_thread_fn,
+                                  (void *)&ps,
+                                  1100, 16 * 1024,
+                                  0, "jf_progress");
+        if (trc != 0) {
+            plog("show_player: progress thread_create failed (non-fatal)");
+            prog_tid = 0;
+        }
+    }
+
     crash_log("p9 threads started");
 
     crash_log("p10 loop");
@@ -293,6 +319,10 @@ void show_player(const JFItem *item) {
     timing_shutdown();
     hud_shutdown();
 
+    // Final position for the server's resume bookmark — read before the
+    // audio clock is torn down.
+    u64 final_pos_ticks = (ps.play_base_us + audio_get_clock_us()) * 10ULL;
+
     // Signal all threads to stop, join in order: decode → audio → upload
     ps.playing = false;
     usleep(16000);
@@ -312,7 +342,14 @@ void show_player(const JFItem *item) {
         sysThreadJoin(upl_tid, &tret);
         plog("show_player: upload thread joined");
     }
+    if (prog_tid) {
+        u64 tret;
+        sysThreadJoin(prog_tid, &tret);
+    }
     crash_log("p12 threads joined");
+
+    // Tell the server where we stopped (also finalizes Continue Watching).
+    jellyfin_report_stopped(item->id, ps.session_id, final_pos_ticks);
 
     // Free video GPU blit resources before releasing the jitter buffer
     vid_gpu_free();

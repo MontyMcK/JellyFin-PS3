@@ -13,7 +13,10 @@ Goal: consumer-quality media playback on PS3, the second-best media player on th
 ## Features
 
 - XMB-style UI with animated wave background
+- Card-grid browsing (3x3 landscape cards, title/info under the selected card) on all library tabs; search and settings keep the compact row UI
 - Browse Movies, TV Shows, and Collections libraries
+- Continue Watching tab: server resume list, watched-progress bars on thumbnails, playback resumes at the saved position
+- Playback progress reported to the server every 10s (Sessions/Playing + Progress + Stopped), so PS3 viewing updates Continue Watching everywhere
 - TV show browser, Series then Seasons then Episodes
 - Collections browser, Collection then Movies
 - Live search across your Jellyfin library (fires on every keystroke)
@@ -272,7 +275,8 @@ JellyFin---PS3/
     |   |-- jellyfin_api.cpp/h     # Jellyfin REST API surface and shared state
     |   |-- api_auth.cpp           # Login / authentication
     |   |-- api_browse.cpp         # Libraries, items, seasons, episodes, search
-    |   `-- api_detail.cpp         # Item detail, PlaybackInfo, transcode URL
+    |   |-- api_detail.cpp         # Item detail, PlaybackInfo, transcode URL
+    |   `-- api_playstate.cpp      # Playback progress reporting (Continue Watching)
     |-- audio/
     |   |-- audio.cpp/h            # Audio port, DMA ring buffer, audio thread, PTS clock
     |   |-- adec.cpp/h             # MP3 decode via minimp3, PCM ring buffer, adec_flush
@@ -359,6 +363,7 @@ JellyFin---PS3/
 | Movie browsing           | Working                                                           |
 | TV show browsing         | Working (Series, Seasons, Episodes)                               |
 | Collections browsing     | Working                                                           |
+| Continue Watching        | Working (resume tab, thumbnail progress bars, resume + reporting) |
 | Search                   | Working (live, keystroke-driven)                                  |
 | Item info overlay        | Working (overview, rating, genres, studios, video/audio info)     |
 | Thumbnail cache          | Working                                                           |

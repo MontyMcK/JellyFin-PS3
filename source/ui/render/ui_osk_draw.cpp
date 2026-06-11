@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "ui_render_internal.h"
+#include "thumbnail_cache.h"
 #include "timing.h"
 
 void xmb_cpu_draw_osk(void) {
@@ -116,7 +117,7 @@ void xmb_rsx_draw_osk(void) {
     }
 }
 
-// CPU draws for search results list (thumbs + selection highlight)
+// CPU draws for search results list (selection highlight + scaled thumbs).
 void xmb_cpu_draw_search_results(void) {
     int results_y = OSK_Y0 + (OSK_ROWS_N + 1) * OSK_STEP_Y + 20;
     int count     = g_search_results_count;
@@ -133,7 +134,9 @@ void xmb_cpu_draw_search_results(void) {
             drawRect((u32)(list_x - 5), (u32)iy,
                      4, (u32)XMB_ROW_H, XMB_ACCENT);
         }
-        xmb_blit_thumb(g_search_results[idx].id,
-                       list_x + 16, iy + (XMB_ROW_H - XMB_THUMB_H) / 2);
+        xmb_cpu_blit_thumb_scaled(g_search_results[idx].id,
+                                  list_x + 16,
+                                  iy + (XMB_ROW_H - XMB_THUMB_H) / 2,
+                                  XMB_THUMB_W, XMB_THUMB_H);
     }
 }

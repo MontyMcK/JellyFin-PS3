@@ -83,6 +83,16 @@ bool jellyfin_get_play_session_id(const char *item_id,
 // transcode (which began at offset 0) and the seek appears to reset to 0:00.
 void jellyfin_stop_transcode(const char *session_id);
 
+// Playback-state reporting (POST /Sessions/Playing{,/Progress,/Stopped}).
+// pos_ticks is the absolute position in Jellyfin 100-ns ticks.  These keep
+// the server's Continue Watching / resume positions up to date.
+void jellyfin_report_playing(const char *item_id, const char *session_id,
+                             unsigned long long pos_ticks);
+void jellyfin_report_progress(const char *item_id, const char *session_id,
+                              unsigned long long pos_ticks, bool paused);
+void jellyfin_report_stopped(const char *item_id, const char *session_id,
+                             unsigned long long pos_ticks);
+
 // Log out of the current session.  Best-effort notifies the server
 // (POST /Sessions/Logout), clears the in-memory credentials, and removes the
 // saved config so the next launch returns to the login screen.  The server URL

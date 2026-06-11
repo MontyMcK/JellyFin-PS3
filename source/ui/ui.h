@@ -25,6 +25,8 @@ typedef struct {
     char duration_str[16];  // "2h 49m"
     char genre[32];         // "Sci-Fi"
     char codec[12];         // "H.264"
+    u32  resume_secs;       // saved playback position (UserData), 0 = none
+    u8   progress_pct;      // 0-100 watched percentage (thumbnail bar)
 } XMBItem;
 
 // Defined in main.cpp; every input loop reads this.

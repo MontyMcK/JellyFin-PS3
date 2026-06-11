@@ -125,6 +125,17 @@ int parse_xmb_items(const char *json, XMBItem *arr, int max) {
 
         xmb_json_first_arr_str(obj, olen, "Genres", it.genre, sizeof(it.genre));
 
+        // UserData (nested object, but the key names are unique within the
+        // item): saved resume position + watched percentage.
+        long long pos_ticks = xmb_json_ll_range(obj, olen,
+                                                "PlaybackPositionTicks", 0);
+        it.resume_secs = (u32)(pos_ticks / 10000000LL);
+        int pct = xmb_json_int_range(obj, olen, "PlayedPercentage", 0);
+        if (pct <= 0 && pos_ticks > 0 && ticks > 0)
+            pct = (int)(pos_ticks * 100 / ticks);
+        if (pct > 100) pct = 100;
+        it.progress_pct = (u8)(pct > 0 ? pct : 0);
+
         char container[16] = "";
         xmb_json_str_range(obj, olen, "Container", container, sizeof(container));
         if (strstr(container, "hevc") || strstr(container, "h265") ||

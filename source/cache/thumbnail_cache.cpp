@@ -14,6 +14,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <malloc.h>
 
 #include <ppu-types.h>
 #include <sys/thread.h>
@@ -25,25 +26,29 @@
 #include "plog.h"
 #include "ui_visuals.h"
 
-#define THUMB_CACHE_SIZE  20
-#define FETCH_BUF_SIZE    (48*1024)
+// Largest visible page (portrait grid, 10) + the prefetched next page +
+// the previous page still warm, with headroom so prefetched pages don't
+// evict what's on screen.
+#define THUMB_CACHE_SIZE  32
+#define FETCH_BUF_SIZE    (256*1024)
 
 typedef enum { SLOT_EMPTY = 0, SLOT_QUEUED, SLOT_READY } SlotState;
 
 typedef struct {
     char      item_id[64];
-    Bitmap    bmp;
+    Bitmap    bmp;            // width/height = the size this slot was requested at
     SlotState state;
 } ThumbSlot;
 
 static ThumbSlot        s_slots[THUMB_CACHE_SIZE];
-static char             s_queue[THUMB_CACHE_SIZE][64];
+static int              s_queue[THUMB_CACHE_SIZE];   // slot indices
 static int              s_q_head     = 0;
 static int              s_q_tail     = 0;
 static volatile int     s_lock       = 0;
 static sys_ppu_thread_t s_thread     = 0;
 static volatile bool    s_running    = false;
 static int              s_evict_next = 0;
+static size_t           s_max_px     = 0;            // pixel capacity per slot
 static uint8_t          s_fetch_buf[FETCH_BUF_SIZE];
 
 static void lock_acquire(void) { while (!__sync_bool_compare_and_swap(&s_lock, 0, 1)) ; }
@@ -52,23 +57,24 @@ static void lock_release(void) { __sync_bool_compare_and_swap(&s_lock, 1, 0); }
 static bool q_empty(void) { return s_q_head == s_q_tail; }
 static bool q_full(void)  { return ((s_q_tail + 1) % THUMB_CACHE_SIZE) == s_q_head; }
 
-static void q_push(const char *id) {
-    strncpy(s_queue[s_q_tail], id, 63);
-    s_queue[s_q_tail][63] = '\0';
+static void q_push(int si) {
+    s_queue[s_q_tail] = si;
     s_q_tail = (s_q_tail + 1) % THUMB_CACHE_SIZE;
 }
 
-static bool q_pop(char *out) {
+static bool q_pop(int *si) {
     if (q_empty()) return false;
-    strncpy(out, s_queue[s_q_head], 63);
-    out[63] = '\0';
+    *si = s_queue[s_q_head];
     s_q_head = (s_q_head + 1) % THUMB_CACHE_SIZE;
     return true;
 }
 
-static int find_slot(const char *id) {
+// An item can be cached at several sizes (e.g. portrait in Movies and
+// landscape in Continue Watching), so a slot matches on id AND size.
+static int find_slot(const char *id, u32 w, u32 h) {
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         if (s_slots[i].state != SLOT_EMPTY &&
+            s_slots[i].bmp.width == w && s_slots[i].bmp.height == h &&
             strncmp(s_slots[i].item_id, id, 64) == 0)
             return i;
     }
@@ -97,22 +103,30 @@ static void fetch_thread_fn(void *arg) {
     char item_id[64];
 
     while (s_running) {
+        int si = -1;
         lock_acquire();
-        bool got = q_pop(item_id);
+        bool got = q_pop(&si);
+        int tw = 0, th = 0;
+        if (got && s_slots[si].state == SLOT_QUEUED) {
+            strncpy(item_id, s_slots[si].item_id, 63);
+            item_id[63] = '\0';
+            tw = (int)s_slots[si].bmp.width;
+            th = (int)s_slots[si].bmp.height;
+        } else {
+            got = false;
+        }
         lock_release();
 
         if (!got) { usleep(8000); continue; }
 
-        lock_acquire();
-        int si = find_slot(item_id);
-        lock_release();
-
-        if (si < 0 || s_slots[si].state != SLOT_QUEUED) continue;
-
+        // fillWidth/fillHeight = scale + centre-crop to exactly the card
+        // size (portrait posters or landscape stills as requested).
+        // format=Jpeg keeps PNG originals from arriving huge and slow.
         char url[512];
         snprintf(url, sizeof(url),
-            "%s/Items/%s/Images/Primary?width=%d&height=%d&quality=90",
-            g_server, item_id, (int)XMB_THUMB_W, (int)XMB_THUMB_H);
+            "%s/Items/%s/Images/Primary?fillWidth=%d&fillHeight=%d"
+            "&quality=75&format=Jpeg",
+            g_server, item_id, tw, th);
 
         int bytes = http_fetch_binary(url, g_token, s_fetch_buf, FETCH_BUF_SIZE);
         if (bytes <= 0) {
@@ -120,7 +134,7 @@ static void fetch_thread_fn(void *arg) {
             snprintf(msg, sizeof(msg), "thumb: fetch failed %s (%d)", item_id, bytes);
             plog(msg);
             lock_acquire();
-            if (find_slot(item_id) == si)
+            if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
             continue;
@@ -134,18 +148,26 @@ static void fetch_thread_fn(void *arg) {
             snprintf(msg, sizeof(msg), "thumb: decode failed %s", item_id);
             plog(msg);
             lock_acquire();
-            if (find_slot(item_id) == si)
+            if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
             continue;
         }
 
-        int total = (int)XMB_THUMB_W * (int)XMB_THUMB_H;
-        for (int i = 0; i < total; i++) {
-            u32 r = px[i*4+0];
-            u32 g = px[i*4+1];
-            u32 b = px[i*4+2];
-            s_slots[si].bmp.pixels[i] = (r << 16) | (g << 8) | b;
+        // Nearest-neighbour scale to exactly the card size — the server may
+        // return different dimensions than requested, and a straight clamped
+        // copy would letterbox instead of filling the card.  Every output
+        // pixel is written, so no pre-clear is needed.
+        Bitmap *bmp = &s_slots[si].bmp;
+        for (u32 y = 0; y < bmp->height; y++) {
+            u32 *dst = bmp->pixels + y * bmp->width;
+            const unsigned char *src =
+                px + (size_t)((u64)y * h / bmp->height) * w * 4;
+            for (u32 x = 0; x < bmp->width; x++) {
+                const unsigned char *s =
+                    src + (size_t)((u64)x * w / bmp->width) * 4;
+                dst[x] = ((u32)s[0] << 16) | ((u32)s[1] << 8) | s[2];
+            }
         }
         stbi_image_free(px);
 
@@ -165,8 +187,24 @@ static void fetch_thread_fn(void *arg) {
 void thumb_cache_init(void) {
     memset(s_slots, 0, sizeof(s_slots));
     s_q_head = s_q_tail = s_evict_next = 0;
-    for (int i = 0; i < THUMB_CACHE_SIZE; i++)
-        bitmapInit(&s_slots[i].bmp, XMB_THUMB_W, XMB_THUMB_H);
+    // Every slot is sized for the biggest card of either orientation; the
+    // actual bitmap dimensions are set per request.
+    GridGeom gp, gl;
+    xmb_grid_geom(XMB_TAB_MOVIES, &gp);   // portrait posters
+    xmb_grid_geom(XMB_TAB_RESUME, &gl);   // landscape stills
+    size_t pp = (size_t)gp.card_w * gp.card_h;
+    size_t pl = (size_t)gl.card_w * gl.card_h;
+    s_max_px  = (pp > pl) ? pp : pl;
+    // Pixels live in MAIN memory (not RSX local): the UI blits cards with
+    // the CPU every frame, and CPU reads of RSX-local memory are far too
+    // slow (and the GPU transfer engine proved freeze-prone for this).
+    for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
+        Bitmap *b = &s_slots[i].bmp;
+        b->width  = 0;
+        b->height = 0;
+        b->pixels = (u32*)memalign(16, s_max_px * 4);
+        b->offset = 0;
+    }
     s_running = true;
     sysThreadCreate(&s_thread, fetch_thread_fn, NULL, 1500, 65536, 0, "thumb_fetch");
 }
@@ -178,27 +216,34 @@ void thumb_cache_shutdown(void) {
         sysThreadJoin(s_thread, &tret);
         s_thread = 0;
     }
-    for (int i = 0; i < THUMB_CACHE_SIZE; i++)
-        bitmapDestroy(&s_slots[i].bmp);
+    for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
+        if (s_slots[i].bmp.pixels) { free(s_slots[i].bmp.pixels); s_slots[i].bmp.pixels = NULL; }
+    }
 }
 
-void thumb_request(const char *item_id) {
-    if (!item_id || !item_id[0]) return;
+void thumb_request(const char *item_id, int w, int h) {
+    if (!item_id || !item_id[0] || w <= 0 || h <= 0) return;
+    if ((size_t)w * (size_t)h > s_max_px) return;
     lock_acquire();
-    if (find_slot(item_id) >= 0) { lock_release(); return; }
+    if (find_slot(item_id, (u32)w, (u32)h) >= 0) { lock_release(); return; }
+    // Don't claim a slot we can't queue — it would stay QUEUED forever.
+    if (q_full()) { lock_release(); return; }
     int si = claim_slot();
     if (si < 0) { lock_release(); return; }
     strncpy(s_slots[si].item_id, item_id, 63);
     s_slots[si].item_id[63] = '\0';
+    s_slots[si].bmp.width  = (u32)w;
+    s_slots[si].bmp.height = (u32)h;
     s_slots[si].state = SLOT_QUEUED;
-    if (!q_full()) q_push(item_id);
+    q_push(si);
     lock_release();
 }
 
-const Bitmap *thumb_get(const char *item_id) {
+const Bitmap *thumb_get(const char *item_id, int w, int h) {
     if (!item_id || !item_id[0]) return NULL;
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         if (s_slots[i].state == SLOT_READY &&
+            s_slots[i].bmp.width == (u32)w && s_slots[i].bmp.height == (u32)h &&
             strncmp(s_slots[i].item_id, item_id, 64) == 0)
             return &s_slots[i].bmp;
     }

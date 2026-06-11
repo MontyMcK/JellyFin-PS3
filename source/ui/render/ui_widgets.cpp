@@ -9,6 +9,7 @@
 
 static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
     0xE8B6,  // XMB_TAB_SEARCH      (search/magnifier)
+    0xE889,  // XMB_TAB_RESUME      (history/clock-arrow)
     0xE54D,  // XMB_TAB_MOVIES      (movie/film)
     0xE333,  // XMB_TAB_TV          (TV)
     0xE3A1,  // XMB_TAB_MUSIC       (music note)
@@ -37,15 +38,13 @@ void xmb_draw_tabs(void) {
 // Alphabetical jump bar rendered to the left of the item list.
 // Always visible on library tabs at depth 0; letters are dimmed when unfocused,
 // accent-coloured on the selected entry when g_jumpbar_active is true.
-void xmb_draw_jumpbar(int /*tab*/) {
-    int W      = (int)display_width;
-    int list_x = (W - XMB_LIST_W) / 2;
-    int vis    = XMB_ITEMS_VIS;
-
-    int bar_top = XMB_CONTENT_Y;
-    int bar_bot = XMB_CONTENT_Y + vis * XMB_ROW_STRIDE - XMB_ROW_GAP;
+void xmb_draw_jumpbar(int tab) {
+    GridGeom gg;
+    xmb_grid_geom(tab, &gg);
+    int bar_top = XMB_GRID_Y0;
+    int bar_bot = XMB_GRID_Y0 + XMB_GRID_ROWS * gg.stride - XMB_CARD_TEXT_H;
     int bar_h   = bar_bot - bar_top;
-    int jbar_x  = list_x - JBAR_GAP - JBAR_W;
+    int jbar_x  = gg.x0 - JBAR_GAP * 3 - JBAR_W;
     if (jbar_x < 0) jbar_x = 0;
 
     // Step height evenly divides the bar; font fills each slot (1.2× gives glyph ascender

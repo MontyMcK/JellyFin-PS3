@@ -10,10 +10,16 @@
 #include <netinet/in.h>
 #include <sys/time.h>
 #include <sysmodule/sysmodule.h>
+#include <sys/mutex.h>
 
 #include "http.h"
 
 static char s_raw_buf[RESPONSE_SIZE + 4096];
+
+// Serializes http_request() — it shares s_raw_buf, and the playback progress
+// reporter calls it from its own thread while the UI/seek paths use it too.
+static sys_mutex_t s_http_mtx;
+static bool        s_http_mtx_ok = false;
 static char s_bin_buf[64*1024];
 
 // Bounds so a slow/unreachable/keep-alive server can never hang us forever.
@@ -244,6 +250,11 @@ int http_init(void) {
     int ret;
     ret = sysModuleLoad(SYSMODULE_NET); if (ret < 0) return ret;
     ret = netInitialize();              if (ret < 0) { sysModuleUnload(SYSMODULE_NET); return ret; }
+    sys_mutex_attr_t attr;
+    memset(&attr, 0, sizeof(attr));
+    attr.attr_protocol  = SYS_MUTEX_PROTOCOL_FIFO;
+    attr.attr_recursive = SYS_MUTEX_ATTR_NOT_RECURSIVE;
+    s_http_mtx_ok = (sysMutexCreate(&s_http_mtx, &attr) == 0);
     return HTTP_SUCCESS;
 }
 
@@ -254,11 +265,15 @@ void http_end(void) {
 
 int http_request(int method, const char *url, const char *body,
                  const char *token, char *out, int out_size) {
+    if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
     char host[256]; int port; char path[512];
     url_parse(url, host, sizeof(host), &port, path, sizeof(path));
 
     int sock = http_connect(host, port);
-    if (sock < 0) return -1;
+    if (sock < 0) {
+        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        return -1;
+    }
 
     const char *verb = (method == HTTP_POST)   ? "POST"   :
                        (method == HTTP_DELETE) ? "DELETE" : "GET";
@@ -279,6 +294,7 @@ int http_request(int method, const char *url, const char *body,
     if (body_len > 0) memcpy(out, s_raw_buf + body_off, body_len);
     out[body_len > 0 ? body_len : 0] = '\0';
 
+    if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
     return status;
 }
 

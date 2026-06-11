@@ -16,6 +16,7 @@
 #include "video.h"
 #include "timing.h"
 #include "player_internal.h"
+#include "jellyfin_api.h"
 
 extern u32 running;
 
@@ -141,6 +142,28 @@ void audio_thread_fn(void *arg) {
     }
 
     plog("audio_thread: exit");
+    sysThreadExit(0);
+}
+
+// -------------------------------------------------------
+// Progress reporter — POST position to Jellyfin every ~10 s
+// -------------------------------------------------------
+
+void progress_thread_fn(void *arg) {
+    PlayerState *ps = (PlayerState*)arg;
+
+    int tick = 0;
+    while (running && ps->playing) {
+        usleep(250000);              // 250 ms granularity for a quick exit
+        if (++tick < 40) continue;   // report every ~10 s
+        tick = 0;
+        if (!ps->playing) break;
+        if (!ps->dec_tid) continue;  // mid-seek flush: position unstable
+        u64 pos_ticks = (ps->play_base_us + audio_get_clock_us()) * 10ULL;
+        jellyfin_report_progress(ps->item->id, ps->session_id,
+                                 pos_ticks, ps->paused);
+    }
+
     sysThreadExit(0);
 }
 
