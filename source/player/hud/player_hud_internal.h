@@ -7,9 +7,10 @@
 // -------------------------------------------------------
 // Visual constants
 // -------------------------------------------------------
-#define HUD_ACCENT          0x007C3CEAUL
-#define HUD_ACCENT_DIM      0x00261260UL
-#define HUD_DIMMED          0x00402070UL   // unfocused when another slot is active
+// Matches the XMB palette (ui_visuals.h): violet accent, indigo dims.
+#define HUD_ACCENT          0x008F6FE8UL
+#define HUD_ACCENT_DIM      0x00232950UL
+#define HUD_DIMMED          0x00555C84UL   // unfocused when another slot is active
 #define HUD_FOCUSED         0x00FFFFFFUL   // white for focused control
 #define HUD_SHOW_US         4000000ULL
 

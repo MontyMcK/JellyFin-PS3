@@ -8,6 +8,7 @@
 
 #include "jellyfin_api.h"
 #include "ui.h"
+#include "ui_visuals.h"
 
 void save_config(void) {
     FILE *f = fopen("/dev_hdd0/tmp/jellyfin_config.txt", "w");
@@ -63,9 +64,12 @@ int do_login(void) {
     trim(password);
 
     drawHeader();
-    drawText(40, 100, "Logging in...");
-    drawTextf(40, 130, "Server: %s", g_server);
-    drawTextf(40, 155, "User:   %s", g_username);
+    drawTTF(40, 96, "Signing in...", 18, XMB_TEXT);
+    {
+        char line[320];
+        snprintf(line, sizeof(line), "%s  \xB7  %s", g_username, g_server);
+        drawTTF(40, 128, line, 14, XMB_TEXT_DIM);
+    }
     flip();
 
     char url[512], body[256];
@@ -99,17 +103,26 @@ int do_login(void) {
     }
 
     drawHeader();
-    drawText(40, 100, "Login Failed!");
-    drawTextf(40, 130, "Status: %d", status);
-    if      (status == 401) drawText(40, 155, "Wrong username or password");
-    else if (status == 404) drawText(40, 155, "Wrong server URL or path");
-    else if (status == 400) drawText(40, 155, "Bad request (check credentials)");
-    else if (status ==  -1) drawText(40, 155, "Could not reach server");
+    drawTTF(40, 96, "Couldn't sign in", 22, XMB_TEXT, true);
+    {
+        const char *why;
+        if      (status == 401) why = "Wrong username or password.";
+        else if (status == 404) why = "Wrong server URL or path.";
+        else if (status == 400) why = "Bad request - check your credentials.";
+        else if (status ==  -1) why = "Could not reach the server.";
+        else                    why = "The server returned an unexpected error.";
+        char line[96];
+        snprintf(line, sizeof(line), "%s  (status %d)", why, status);
+        drawTTF(40, 136, line, 16, XMB_TEXT_DIM);
+    }
     if (responseBuffer[0]) {
         char snippet[64]; snprintf(snippet, sizeof(snippet), "%.60s", responseBuffer);
-        drawTextf(40, 180, "%s", snippet);
+        drawTTF(40, 164, snippet, 13, XMB_TEXT_FAINT);
     }
-    drawText(40, 230, "Press X to try again");
+    {
+        static const Hint h[] = {{'X',"Try again"}};
+        draw_hints_bar(h, 1);
+    }
     flip();
 
     init_btns();

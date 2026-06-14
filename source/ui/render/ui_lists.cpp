@@ -65,25 +65,29 @@ void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y,
         drawRect((u32)x, (u32)y, (u32)w, (u32)h, XMB_THUMB_DIM);
 }
 
-// Draw the meta string "year . duration . genre" at (x, y).
+// Middle-dot separator ("2014 · 2h 49m · Sci-Fi").  \xB7 is U+00B7 in
+// Open Sans — drawTTF treats bytes as Latin-1 codepoints, so it just works.
+#define META_SEP " \xB7 "
+
+// Draw the meta string "year · duration · genre" at (x, y).
 void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px) {
     char meta[64] = "";
     if (it->year_str[0])     { snprintf(meta, sizeof(meta), "%s", it->year_str); }
     if (it->duration_str[0]) {
-        if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
+        if (meta[0]) strncat(meta, META_SEP, sizeof(meta)-strlen(meta)-1);
         strncat(meta, it->duration_str, sizeof(meta)-strlen(meta)-1);
     }
     if (it->genre[0]) {
-        if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
+        if (meta[0]) strncat(meta, META_SEP, sizeof(meta)-strlen(meta)-1);
         strncat(meta, it->genre, sizeof(meta)-strlen(meta)-1);
     }
-    if (meta[0]) drawTTF(x, y, meta, px, 0x00FFFFFF);
+    if (meta[0]) drawTTF(x, y, meta, px, XMB_TEXT_DIM);
 }
 
 // Draw text clipped to max_w pixels, ".." appended when truncated.
 static void draw_ttf_clipped(u32 x, u32 y, const char *text, float px,
                              u32 color, int max_w, bool bold = false) {
-    if (ttf_text_width(text, px) <= max_w) {
+    if (ttf_text_width(text, px, bold) <= max_w) {
         drawTTF(x, y, text, px, color, bold);
         return;
     }
@@ -94,7 +98,7 @@ static void draw_ttf_clipped(u32 x, u32 y, const char *text, float px,
         buf[--len] = '\0';
         char trial[132];
         snprintf(trial, sizeof(trial), "%s..", buf);
-        if (ttf_text_width(trial, px) <= max_w) {
+        if (ttf_text_width(trial, px, bold) <= max_w) {
             drawTTF(x, y, trial, px, color, bold);
             return;
         }
@@ -151,32 +155,40 @@ void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
 
         thumb_request(items[idx].id, gg->card_w, gg->card_h);
         const Bitmap *bm = thumb_get(items[idx].id, gg->card_w, gg->card_h);
-        if (bm)
+        if (bm) {
             cpu_blit_bitmap(bm, cx, cy);
-        else
+        } else {
+            // Loading placeholder: dark panel with a faint image glyph.
             drawRect((u32)cx, (u32)cy, (u32)gg->card_w, (u32)gg->card_h,
                      XMB_THUMB_DIM);
+            const float ph_px = 32.0f;
+            drawIcon((u32)(cx + (gg->card_w - (int)ph_px) / 2),
+                     (u32)(cy + (gg->card_h - (int)ph_px) / 2),
+                     0xE3F4, ph_px, 0x00262C4EUL);
+        }
 
         // Watched-progress strip along the bottom edge of the card.
         if (items[idx].progress_pct > 0) {
-            int bar_y = cy + gg->card_h - 5;
+            int bar_y = cy + gg->card_h - 4;
             int fill  = (gg->card_w * items[idx].progress_pct) / 100;
-            drawRect((u32)cx, (u32)bar_y, (u32)gg->card_w, 5, XMB_BADGE_BG);
+            drawRect((u32)cx, (u32)bar_y, (u32)gg->card_w, 4, XMB_TRACK);
             if (fill > 0)
-                drawRect((u32)cx, (u32)bar_y, (u32)fill, 5, XMB_ACCENT);
+                drawRect((u32)cx, (u32)bar_y, (u32)fill, 4, XMB_ACCENT);
         }
 
-        // Selection: accent frame around the card.
+        // Selection: thin white frame floated 2px off the card, with a
+        // 1px soft halo outside it (small blended ring — cheap).
         if (idx == sel) {
-            const int T = 4;   // frame thickness
-            drawRect((u32)(cx - T), (u32)(cy - T),
-                     (u32)(gg->card_w + 2*T), (u32)T, XMB_ACCENT);
-            drawRect((u32)(cx - T), (u32)(cy + gg->card_h),
-                     (u32)(gg->card_w + 2*T), (u32)T, XMB_ACCENT);
-            drawRect((u32)(cx - T), (u32)cy,
-                     (u32)T, (u32)gg->card_h, XMB_ACCENT);
-            drawRect((u32)(cx + gg->card_w), (u32)cy,
-                     (u32)T, (u32)gg->card_h, XMB_ACCENT);
+            const int T = 2, G = 2, O = G + T;
+            int w = gg->card_w, h = gg->card_h;
+            drawRect((u32)(cx - O), (u32)(cy - O), (u32)(w + 2*O), T, XMB_KEY_SEL);
+            drawRect((u32)(cx - O), (u32)(cy + h + G), (u32)(w + 2*O), T, XMB_KEY_SEL);
+            drawRect((u32)(cx - O), (u32)(cy - G), T, (u32)(h + 2*G), XMB_KEY_SEL);
+            drawRect((u32)(cx + w + G), (u32)(cy - G), T, (u32)(h + 2*G), XMB_KEY_SEL);
+            drawRectBlend((u32)(cx - O - 1), (u32)(cy - O - 1), (u32)(w + 2*O + 2), 1, XMB_KEY_SEL, 70);
+            drawRectBlend((u32)(cx - O - 1), (u32)(cy + h + O), (u32)(w + 2*O + 2), 1, XMB_KEY_SEL, 70);
+            drawRectBlend((u32)(cx - O - 1), (u32)(cy - O), 1, (u32)(h + 2*O), XMB_KEY_SEL, 70);
+            drawRectBlend((u32)(cx + w + O), (u32)(cy - O), 1, (u32)(h + 2*O), XMB_KEY_SEL, 70);
         }
     }
 
@@ -203,40 +215,41 @@ void xmb_grid_text(const GridGeom *gg, const XMBItem *items, int count,
         int cx, cy;
         grid_cell_pos(gg, i, y0, &cx, &cy);
         draw_ttf_clipped((u32)cx, (u32)(cy + gg->card_h + 8),
-                         items[idx].name, 17, 0x009999AAUL, gg->card_w);
+                         items[idx].name, 16, XMB_TEXT_DIM, gg->card_w);
     }
 
     if (sel >= scroll && sel < scroll + gg->vis && sel < count) {
         const XMBItem *it = &items[sel];
         int cx, cy;
         grid_cell_pos(gg, sel - scroll, y0, &cx, &cy);
-        int ty = cy + gg->card_h + 6;
-        draw_ttf_clipped((u32)cx, (u32)ty, it->name, 21,
-                         0x00FFFFFF, gg->card_w, true);
+        int ty = cy + gg->card_h + 7;
+        draw_ttf_clipped((u32)cx, (u32)ty, it->name, 20,
+                         XMB_WHITE, gg->card_w, true);
         char meta[96] = "";
         if (it->year_str[0])     snprintf(meta, sizeof(meta), "%s", it->year_str);
         if (it->duration_str[0]) {
-            if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
+            if (meta[0]) strncat(meta, META_SEP, sizeof(meta)-strlen(meta)-1);
             strncat(meta, it->duration_str, sizeof(meta)-strlen(meta)-1);
         }
         if (it->genre[0]) {
-            if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
+            if (meta[0]) strncat(meta, META_SEP, sizeof(meta)-strlen(meta)-1);
             strncat(meta, it->genre, sizeof(meta)-strlen(meta)-1);
         }
         if (it->codec[0]) {
-            if (meta[0]) strncat(meta, " . ", sizeof(meta)-strlen(meta)-1);
+            if (meta[0]) strncat(meta, META_SEP, sizeof(meta)-strlen(meta)-1);
             strncat(meta, it->codec, sizeof(meta)-strlen(meta)-1);
         }
         if (meta[0])
-            draw_ttf_clipped((u32)cx, (u32)(ty + 28), meta, 14,
-                             0x00AAAAAAUL, gg->card_w);
+            draw_ttf_clipped((u32)cx, (u32)(ty + 27), meta, 14,
+                             XMB_TEXT_DIM, gg->card_w);
     }
 
-    int ax = gg->x0 + gg->grid_w + 12;
+    // More-content arrows beside the grid (Material chevrons, not ASCII).
+    int ax = gg->x0 + gg->grid_w + 10;
     if (scroll > 0)
-        drawTTF((u32)ax, (u32)y0, "^", 12, 0x00FFFFFF);
+        drawIcon((u32)ax, (u32)y0, 0xE316, 22, XMB_ICON_IDLE);
     if (more_below)
-        drawTTF((u32)ax, (u32)(y0 + XMB_GRID_ROWS * gg->stride - 40),
-                "v", 12, 0x00FFFFFF);
+        drawIcon((u32)ax, (u32)(y0 + XMB_GRID_ROWS * gg->stride - 60),
+                 0xE313, 22, XMB_ICON_IDLE);
 }
 

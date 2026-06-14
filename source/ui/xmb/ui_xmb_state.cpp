@@ -4,13 +4,13 @@
 #include "ui_internal.h"
 
 XMBTab g_tabs[XMB_TAB_COUNT] = {
-    {"SEARCH",            "?",  "", true },
-    {"CONTINUE WATCHING", ">",  "", true },
-    {"MOVIES",            "#",  "", false},
-    {"TV SHOWS",          "=",  "", false},
-    {"MUSIC",             "~",  "", true },
-    {"COLLECTIONS",       "+",  "", false},
-    {"SETTINGS",          "*",  "", true },
+    {"Search",            "?",  "", true },
+    {"Continue Watching", ">",  "", true },
+    {"Movies",            "#",  "", false},
+    {"TV Shows",          "=",  "", false},
+    {"Music",             "~",  "", true },
+    {"Collections",       "+",  "", false},
+    {"Settings",          "*",  "", true },
 };
 
 XMBItem g_items[XMB_TAB_COUNT][XMB_ITEMS_MAX];

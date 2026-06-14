@@ -168,16 +168,17 @@ void drawTextScaled(u32 x, u32 y, const char *text, int px) {
 // color: 0x00RRGGBB.  Falls back to drawTextScaled if font not loaded.
 // -------------------------------------------------------
 
-int ttf_text_width(const char *text, float px) {
+int ttf_text_width(const char *text, float px, bool bold) {
     if (!s_ttf_ok) return (int)(strlen(text) * px);
-    float scale = stbtt_ScaleForPixelHeight(&s_font, px);
+    stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
+    float scale = stbtt_ScaleForPixelHeight(fi, px);
     float xf = 0.0f;
     int prev_cp = 0;
     while (*text) {
         int cp = (unsigned char)*text;
-        if (prev_cp) xf += stbtt_GetCodepointKernAdvance(&s_font, prev_cp, cp) * scale;
+        if (prev_cp) xf += stbtt_GetCodepointKernAdvance(fi, prev_cp, cp) * scale;
         int advance;
-        stbtt_GetCodepointHMetrics(&s_font, cp, &advance, NULL);
+        stbtt_GetCodepointHMetrics(fi, cp, &advance, NULL);
         xf += (float)advance * scale;
         prev_cp = cp;
         text++;

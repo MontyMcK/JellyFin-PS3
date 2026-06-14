@@ -116,7 +116,7 @@ static void draw_menu(int dw, int dh) {
         drawTTF((u32)(mx0 + MENU_PAD + MENU_DOT_COL),
                 (u32)(row_cy - (int)(ROW_TEXT_PX * 0.5f)),
                 g_hud.menu_items[i], ROW_TEXT_PX,
-                (i == g_hud.menu_sel) ? HUD_FOCUSED : 0x00AAAAAAUL);
+                (i == g_hud.menu_sel) ? HUD_FOCUSED : 0x0099A0BCUL);
     }
 }
 

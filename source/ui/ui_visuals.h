@@ -30,21 +30,36 @@ typedef struct {
 #define OSK_ROWS_N 4
 
 // -------------------------------------------------------
+// Palette — deep indigo base (XMB-style), one violet accent
+// (Jellyfin brand-adjacent), white reserved for selection.
+// Text comes in three fixed levels; never invent new greys.
+// -------------------------------------------------------
+#define XMB_BG          0x000B0E1EUL   // RSX clear color (sits under the gradient)
+#define XMB_BG_TOP      0x00151A38UL   // background gradient, top edge
+#define XMB_BG_BOT      0x0005060CUL   // background gradient, bottom edge
+#define XMB_ACCENT      0x008F6FE8UL   // violet: progress fills, active marks, brand tag
+#define XMB_ACCENT_DEEP 0x005B43A8UL   // latched accent (caps-lock key)
+#define XMB_TEXT        0x00E9EBF5UL   // primary text (soft white)
+#define XMB_TEXT_DIM    0x0099A0BCUL   // secondary text / metadata
+#define XMB_TEXT_FAINT  0x005C6386UL   // tertiary text, section labels, empty states
+#define XMB_WHITE       0x00FFFFFFUL   // selected emphasis only
+#define XMB_PANEL       0x00191E3CUL   // raised panels (settings card, modals)
+#define XMB_PANEL_HI    0x00232950UL   // selected row fill
+#define XMB_HAIRLINE    0x002C3258UL   // 1px panel borders
+#define XMB_THUMB_DIM   0x0012162CUL   // thumbnail loading placeholder
+#define XMB_TRACK       0x0010142AUL   // progress bar track
+#define XMB_KEY_NORMAL  0x001A1F3EUL   // OSK key
+#define XMB_KEY_SEL     0x00F0F2FAUL   // OSK selected key (white, dark label)
+#define XMB_KEY_LABEL_SEL 0x0010142AUL // label color on the selected key
+#define XMB_ICON_IDLE   0x00646C96UL   // inactive tab icons / chrome glyphs
+
+// -------------------------------------------------------
 // XMB layout constants (pixel values, assume 720p minimum)
 // -------------------------------------------------------
-#define XMB_BG          0x000d0d1aUL
-#define XMB_DIVIDER_CLR 0x00554077UL
-#define XMB_ACCENT      0x007C3CEAUL
-#define XMB_HIGHLIGHT   0x001D1040UL
-#define XMB_THUMB_DIM   0x00241444UL
-#define XMB_BADGE_BG    0x00302050UL
-#define XMB_KEY_NORMAL  0x001A103AUL
-#define XMB_KEY_SEL     0x005A3AB0UL
-
 #define XMB_TOPBAR_H    64
 #define XMB_TABBAR_H    80
 #define XMB_DIVIDER_Y   (XMB_TOPBAR_H + XMB_TABBAR_H)
-#define XMB_CONTENT_Y   (XMB_DIVIDER_Y + 52)
+#define XMB_CONTENT_Y   (XMB_DIVIDER_Y + 30)
 #define XMB_BOTTOM_PAD  70
 #define XMB_ITEM_H      90
 #define XMB_THUMB_W     52
@@ -182,7 +197,7 @@ int  iconic_adv_px(char glyph, float px);
 void visuals_cleanup(void);
 void ttf_init(void);
 void ttf_prewarm_hud(void);
-int  ttf_text_width(const char *text, float px);
+int  ttf_text_width(const char *text, float px, bool bold = false);
 void xmb_draw_tabs(void);
 void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14);
 
@@ -199,6 +214,13 @@ void xmb_cpu_draw_osk(void);
 void xmb_cpu_draw_search_results(void);
 void xmb_draw_jumpbar(int tab);
 void draw_hints_bar(const Hint *hints, int n);
-void draw_topbar_lr(void);
+void xmb_draw_topbar(void);         // brand top-left, clock top-right
+void xmb_draw_divider(void);        // faded hairline under the tab bar (CPU phase)
+// Centered empty-state: the tab's icon, dimmed, above one line of text.
+void xmb_draw_empty_state(int tab, const char *msg);
+// Breadcrumb trail: up to two dim parent segments + bright leaf, with
+// chevron separators.  Pass NULL for unused segments.
+void xmb_draw_breadcrumb(int x, int y, const char *a, const char *b,
+                         const char *leaf);
 void xmb_cpu_draw_settings(void);   // CPU phase: highlight rect
 void xmb_draw_settings(void);       // RSX phase: account info + entries

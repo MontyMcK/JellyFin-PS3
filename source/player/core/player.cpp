@@ -26,8 +26,62 @@
 #include "ui_visuals.h"
 #include "jellyfin_api.h"
 #include "rsxutil.h"
+#include "thumbnail_cache.h"
 
 extern void crash_log(const char *msg);
+
+// -------------------------------------------------------
+// End-of-item auto-advance ("Next Episode")
+// -------------------------------------------------------
+// The UI arms this before show_player when the played item has a follower
+// in its list.  In the last 30 s of playback the player shows the popup
+// badge (just the label) with the instruction line drawn separately below
+// it; SELECT ends playback with the next-request flag set, which the UI
+// reads via player_take_next_request() to start the next item.
+static bool s_next_armed     = false;
+static bool s_next_requested = false;
+static char s_next_label[32] = "NEXT EPISODE";
+static char s_next_hint[64]  = "Press SELECT for next episode";
+
+void player_arm_next(const char *label, const char *hint) {
+    s_next_armed     = true;
+    s_next_requested = false;
+    if (label && label[0])
+        snprintf(s_next_label, sizeof(s_next_label), "%s", label);
+    if (hint && hint[0])
+        snprintf(s_next_hint, sizeof(s_next_hint), "%s", hint);
+}
+
+bool player_take_next_request(void) {
+    bool r = s_next_requested;
+    s_next_requested = false;
+    return r;
+}
+
+// Popup badge top-right; the instruction line is drawn separately below
+// the badge, outside the box.
+static void player_draw_next_popup(void) {
+    const float label_px = 26.0f;
+    const float hint_px  = 16.0f;
+    const int   pad_x = 26, pad_y = 14, margin = 48;
+
+    int tw = ttf_text_width(s_next_label, label_px);
+    int bw = tw + 2 * pad_x;
+    int bh = (int)label_px + 2 * pad_y;
+    int bx = (int)display_width - bw - margin;
+    int by = margin;
+
+    drawRect((u32)(bx - 1), (u32)(by - 1), (u32)(bw + 2), (u32)(bh + 2),
+             XMB_HAIRLINE);
+    drawRect((u32)bx, (u32)by, (u32)bw, (u32)bh, XMB_PANEL);
+    drawRect((u32)bx, (u32)by, 3, (u32)bh, XMB_ACCENT);
+    drawTTF((u32)(bx + pad_x), (u32)(by + pad_y), s_next_label, label_px,
+            XMB_TEXT, true);
+
+    int hw = ttf_text_width(s_next_hint, hint_px);
+    drawTTF((u32)(bx + bw - hw), (u32)(by + bh + 14), s_next_hint, hint_px,
+            XMB_TEXT_DIM);
+}
 
 void show_player(const JFItem *item, u32 resume_secs) {
     crash_log("p1 enter");
@@ -45,6 +99,11 @@ void show_player(const JFItem *item, u32 resume_secs) {
             plog(buf);
         }
     }
+
+    // Consume the auto-advance arming one-shot so a later, unrelated
+    // playback can never inherit a stale NEXT popup.
+    bool have_next = s_next_armed;
+    s_next_armed = false;
 
     // Session state shared with the player_* helpers.  ~2KB of JFTracks —
     // keep off the stack.
@@ -93,11 +152,18 @@ void show_player(const JFItem *item, u32 resume_secs) {
     drawText(40, 130, "Initializing decoder...");
     flip();
 
+    // Release the UI thumbnail cache (joins its fetch thread, frees ~15 MB
+    // of card bitmaps) — the decoder + jitter buffer below need every MB,
+    // and jbuf_alloc fails outright with the cache resident.  Re-created on
+    // every exit path; the UI simply refetches its thumbs.
+    thumb_cache_shutdown();
+
     crash_log("p2 vdec_open begin");
     plog("show_player: vdec_open");
     if (!vdec_open()) {
         plog("show_player: vdec_open FAILED");
         vdec_close();
+        thumb_cache_init();
         show_error("VDEC init failed.", "See /dev_hdd0/tmp/player_log.txt");
         ui_restore_rsx_state();
         return;
@@ -126,6 +192,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
         adec_stop();
         audio_close();
         vdec_close();
+        thumb_cache_init();
         show_error("Stream connection failed.", url);
         ui_restore_rsx_state();
         return;
@@ -146,6 +213,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
         adec_stop();
         audio_close();
         vdec_close();
+        thumb_cache_init();
         ui_restore_rsx_state();
         return;
     }
@@ -188,6 +256,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
         adec_stop();
         audio_close();
         vdec_close();
+        thumb_cache_init();
         return;
     }
 
@@ -264,6 +333,20 @@ void show_player(const JFItem *item, u32 resume_secs) {
             plog("playing=0 reason=user_stop");
             ps.playing = false;
         }
+
+        // End-of-item auto-advance: within the last 30 s of a list item,
+        // show the NEXT popup; SELECT ends this session with the
+        // next-request flag set so the UI starts the follower.
+        bool next_popup = false;
+        if (have_next && ps.total_secs > 30) {
+            u64 pos_secs = (ps.play_base_us + audio_get_clock_us()) / 1000000ULL;
+            next_popup = (pos_secs + 30 >= (u64)ps.total_secs);
+        }
+        if (next_popup && BTN_PRESSED(select)) {
+            plog("playing=0 reason=next_item");
+            s_next_requested = true;
+            ps.playing = false;
+        }
         if (!ps.playing) break;
 
         // The HUD owns the D-pad (focus navigation) and X (activates the
@@ -303,6 +386,13 @@ void show_player(const JFItem *item, u32 resume_secs) {
         }
 
         player_display_frame(&ps);
+
+        if (next_popup && ps.frame_count > 0) {
+            // Fence the in-flight video draw before CPU framebuffer writes,
+            // same as the HUD overlay does.
+            rsxSync();
+            player_draw_next_popup();
+        }
 
         flip();
     }
@@ -366,6 +456,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
     vdec_close();
     crash_log("p14 vdec_close OK");
 
+    thumb_cache_init();
     ui_restore_rsx_state();
     crash_log("p19 done");
     plog("show_player: done");

@@ -10,6 +10,8 @@
 #include "ui_internal.h"
 #include "ui_wave.h"
 
+extern void crash_log(const char *msg);
+
 static void xmb_reset_state(void) {
     memset(g_items, 0, sizeof(g_items));
     memset(g_item_count, 0, sizeof(g_item_count));
@@ -66,9 +68,7 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
 
 // CPU draw phase — direct framebuffer writes, runs after rsxSync().
 static void xmb_draw_cpu_phase(int tab) {
-    // Divider line
-    u32 *div = color_buffer[curr_fb] + XMB_DIVIDER_Y * display_width;
-    for (u32 x = 0; x < display_width; x++) div[x] = XMB_DIVIDER_CLR;
+    xmb_draw_divider();
 
     if (tab == XMB_TAB_SEARCH) {
         xmb_cpu_draw_osk();
@@ -84,36 +84,27 @@ static void xmb_draw_cpu_phase(int tab) {
 
 // TTF/RSX draw phase — text and icons on top of the CPU-drawn layer.
 static void xmb_draw_text_phase(int tab) {
-    drawTTF(XMB_ITEM_PAD, 16, "JELLYFIN-PS3", 28, 0x007C3CEA, true);
-    draw_topbar_lr();
-
-    {
-        const char *tab_name = g_tabs[g_active_tab].label;
-        int hx = (int)display_width / 2 - ttf_text_width(tab_name, 28) / 2;
-        if (hx < (int)XMB_ITEM_PAD) hx = (int)XMB_ITEM_PAD;
-        drawTTF((u32)hx, (u32)(XMB_DIVIDER_Y + 14), tab_name, 28, 0x00FFFFFF);
-    }
+    xmb_draw_topbar();
 
     if (tab == XMB_TAB_SEARCH) {
         xmb_rsx_draw_osk();
     } else if (tab == XMB_TAB_SETTINGS) {
         xmb_draw_settings();
     } else if (tab == XMB_TAB_MUSIC) {
-        drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 40), "Coming soon", 22, 0x00FFFFFF);
+        xmb_draw_empty_state(tab, "Coming soon");
     } else {
         // Card-grid tabs: breadcrumb (sub-screens), empty text, grid labels.
         if (tab == XMB_TAB_TV && g_tv_depth > 0) {
-            char crumb[256];
             if (g_tv_depth == 1)
-                snprintf(crumb, sizeof(crumb), "%s > Seasons", g_tv_series_name);
+                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+                                    g_tv_series_name, "Seasons", NULL);
             else
-                snprintf(crumb, sizeof(crumb), "%s > %s > Episodes",
-                         g_tv_series_name, g_tv_season_name);
-            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
+                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+                                    g_tv_series_name, g_tv_season_name,
+                                    "Episodes");
         } else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
-            char crumb[256];
-            snprintf(crumb, sizeof(crumb), "%s > Movies", g_col_name);
-            drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 2), crumb, 14, 0x00888888);
+            xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+                                g_col_name, "Movies", NULL);
         }
 
         GridGeom gg; const XMBItem *items; int count, sel, scroll, y0; bool more;
@@ -123,10 +114,9 @@ static void xmb_draw_text_phase(int tab) {
             if (count == 0) {
                 bool loaded = sub || g_items_loaded[tab];
                 if (loaded)
-                    drawTTF(XMB_ITEM_PAD, (u32)(XMB_CONTENT_Y + 46),
-                            tab == XMB_TAB_RESUME ? "Nothing in progress."
-                                                  : "No items.",
-                            16, 0x00FFFFFF);
+                    xmb_draw_empty_state(tab,
+                            tab == XMB_TAB_RESUME ? "Nothing in progress"
+                                                  : "No items in this library");
             } else {
                 xmb_grid_text(&gg, items, count, sel, scroll, y0, more);
             }
@@ -145,40 +135,43 @@ static void xmb_draw_hints(int tab) {
 
     if (tab == XMB_TAB_SETTINGS) {
         if (g_settings_confirm) {
-            static const Hint h[] = {{'X',"CONFIRM"},{'C',"CANCEL"}};
+            static const Hint h[] = {{'X',"Confirm"},{'C',"Cancel"}};
             draw_hints_bar(h, 2);
         } else {
-            static const Hint h[] = {{'D',"NAV"},{'X',"SELECT"}};
-            draw_hints_bar(h, 2);
+            static const Hint h[] = {{'X',"Select"}};
+            draw_hints_bar(h, 1);
         }
     } else if (tab == XMB_TAB_SEARCH) {
         if (g_search_focus_results) {
-            static const Hint h[] = {{'D',"NAV"},{'X',"PLAY"},{'C',"BACK"}};
-            draw_hints_bar(h, 3);
+            static const Hint h[] = {{'X',"Play"},{'C',"Back"}};
+            draw_hints_bar(h, 2);
         } else {
-            static const Hint h[] = {{'D',"NAV"},{'X',"TYPE"},{'C',"CLEAR"}};
-            draw_hints_bar(h, 3);
+            static const Hint h[] = {{'X',"Type"},{'C',"Clear"}};
+            draw_hints_bar(h, 2);
         }
     } else if (in_tv_sub || in_col_sub) {
-        static const Hint h[] = {{'D',"NAV"},{'X',"SELECT"},{'C',"BACK"}};
-        draw_hints_bar(h, 3);
+        static const Hint h[] = {{'X',"Select"},{'C',"Back"}};
+        draw_hints_bar(h, 2);
     } else if (g_jumpbar_active) {
-        static const Hint h[] = {{'D',"NAV"},{'X',"FILTER"},{'C',"CANCEL"}};
-        draw_hints_bar(h, 3);
+        static const Hint h[] = {{'X',"Jump"},{'C',"Cancel"}};
+        draw_hints_bar(h, 2);
     } else if (tab == XMB_TAB_RESUME) {
-        static const Hint h[] = {{'D',"NAV"},{'X',"RESUME"},{'C',"BACK"},{'T',"INFO"}};
-        draw_hints_bar(h, 4);
+        static const Hint h[] = {{'X',"Resume"},{'T',"Info"}};
+        draw_hints_bar(h, 2);
     } else {
-        static const Hint h[] = {{'D',"NAV"},{'E',"JUMP"},{'X',"SELECT"},{'C',"BACK"},{'T',"INFO"}};
-        draw_hints_bar(h, 5);
+        static const Hint h[] = {{'E',"Jump"},{'X',"Select"},{'T',"Info"}};
+        draw_hints_bar(h, 3);
     }
 }
 
 void ui_run_xmb(void) {
+    crash_log("13.1 reset_state");
     xmb_reset_state();
     wave_reset();
 
+    crash_log("13.2 detect_tabs");
     xmb_detect_tabs();
+    crash_log("13.3 detect_tabs done");
 
     if (!g_tabs[XMB_TAB_MOVIES].enabled) {
         for (int t = 0; t < XMB_TAB_COUNT; t++) {
@@ -188,17 +181,31 @@ void ui_run_xmb(void) {
 
     OSK_Y0 = XMB_CONTENT_Y + 58;
 
+    crash_log("13.4 init_btns");
     init_btns();
+    crash_log("13.5 loop enter");
 
+    // Breadcrumbs inside the loop fire only on the first pass so the log
+    // doesn't grow unbounded once the UI is actually running.
+    bool first_iter = true;
     while (running) {
+        if (first_iter) crash_log("13.5a waitflip");
         waitflip();
+        if (first_iter) crash_log("13.5b syscb");
         sysUtilCheckCallback();
+        if (first_iter) crash_log("13.5c clearScreen");
         clearScreen(XMB_BG);
+        if (first_iter) crash_log("13.5d wave_draw");
         wave_draw();
+        if (first_iter) crash_log("13.6 wave_draw done");
 
         int tab = g_active_tab;
         if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS)
-            if (!g_items_loaded[tab]) xmb_fetch_tab_items(tab);
+            if (!g_items_loaded[tab]) {
+                if (first_iter) crash_log("13.7 fetch_tab_items");
+                xmb_fetch_tab_items(tab);
+                if (first_iter) crash_log("13.7b fetch done");
+            }
 
         poll_buttons();
         bool should_exit = false;
@@ -210,12 +217,18 @@ void ui_run_xmb(void) {
 
         rsxSync();
 
+        if (first_iter) crash_log("13.8 cpu_phase");
         xmb_draw_cpu_phase(tab);
+        if (first_iter) crash_log("13.8b text_phase");
         xmb_draw_text_phase(tab);
+        if (first_iter) crash_log("13.8c hints");
         xmb_draw_hints(tab);
+        if (first_iter) crash_log("13.8d tabs");
         xmb_draw_tabs();
 
+        if (first_iter) crash_log("13.9 first flip");
         flip();
+        if (first_iter) { crash_log("13.10 first frame done"); first_iter = false; }
         sysUtilCheckCallback();
     }
 }

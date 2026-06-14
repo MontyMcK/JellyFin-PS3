@@ -63,6 +63,19 @@ static void xmb_play_item(const XMBItem *it, u32 resume_secs) {
     show_player(&jf, resume_secs);
 }
 
+// Play items[idx] and keep advancing through the list while the user
+// accepts the player's end-of-item NEXT prompt (SELECT during the last
+// 30 s).  Used for episodes in a season and movies in a collection.
+static void xmb_play_list_with_next(const XMBItem *items, int count, int idx,
+                                    const char *label, const char *hint) {
+    for (;;) {
+        if (idx + 1 < count) player_arm_next(label, hint);
+        xmb_play_item(&items[idx], 0);
+        if (idx + 1 >= count || !player_take_next_request()) break;
+        idx++;
+    }
+}
+
 // -------------------------------------------------------
 // Per-screen input handlers.  Each returns true when the XMB
 // loop should exit (only the settings Log Out path does).
@@ -140,7 +153,9 @@ static void xmb_input_tv_sub(void) {
                                                  0, &g_tv_sub_total);
             g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
         } else {
-            xmb_play_item(it, 0);
+            xmb_play_list_with_next(g_tv_sub_items, g_tv_sub_count,
+                                    g_tv_sub_sel, "NEXT EPISODE",
+                                    "Press SELECT for next episode");
             g_tv_depth = 0;
             g_tv_sub_sel = 0;
             g_tv_sub_scroll = 0;
@@ -191,7 +206,9 @@ static void xmb_input_col_sub(void) {
         if ((g_col_sub_sel % C) > 0) g_col_sub_sel--;
     }
     if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
-        xmb_play_item(&g_col_sub_items[g_col_sub_sel], 0);
+        xmb_play_list_with_next(g_col_sub_items, g_col_sub_count,
+                                g_col_sub_sel, "NEXT MOVIE",
+                                "Press SELECT for next movie");
         g_col_depth = 0;
         g_col_sub_sel = 0;
         g_col_sub_scroll = 0;
