@@ -78,6 +78,10 @@ void decode_unicode_escapes(char *str);
 // color is 0x00RRGGBB (X8R8G8B8 framebuffer format).
 // -------------------------------------------------------
 void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color);
+// Alpha-blend a rect over the framebuffer (alpha 0-255).  Reads back the
+// framebuffer per pixel, which is slow on RSX local memory — keep the area
+// small (hairlines, thin frames); never large fills.
+void drawRectBlend(u32 x, u32 y, u32 w, u32 h, u32 color, u8 alpha);
 void cpuClearFb(u32 color);   // clear entire framebuffer
 
 // -------------------------------------------------------

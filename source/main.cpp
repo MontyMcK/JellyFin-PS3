@@ -41,10 +41,19 @@ static void sysutil_exit_callback(u64 status, u64 param, void *usrdata) {
 // Crash log (survives a crash, written before each step)
 // -------------------------------------------------------
 
-static FILE *g_clog = NULL;
+// Each breadcrumb is opened, written, and closed immediately. A kept-open
+// FILE* + fflush can lose its tail on a hard GPU hang (the kind that needs a
+// power-cycle); closing every line forces it through the lv2 FS so the last
+// breadcrumb is on disk no matter how the next step dies. First call
+// truncates the file; every call after that appends.
 void crash_log(const char *msg) {
-    if (!g_clog) g_clog = fopen("/dev_hdd0/tmp/crash_log.txt", "w");
-    if  (g_clog) { fprintf(g_clog, "%s\n", msg); fflush(g_clog); }
+    static bool started = false;
+    FILE *f = fopen("/dev_hdd0/tmp/crash_log.txt", started ? "a" : "w");
+    if (f) {
+        fprintf(f, "%s\n", msg);
+        fclose(f);
+        started = true;
+    }
 }
 
 // -------------------------------------------------------
@@ -61,6 +70,7 @@ int main(int argc, const char *argv[]) {
 
     crash_log("1 memalign");
     void *host_addr = memalign(1024*1024, HOST_SIZE);
+    crash_log(host_addr ? "1b host_addr ok" : "1b host_addr NULL");
 
     crash_log("2 init_screen");
     init_screen(host_addr, HOST_SIZE);
@@ -78,16 +88,19 @@ int main(int argc, const char *argv[]) {
     ui_init();
     plog_start();
 
-    crash_log("7 splash");
+    crash_log("7 splash drawHeader");
     drawHeader();
-    drawText(40, 100, "Starting...");
+    crash_log("7b splash drawTTF");
+    drawTTF(40, 96, "Starting...", 16, 0x0099A0BC);
+    crash_log("7c splash flip");
     flip();
+    crash_log("7d splash done");
 
     crash_log("8 http_init");
     if (http_init() != HTTP_SUCCESS) {
         crash_log("8 FAILED");
         drawHeader();
-        drawText(40, 100, "HTTP init failed!");
+        drawTTF(40, 96, "Network initialisation failed.", 16, 0x0099A0BC);
         flip();
         while (running) sysUtilCheckCallback();
         return 1;

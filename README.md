@@ -12,8 +12,8 @@ Goal: consumer-quality media playback on PS3, the second-best media player on th
 
 ## Features
 
-- XMB-style UI with animated wave background
-- Card-grid browsing (3x3 landscape cards, title/info under the selected card) on all library tabs; search and settings keep the compact row UI
+- XMB-style UI: background gradient with translucent animated wave ribbons, top-bar clock, icon tab bar
+- Card-grid browsing (5x2 portrait posters, 3x2 landscape stills, title/info under the selected card) on all library tabs; search and settings keep the compact row UI
 - Browse Movies, TV Shows, and Collections libraries
 - Continue Watching tab: server resume list, watched-progress bars on thumbnails, playback resumes at the saved position
 - Playback progress reported to the server every 10s (Sessions/Playing + Progress + Stopped), so PS3 viewing updates Continue Watching everywhere

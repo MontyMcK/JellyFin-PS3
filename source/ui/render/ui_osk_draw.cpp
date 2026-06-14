@@ -1,4 +1,4 @@
-// Search tab rendering — search-bar OSK (CPU key cells + RSX labels)
+// Search tab rendering — search field, OSK (CPU key cells + RSX labels)
 // and the results list below it.
 
 #include <stdio.h>
@@ -8,13 +8,18 @@
 #include "thumbnail_cache.h"
 #include "timing.h"
 
+#define OSK_FIELD_H 40
+
 void xmb_cpu_draw_osk(void) {
     int W = (int)display_width;
     int total_w = 10 * OSK_STEP_X - OSK_GAP;
     int osk_x0  = (W - total_w) / 2;
 
+    // Search field: dark well with an accent underline.
     drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + 8),
-             (u32)total_w, 40, 0x001A1040);
+             (u32)total_w, OSK_FIELD_H, 0x00131830UL);
+    drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + 8 + OSK_FIELD_H - 2),
+             (u32)total_w, 2, XMB_ACCENT);
 
     for (int r = 0; r <= OSK_ROWS_N; r++) {
         if (r == OSK_ROWS_N) {
@@ -46,6 +51,16 @@ void xmb_cpu_draw_osk(void) {
     }
 }
 
+// One key label, centered in a key cell, dark when the key is selected
+// (selected keys are white).
+static void osk_key_label(int kx, int kw, int ry, const char *lbl, bool sel) {
+    const float px = 20.0f;
+    int lw = ttf_text_width(lbl, px);
+    int ty = ry + (OSK_KEY_H - (int)px) / 2 - 2;
+    drawTTF((u32)(kx + (kw - lw) / 2), (u32)(ty > 0 ? ty : 0), lbl, px,
+            sel ? XMB_KEY_LABEL_SEL : XMB_TEXT);
+}
+
 void xmb_rsx_draw_osk(void) {
     int W = (int)display_width;
     int total_w = 10 * OSK_STEP_X - OSK_GAP;
@@ -54,43 +69,55 @@ void xmb_rsx_draw_osk(void) {
     u64 us = timing_get_us();
     bool cursor = ((us / 500000) & 1) == 0;
 
-    char disp[68];
-    snprintf(disp, sizeof(disp), "%s%s", g_search_buf, cursor ? "_" : " ");
+    // Search field content: magnifier glyph, then typed text or ghost prompt.
     {
-        int bar_cx = (int)display_width / 2;
-        int text_w = (int)strlen(disp) * 18;
-        int tx = bar_cx - text_w / 2;
-        if (tx < (int)XMB_ITEM_PAD + 4) tx = (int)XMB_ITEM_PAD + 4;
-        drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 18), disp, 18, 0x00FFFFFF);
+        int fx = osk_x0 + 14;
+        int fy = XMB_CONTENT_Y + 8;
+        drawIcon((u32)fx, (u32)(fy + (OSK_FIELD_H - 20) / 2), 0xE8B6, 20.0f,
+                 XMB_TEXT_FAINT);
+        int tx = fx + 30;
+        int ty = fy + (OSK_FIELD_H - 18) / 2 - 2;
+        if (g_search_buf[0]) {
+            char disp[68];
+            snprintf(disp, sizeof(disp), "%s%s", g_search_buf, cursor ? "_" : "");
+            drawTTF((u32)tx, (u32)ty, disp, 18, XMB_TEXT);
+        } else {
+            if (cursor) drawTTF((u32)tx, (u32)ty, "_", 18, XMB_TEXT);
+            drawTTF((u32)(tx + 14), (u32)ty, "Search your library", 17,
+                    XMB_TEXT_FAINT);
+        }
     }
 
     for (int r = 0; r <= OSK_ROWS_N; r++) {
+        int ry = OSK_Y0 + r * OSK_STEP_Y;
         if (r == OSK_ROWS_N) {
             int space_w = 5 * OSK_STEP_X - OSK_GAP;
-            int sy = OSK_Y0 + r * OSK_STEP_Y + (OSK_KEY_H - 8) / 2;
-            int cx_space = osk_x0 + space_w / 2 - 20;
-            drawTTF((u32)(cx_space > 0 ? cx_space : 0), (u32)sy, "SPACE", 21, 0x00FFFFFF);
-
             int bsx = osk_x0 + space_w + OSK_GAP;
-            drawTTF((u32)(bsx + (OSK_KEY_W - 8) / 2), (u32)sy, "<", 21, 0x00FFFFFF);
-
             int clx = bsx + OSK_KEY_W + OSK_GAP;
-            drawTTF((u32)(clx + (OSK_KEY_W - 40) / 2), (u32)sy, "CLEAR", 21, 0x00FFFFFF);
+            osk_key_label(osk_x0, space_w, ry, "Space",
+                          r == g_osk_row && g_osk_col == 0);
+            {   // Backspace: Material icon, centered in the key.
+                bool sel = (r == g_osk_row && g_osk_col == 1);
+                drawIcon((u32)(bsx + (OSK_KEY_W - 22) / 2),
+                         (u32)(ry + (OSK_KEY_H - 22) / 2), 0xE14A, 22.0f,
+                         sel ? XMB_KEY_LABEL_SEL : XMB_TEXT);
+            }
+            osk_key_label(clx, OSK_KEY_W, ry, "Clear",
+                          r == g_osk_row && g_osk_col == 2);
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
             const char  *row  = rows[r];
             int base_len = strlen(row);
-            int ry = OSK_Y0 + r * OSK_STEP_Y + (OSK_KEY_H - 8) / 2;
 
             for (int c = 0; c < base_len; c++) {
-                char label[3] = { row[c], '\0', '\0' };
-                int kx = osk_x0 + c * OSK_STEP_X + (OSK_KEY_W - 8) / 2;
-                drawTTF((u32)kx, (u32)ry, label, 21, 0x00FFFFFF);
+                char label[2] = { row[c], '\0' };
+                osk_key_label(osk_x0 + c * OSK_STEP_X, OSK_KEY_W, ry, label,
+                              r == g_osk_row && c == g_osk_col);
             }
             if (r == OSK_ROWS_N - 1) {
-                const char *toggle_lbl = g_osk_sym ? "ABC" : "#+=";
-                int kx = osk_x0 + base_len * OSK_STEP_X + (OSK_KEY_W - 24) / 2;
-                drawTTF((u32)(kx > 0 ? kx : 0), (u32)ry, toggle_lbl, 21, 0x00FFFFFF);
+                osk_key_label(osk_x0 + base_len * OSK_STEP_X, OSK_KEY_W, ry,
+                              g_osk_sym ? "ABC" : "#+=",
+                              r == g_osk_row && g_osk_col == base_len);
             }
         }
     }
@@ -108,12 +135,18 @@ void xmb_rsx_draw_osk(void) {
             if (idx >= count) break;
             const XMBItem *it = &g_search_results[idx];
             int iy = results_y + i * XMB_ROW_STRIDE;
-            drawTTF((u32)sr_tx, (u32)(iy + 20), it->name, 18, 0x00FFFFFF);
-            xmb_draw_meta((u32)sr_tx, (u32)(iy + 48), it, 18);
+            bool sel = g_search_focus_results && idx == g_search_sel;
+            drawTTF((u32)sr_tx, (u32)(iy + 18), it->name, 19,
+                    sel ? XMB_WHITE : XMB_TEXT, sel);
+            xmb_draw_meta((u32)sr_tx, (u32)(iy + 46), it, 14);
         }
     }
     if (count == 0 && g_search_buf[0]) {
-        drawTTF((u32)XMB_ITEM_PAD, (u32)results_y, "No results.", 8, 0x00FFFFFF);
+        char msg[96];
+        snprintf(msg, sizeof(msg), "No results for \"%s\"", g_search_buf);
+        int mw = ttf_text_width(msg, 16);
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + 10),
+                msg, 16, XMB_TEXT_FAINT);
     }
 }
 
@@ -130,9 +163,9 @@ void xmb_cpu_draw_search_results(void) {
         int iy = results_y + i * XMB_ROW_STRIDE;
         if (g_search_focus_results && idx == g_search_sel) {
             drawRect((u32)list_x, (u32)iy,
-                     (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_HIGHLIGHT);
-            drawRect((u32)(list_x - 5), (u32)iy,
-                     4, (u32)XMB_ROW_H, XMB_ACCENT);
+                     (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_PANEL_HI);
+            drawRect((u32)(list_x - 4), (u32)iy,
+                     3, (u32)XMB_ROW_H, XMB_ACCENT);
         }
         xmb_cpu_blit_thumb_scaled(g_search_results[idx].id,
                                   list_x + 16,

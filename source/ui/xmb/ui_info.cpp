@@ -59,70 +59,111 @@ void xmb_show_item_info(const XMBItem *it) {
         wave_draw();
         rsxSync();
         {
-            u32 X = XMB_ITEM_PAD;
-            u32 Y = XMB_TOPBAR_H + 10;
-            drawTTF(X, Y, it->name, 56, 0x00FFFFFF);
-            Y += 80;
-            char meta_line[256];
-            snprintf(meta_line, sizeof(meta_line), "%s  %s  %s  %s",
-                     it->year_str,
-                     it->duration_str,
-                     detail.official_rating[0] ? detail.official_rating : "",
-                     detail.community_rating[0] ? detail.community_rating : "");
-            drawTTF(X, Y, meta_line, 28, 0x00AAAAAA);
-            Y += 56;
-            if (detail.video_info[0]) {
-                drawTTF(X,       Y, "Video:", 24, 0x00888888);
-                drawTTF(X + 160, Y, detail.video_info, 24, 0x00FFFFFF);
-                Y += 40;
+            int X = XMB_ITEM_PAD;
+            int Y = XMB_TOPBAR_H + 12;
+            int max_w = (int)display_width - 2 * X;
+
+            // Title, truncated to the content width.
+            {
+                char tbuf[132];
+                snprintf(tbuf, sizeof(tbuf), "%s", it->name);
+                int len = (int)strlen(tbuf);
+                while (len > 1 && ttf_text_width(tbuf, 40) > max_w)
+                    tbuf[--len] = '\0';
+                drawTTF((u32)X, (u32)Y, tbuf, 40, XMB_WHITE, true);
             }
-            if (detail.audio_info[0]) {
-                drawTTF(X,       Y, "Audio:", 24, 0x00888888);
-                drawTTF(X + 160, Y, detail.audio_info, 24, 0x00FFFFFF);
-                Y += 48;
+            Y += 62;
+
+            // Meta row: year · duration, official-rating chip, ★ rating.
+            {
+                int mx = X;
+                char meta[64] = "";
+                if (it->year_str[0])
+                    snprintf(meta, sizeof(meta), "%s", it->year_str);
+                if (it->duration_str[0]) {
+                    if (meta[0]) strncat(meta, " \xB7 ", sizeof(meta)-strlen(meta)-1);
+                    strncat(meta, it->duration_str, sizeof(meta)-strlen(meta)-1);
+                }
+                if (meta[0]) {
+                    drawTTF((u32)mx, (u32)Y, meta, 18, XMB_TEXT_DIM);
+                    mx += ttf_text_width(meta, 18) + 18;
+                }
+                if (detail.official_rating[0]) {
+                    // Outlined chip.
+                    int cw = ttf_text_width(detail.official_rating, 13) + 16;
+                    int ch = 22;
+                    drawRect((u32)mx, (u32)Y, (u32)cw, 1, XMB_HAIRLINE);
+                    drawRect((u32)mx, (u32)(Y + ch - 1), (u32)cw, 1, XMB_HAIRLINE);
+                    drawRect((u32)mx, (u32)Y, 1, (u32)ch, XMB_HAIRLINE);
+                    drawRect((u32)(mx + cw - 1), (u32)Y, 1, (u32)ch, XMB_HAIRLINE);
+                    drawTTF((u32)(mx + 8), (u32)(Y + 3), detail.official_rating,
+                            13, XMB_TEXT_DIM);
+                    mx += cw + 18;
+                }
+                if (detail.community_rating[0]) {
+                    drawIcon((u32)mx, (u32)(Y + 1), 0xE838, 18.0f, 0x00E8B64CUL);
+                    drawTTF((u32)(mx + 24), (u32)Y, detail.community_rating,
+                            18, XMB_TEXT_DIM);
+                }
             }
+            Y += 44;
+
             if (detail.tagline[0]) {
-                drawTTF(X, Y, detail.tagline, 32, 0x00AACCFF);
-                Y += 56;
+                drawTTF((u32)X, (u32)Y, detail.tagline, 20, 0x00AFA3E8UL);
+                Y += 38;
             }
+
+            // Overview, word-wrapped by pixel width.
             if (detail.overview[0]) {
-                const int max_cpl   = 40;
+                const int wrap_w    = max_w > 760 ? 760 : max_w;
                 const int max_lines = 6;
                 const char *p = detail.overview;
                 int lines_drawn = 0;
                 while (*p && lines_drawn < max_lines) {
-                    int line_len = (int)strlen(p);
-                    if (line_len > max_cpl) {
-                        int i;
-                        for (i = max_cpl; i > 0; i--)
-                            if (p[i] == ' ') break;
-                        if (i == 0) i = max_cpl;
-                        char buf[128];
-                        snprintf(buf, sizeof(buf), "%.*s", i, p);
-                        drawTTF(X, Y, buf, 24, 0x00FFFFFF);
-                        p += i;
-                        if (*p == ' ') p++;
-                    } else {
-                        drawTTF(X, Y, p, 24, 0x00FFFFFF);
-                        p += line_len;
+                    // Longest prefix that fits, broken at a space.
+                    // (Width accumulated per char; ignoring kerning is fine
+                    // for wrapping.)
+                    int  fit = 0, last_sp = -1;
+                    int  wpx = 0;
+                    char buf[160];
+                    char one[2] = { 0, 0 };
+                    while (p[fit] && fit < (int)sizeof(buf) - 1) {
+                        if (p[fit] == ' ') last_sp = fit;
+                        one[0] = p[fit];
+                        wpx += ttf_text_width(one, 19);
+                        if (wpx > wrap_w) break;
+                        fit++;
                     }
-                    Y += 36;
+                    int take = (!p[fit] || fit >= (int)sizeof(buf) - 1) ? fit
+                             : (last_sp > 0 ? last_sp : fit);
+                    if (take <= 0) take = 1;
+                    snprintf(buf, sizeof(buf), "%.*s", take, p);
+                    drawTTF((u32)X, (u32)Y, buf, 19, 0x00C9CEE4UL);
+                    p += take;
+                    while (*p == ' ') p++;
+                    Y += 30;
                     lines_drawn++;
                 }
-                Y += 16;
+                Y += 14;
             }
-            if (detail.genres[0]) {
-                drawTTF(X,       Y, "Genres:", 24, 0x00888888);
-                drawTTF(X + 160, Y, detail.genres, 24, 0x00FFFFFF);
-                Y += 40;
-            }
-            if (detail.studios[0]) {
-                drawTTF(X,       Y, "Studios:", 24, 0x00888888);
-                drawTTF(X + 160, Y, detail.studios, 24, 0x00FFFFFF);
+
+            // Fact rows: faint label column, bright values.
+            struct { const char *label; const char *value; } facts[] = {
+                { "Video",   detail.video_info  },
+                { "Audio",   detail.audio_info  },
+                { "Genres",  detail.genres      },
+                { "Studios", detail.studios     },
+            };
+            for (int i = 0; i < 4; i++) {
+                if (!facts[i].value[0]) continue;
+                drawTTF((u32)X,         (u32)(Y + 2), facts[i].label, 15,
+                        XMB_TEXT_FAINT);
+                drawTTF((u32)(X + 120), (u32)Y, facts[i].value, 17, XMB_TEXT);
+                Y += 32;
             }
         }
         {
-            static const Hint h[] = {{'C',"BACK"}};
+            static const Hint h[] = {{'C',"Back"}};
             draw_hints_bar(h, 1);
         }
         flip();

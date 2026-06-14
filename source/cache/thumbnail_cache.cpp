@@ -24,6 +24,7 @@
 #include "http.h"
 #include "jellyfin_api.h"
 #include "plog.h"
+#include "timing.h"
 #include "ui_visuals.h"
 
 // Largest visible page (portrait grid, 10) + the prefetched next page +
@@ -67,6 +68,31 @@ static bool q_pop(int *si) {
     *si = s_queue[s_q_head];
     s_q_head = (s_q_head + 1) % THUMB_CACHE_SIZE;
     return true;
+}
+
+// Failed fetches back off for 10 s — without this the UI re-queues a
+// failing thumb every single frame, hammering the server and the log.
+// Accessed under s_lock (noted on the fetch thread, checked on request).
+#define FAIL_BACKOFF_US 10000000ULL
+#define FAIL_LIST_N     16
+static struct { char id[64]; u64 until_us; } s_fail[FAIL_LIST_N];
+static int s_fail_next = 0;
+
+static bool fail_listed(const char *id) {
+    u64 now = timing_get_us();
+    for (int i = 0; i < FAIL_LIST_N; i++) {
+        if (s_fail[i].id[0] && now < s_fail[i].until_us &&
+            strncmp(s_fail[i].id, id, 64) == 0)
+            return true;
+    }
+    return false;
+}
+
+static void fail_note(const char *id) {
+    strncpy(s_fail[s_fail_next].id, id, 63);
+    s_fail[s_fail_next].id[63] = '\0';
+    s_fail[s_fail_next].until_us = timing_get_us() + FAIL_BACKOFF_US;
+    s_fail_next = (s_fail_next + 1) % FAIL_LIST_N;
 }
 
 // An item can be cached at several sizes (e.g. portrait in Movies and
@@ -134,6 +160,7 @@ static void fetch_thread_fn(void *arg) {
             snprintf(msg, sizeof(msg), "thumb: fetch failed %s (%d)", item_id, bytes);
             plog(msg);
             lock_acquire();
+            fail_note(item_id);
             if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
@@ -148,6 +175,7 @@ static void fetch_thread_fn(void *arg) {
             snprintf(msg, sizeof(msg), "thumb: decode failed %s", item_id);
             plog(msg);
             lock_acquire();
+            fail_note(item_id);
             if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
@@ -225,6 +253,7 @@ void thumb_request(const char *item_id, int w, int h) {
     if (!item_id || !item_id[0] || w <= 0 || h <= 0) return;
     if ((size_t)w * (size_t)h > s_max_px) return;
     lock_acquire();
+    if (fail_listed(item_id)) { lock_release(); return; }
     if (find_slot(item_id, (u32)w, (u32)h) >= 0) { lock_release(); return; }
     // Don't claim a slot we can't queue — it would stay QUEUED forever.
     if (q_full()) { lock_release(); return; }

@@ -9,6 +9,8 @@
 
 #include "rsxutil.h"
 
+extern void crash_log(const char *msg);
+
 #define GCM_LABEL_INDEX		255
 
 videoResolution res;
@@ -90,8 +92,10 @@ void setRenderTarget(u32 index)
 
 void init_screen(void *host_addr,u32 size)
 {
+	crash_log("2.1 rsxInit");
 	rsxInit(&context,CB_SIZE,size,host_addr);
 
+	crash_log("2.2 videoGetState");
 	videoState state;
 	videoGetState(0,0,&state);
 
@@ -106,6 +110,7 @@ void init_screen(void *host_addr,u32 size)
 
 	waitRSXIdle();
 
+	crash_log("2.3 videoConfigure");
 	videoConfigure(0,&vconfig,NULL,0);
 	videoGetState(0,0,&state);
 
@@ -113,10 +118,17 @@ void init_screen(void *host_addr,u32 size)
 
 	display_width = res.width;
 	display_height = res.height;
+	{
+		char b[64];
+		snprintf(b,sizeof(b),"2.4 res %ux%u",display_width,display_height);
+		crash_log(b);
+	}
 
 	color_pitch = display_width*sizeof(u32);
+	crash_log("2.5 rsxMemalign color");
 	color_buffer[0] = (u32*)rsxMemalign(64,(display_height*color_pitch));
 	color_buffer[1] = (u32*)rsxMemalign(64,(display_height*color_pitch));
+	crash_log((color_buffer[0]&&color_buffer[1]) ? "2.5b color ok" : "2.5b color NULL");
 
 	rsxAddressToOffset(color_buffer[0],&color_offset[0]);
 	rsxAddressToOffset(color_buffer[1],&color_offset[1]);
@@ -125,8 +137,10 @@ void init_screen(void *host_addr,u32 size)
 	gcmSetDisplayBuffer(1,color_offset[1],color_pitch,display_width,display_height);
 
 	depth_pitch = display_width*sizeof(u32);
+	crash_log("2.6 rsxMemalign depth");
 	depth_buffer = (u32*)rsxMemalign(64,(display_height*depth_pitch)*2);
 	rsxAddressToOffset(depth_buffer,&depth_offset);
+	crash_log("2.7 init_screen done");
 }
 
 void waitflip()
