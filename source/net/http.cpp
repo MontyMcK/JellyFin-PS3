@@ -34,8 +34,11 @@ static void url_parse(const char *url, char *host, int hsz,
     else if (strncmp(p, "https://", 8) == 0) { p += 8; https = true; }
     const char *h = p;
     while (*p && *p != ':' && *p != '/') p++;
-    int hl = p - h; if (hl >= hsz) hl = hsz - 1;
-    memcpy(host, h, hl); host[hl] = '\0';
+    int hl = p - h;
+    if (hl >= hsz) hl = hsz - 1;
+    if (hl < 0) hl = 0;
+    memcpy(host, h, hl);
+    host[hl] = '\0';
     *port = https ? 443 : 8096;
     if (*p == ':') { p++; *port = atoi(p); while (*p && *p != '/') p++; }
     strncpy(path, *p ? p : "/", psz - 1); path[psz - 1] = '\0';
