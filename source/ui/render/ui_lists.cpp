@@ -21,7 +21,7 @@ static void cpu_blit_bitmap(const Bitmap *bm, int dx, int dy) {
     int w = (int)bm->width, h = (int)bm->height;
     for (int row = 0; row < h; row++) {
         int sy = dy + row;
-        if (sy < 0 || sy >= (int)display_height) continue;
+        if (cpu_row_clipped(sy)) continue;
         int sx0 = dx, copy_w = w, src_x = 0;
         if (sx0 < 0) { src_x = -sx0; copy_w += sx0; sx0 = 0; }
         if (sx0 + copy_w > (int)display_width) copy_w = (int)display_width - sx0;
@@ -38,7 +38,7 @@ static void cpu_blit_bitmap_scaled(const Bitmap *bm, int dx, int dy,
     if (!bm || !bm->pixels || dw <= 0 || dh <= 0) return;
     for (int row = 0; row < dh; row++) {
         int sy = dy + row;
-        if (sy < 0 || sy >= (int)display_height) continue;
+        if (cpu_row_clipped(sy)) continue;
         const u32 *src = bm->pixels +
             ((u32)((u64)row * bm->height / dh)) * bm->width;
         u32 *dst = color_buffer[curr_fb] + (u32)sy * display_width;
@@ -143,6 +143,47 @@ static void grid_cell_pos(const GridGeom *gg, int vis_idx, int y0,
     *cy = y0     + (vis_idx / gg->cols) * gg->stride;
 }
 
+// Draw one card at (cx,cy): cached image (or a dim placeholder while it
+// loads), the watched-progress strip, and — when selected — a thin white
+// frame with a soft 1px halo.  Shared by the grid and the Home shelf.
+void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
+                   u8 progress_pct, bool selected) {
+    thumb_request(item_id, card_w, card_h);
+    const Bitmap *bm = thumb_get(item_id, card_w, card_h);
+    if (bm) {
+        cpu_blit_bitmap(bm, cx, cy);
+    } else {
+        // Loading placeholder: dark panel with a faint image glyph.
+        drawRect((u32)cx, (u32)cy, (u32)card_w, (u32)card_h, XMB_THUMB_DIM);
+        const float ph_px = 32.0f;
+        drawIcon((u32)(cx + (card_w - (int)ph_px) / 2),
+                 (u32)(cy + (card_h - (int)ph_px) / 2),
+                 0xE3F4, ph_px, 0x00262C4EUL);
+    }
+
+    // Watched-progress strip along the bottom edge of the card.
+    if (progress_pct > 0) {
+        int bar_y = cy + card_h - 4;
+        int fill  = (card_w * progress_pct) / 100;
+        drawRect((u32)cx, (u32)bar_y, (u32)card_w, 4, XMB_TRACK);
+        if (fill > 0)
+            drawRect((u32)cx, (u32)bar_y, (u32)fill, 4, XMB_ACCENT);
+    }
+
+    if (selected) {
+        const int T = 2, G = 2, O = G + T;
+        int w = card_w, h = card_h;
+        drawRect((u32)(cx - O), (u32)(cy - O), (u32)(w + 2*O), T, XMB_KEY_SEL);
+        drawRect((u32)(cx - O), (u32)(cy + h + G), (u32)(w + 2*O), T, XMB_KEY_SEL);
+        drawRect((u32)(cx - O), (u32)(cy - G), T, (u32)(h + 2*G), XMB_KEY_SEL);
+        drawRect((u32)(cx + w + G), (u32)(cy - G), T, (u32)(h + 2*G), XMB_KEY_SEL);
+        drawRectBlend((u32)(cx - O - 1), (u32)(cy - O - 1), (u32)(w + 2*O + 2), 1, XMB_KEY_SEL, 70);
+        drawRectBlend((u32)(cx - O - 1), (u32)(cy + h + O), (u32)(w + 2*O + 2), 1, XMB_KEY_SEL, 70);
+        drawRectBlend((u32)(cx - O - 1), (u32)(cy - O), 1, (u32)(h + 2*O), XMB_KEY_SEL, 70);
+        drawRectBlend((u32)(cx + w + O), (u32)(cy - O), 1, (u32)(h + 2*O), XMB_KEY_SEL, 70);
+    }
+}
+
 // CPU phase (after rsxSync): card images, placeholders, selection border,
 // progress strips.
 void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
@@ -152,44 +193,8 @@ void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
         if (idx >= count) break;
         int cx, cy;
         grid_cell_pos(gg, i, y0, &cx, &cy);
-
-        thumb_request(items[idx].id, gg->card_w, gg->card_h);
-        const Bitmap *bm = thumb_get(items[idx].id, gg->card_w, gg->card_h);
-        if (bm) {
-            cpu_blit_bitmap(bm, cx, cy);
-        } else {
-            // Loading placeholder: dark panel with a faint image glyph.
-            drawRect((u32)cx, (u32)cy, (u32)gg->card_w, (u32)gg->card_h,
-                     XMB_THUMB_DIM);
-            const float ph_px = 32.0f;
-            drawIcon((u32)(cx + (gg->card_w - (int)ph_px) / 2),
-                     (u32)(cy + (gg->card_h - (int)ph_px) / 2),
-                     0xE3F4, ph_px, 0x00262C4EUL);
-        }
-
-        // Watched-progress strip along the bottom edge of the card.
-        if (items[idx].progress_pct > 0) {
-            int bar_y = cy + gg->card_h - 4;
-            int fill  = (gg->card_w * items[idx].progress_pct) / 100;
-            drawRect((u32)cx, (u32)bar_y, (u32)gg->card_w, 4, XMB_TRACK);
-            if (fill > 0)
-                drawRect((u32)cx, (u32)bar_y, (u32)fill, 4, XMB_ACCENT);
-        }
-
-        // Selection: thin white frame floated 2px off the card, with a
-        // 1px soft halo outside it (small blended ring — cheap).
-        if (idx == sel) {
-            const int T = 2, G = 2, O = G + T;
-            int w = gg->card_w, h = gg->card_h;
-            drawRect((u32)(cx - O), (u32)(cy - O), (u32)(w + 2*O), T, XMB_KEY_SEL);
-            drawRect((u32)(cx - O), (u32)(cy + h + G), (u32)(w + 2*O), T, XMB_KEY_SEL);
-            drawRect((u32)(cx - O), (u32)(cy - G), T, (u32)(h + 2*G), XMB_KEY_SEL);
-            drawRect((u32)(cx + w + G), (u32)(cy - G), T, (u32)(h + 2*G), XMB_KEY_SEL);
-            drawRectBlend((u32)(cx - O - 1), (u32)(cy - O - 1), (u32)(w + 2*O + 2), 1, XMB_KEY_SEL, 70);
-            drawRectBlend((u32)(cx - O - 1), (u32)(cy + h + O), (u32)(w + 2*O + 2), 1, XMB_KEY_SEL, 70);
-            drawRectBlend((u32)(cx - O - 1), (u32)(cy - O), 1, (u32)(h + 2*O), XMB_KEY_SEL, 70);
-            drawRectBlend((u32)(cx + w + O), (u32)(cy - O), 1, (u32)(h + 2*O), XMB_KEY_SEL, 70);
-        }
+        xmb_draw_card(items[idx].id, cx, cy, gg->card_w, gg->card_h,
+                      items[idx].progress_pct, idx == sel);
     }
 
     // Prefetch the next page of thumbs past the visible window so paging

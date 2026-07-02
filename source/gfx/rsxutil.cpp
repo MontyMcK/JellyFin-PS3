@@ -88,6 +88,16 @@ void setRenderTarget(u32 index)
 	sf.y				= 0;
 
 	rsxSetSurface(context,&sf);
+
+	// Map clip-space [-1,1] to the full framebuffer.  Without an explicit
+	// viewport the RSX keeps a stale/default transform on real hardware — GPU
+	// geometry (e.g. the XMB wave) then renders mis-scaled and rides up the
+	// screen, even though RPCS3 defaults to a full-surface viewport so it looks
+	// fine in the emulator.  Same scale/offset the video player sets.
+	float vp_sc[4]  = { display_width * 0.5f, -(float)display_height * 0.5f, 0.5f, 0.0f };
+	float vp_off[4] = { display_width * 0.5f,  (float)display_height * 0.5f, 0.5f, 0.0f };
+	rsxSetViewport(context, 0, 0, (u16)display_width, (u16)display_height,
+	               0.0f, 1.0f, vp_sc, vp_off);
 }
 
 void init_screen(void *host_addr,u32 size)

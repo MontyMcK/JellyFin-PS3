@@ -39,9 +39,10 @@ void xmb_switch_tab(int new_tab) {
     if (new_tab == XMB_TAB_SETTINGS) {
         g_settings_sel = 0; g_settings_confirm = false;
     }
-    // The resume list changes after every playback — refetch on entry.
-    if (new_tab == XMB_TAB_RESUME)
-        g_items_loaded[XMB_TAB_RESUME] = false;
+    // Home: reset focus and refetch the dynamic rows (Continue Watching /
+    // Next Up change after every playback).
+    if (new_tab == XMB_TAB_HOME)
+        xmb_home_on_enter();
 }
 
 int xmb_next_enabled(int start, int dir) {
@@ -55,7 +56,7 @@ int xmb_next_enabled(int start, int dir) {
 
 // Launch the player for one list item, mapping XMBItem -> JFItem.
 // resume_secs > 0 starts playback at that position (Continue Watching).
-static void xmb_play_item(const XMBItem *it, u32 resume_secs) {
+void xmb_play_item(const XMBItem *it, u32 resume_secs) {
     JFItem jf; memset(&jf, 0, sizeof(jf));
     strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
     strncpy(jf.name, it->name, sizeof(jf.name)-1);

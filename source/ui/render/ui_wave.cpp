@@ -1,6 +1,7 @@
 #include <math.h>
 #include <string.h>
 #include <rsx/rsx.h>
+#include <rsx/gcm_sys.h>
 #include "rsxutil.h"
 #include "wave_shaders.h"
 #include "ui_wave.h"
@@ -9,12 +10,6 @@
 #define WAVE_STEP_PX    20
 #define WAVE_NS         8      // vertical slices per ribbon (fade resolution)
 #define WAVE_MAX_COLS   98     // x columns: supports up to ~1940px wide (720p uses 65)
-#define WAVE_STRIP_VERTS (WAVE_MAX_COLS * 2)
-#define WAVE_GRAD_VERTS 4
-// Fullscreen background-gradient quad + 3 ribbons, each tessellated into
-// WAVE_NS horizontal strips so opaque colour interpolation tracks the gradient.
-#define WAVE_STRIPS     (3 * WAVE_NS)
-#define WAVE_VBUF_BYTES ((WAVE_GRAD_VERTS + WAVE_STRIPS * WAVE_STRIP_VERTS) * 20)
 
 // Ribbons read as translucent veils over the background gradient: bright at
 // the crest, fading to nothing below.  We do NOT lean on GPU per-vertex alpha
@@ -29,19 +24,22 @@
 // composited over the gradient (and any earlier ribbons) at that exact height,
 // using the same maths as tools/ui_preview/preview.c.  Drawn fully opaque, the
 // GPU's plain colour interpolation reproduces the veil pixel-for-pixel with
-// blending switched off, so the result is identical on RPCS3 and hardware.
-// WAVE_ALPHA is the crest opacity used for that pre-blend.
+// blending switched off.
+//
+// The vertices are streamed straight into the RSX command FIFO with
+// rsxDrawVertex4f/4ub (immediate mode) rather than fetched from a bound vertex
+// array — exactly how the player's HUD dim quad draws.  That keeps the work on
+// the GPU (a CPU framebuffer fill at this size costs ~180ms/frame) while
+// avoiding the vertex-array-fetch unit that grey-screens real hardware.
+// WAVE_ALPHA is the crest opacity used for the pre-blend.
 static const u32   WAVE_COLOR[3]  = { 0x004A52A8, 0x006C5BD4, 0x003A4290 };
 static const u8    WAVE_ALPHA[3]  = { 56, 42, 72 };
-static const float WAVE_AMP[3]    = { 34.0f, 24.0f, 16.0f };
+static const float WAVE_AMP[3]    = { 30.0f, 22.0f, 15.0f };
 static const float WAVE_FREQ[3]   = { 1.5f,  1.8f,  2.1f  };
-static const float WAVE_BASEY[3]  = { 0.66f, 0.76f, 0.85f };
+// Crest baselines as a fraction of screen height — kept low so the ribbons
+// sit in the bottom quarter of the screen instead of climbing into the middle.
+static const float WAVE_BASEY[3]  = { 0.78f, 0.85f, 0.91f };
 static const float WAVE_DPHASE[3] = { 0.008f, 0.013f, 0.018f };
-
-typedef struct {
-    float x, y, z, w;
-    u8 r, g, b, a;
-} WaveVert; // 20 bytes
 
 // Sample the background gradient (XMB_BG_TOP -> XMB_BG_BOT, top to bottom) at
 // screen-space y in [0,H], returning the three 8-bit channels.  Mirrors the
@@ -62,7 +60,6 @@ static inline u8 over8(u8 src, u8 dst, u8 a) {
 }
 
 static float  s_wave_phase[3]   = { 0.0f, 0.0f, 0.0f };
-static u8    *s_wave_vbuf       = NULL;
 static u32   *s_wave_fp_buf     = NULL;
 static u32    s_wave_fp_offset  = 0;
 
@@ -101,8 +98,6 @@ void wave_reset(void) {
 }
 
 void wave_init(void) {
-    s_wave_vbuf = (u8*)rsxMemalign(256, WAVE_VBUF_BYTES);
-
     rsxFragmentProgram *fpo = (rsxFragmentProgram*)wave_fp_data;
     void *fp_ucode; u32 fp_size;
     rsxFragmentProgramGetUCode(fpo, &fp_ucode, &fp_size);
@@ -111,17 +106,17 @@ void wave_init(void) {
     rsxAddressToOffset(s_wave_fp_buf, &s_wave_fp_offset);
 }
 
-void wave_draw(void) {
-    if (!s_wave_vbuf || !s_wave_fp_buf) return;
+// Push one immediate-mode vertex (colour latched first, position last — the
+// position write commits the vertex, matching the HUD dim quad ordering).
+static inline void wave_vtx(float x, float y, u8 r, u8 g, u8 b) {
+    const u8    col[4] = { r, g, b, 255 };
+    const float pos[4] = { x, y, 0.0f, 1.0f };
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    pos);
+}
 
-    // TEMP (2026-06-14): the GPU vertex-array path below wedges the real RSX on
-    // hardware — boot hangs the instant it enters wave_draw at 1920x1080 (grey
-    // screen of death; confirmed by crash_log stopping at "13.5d wave_draw").
-    // clearScreen(XMB_BG) already laid down the background this frame, so bail
-    // here to keep the XMB usable. The wave needs re-implementing off the
-    // unreliable vertex-array-fetch path (inline FIFO like the HUD dim quad,
-    // or a CPU fill) before this can be re-enabled.
-    return;
+void wave_draw(void) {
+    if (!s_wave_fp_buf) return;
 
     rsxVertexProgram  *vpo = (rsxVertexProgram*)  wave_vp_data;
     rsxFragmentProgram *fpo = (rsxFragmentProgram*) wave_fp_data;
@@ -134,6 +129,7 @@ void wave_draw(void) {
 
     rsxSetDepthTestEnable(context, GCM_FALSE);
     rsxSetDepthWriteEnable(context, GCM_FALSE);
+    rsxSetBlendEnable(context, GCM_FALSE);    // colours are pre-composited, opaque
 
     float W = (float)display_width;
     float H = (float)display_height;
@@ -159,80 +155,44 @@ void wave_draw(void) {
         for (int ci = 0; ci < ncols; ci++)
             crest[li][ci] = wave_crest(li, colx[ci], W, H);
 
-    // Gradient quad at the head of the buffer (triangle strip).
+    // Background-gradient quad (XMB_BG_TOP -> XMB_BG_BOT), streamed inline.
     {
-        WaveVert *gv = (WaveVert*)s_wave_vbuf;
         u8 tr=(XMB_BG_TOP>>16)&0xFF, tg=(XMB_BG_TOP>>8)&0xFF, tb=XMB_BG_TOP&0xFF;
         u8 br=(XMB_BG_BOT>>16)&0xFF, bg=(XMB_BG_BOT>>8)&0xFF, bb=XMB_BG_BOT&0xFF;
-        gv[0].x=-1.0f; gv[0].y= 1.0f; gv[0].r=tr; gv[0].g=tg; gv[0].b=tb;
-        gv[1].x=-1.0f; gv[1].y=-1.0f; gv[1].r=br; gv[1].g=bg; gv[1].b=bb;
-        gv[2].x= 1.0f; gv[2].y= 1.0f; gv[2].r=tr; gv[2].g=tg; gv[2].b=tb;
-        gv[3].x= 1.0f; gv[3].y=-1.0f; gv[3].r=br; gv[3].g=bg; gv[3].b=bb;
-        for (int i = 0; i < WAVE_GRAD_VERTS; i++) { gv[i].z=0.0f; gv[i].w=1.0f; gv[i].a=255; }
+        rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
+        wave_vtx(-1.0f,  1.0f, tr, tg, tb);   // top-left
+        wave_vtx(-1.0f, -1.0f, br, bg, bb);   // bottom-left
+        wave_vtx( 1.0f,  1.0f, tr, tg, tb);   // top-right
+        wave_vtx( 1.0f, -1.0f, br, bg, bb);   // bottom-right
+        rsxDrawVertexEnd(context);
     }
 
-    // Build one triangle strip per (ribbon, slice).  Slice k spans the fraction
-    // [k/NS, (k+1)/NS] of the distance from this column's crest down to the
-    // screen bottom; each vertex colour is the ribbon tint composited over the
-    // background at that exact height, so the strips are drawn fully opaque and
-    // never depend on GPU alpha blending (the part that broke on hardware).
-    WaveVert *strips = (WaveVert*)(s_wave_vbuf + WAVE_GRAD_VERTS * sizeof(WaveVert));
+    // One triangle strip per (ribbon, slice), back-to-front.  Slice k spans the
+    // fraction [k/NS, (k+1)/NS] of the distance from this column's crest down to
+    // the screen bottom; each vertex colour is the ribbon tint composited over
+    // the background at that exact height, so the strips are drawn fully opaque
+    // and never depend on GPU alpha blending (the part that broke on hardware).
     for (int li = 0; li < 3; li++) {
         u8 cr=(WAVE_COLOR[li]>>16)&0xFF, cg=(WAVE_COLOR[li]>>8)&0xFF, cb=WAVE_COLOR[li]&0xFF;
         for (int k = 0; k < WAVE_NS; k++) {
-            int strip_idx = li * WAVE_NS + k;
-            WaveVert *v = strips + strip_idx * WAVE_STRIP_VERTS;
             float ft = (float)k       / WAVE_NS;     // top edge fraction
             float fb = (float)(k + 1) / WAVE_NS;     // bottom edge fraction
+            u8 at = (u8)(WAVE_ALPHA[li] * (1.0f - ft));
+            u8 ab = (u8)(WAVE_ALPHA[li] * (1.0f - fb));
+            rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
             for (int ci = 0; ci < ncols; ci++) {
                 float cy = crest[li][ci];
                 float yt = cy + (H - cy) * ft;
                 float yb = cy + (H - cy) * fb;
-                u8 at = (u8)(WAVE_ALPHA[li] * (1.0f - ft));
-                u8 ab = (u8)(WAVE_ALPHA[li] * (1.0f - fb));
                 u8 btr,btg,btb, bbr,bbg,bbb;
                 wave_bg(li, ci, yt, H, crest, &btr,&btg,&btb);
                 wave_bg(li, ci, yb, H, crest, &bbr,&bbg,&bbb);
                 float cx = (2.0f * colx[ci] / W) - 1.0f;
-                WaveVert *vt = &v[ci*2], *vb = &v[ci*2 + 1];
-                vt->x=cx; vt->y=1.0f-(2.0f*yt/H); vt->z=0.0f; vt->w=1.0f;
-                vt->r=over8(cr,btr,at); vt->g=over8(cg,btg,at); vt->b=over8(cb,btb,at); vt->a=255;
-                vb->x=cx; vb->y=1.0f-(2.0f*yb/H); vb->z=0.0f; vb->w=1.0f;
-                vb->r=over8(cr,bbr,ab); vb->g=over8(cg,bbg,ab); vb->b=over8(cb,bbb,ab); vb->a=255;
+                wave_vtx(cx, 1.0f - (2.0f*yt/H), over8(cr,btr,at), over8(cg,btg,at), over8(cb,btb,at));
+                wave_vtx(cx, 1.0f - (2.0f*yb/H), over8(cr,bbr,ab), over8(cg,bbg,ab), over8(cb,bbb,ab));
             }
+            rsxDrawVertexEnd(context);
         }
-    }
-
-    // Issue draw calls back-to-front: gradient first, then ribbons 0..2 (each
-    // ribbon's slices in order).  All geometry is already in RSX memory and
-    // pre-composited, so blending stays off.
-    u32 vbuf_base;
-    rsxAddressToOffset(s_wave_vbuf, &vbuf_base);
-
-    rsxSetBlendEnable(context, GCM_FALSE);
-
-    int npass = 1 + WAVE_STRIPS;             // gradient + every ribbon slice
-    for (int pass = 0; pass < npass; pass++) {
-        u32 vbuf_off, nverts;
-        if (pass == 0) {
-            vbuf_off = vbuf_base;
-            nverts   = WAVE_GRAD_VERTS;
-        } else {
-            int strip_idx = pass - 1;
-            vbuf_off = vbuf_base + (u32)((WAVE_GRAD_VERTS + strip_idx * WAVE_STRIP_VERTS) * sizeof(WaveVert));
-            nverts   = (u32)(ncols * 2);
-        }
-
-        rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
-            vbuf_off,
-            (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
-
-        rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
-            vbuf_off + 16u,
-            (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
-
-        rsxInvalidateVertexCache(context);
-        rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, nverts);
     }
 
     // Restore the UI's standard alpha-blend state for everything drawn after

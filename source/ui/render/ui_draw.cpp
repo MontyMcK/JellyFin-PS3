@@ -47,10 +47,27 @@ void decode_unicode_escapes(char *str) {
 // color: 0x00RRGGBB  (X8R8G8B8, X byte unused by display)
 // -------------------------------------------------------
 
+// CPU-draw vertical scissor (see ui.h).  Defaults cover the whole frame.
+int g_cpu_clip_top = 0;
+int g_cpu_clip_bot = 0;   // 0 == bottom edge
+
+bool cpu_row_clipped(int sy) {
+    if (sy < g_cpu_clip_top || sy >= (int)display_height) return true;
+    if (g_cpu_clip_bot && sy >= g_cpu_clip_bot)           return true;
+    return false;
+}
+
+// Clamp a fill's [y, y2) row span to the active scissor.
+static void clip_rows(u32 *y, u32 *y2) {
+    if ((int)*y  < g_cpu_clip_top)                       *y  = (u32)g_cpu_clip_top;
+    if (g_cpu_clip_bot && *y2 > (u32)g_cpu_clip_bot)     *y2 = (u32)g_cpu_clip_bot;
+}
+
 void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color) {
     if (x >= display_width || y >= display_height || w == 0 || h == 0) return;
     u32 x2 = (x + w > display_width)  ? display_width  : x + w;
     u32 y2 = (y + h > display_height) ? display_height : y + h;
+    clip_rows(&y, &y2);
     for (u32 r = y; r < y2; r++) {
         u32 *p = color_buffer[curr_fb] + r * display_width + x;
         u32  n = x2 - x;
@@ -64,6 +81,7 @@ void drawRectBlend(u32 x, u32 y, u32 w, u32 h, u32 color, u8 alpha) {
     if (alpha == 255) { drawRect(x, y, w, h, color); return; }
     u32 x2 = (x + w > display_width)  ? display_width  : x + w;
     u32 y2 = (y + h > display_height) ? display_height : y + h;
+    clip_rows(&y, &y2);
     u32 r_fg = (color >> 16) & 0xFF;
     u32 g_fg = (color >>  8) & 0xFF;
     u32 b_fg =  color        & 0xFF;

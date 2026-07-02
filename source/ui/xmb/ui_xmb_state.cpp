@@ -5,7 +5,7 @@
 
 XMBTab g_tabs[XMB_TAB_COUNT] = {
     {"Search",            "?",  "", true },
-    {"Continue Watching", ">",  "", true },
+    {"Home",              ">",  "", true },
     {"Movies",            "#",  "", false},
     {"TV Shows",          "=",  "", false},
     {"Music",             "~",  "", true },

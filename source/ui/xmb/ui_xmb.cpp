@@ -75,6 +75,8 @@ static void xmb_draw_cpu_phase(int tab) {
         xmb_cpu_draw_search_results();
     } else if (tab == XMB_TAB_SETTINGS) {
         xmb_cpu_draw_settings();
+    } else if (tab == XMB_TAB_HOME) {
+        xmb_home_cpu_phase();
     } else {
         GridGeom gg; const XMBItem *items; int count, sel, scroll, y0; bool more;
         if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0, &more))
@@ -92,6 +94,8 @@ static void xmb_draw_text_phase(int tab) {
         xmb_draw_settings();
     } else if (tab == XMB_TAB_MUSIC) {
         xmb_draw_empty_state(tab, "Coming soon");
+    } else if (tab == XMB_TAB_HOME) {
+        xmb_home_text_phase();
     } else {
         // Card-grid tabs: breadcrumb (sub-screens), empty text, grid labels.
         if (tab == XMB_TAB_TV && g_tv_depth > 0) {
@@ -155,8 +159,8 @@ static void xmb_draw_hints(int tab) {
     } else if (g_jumpbar_active) {
         static const Hint h[] = {{'X',"Jump"},{'C',"Cancel"}};
         draw_hints_bar(h, 2);
-    } else if (tab == XMB_TAB_RESUME) {
-        static const Hint h[] = {{'X',"Resume"},{'T',"Info"}};
+    } else if (tab == XMB_TAB_HOME) {
+        static const Hint h[] = {{'X',"Open"},{'T',"Info"}};
         draw_hints_bar(h, 2);
     } else {
         static const Hint h[] = {{'E',"Jump"},{'X',"Select"},{'T',"Info"}};
@@ -200,7 +204,8 @@ void ui_run_xmb(void) {
         if (first_iter) crash_log("13.6 wave_draw done");
 
         int tab = g_active_tab;
-        if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS)
+        if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS
+            && tab != XMB_TAB_HOME)
             if (!g_items_loaded[tab]) {
                 if (first_iter) crash_log("13.7 fetch_tab_items");
                 xmb_fetch_tab_items(tab);
@@ -211,6 +216,8 @@ void ui_run_xmb(void) {
         bool should_exit = false;
         if (tab == XMB_TAB_SEARCH)
             should_exit = xmb_handle_input_search();
+        else if (tab == XMB_TAB_HOME)
+            should_exit = xmb_handle_input_home();
         else
             should_exit = xmb_handle_input_browse();
         if (should_exit) break;

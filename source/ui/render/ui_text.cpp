@@ -222,7 +222,7 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
 
             for (int gy = 0; gy < h; gy++) {
                 int sy = draw_y0 + gy;
-                if (sy < 0 || (u32)sy >= display_height) continue;
+                if (cpu_row_clipped(sy)) continue;
                 u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
                 for (int gx = 0; gx < w; gx++) {
                     int sx = draw_x0 + gx;
@@ -266,7 +266,7 @@ void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
     int draw_y0 = (int)y + baseline + yoff;
     for (int gy = 0; gy < h; gy++) {
         int sy = draw_y0 + gy;
-        if (sy < 0 || (u32)sy >= display_height) continue;
+        if (cpu_row_clipped(sy)) continue;
         u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
         for (int gx = 0; gx < w; gx++) {
             int sx = draw_x0 + gx;

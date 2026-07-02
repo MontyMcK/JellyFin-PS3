@@ -27,10 +27,11 @@
 #include "timing.h"
 #include "ui_visuals.h"
 
-// Largest visible page (portrait grid, 10) + the prefetched next page +
-// the previous page still warm, with headroom so prefetched pages don't
-// evict what's on screen.
-#define THUMB_CACHE_SIZE  32
+// Sized for the Home shelf, which shows several rows of cards at once (more
+// distinct (id,size) thumbs on screen than a single grid page) plus light
+// prefetch.  Slot pixel budget is the largest grid card, which is >= any Home
+// card, so more slots only costs slot headers + that fixed bitmap each.
+#define THUMB_CACHE_SIZE  64
 #define FETCH_BUF_SIZE    (256*1024)
 
 typedef enum { SLOT_EMPTY = 0, SLOT_QUEUED, SLOT_READY } SlotState;

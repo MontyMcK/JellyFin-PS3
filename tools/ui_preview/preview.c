@@ -231,9 +231,9 @@ static void draw_background(void) {
     }
     static const u32   C[3]  = { 0x004A52A8, 0x006C5BD4, 0x003A4290 };
     static const u8    A[3]  = { 56, 42, 72 };
-    static const float AMP[3]  = { 34, 24, 16 };
+    static const float AMP[3]  = { 30, 22, 15 };
     static const float FREQ[3] = { 1.5f, 1.8f, 2.1f };
-    static const float BASE[3] = { 0.66f, 0.76f, 0.85f };
+    static const float BASE[3] = { 0.78f, 0.85f, 0.91f };  // low: bottom-quarter ribbons
     static const float PH[3]   = { 1.3f, 3.1f, 5.2f };  // arbitrary frozen phase
     for (int li = 0; li < 3; li++) {
         u32 rf=(C[li]>>16)&0xFF, gf=(C[li]>>8)&0xFF, bf=C[li]&0xFF;
@@ -283,13 +283,23 @@ static void xmb_draw_divider(void) {
     }
 }
 
-static void xmb_draw_tabs(int active) {
+// `enabled` may be NULL to mean "all tabs present" (the usual preview case);
+// pass a per-tab flag array to preview a server with missing libraries.
+static void xmb_draw_tabs_ex(int active, const int *enabled) {
     const int SP = 96;
-    const int half = ((XMB_TAB_COUNT - 1) * SP) / 2;
-    const int x0 = W / 2 - half;
     const int icon_cy = XMB_TOPBAR_H + 30;
-    for (int t = 0; t < XMB_TAB_COUNT; t++) {
-        int cx = x0 + t * SP;
+
+    // Pack only the enabled tabs and center that group (mirrors ui_widgets.cpp).
+    int idx[XMB_TAB_COUNT], n = 0;
+    for (int t = 0; t < XMB_TAB_COUNT; t++)
+        if (!enabled || enabled[t]) idx[n++] = t;
+    if (n == 0) return;
+
+    const int gw = (n - 1) * SP;
+    const int x0 = W / 2 - gw / 2;
+    for (int i = 0; i < n; i++) {
+        int t = idx[i];
+        int cx = x0 + i * SP;
         int act = (t == active);
         int px = act ? 60 : 28;
         drawIcon(cx - px / 2, icon_cy - px / 2, TAB_CP[t], px, act ? XMB_TEXT : XMB_ICON_IDLE);
@@ -300,10 +310,12 @@ static void xmb_draw_tabs(int active) {
     }
     const float lr = 26.0f;
     int lx = x0 - SP/2 - iconic_adv_px('l', lr)/2;
-    int rx = x0 + (XMB_TAB_COUNT-1)*SP + SP/2 - iconic_adv_px('r', lr)/2;
+    int rx = x0 + gw + SP/2 - iconic_adv_px('r', lr)/2;
     draw_iconic_glyph_vcentered(lx, icon_cy, 'l', lr, XMB_TEXT_FAINT);
     draw_iconic_glyph_vcentered(rx, icon_cy, 'r', lr, XMB_TEXT_FAINT);
 }
+
+static void xmb_draw_tabs(int active) { xmb_draw_tabs_ex(active, NULL); }
 
 typedef struct { char glyph; const char *label; } Hint;
 static void draw_hints_bar(const Hint *hints, int n) {

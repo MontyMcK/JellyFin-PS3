@@ -13,7 +13,7 @@
 
 static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
     0xE8B6,  // XMB_TAB_SEARCH      (search/magnifier)
-    0xE889,  // XMB_TAB_RESUME      (history/clock-arrow)
+    0xE88A,  // XMB_TAB_HOME        (house)
     0xE54D,  // XMB_TAB_MOVIES      (movie/film)
     0xE333,  // XMB_TAB_TV          (TV)
     0xE3A1,  // XMB_TAB_MUSIC       (music note)
@@ -68,15 +68,24 @@ void xmb_draw_divider(void) {
 // -------------------------------------------------------
 
 void xmb_draw_tabs(void) {
-    const int TAB_SPACING  = 96;
-    const int group_half_w = ((XMB_TAB_COUNT - 1) * TAB_SPACING) / 2;
-    const int tab_group_x0 = (int)display_width / 2 - group_half_w;
-    const int icon_cy      = XMB_TOPBAR_H + 30;   // icon centerline
+    const int TAB_SPACING = 96;
+    const int icon_cy     = XMB_TOPBAR_H + 30;   // icon centerline
 
-    for (int t = 0; t < XMB_TAB_COUNT; t++) {
-        if (!g_tabs[t].enabled) continue;
+    // Pack only the enabled tabs and center *that* group.  Centering on the
+    // full XMB_TAB_COUNT span would leave a gap (and shove the row off to the
+    // left) whenever a library is missing — e.g. no Collections boxsets.
+    int enabled[XMB_TAB_COUNT];
+    int n = 0;
+    for (int t = 0; t < XMB_TAB_COUNT; t++)
+        if (g_tabs[t].enabled) enabled[n++] = t;
+    if (n == 0) return;
 
-        int  cx     = tab_group_x0 + t * TAB_SPACING;
+    const int group_w      = (n - 1) * TAB_SPACING;
+    const int tab_group_x0 = (int)display_width / 2 - group_w / 2;
+
+    for (int i = 0; i < n; i++) {
+        int  t      = enabled[i];
+        int  cx     = tab_group_x0 + i * TAB_SPACING;
         bool active = (t == g_active_tab);
         int icon_px = active ? 60 : 28;
         int icon_x  = cx - icon_px / 2;
@@ -96,7 +105,7 @@ void xmb_draw_tabs(void) {
     // L1 / R1 flank the tab group as quiet paging hints.
     const float lr_px = 26.0f;
     int lx = tab_group_x0 - TAB_SPACING / 2 - iconic_adv_px('l', lr_px) / 2;
-    int rx = tab_group_x0 + (XMB_TAB_COUNT - 1) * TAB_SPACING + TAB_SPACING / 2
+    int rx = tab_group_x0 + group_w + TAB_SPACING / 2
              - iconic_adv_px('r', lr_px) / 2;
     if (lx < 0) lx = 0;
     draw_iconic_glyph_vcentered((u32)lx, icon_cy, 'l', lr_px, XMB_TEXT_FAINT);

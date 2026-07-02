@@ -84,6 +84,16 @@ void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color);
 void drawRectBlend(u32 x, u32 y, u32 w, u32 h, u32 color, u8 alpha);
 void cpuClearFb(u32 color);   // clear entire framebuffer
 
+// Vertical scissor for the CPU draw primitives (drawRect/drawRectBlend,
+// drawTTF/drawIcon, card blits).  Framebuffer rows outside
+// [g_cpu_clip_top, g_cpu_clip_bot) are skipped; g_cpu_clip_bot == 0 means
+// "to the bottom edge".  Defaults span the whole screen, so most callers
+// never touch these — the Home shelf sets them to keep smoothly-scrolling
+// cards out of the top bar / hints bar, and restores them afterward.
+extern int g_cpu_clip_top;
+extern int g_cpu_clip_bot;
+bool cpu_row_clipped(int sy);   // true when framebuffer row sy is scissored out
+
 // -------------------------------------------------------
 // XMB main screen — replaces the old show_main_menu().
 // -------------------------------------------------------

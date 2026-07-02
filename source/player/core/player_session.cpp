@@ -75,13 +75,14 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
-        "&VideoProfile=baseline"
-        "&VideoLevel=31"
+        "&Profile=baseline"
+        "&Level=31"
         "&MaxWidth=%u&MaxHeight=%u"
         "&VideoBitrate=4000000"
         "&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000"
         "&MaxAudioChannels=2"
         "&MaxFramerate=30"
+        "&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false"
         "&DeviceId=ps3&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",

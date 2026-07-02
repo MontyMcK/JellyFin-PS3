@@ -42,11 +42,24 @@ int  xmb_slide_tv_sub_forward(void);
 int  xmb_slide_col_sub_forward(void);
 
 // -------------------------------------------------------
-// Per-tab input handlers (xmb/ui_nav.cpp, xmb/ui_search.cpp)
+// Per-tab input handlers (xmb/ui_nav.cpp, xmb/ui_search.cpp, xmb/ui_home.cpp)
 // Return true when the XMB loop should exit (logout / quit).
 // -------------------------------------------------------
 bool xmb_handle_input_browse(void);
 bool xmb_handle_input_search(void);
+bool xmb_handle_input_home(void);
+
+// Launch the player for one list item (xmb/ui_nav.cpp).  resume_secs > 0
+// starts playback at that saved position.
+void xmb_play_item(const XMBItem *it, u32 resume_secs);
 
 // Triangle detail overlay (xmb/ui_info.cpp)
 void xmb_show_item_info(const XMBItem *it);
+
+// -------------------------------------------------------
+// Home shelf screen (xmb/ui_home.cpp) — stacked horizontal rows
+// (Continue Watching, Next Up, Recently Added Movies/Shows, Music stub).
+// -------------------------------------------------------
+void xmb_home_on_enter(void);     // reset focus + mark dynamic rows for refetch
+void xmb_home_cpu_phase(void);    // card images / placeholders / selection (after rsxSync)
+void xmb_home_text_phase(void);   // row titles, labels, chevrons

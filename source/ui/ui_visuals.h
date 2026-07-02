@@ -6,13 +6,16 @@
 // XMB tab indices
 // -------------------------------------------------------
 #define XMB_TAB_SEARCH      0
-#define XMB_TAB_RESUME      1   // Continue Watching
+#define XMB_TAB_RESUME      1   // now the Home shelf (Continue Watching is one row of it)
 #define XMB_TAB_MOVIES      2
 #define XMB_TAB_TV          3
 #define XMB_TAB_MUSIC       4
 #define XMB_TAB_COLLECTIONS 5
 #define XMB_TAB_SETTINGS    6
 #define XMB_TAB_COUNT       7
+
+// The Continue Watching tab slot is repurposed as the Home shelf screen.
+#define XMB_TAB_HOME        XMB_TAB_RESUME
 
 #define XMB_ITEMS_MAX 50
 #define XMB_PAGE_SIZE 25
