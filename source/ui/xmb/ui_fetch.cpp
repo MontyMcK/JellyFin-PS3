@@ -268,3 +268,78 @@ int xmb_slide_col_sub_forward(void) {
     g_col_sub_total  = new_total;
     return new_count > 0 ? keep : -1;
 }
+
+// Backward sliding: re-fetch the page just before the window and prepend it,
+// dropping trailing items to stay within XMB_ITEMS_MAX.  The page is fetched
+// into a scratch buffer first so a failed or short fetch leaves the window
+// untouched (a short page would misalign the window against server indices).
+// Returns the number of prepended items — existing indices shift up by that
+// much — or -1 when already at the top / on fetch failure.
+
+static XMBItem s_slide_page[XMB_PAGE_SIZE];
+
+int xmb_slide_tab_backward(int tab) {
+    if (g_tab_start[tab] <= 0) return -1;
+    int fetch_start = g_tab_start[tab] - XMB_PAGE_SIZE;
+    if (fetch_start < 0) fetch_start = 0;
+    int want = g_tab_start[tab] - fetch_start;
+
+    char url[512];
+    xmb_build_items_url(url, sizeof(url), tab, fetch_start, want);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return -1;
+    if (parse_xmb_items(responseBuffer, s_slide_page, want) != want) return -1;
+
+    int keep = g_item_count[tab];
+    if (keep > XMB_ITEMS_MAX - want) keep = XMB_ITEMS_MAX - want;
+    memmove(g_items[tab] + want, g_items[tab], keep * sizeof(XMBItem));
+    memcpy(g_items[tab], s_slide_page, want * sizeof(XMBItem));
+    g_tab_start[tab]  = fetch_start;
+    g_item_count[tab] = keep + want;
+    return want;
+}
+
+int xmb_slide_tv_sub_backward(void) {
+    if (g_tv_sub_start <= 0) return -1;
+    int fetch_start = g_tv_sub_start - XMB_PAGE_SIZE;
+    if (fetch_start < 0) fetch_start = 0;
+    int want = g_tv_sub_start - fetch_start;
+
+    int new_total = g_tv_sub_total;
+    int n = (g_tv_depth == 1)
+        ? xmb_fetch_seasons(g_tv_series_id, s_slide_page, want,
+                            fetch_start, &new_total)
+        : xmb_fetch_episodes(g_tv_series_id, g_tv_season_id, s_slide_page,
+                             want, fetch_start, &new_total);
+    if (n != want) return -1;
+
+    int keep = g_tv_sub_count;
+    if (keep > XMB_ITEMS_MAX - want) keep = XMB_ITEMS_MAX - want;
+    memmove(g_tv_sub_items + want, g_tv_sub_items, keep * sizeof(XMBItem));
+    memcpy(g_tv_sub_items, s_slide_page, want * sizeof(XMBItem));
+    g_tv_sub_start = fetch_start;
+    g_tv_sub_count = keep + want;
+    g_tv_sub_total = new_total;
+    return want;
+}
+
+int xmb_slide_col_sub_backward(void) {
+    if (g_col_sub_start <= 0) return -1;
+    int fetch_start = g_col_sub_start - XMB_PAGE_SIZE;
+    if (fetch_start < 0) fetch_start = 0;
+    int want = g_col_sub_start - fetch_start;
+
+    int new_total = g_col_sub_total;
+    int n = xmb_fetch_collection_items(g_col_id, s_slide_page, want,
+                                       fetch_start, &new_total);
+    if (n != want) return -1;
+
+    int keep = g_col_sub_count;
+    if (keep > XMB_ITEMS_MAX - want) keep = XMB_ITEMS_MAX - want;
+    memmove(g_col_sub_items + want, g_col_sub_items, keep * sizeof(XMBItem));
+    memcpy(g_col_sub_items, s_slide_page, want * sizeof(XMBItem));
+    g_col_sub_start = fetch_start;
+    g_col_sub_count = keep + want;
+    g_col_sub_total = new_total;
+    return want;
+}

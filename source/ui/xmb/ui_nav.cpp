@@ -140,6 +140,14 @@ static void xmb_input_tv_sub(void) {
             g_tv_sub_sel -= C;
             if (g_tv_sub_sel < g_tv_sub_scroll)
                 g_tv_sub_scroll = (g_tv_sub_sel / C) * C;
+        } else if (g_tv_sub_start > 0) {
+            // Earlier pages were dropped by the forward slide: fetch back.
+            int n = xmb_slide_tv_sub_backward();
+            if (n > 0) {
+                g_tv_sub_sel += n - C;   // one row up, same column
+                if (g_tv_sub_sel < 0) g_tv_sub_sel = 0;
+                g_tv_sub_scroll = (g_tv_sub_sel / C) * C;
+            }
         }
     }
     if (BTN_REPEAT(down)) {
@@ -201,6 +209,14 @@ static void xmb_input_col_sub(void) {
             g_col_sub_sel -= C;
             if (g_col_sub_sel < g_col_sub_scroll)
                 g_col_sub_scroll = (g_col_sub_sel / C) * C;
+        } else if (g_col_sub_start > 0) {
+            // Earlier pages were dropped by the forward slide: fetch back.
+            int n = xmb_slide_col_sub_backward();
+            if (n > 0) {
+                g_col_sub_sel += n - C;   // one row up, same column
+                if (g_col_sub_sel < 0) g_col_sub_sel = 0;
+                g_col_sub_scroll = (g_col_sub_sel / C) * C;
+            }
         }
     }
     if (BTN_REPEAT(down)) {
@@ -297,6 +313,15 @@ bool xmb_handle_input_browse(void) {
         if (g_sel >= C) {
             g_sel -= C;
             if (g_sel < g_scroll_top) g_scroll_top = (g_sel / C) * C;
+        } else if (g_tab_start[tab] > 0) {
+            // Top of the loaded window with earlier pages dropped by the
+            // forward slide: fetch the previous page back in.
+            int n = xmb_slide_tab_backward(tab);
+            if (n > 0) {
+                g_sel += n - C;   // one row up, same column
+                if (g_sel < 0) g_sel = 0;
+                g_scroll_top = (g_sel / C) * C;
+            }
         }
     }
     if (BTN_REPEAT(down)) {

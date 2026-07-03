@@ -13,9 +13,11 @@ Goal: consumer-quality media playback on PS3, the second-best media player on th
 ## Features
 
 - XMB-style UI: background gradient with translucent animated wave ribbons, top-bar clock, icon tab bar
+- Home shelf: vertically-scrolling rows (Continue Watching, Next Up, Recently Added Movies/Shows) mirroring the Jellyfin web home
 - Card-grid browsing (5x2 portrait posters, 3x2 landscape stills, title/info under the selected card) on all library tabs; search and settings keep the compact row UI
 - Browse Movies, TV Shows, and Collections libraries
 - Continue Watching tab: server resume list, watched-progress bars on thumbnails, playback resumes at the saved position
+- Next-episode auto-advance: a NEXT EPISODE prompt in the last 90s of any episode (SELECT to jump immediately), with a 30s countdown that starts the next episode automatically; the follower is resolved from the server, so it works from any launch point (Home rows, Continue Watching, search, season lists) and continues across season boundaries
 - Playback progress reported to the server every 10s (Sessions/Playing + Progress + Stopped), so PS3 viewing updates Continue Watching everywhere
 - TV show browser, Series then Seasons then Episodes
 - Collections browser, Collection then Movies
@@ -31,15 +33,16 @@ Goal: consumer-quality media playback on PS3, the second-best media player on th
 - MP3 audio decode via minimp3 with PCM ring buffer
 - Interleaved stereo DMA audio output at 48kHz
 - Double-buffered RSX GPU blit via custom vertex and fragment shaders
-- In-player HUD: one compact strip with a focusable control row (rewind, play/pause, fast-forward, AUDIO, CC), seek bar, and elapsed/remaining times
+- In-player HUD: one compact strip with a focusable control row (rewind, play/pause, fast-forward, AUDIO, CC), seek bar, and elapsed/remaining times — composed into a texture only when its content changes and GPU-blended over the video, so a visible seek bar costs the display loop nothing
 - Audio track and subtitle selection via popup menus (Jellyfin AudioStreamIndex / SubtitleStreamIndex); subtitles are burned in server-side (SubtitleMethod=Encode) since the PS3 has no subtitle renderer
 - Title overlay in the top-left while paused
 - Seek: R2/L2 tap skips 10s (rapid taps batch into one jump), hold pauses and scrubs the bar in 25s steps with a single reposition on release
 - Every reposition (seek or track change) stops the server transcode, mints a fresh PlaySessionId via PlaybackInfo, and re-requests stream.ts at the target StartTimeTicks, with full decoder, audio, and jitter-buffer flush
 - Jellyfin PlaybackInfo POST with PS3 H.264 transcode profile (720p)
+- Transcode is always forced: the stream URL pins Profile=baseline / Level=31 and sets AllowVideoStreamCopy=false / AllowAudioStreamCopy=false, so any library file plays regardless of source codec, profile, resolution, or bitrate (a stream-copied High-profile track used to decode as black frames)
 - .pkg packaging via PSL1GHT built-in ppu_rules flow (APPID JFPS30000)
 - Crash log written synchronously to /dev_hdd0/tmp/crash_log.txt
-- Async ring-buffer logging system (player log at /dev_hdd0/tmp/player_log.txt)
+- Async ring-buffer logging system (player log at /dev_hdd0/tmp/player_log.txt), toggled from the Settings tab — off by default, choice persisted across restarts
 
 ---
 
@@ -93,6 +96,7 @@ Press any button during playback to bring up the HUD. It auto-hides after 4 seco
 | X on AUDIO / CC | Open the audio / subtitle track popup menu                              |
 | R2 / L2 (tap)   | Skip +10s / -10s (taps within 1s batch into one seek)                   |
 | R2 / L2 (hold)  | Pause and scrub the seek bar; the seek fires once on release            |
+| Select          | Jump to the next episode/movie (during the NEXT prompt, last 90s)       |
 
 Track menu: D-pad Up/Down to highlight, X to select, O to close. The active entry carries an accent dot; the CC menu has an Off entry at the top, and an active subtitle underlines the CC button. Picking a different track reopens the stream at the current position with the new track applied (subtitles can take a while to start the first time — the server extracts the track before the burn-in transcode begins).
 
@@ -196,15 +200,18 @@ The audio clock drives the seek bar, so the bar jumps to the new position automa
 
 ---
 
-## HUD Overlay and the dim strip
+## HUD Overlay
 
-The in-player HUD draws a darkened strip along the bottom of the screen behind the controls. Getting this right was non-trivial on RSX:
+The in-player HUD (dim strip, seek bar, controls, paused title, track menu) went through several architectures on the way to one that doesn't cost the display loop anything:
 
-- The first approach drew the strip as a GPU quad using vertex arrays (rsxBindVertexArrayAttrib + rsxDrawVertexArray). This hard-froze the console when paused, because the GPU stalled fetching a stale TEX0 attribute array left bound by the video path.
+- The first approach drew the dim strip as a GPU quad using vertex arrays (rsxBindVertexArrayAttrib + rsxDrawVertexArray). This hard-froze the console when paused, because the GPU stalled fetching a stale TEX0 attribute array left bound by the video path.
 - The second approach blended the strip on the PPU directly into the framebuffer. It never froze, but color_buffer is CPU-writable RSX VRAM, and per-pixel read-modify-write over the bus pushed frame time from about 16.7ms to about 183ms (around 5fps) whenever the HUD was visible.
-- The current approach matches how Movian draws its overlays: a GPU quad with vertices submitted inline into the command FIFO (rsxDrawVertexBegin / rsxDrawVertex4f / rsxDrawVertexEnd). Inline submission has no vertex-array fetch, so it cannot wedge on a stale binding, and it stays on the GPU, so frame time returns to one vblank.
+- The third approach fixed the strip with an inline GPU quad (rsxDrawVertexBegin / rsxDrawVertex4f / rsxDrawVertexEnd — no vertex-array fetch, so no stale-binding wedge), but the text and controls were still CPU-drawn into VRAM every frame behind an rsxSync fence. That work pushed each iteration just past one vblank, so VSYNC quantised the loop to a 2-vblank cadence whenever the bar was visible — video at half rate, the seek bar and the player splitting the frame budget.
+- The current approach removes the HUD from the per-frame path entirely. The whole overlay is composed with the CPU into a main-RAM staging buffer only when its content changes (the time string ticks once a second; everything else is input-driven), the dirty rows are uploaded to an RSX texture, and every frame the GPU draws one full-screen alpha-blended quad over the video (rsx_draw_hud_overlay, reusing the video shaders — the fragment program passes texture alpha through). Vertices go inline, no rsxSync is needed, and per-frame cost is a few FIFO words.
 
-Three implementations are kept behind compile defines so the fast path can be swapped instantly if needed:
+The CPU draw primitives (drawRect, drawTTF, drawIcon, iconic glyphs) support an off-screen compose target with straight-alpha OVER compositing (cpu_rt_begin/end in ui_draw.cpp) for this; the XMB screen paths are unchanged.
+
+The three dim-strip implementations are still kept behind compile defines in hud_dim.cpp for hardware A/B testing:
 
 | Define              | Path                                                  |
 |---------------------|-------------------------------------------------------|
@@ -212,7 +219,7 @@ Three implementations are kept behind compile defines so the fast path can be sw
 | HUD_DIM_CPU         | CPU pixel blend, slow but bulletproof fallback        |
 | HUD_DIM_GPU_ARRAY   | Original array-fetch quad, known to freeze, test only |
 
-A single rsxSync() fences the prior video draw before the HUD reprograms RSX state, which is also required to avoid a paused-state collision with in-flight video commands.
+While paused with no input, the display loop stops redrawing entirely (paused-idle gate in player.cpp): the frame is pixel-identical anyway, so the loop just polls input at vblank rate until something changes. Pausing is instant, scrubbing stays responsive, and the console goes quiet.
 
 ---
 
@@ -255,7 +262,8 @@ Audio PES packets (MP3, type 0x03)
 | Decode         | 800      | TS demux, VDEC submit, jitter buffer fill                  |
 | Upload         | 850      | memcpy jitter buffer to RSX texture (A + B)                |
 | Audio          | 750      | DMA event loop, PCM ring drain                             |
-| Async log      | default  | Ring-buffer drain to player_log.txt                        |
+| Progress       | 1100     | POST position to Jellyfin every ~10s (Continue Watching)   |
+| Async log      | 1200     | Ring-buffer drain to player_log.txt (when logging enabled) |
 
 On seek, only the decode thread is stopped and respawned; the audio and upload threads stay alive and idle on empty buffers.
 
@@ -310,8 +318,9 @@ JellyFin---PS3/
     |   |   `-- player_display.cpp # Blend gate, frame swap, HUD overlay, diagnostics
     |   |-- hud/
     |   |   |-- hud_core.cpp       # HUD state, input, focus navigation, public API
-    |   |   |-- hud_dim.cpp        # Dim quad (inline GPU / CPU / array-fetch paths)
-    |   |   `-- hud_draw.cpp       # Seek bar, transport row, popup menu rendering
+    |   |   |-- hud_dim.cpp        # Dim quad fallbacks + overlay buffer lifecycle
+    |   |   `-- hud_draw.cpp       # Overlay compose-on-change (seek bar, transport
+    |   |                          #   row, title, menu) + per-frame GPU quad
     |   |-- gpu/
     |   |   |-- player_gpu.cpp     # RSX buffer alloc/free, vid_gpu_draw wrapper
     |   |   `-- player_rsx.cpp/h   # RSX frame draw (blit + crossfade)
@@ -330,8 +339,9 @@ JellyFin---PS3/
     |   |-- xmb/
     |   |   |-- ui_xmb.cpp         # XMB main loop (input dispatch + draw phases)
     |   |   |-- ui_xmb_state.cpp   # Tab/item/navigation globals
-    |   |   |-- ui_nav.cpp         # Tab switching + browse input handlers
-    |   |   |-- ui_fetch.cpp       # Library fetch + sliding-window pagination
+    |   |   |-- ui_nav.cpp         # Tab switching, browse input, episode play loop
+    |   |   |-- ui_home.cpp        # Home shelf (Continue Watching / Next Up rows)
+    |   |   |-- ui_fetch.cpp       # Library fetch, pagination, next-episode lookup
     |   |   |-- ui_search.cpp      # Search tab input + live search
     |   |   |-- ui_info.cpp        # Triangle item info overlay
     |   |   `-- ui_json.cpp        # JSON parsing helpers (parse_xmb_items)
@@ -348,9 +358,13 @@ JellyFin---PS3/
     |       `-- iconic_psx.h       # PSX-style iconography
     |-- util/
     |   |-- timing.cpp/h           # Frame pacing, Bresenham accumulator, AV sync EMA
-    |   `-- plog.cpp/h             # Async ring-buffer logging
+    |   `-- plog.cpp/h             # Async ring-buffer logging + settings toggle
     `-- video/
-        `-- video.cpp/h            # VDEC init, H.264 decode, jitter buffer, fps detection, flush
+        |-- video.cpp/h            # Session glue: feed TS, reset, public video API
+        |-- video_internal.h       # Internal cross-module API (submit, jbuf producer)
+        |-- ts_demux.cpp/h         # MPEG-TS demux: PAT/PMT, PES reassembly, PTS
+        |-- vdec.cpp               # VDEC init/flush, H.264 AU submit, frame pull, fps detection
+        `-- jbuf.cpp               # Jitter buffer (16 decoded-frame slots + producer API)
 ```
 
 ---
@@ -360,10 +374,12 @@ JellyFin---PS3/
 | Feature                  | Status                                                            |
 |--------------------------|-------------------------------------------------------------------|
 | Login / Auth             | Working                                                           |
+| Home shelf               | Working (Continue Watching, Next Up, Recently Added rows)         |
 | Movie browsing           | Working                                                           |
 | TV show browsing         | Working (Series, Seasons, Episodes)                               |
 | Collections browsing     | Working                                                           |
 | Continue Watching        | Working (resume tab, thumbnail progress bars, resume + reporting) |
+| Next-episode advance     | Working (SELECT prompt at 90s, 30s auto-advance countdown, server-resolved across seasons, any launch point) |
 | Search                   | Working (live, keystroke-driven)                                  |
 | Item info overlay        | Working (overview, rating, genres, studios, video/audio info)     |
 | Thumbnail cache          | Working                                                           |
@@ -371,10 +387,11 @@ JellyFin---PS3/
 | Temporal frame blending  | Working (crossfade shader, eliminates 2:3 judder)                 |
 | Audio playback           | Working (48kHz stereo MP3, zero silence blocks)                   |
 | AV sync                  | Locked (plus or minus 5ms via PTS clock + EMA bias)               |
-| HUD overlay              | Working (inline GPU dim quad, no freeze, full-speed)              |
+| HUD overlay              | Working (GPU-composited texture, compose-on-change, zero per-frame cost) |
 | Seek / rewind / skip     | Working (tap-to-skip + hold-to-scrub, StartTimeTicks re-request + full pipeline flush) |
 | Audio / subtitle tracks  | Working (popup menus; subtitles burned in server-side)            |
-| PlaybackInfo / transcode | Working (H.264 720p profile, PlaySessionId extracted)             |
+| PlaybackInfo / transcode | Working (H.264 720p baseline profile, transcode always forced, PlaySessionId extracted) |
+| Settings                 | Working (account card, log out, Debug Logging toggle)             |
 | PKG packaging            | Working (make pkg, APPID JFPS30000)                               |
 | Music library            | Not implemented                                                   |
 
@@ -382,7 +399,9 @@ JellyFin---PS3/
 
 ## Logging
 
-During playback, async log output is written to /dev_hdd0/tmp/player_log.txt. The crash log at /dev_hdd0/tmp/crash_log.txt is written synchronously at key lifecycle checkpoints (including per-step seek and HUD checkpoints) and survives crashes that prevent the async logger from flushing. Reading it from the bottom up pinpoints the exact step that failed on hardware.
+Debug logging is **off by default** and toggled from the Settings tab (the choice persists across restarts in /dev_hdd0/tmp/jellyfin_settings.txt — it survives logout, which only removes jellyfin_config.txt). When enabled, async log output is written to /dev_hdd0/tmp/player_log.txt; while disabled, plog() discards messages with no ring-buffer or disk activity.
+
+The crash log at /dev_hdd0/tmp/crash_log.txt is always written synchronously at key lifecycle checkpoints (including per-step seek and HUD checkpoints) and survives crashes that prevent the async logger from flushing. Reading it from the bottom up pinpoints the exact step that failed on hardware.
 
 ---
 

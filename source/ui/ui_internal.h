@@ -42,6 +42,14 @@ int  xmb_slide_tab_forward(int tab);
 int  xmb_slide_tv_sub_forward(void);
 int  xmb_slide_col_sub_forward(void);
 
+// Reverse direction: prepend the previous page (dropped by a forward slide)
+// so the user can scroll back to the top.  Returns the number of prepended
+// items (existing indices shift up by that much), or -1 at the top / on a
+// failed fetch.
+int  xmb_slide_tab_backward(int tab);
+int  xmb_slide_tv_sub_backward(void);
+int  xmb_slide_col_sub_backward(void);
+
 // -------------------------------------------------------
 // Per-tab input handlers (xmb/ui_nav.cpp, xmb/ui_search.cpp, xmb/ui_home.cpp)
 // Return true when the XMB loop should exit (logout / quit).
