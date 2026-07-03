@@ -168,11 +168,10 @@ bool xmb_handle_input_search(void) {
         }
         if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {
             const XMBItem *it = &g_search_results[g_search_sel];
-            JFItem jf; memset(&jf, 0, sizeof(jf));
-            strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
-            strncpy(jf.name, it->name, sizeof(jf.name)-1);
-            strncpy(jf.type, it->type, sizeof(jf.type)-1);
-            show_player(&jf);
+            if (strcmp(it->type, "Episode") == 0)
+                xmb_play_episode_with_next(it, 0);
+            else
+                xmb_play_item(it, 0);
             return false;
         }
     }

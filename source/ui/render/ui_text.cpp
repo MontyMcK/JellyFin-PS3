@@ -220,15 +220,18 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
             int draw_x0 = (int)xf + xoff;
             int draw_y0 = (int)y + baseline + yoff;
 
+            bool rt = cpu_rt_on();
+            u32  tw_ = cpu_draw_w();
             for (int gy = 0; gy < h; gy++) {
                 int sy = draw_y0 + gy;
                 if (cpu_row_clipped(sy)) continue;
-                u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
+                u32 *row = cpu_draw_row((u32)sy);
                 for (int gx = 0; gx < w; gx++) {
                     int sx = draw_x0 + gx;
-                    if (sx < 0 || (u32)sx >= display_width) continue;
+                    if (sx < 0 || (u32)sx >= tw_) continue;
                     u32 a = bm[gy * w + gx];
                     if (a == 0) continue;
+                    if (rt) { row[sx] = argb_over(row[sx], color, a); continue; }
                     if (a == 255) { row[sx] = color; continue; }
                     u32 bg   = row[sx];
                     u32 r_out = aa_blend(a, r_fg, (bg >> 16) & 0xFF);
@@ -264,15 +267,18 @@ void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
     u32 b_fg =  color        & 0xFF;
     int draw_x0 = (int)x + xoff;
     int draw_y0 = (int)y + baseline + yoff;
+    bool rt = cpu_rt_on();
+    u32  tw_ = cpu_draw_w();
     for (int gy = 0; gy < h; gy++) {
         int sy = draw_y0 + gy;
         if (cpu_row_clipped(sy)) continue;
-        u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
+        u32 *row = cpu_draw_row((u32)sy);
         for (int gx = 0; gx < w; gx++) {
             int sx = draw_x0 + gx;
-            if (sx < 0 || (u32)sx >= display_width) continue;
+            if (sx < 0 || (u32)sx >= tw_) continue;
             u32 a = bm[gy * w + gx];
             if (a == 0) continue;
+            if (rt) { row[sx] = argb_over(row[sx], color, a); continue; }
             if (a == 255) { row[sx] = color; continue; }
             u32 bg   = row[sx];
             u32 r_bg = (bg >> 16) & 0xFF;
@@ -308,15 +314,19 @@ void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color) {
     u32 b_fg =  color        & 0xFF;
     int dx0 = (int)x + xoff;
     int dy0 = (int)y + baseline + yoff;
+    bool rt = cpu_rt_on();
+    u32  tw_ = cpu_draw_w();
+    u32  th_ = cpu_draw_h();
     for (int gy = 0; gy < h; gy++) {
         int sy = dy0 + gy;
-        if (sy < 0 || (u32)sy >= display_height) continue;
-        u32 *row = color_buffer[curr_fb] + (u32)sy * display_width;
+        if (sy < 0 || (u32)sy >= th_) continue;
+        u32 *row = cpu_draw_row((u32)sy);
         for (int gx = 0; gx < w; gx++) {
             int sx = dx0 + gx;
-            if (sx < 0 || (u32)sx >= display_width) continue;
+            if (sx < 0 || (u32)sx >= tw_) continue;
             u32 a = bm[gy * w + gx];
             if (a == 0) continue;
+            if (rt) { row[sx] = argb_over(row[sx], color, a); continue; }
             if (a == 255) { row[sx] = color; continue; }
             u32 bg   = row[sx];
             u32 r_bg = (bg >> 16) & 0xFF;

@@ -332,8 +332,13 @@ static void home_activate(void) {
     }
 
     // Continue Watching resumes; everything else plays from the start.
+    // Episodes get the NEXT prompt / auto-advance no matter which row
+    // they came from.
     u32 resume = (s_focus_row == HR_CONTINUE) ? it->resume_secs : 0;
-    xmb_play_item(it, resume);
+    if (strcmp(it->type, "Episode") == 0)
+        xmb_play_episode_with_next(it, resume);
+    else
+        xmb_play_item(it, resume);
     s_rows[HR_CONTINUE].loaded = false; s_rows[HR_CONTINUE].scroll = 0;
     s_rows[HR_NEXTUP].loaded   = false; s_rows[HR_NEXTUP].scroll   = 0;
     init_btns();

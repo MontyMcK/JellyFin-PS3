@@ -51,7 +51,24 @@ void decode_unicode_escapes(char *str) {
 int g_cpu_clip_top = 0;
 int g_cpu_clip_bot = 0;   // 0 == bottom edge
 
+// CPU compose target (see ui.h).  NULL = draw to the framebuffer.
+static u32 *s_rt_buf = NULL;
+static u32  s_rt_w   = 0;
+static u32  s_rt_h   = 0;
+
+void cpu_rt_begin(u32 *buf, u32 w, u32 h) { s_rt_buf = buf; s_rt_w = w; s_rt_h = h; }
+void cpu_rt_end(void)                     { s_rt_buf = NULL; }
+bool cpu_rt_on(void)                      { return s_rt_buf != NULL; }
+u32  cpu_draw_w(void)                     { return s_rt_buf ? s_rt_w : display_width; }
+u32  cpu_draw_h(void)                     { return s_rt_buf ? s_rt_h : display_height; }
+u32 *cpu_draw_row(u32 y) {
+    return s_rt_buf ? s_rt_buf + y * s_rt_w
+                    : color_buffer[curr_fb] + y * display_width;
+}
+
 bool cpu_row_clipped(int sy) {
+    if (s_rt_buf)   // scissor is a framebuffer concept; RT clips to its bounds
+        return (sy < 0 || sy >= (int)s_rt_h);
     if (sy < g_cpu_clip_top || sy >= (int)display_height) return true;
     if (g_cpu_clip_bot && sy >= g_cpu_clip_bot)           return true;
     return false;
@@ -59,29 +76,41 @@ bool cpu_row_clipped(int sy) {
 
 // Clamp a fill's [y, y2) row span to the active scissor.
 static void clip_rows(u32 *y, u32 *y2) {
+    if (s_rt_buf) return;
     if ((int)*y  < g_cpu_clip_top)                       *y  = (u32)g_cpu_clip_top;
     if (g_cpu_clip_bot && *y2 > (u32)g_cpu_clip_bot)     *y2 = (u32)g_cpu_clip_bot;
 }
 
 void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color) {
-    if (x >= display_width || y >= display_height || w == 0 || h == 0) return;
-    u32 x2 = (x + w > display_width)  ? display_width  : x + w;
-    u32 y2 = (y + h > display_height) ? display_height : y + h;
+    u32 dw = cpu_draw_w(), dh = cpu_draw_h();
+    if (x >= dw || y >= dh || w == 0 || h == 0) return;
+    u32 x2 = (x + w > dw) ? dw : x + w;
+    u32 y2 = (y + h > dh) ? dh : y + h;
     clip_rows(&y, &y2);
+    if (s_rt_buf) color |= 0xFF000000u;   // solid fill: opaque in the RT
     for (u32 r = y; r < y2; r++) {
-        u32 *p = color_buffer[curr_fb] + r * display_width + x;
+        u32 *p = cpu_draw_row(r) + x;
         u32  n = x2 - x;
         for (u32 c = 0; c < n; c++) p[c] = color;
     }
 }
 
 void drawRectBlend(u32 x, u32 y, u32 w, u32 h, u32 color, u8 alpha) {
-    if (x >= display_width || y >= display_height || w == 0 || h == 0) return;
+    u32 dw = cpu_draw_w(), dh = cpu_draw_h();
+    if (x >= dw || y >= dh || w == 0 || h == 0) return;
     if (alpha == 0) return;
     if (alpha == 255) { drawRect(x, y, w, h, color); return; }
-    u32 x2 = (x + w > display_width)  ? display_width  : x + w;
-    u32 y2 = (y + h > display_height) ? display_height : y + h;
+    u32 x2 = (x + w > dw) ? dw : x + w;
+    u32 y2 = (y + h > dh) ? dh : y + h;
     clip_rows(&y, &y2);
+    if (s_rt_buf) {
+        for (u32 r = y; r < y2; r++) {
+            u32 *p = cpu_draw_row(r);
+            for (u32 c = x; c < x2; c++)
+                p[c] = argb_over(p[c], color, alpha);
+        }
+        return;
+    }
     u32 r_fg = (color >> 16) & 0xFF;
     u32 g_fg = (color >>  8) & 0xFF;
     u32 b_fg =  color        & 0xFF;

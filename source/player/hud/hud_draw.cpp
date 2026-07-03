@@ -1,31 +1,115 @@
 // HUD rendering — paused title, dim strip, transport controls, seek bar,
 // time labels, AUDIO/CC buttons, and the track-selection popup menu.
+//
+// The HUD is NOT drawn into the framebuffer.  It is composed with the CPU
+// into a main-RAM ARGB staging buffer only when its content changes (the
+// time string ticks once a second; everything else is input-driven),
+// uploaded to an RSX texture, and drawn every frame as a single
+// alpha-blended GPU quad after the video (rsx_draw_hud_overlay).  Per-frame
+// cost is a few FIFO words — no rsxSync stall, no CPU writes into VRAM —
+// so a visible seek bar can no longer push the display loop past one
+// vblank (the "HUD splits the FPS with the video" lag).
 
 #include <stdio.h>
+#include <string.h>
+#include <malloc.h>
 
 #include <ppu-types.h>
+#include <rsx/rsx.h>
 
 #include "player_hud.h"
 #include "player_hud_internal.h"
+#include "player_rsx.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "rsxutil.h"
 #include "plog.h"
 
 // -------------------------------------------------------
-// CPU-drawn primitives
+// Overlay buffers + compose-on-change state
+// -------------------------------------------------------
+
+static u32 *s_ovl_stage   = NULL;   // main-RAM compose target (straight alpha)
+static u32 *s_ovl_tex     = NULL;   // RSX-local texture the GPU samples
+static u32  s_ovl_tex_off = 0;
+static u32  s_ovl_w = 0, s_ovl_h = 0;
+static int  s_ovl_prev_y0 = 0, s_ovl_prev_y1 = 0;  // rows drawn by last compose
+static int  s_ovl_y0 = 0, s_ovl_y1 = 0;            // rows drawn by this compose
+
+// Everything the overlay's pixels depend on.  Compared memberwise per frame;
+// a change triggers one recompose + upload.  Zero the struct before filling
+// so padding compares clean.
+struct OvlKey {
+    u32  elapsed_secs;
+    u32  total_secs;
+    s32  focus, incr_idx;
+    s32  menu_sel, menu_cur, menu_n;
+    u8   paused, cc, menu_vis, title_on;
+    char audio[64];
+};
+static OvlKey s_ovl_key;
+static bool   s_ovl_key_valid = false;
+
+void hud_overlay_alloc(void) {
+    s_ovl_w = display_width;
+    s_ovl_h = display_height;
+    u32 bytes = s_ovl_w * s_ovl_h * 4;
+    s_ovl_stage = (u32*)memalign(128, bytes);
+    s_ovl_tex   = (u32*)rsxMemalign(64, bytes);
+    if (s_ovl_stage) memset(s_ovl_stage, 0, bytes);
+    if (s_ovl_tex) {
+        memset((void*)s_ovl_tex, 0, bytes);
+        rsxAddressToOffset(s_ovl_tex, &s_ovl_tex_off);
+    }
+    if (!s_ovl_stage || !s_ovl_tex) plog("hud_ovl: alloc FAILED");
+    s_ovl_prev_y0 = s_ovl_prev_y1 = 0;
+    s_ovl_key_valid = false;
+}
+
+void hud_overlay_free(void) {
+    if (s_ovl_stage) { free(s_ovl_stage);   s_ovl_stage = NULL; }
+    if (s_ovl_tex)   { rsxFree(s_ovl_tex);  s_ovl_tex   = NULL; }
+}
+
+// Extend the dirty row span of the current compose.
+static void ovl_span(int y0, int y1) {
+    if (y0 < 0) y0 = 0;
+    if (y1 > (int)s_ovl_h) y1 = (int)s_ovl_h;
+    if (y1 <= y0) return;
+    if (y0 < s_ovl_y0) s_ovl_y0 = y0;
+    if (y1 > s_ovl_y1) s_ovl_y1 = y1;
+}
+
+// Translucent black backdrop written straight into the staging buffer —
+// the bottom layer of each HUD region, so no compositing needed.
+static void ovl_dim(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha) {
+    if (rx >= s_ovl_w || ry >= s_ovl_h) return;
+    u32 x2 = (rx + rw > s_ovl_w) ? s_ovl_w : rx + rw;
+    u32 y2 = (ry + rh > s_ovl_h) ? s_ovl_h : ry + rh;
+    u32 px = (u32)alpha << 24;
+    for (u32 y = ry; y < y2; y++) {
+        u32 *row = s_ovl_stage + y * s_ovl_w;
+        for (u32 x = rx; x < x2; x++) row[x] = px;
+    }
+    ovl_span((int)ry, (int)y2);
+}
+
+// -------------------------------------------------------
+// CPU-drawn primitives (render into the compose target)
 // -------------------------------------------------------
 
 static void draw_circle(int cx, int cy, int r, u32 color) {
     int r2 = r * r;
+    u32 tw_ = cpu_draw_w(), th_ = cpu_draw_h();
+    if (cpu_rt_on()) color |= 0xFF000000u;
     for (int dy = -r; dy <= r; dy++) {
         int sy = cy + dy;
-        if (sy < 0 || (u32)sy >= display_height) continue;
-        u32 *rowp = color_buffer[curr_fb] + (u32)sy * display_width;
+        if (sy < 0 || (u32)sy >= th_) continue;
+        u32 *rowp = cpu_draw_row((u32)sy);
         for (int dx = -r; dx <= r; dx++) {
             if (dx * dx + dy * dy > r2) continue;
             int sx = cx + dx;
-            if (sx < 0 || (u32)sx >= display_width) continue;
+            if (sx < 0 || (u32)sx >= tw_) continue;
             rowp[sx] = color;
         }
     }
@@ -37,16 +121,18 @@ static void draw_pp_symbol(int cx, int cy, bool paused, u32 color) {
         // Right-pointing filled triangle: tip at (cx + PP_W/2, cy).
         int half_h = PP_H / 2;
         int half_w = PP_W / 2;
+        u32 tw_ = cpu_draw_w(), th_ = cpu_draw_h();
+        if (cpu_rt_on()) color |= 0xFF000000u;
         for (int dy = -half_h; dy <= half_h; dy++) {
             int sy = cy + dy;
-            if (sy < 0 || (u32)sy >= display_height) continue;
+            if (sy < 0 || (u32)sy >= th_) continue;
             int abs_dy = dy < 0 ? -dy : dy;
             int span = (half_h - abs_dy) * (2 * half_w) / (half_h > 0 ? half_h : 1);
             int x0 = cx - half_w;
             int x1 = x0 + span;
-            u32 *line = color_buffer[curr_fb] + (u32)sy * display_width;
+            u32 *line = cpu_draw_row((u32)sy);
             for (int sx = x0; sx <= x1; sx++) {
-                if (sx >= 0 && (u32)sx < display_width)
+                if (sx >= 0 && (u32)sx < tw_)
                     line[sx] = color;
             }
         }
@@ -99,7 +185,7 @@ static void draw_menu(int dw, int dh) {
     int my0 = my1 - mh;
     if (my0 < 6) my0 = 6;
 
-    hud_dim_rect((u32)mx0, (u32)my0, (u32)mw, (u32)(my1 - my0), 225);
+    ovl_dim((u32)mx0, (u32)my0, (u32)mw, (u32)(my1 - my0), 225);
 
     drawTTF((u32)(mx0 + MENU_PAD),
             (u32)(my0 + (MENU_TITLE_H - (int)MENU_TITLE_PX) / 2),
@@ -121,21 +207,28 @@ static void draw_menu(int dw, int dh) {
 }
 
 // -------------------------------------------------------
-// hud_draw — full overlay for one frame
+// hud_compose — render the full overlay into the staging buffer
 // -------------------------------------------------------
 
-void hud_draw(u64 elapsed_us, bool paused) {
-    if (!g_hud.visible) return;
+static void hud_compose(u64 elapsed_us, bool paused) {
+    // Wipe the rows the previous compose drew, then track this one's span.
+    if (s_ovl_prev_y1 > s_ovl_prev_y0)
+        memset(s_ovl_stage + (u32)s_ovl_prev_y0 * s_ovl_w, 0,
+               (u32)(s_ovl_prev_y1 - s_ovl_prev_y0) * s_ovl_w * 4);
+    s_ovl_y0 = (int)s_ovl_h;
+    s_ovl_y1 = 0;
 
-    int dw = (int)display_width;
-    int dh = (int)display_height;
+    cpu_rt_begin(s_ovl_stage, s_ovl_w, s_ovl_h);
+
+    int dw = (int)s_ovl_w;
+    int dh = (int)s_ovl_h;
 
     // ---- Title (top-left, only while paused) ----
     if (paused && g_hud.title[0]) {
         int tw = ttf_text_width(g_hud.title, TITLE_PX);
         if (tw > dw - 2 * LEFT_PAD) tw = dw - 2 * LEFT_PAD;
-        hud_dim_rect((u32)(LEFT_PAD - 12), (u32)(TITLE_TOP_PAD - 8),
-                     (u32)(tw + 24), (u32)((int)TITLE_PX + 16), 185);
+        ovl_dim((u32)(LEFT_PAD - 12), (u32)(TITLE_TOP_PAD - 8),
+                (u32)(tw + 24), (u32)((int)TITLE_PX + 16), 185);
         drawTTF((u32)LEFT_PAD, (u32)TITLE_TOP_PAD, g_hud.title, TITLE_PX,
                 HUD_FOCUSED);
     }
@@ -143,10 +236,7 @@ void hud_draw(u64 elapsed_us, bool paused) {
     // ---- Background strip ----
     int strip_y = dh - HUD_STRIP_H;
     if (strip_y < 0) strip_y = 0;
-    static int s_dl = 0; bool dl = (s_dl < 12); if (dl) s_dl++;
-    if (dl) plog("hud_draw: A pre dim_rect");
-    hud_dim_rect(0, (u32)strip_y, (u32)dw, (u32)(dh - strip_y), 185);
-    if (dl) plog("hud_draw: C post dim_rect");
+    ovl_dim(0, (u32)strip_y, (u32)dw, (u32)(dh - strip_y), 185);
 
     // ---- Row centre ----
     // Everything — transport, seek bar, times, AUDIO, CC — shares one row.
@@ -243,4 +333,62 @@ void hud_draw(u64 elapsed_us, bool paused) {
 
     if (g_hud.menu_visible && g_hud.menu_n > 0)
         draw_menu(dw, dh);
+
+    cpu_rt_end();
+
+    // Upload the union of the previous and current spans so rows the HUD no
+    // longer covers (e.g. a closed menu) are cleared on the texture too.
+    int up_y0 = (s_ovl_prev_y0 < s_ovl_y0) ? s_ovl_prev_y0 : s_ovl_y0;
+    int up_y1 = (s_ovl_prev_y1 > s_ovl_y1) ? s_ovl_prev_y1 : s_ovl_y1;
+    if (up_y1 > up_y0)
+        memcpy((void*)(s_ovl_tex + (u32)up_y0 * s_ovl_w),
+               s_ovl_stage + (u32)up_y0 * s_ovl_w,
+               (u32)(up_y1 - up_y0) * s_ovl_w * 4);
+    s_ovl_prev_y0 = (s_ovl_y1 > s_ovl_y0) ? s_ovl_y0 : 0;
+    s_ovl_prev_y1 = (s_ovl_y1 > s_ovl_y0) ? s_ovl_y1 : 0;
+
+    {
+        static int s_cl = 0;
+        if (s_cl < 12) {
+            s_cl++;
+            char buf[80];
+            snprintf(buf, sizeof(buf), "hud_ovl: compose#%d rows=%d..%d up=%d..%d",
+                     s_cl, s_ovl_y0, s_ovl_y1, up_y0, up_y1);
+            plog(buf);
+        }
+    }
+}
+
+// -------------------------------------------------------
+// hud_draw — recompose the overlay if its content changed, then queue the
+// GPU quad.  Called every frame the HUD is visible; the compose branch runs
+// about once a second (when the time string ticks) or on input.
+// -------------------------------------------------------
+
+void hud_draw(u64 elapsed_us, bool paused) {
+    if (!g_hud.visible) return;
+    if (!s_ovl_stage || !s_ovl_tex) return;   // alloc failed: no HUD
+
+    OvlKey key;
+    memset(&key, 0, sizeof(key));
+    key.elapsed_secs = (u32)(elapsed_us / 1000000ULL);
+    key.total_secs   = g_hud.total_secs;
+    key.focus        = g_hud.focus;
+    key.incr_idx     = g_hud.incr_idx;
+    key.menu_sel     = g_hud.menu_sel;
+    key.menu_cur     = g_hud.menu_cur;
+    key.menu_n       = g_hud.menu_n;
+    key.paused       = paused ? 1 : 0;
+    key.cc           = g_hud.cc_active ? 1 : 0;
+    key.menu_vis     = g_hud.menu_visible ? 1 : 0;
+    key.title_on     = (paused && g_hud.title[0]) ? 1 : 0;
+    snprintf(key.audio, sizeof(key.audio), "%s", g_hud.audio_label);
+
+    if (!s_ovl_key_valid || memcmp(&key, &s_ovl_key, sizeof(key)) != 0) {
+        s_ovl_key       = key;
+        s_ovl_key_valid = true;
+        hud_compose(elapsed_us, paused);
+    }
+
+    rsx_draw_hud_overlay(s_ovl_tex_off, s_ovl_w, s_ovl_h);
 }

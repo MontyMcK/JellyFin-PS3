@@ -40,8 +40,6 @@ extern void crash_log(const char *msg);
 // respawned.
 static volatile bool s_seeking = false;
 
-enum { SEEK_IDLE, SEEK_PRESS, SEEK_SCRUB };
-
 static const u64 SEEK_HOLD_DELAY_US = 400000ULL;   // held longer than this -> scrub
 static const u64 SEEK_SCRUB_STEP_US = 250000ULL;   // one scrub step per 250ms
 static const s32 SEEK_SCRUB_SECS    = 25;          // +25s per scrub step

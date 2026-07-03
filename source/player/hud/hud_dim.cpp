@@ -41,9 +41,12 @@ void hud_gpu_init(void) {
     s_hud_fp_buf = (u32*)rsxMemalign(256, fp_size);
     memcpy(s_hud_fp_buf, fp_ucode, fp_size);
     rsxAddressToOffset(s_hud_fp_buf, &s_hud_fp_off);
+
+    hud_overlay_alloc();
 }
 
 void hud_gpu_shutdown(void) {
+    hud_overlay_free();
     if (s_hud_vbuf)   { rsxFree(s_hud_vbuf);   s_hud_vbuf   = NULL; }
     if (s_hud_fp_buf) { rsxFree(s_hud_fp_buf);  s_hud_fp_buf = NULL; }
 }

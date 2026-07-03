@@ -151,6 +151,36 @@ int xmb_fetch_episodes(const char *series_id, const char *season_id,
     return count;
 }
 
+// Resolve the episode that follows episode_id in its series, crossing season
+// boundaries (the series-wide episode list is used, not the season's).  Two
+// requests: the item detail for SeriesId, then the episode list starting at
+// the current episode (StartItemId) so the follower is the second item.
+// Returns true and fills *out when a follower exists.
+bool xmb_fetch_next_episode(const char *episode_id, XMBItem *out) {
+    char url[512];
+    snprintf(url, sizeof(url), "%s/Users/%s/Items/%s",
+             g_server, g_userid, episode_id);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return false;
+
+    char series_id[64] = "";
+    json_get_string(responseBuffer, "SeriesId", series_id, sizeof(series_id));
+    if (!series_id[0]) return false;
+
+    snprintf(url, sizeof(url),
+        "%s/Shows/%s/Episodes?userId=%s&StartItemId=%s&Limit=2"
+        "&Fields=ProductionYear,RunTimeTicks,Genres,Container",
+        g_server, series_id, g_userid, episode_id);
+    status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return false;
+
+    XMBItem two[2];
+    if (parse_xmb_items(responseBuffer, two, 2) < 2) return false;
+    *out = two[1];
+    strncpy(out->type, "Episode", sizeof(out->type)-1);
+    return true;
+}
+
 int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, int max,
                                int start_index, int *out_total) {
     char url[512];

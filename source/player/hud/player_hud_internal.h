@@ -90,4 +90,11 @@ void hud_show(void);
 // Darken the rectangle on the framebuffer.  Selects the configured dim path
 // (inline GPU quad by default) and fences the GPU paths with rsxSync before
 // returning, so CPU pixel writes may follow immediately (hud_dim.cpp).
+// Note: hud_draw no longer uses this — the HUD is composed into a texture
+// and GPU-blended (hud_draw.cpp); kept for the compile-define fallbacks.
 void hud_dim_rect(u32 rx, u32 ry, u32 rw, u32 rh, u8 alpha);
+
+// Overlay texture + staging buffer for the GPU-composited HUD (hud_draw.cpp).
+// Allocated/freed with the other HUD GPU resources in hud_gpu_init/shutdown.
+void hud_overlay_alloc(void);
+void hud_overlay_free(void);

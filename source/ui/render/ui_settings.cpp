@@ -1,5 +1,5 @@
 // Settings tab rendering — account card (avatar + identity) and selectable
-// action rows.  Only "Log Out" exists for now (XMB_SETTINGS_COUNT == 1).
+// action rows: "Log Out" and the "Debug Logging" toggle.
 
 #include <stdio.h>
 #include <string.h>
@@ -7,9 +7,10 @@
 
 #include "ui_visuals.h"
 #include "jellyfin_api.h"
+#include "plog.h"
 
-static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out" };
-static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  = { 0xE879 };  // exit_to_app
+static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out", "Debug Logging" };
+static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  = { 0xE879, 0xE868 };  // exit_to_app, bug_report
 
 #define SET_PANEL_H 96
 #define SET_ROW_H   56
@@ -121,6 +122,13 @@ void xmb_draw_settings(void) {
                  SETTINGS_ICONS[i], 20.0f, clr);
         drawTTF((u32)(list_x + 52), (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
                 SETTINGS_LABELS[i], 18, clr, sel);
+        if (i == 1) {   // Debug Logging — right-aligned On/Off state
+            const char *val = plog_enabled() ? "On" : "Off";
+            int vw = ttf_text_width(val, 18, sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
+                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
+                    val, 18, plog_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
     }
 
     // Version footer.

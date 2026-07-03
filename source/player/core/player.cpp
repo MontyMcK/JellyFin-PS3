@@ -33,11 +33,12 @@ extern void crash_log(const char *msg);
 // -------------------------------------------------------
 // End-of-item auto-advance ("Next Episode")
 // -------------------------------------------------------
-// The UI arms this before show_player when the played item has a follower
-// in its list.  In the last 30 s of playback the player shows the popup
-// badge (just the label) with the instruction line drawn separately below
-// it; SELECT ends playback with the next-request flag set, which the UI
-// reads via player_take_next_request() to start the next item.
+// The UI arms this before show_player when the played item has a follower.
+// In the last 90 s of playback the player shows the popup badge (just the
+// label) with the instruction line drawn separately below it; SELECT ends
+// playback with the next-request flag set, which the UI reads via
+// player_take_next_request() to start the next item.  For episodes the
+// last 30 s also run a countdown that fires the request automatically.
 static bool s_next_armed     = false;
 static bool s_next_requested = false;
 static char s_next_label[32] = "NEXT EPISODE";
@@ -59,8 +60,9 @@ bool player_take_next_request(void) {
 }
 
 // Popup badge top-right; the instruction line is drawn separately below
-// the badge, outside the box.
-static void player_draw_next_popup(void) {
+// the badge, outside the box.  auto_secs >= 0 appends the auto-advance
+// countdown to the instruction line.
+static void player_draw_next_popup(int auto_secs) {
     const float label_px = 26.0f;
     const float hint_px  = 16.0f;
     const int   pad_x = 26, pad_y = 14, margin = 48;
@@ -78,8 +80,14 @@ static void player_draw_next_popup(void) {
     drawTTF((u32)(bx + pad_x), (u32)(by + pad_y), s_next_label, label_px,
             XMB_TEXT, true);
 
-    int hw = ttf_text_width(s_next_hint, hint_px);
-    drawTTF((u32)(bx + bw - hw), (u32)(by + bh + 14), s_next_hint, hint_px,
+    char hint[96];
+    if (auto_secs >= 0)
+        snprintf(hint, sizeof(hint), "%s \xB7 starting in %ds",
+                 s_next_hint, auto_secs);
+    else
+        snprintf(hint, sizeof(hint), "%s", s_next_hint);
+    int hw = ttf_text_width(hint, hint_px);
+    drawTTF((u32)(bx + bw - hw), (u32)(by + bh + 14), hint, hint_px,
             XMB_TEXT_DIM);
 }
 
@@ -104,6 +112,12 @@ void show_player(const JFItem *item, u32 resume_secs) {
     // playback can never inherit a stale NEXT popup.
     bool have_next = s_next_armed;
     s_next_armed = false;
+
+    // Auto-advance countdown applies only to episodes; movies keep the
+    // manual SELECT prompt.
+    bool auto_next      = have_next && strcmp(item->type, "Episode") == 0;
+    bool in_auto_window = false;   // last frame was inside the countdown
+    bool user_stopped   = false;   // START pressed (never auto-advance)
 
     // Session state shared with the player_* helpers.  ~2KB of JFTracks —
     // keep off the stack.
@@ -315,9 +329,16 @@ void show_player(const JFItem *item, u32 resume_secs) {
     crash_log("p9 threads started");
 
     crash_log("p10 loop");
+    // Paused-idle gate state (see below).  flip_queued: whether the previous
+    // iteration queued a flip — waitflip() blocks forever if none is pending.
+    bool flip_queued  = true;
+    bool was_paused   = false;
+    int  pause_settle = 0;   // frames still to draw after a pause-state change
+
     // ---- Main (display) loop ----
     while (running && ps.playing && !s_vdec_error) {
-        waitflip();
+        if (flip_queued) waitflip();
+        flip_queued = false;
         sysUtilCheckCallback();
 
         static u64 s_loop_iter_us   = 0;
@@ -331,19 +352,34 @@ void show_player(const JFItem *item, u32 resume_secs) {
         bool r2_pressed = BTN_PRESSED(r2);
         if (BTN_PRESSED(start)) {
             plog("playing=0 reason=user_stop");
+            user_stopped = true;
             ps.playing = false;
         }
 
-        // End-of-item auto-advance: within the last 30 s of a list item,
+        // End-of-item auto-advance: within the last 90 s of a followed item,
         // show the NEXT popup; SELECT ends this session with the
-        // next-request flag set so the UI starts the follower.
+        // next-request flag set so the UI starts the follower.  Episodes
+        // also count down through the last 30 s and fire the request
+        // automatically at zero.
         bool next_popup = false;
-        if (have_next && ps.total_secs > 30) {
+        int  auto_secs  = -1;
+        in_auto_window  = false;
+        if (have_next && ps.total_secs > 90) {
             u64 pos_secs = (ps.play_base_us + audio_get_clock_us()) / 1000000ULL;
-            next_popup = (pos_secs + 30 >= (u64)ps.total_secs);
+            next_popup = (pos_secs + 90 >= (u64)ps.total_secs);
+            if (next_popup && auto_next && pos_secs + 30 >= (u64)ps.total_secs) {
+                s64 rem = (s64)ps.total_secs - (s64)pos_secs;
+                auto_secs = rem > 0 ? (int)rem : 0;
+                in_auto_window = true;
+            }
         }
         if (next_popup && BTN_PRESSED(select)) {
             plog("playing=0 reason=next_item");
+            s_next_requested = true;
+            ps.playing = false;
+        }
+        if (auto_secs == 0 && ps.playing) {
+            plog("playing=0 reason=next_auto");
             s_next_requested = true;
             ps.playing = false;
         }
@@ -385,16 +421,39 @@ void show_player(const JFItem *item, u32 resume_secs) {
             if (!player_execute_seek(&ps)) break;
         }
 
+        // Paused-idle gate.  While paused the seek bar stays up and every
+        // redrawn frame is pixel-identical, yet redrawing costs the GPU
+        // clear + video quad, three rsxSync stalls, and CPU alpha-blended
+        // text into RSX VRAM — at 60 Hz that churn is what makes the whole
+        // player lag whenever the bar is visible.  Draw only when something
+        // can have changed (input, seek/scrub activity, a landed paused
+        // seek, or the pause state itself); otherwise sleep one vblank and
+        // just keep polling input.  Playback (!paused) is never gated.
+        if (ps.paused != was_paused) { was_paused = ps.paused; pause_settle = 2; }
+        bool any_input =
+            btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right ||
+            btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
+            btn_cur.start || btn_cur.select ||
+            btn_cur.l1 || btn_cur.r1 || btn_cur.l2 || btn_cur.r2;
+        if (ps.paused && !any_input && act == HUD_ACTION_NONE &&
+            !ps.show_seek_frame && ps.seek.pending_secs == 0 &&
+            ps.seek.state == SEEK_IDLE && pause_settle == 0) {
+            usleep(16000);
+            continue;
+        }
+        if (pause_settle > 0) pause_settle--;
+
         player_display_frame(&ps);
 
         if (next_popup && ps.frame_count > 0) {
             // Fence the in-flight video draw before CPU framebuffer writes,
             // same as the HUD overlay does.
             rsxSync();
-            player_draw_next_popup();
+            player_draw_next_popup(auto_secs);
         }
 
         flip();
+        flip_queued = true;
     }
 
     crash_log("p11 loop exit");
@@ -404,6 +463,15 @@ void show_player(const JFItem *item, u32 resume_secs) {
             "show_player: loop exit running=%u playing=%d vdec_err=%d fr=%d",
             running, (int)ps.playing, (int)s_vdec_error, ps.frame_count);
         plog(buf);
+    }
+
+    // Transcoded streams often run slightly short of RunTimeTicks, so EOF
+    // can land before the countdown reaches zero.  If playback ended on its
+    // own inside the countdown window, still advance to the next episode.
+    if (in_auto_window && !s_next_requested && !user_stopped &&
+        !ps.playing && running && !s_vdec_error) {
+        plog("next_auto: eof inside countdown window");
+        s_next_requested = true;
     }
 
     timing_shutdown();

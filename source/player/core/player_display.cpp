@@ -256,14 +256,13 @@ void player_display_frame(PlayerState *ps) {
     }
 
     // HUD overlay.
-    // The HUD's dim quad reprograms RSX vertex/fragment state.  If the video
-    // draw above is still in flight when that happens, the RSX wedges (the dim
-    // quad collides with the video path's TEX0 fetch).  When playing, do_pop
-    // triggers the rsxSync() before vid_gpu_draw, so the pipeline is already
-    // fenced.  When PAUSED, do_pop is always false (the consume gate requires
-    // !paused), so that sync is skipped and the HUD would be the first thing
-    // to touch RSX after an unfenced vid_gpu_draw -> hard freeze.  Fence
-    // unconditionally here so the HUD never races the video commands.
+    // The HUD is composed into a texture and drawn as one alpha-blended GPU
+    // quad (hud_draw.cpp): no CPU writes into the framebuffer, so no rsxSync
+    // fence is needed here — the quad is FIFO-ordered after the video draw
+    // like any other command, and its vertices go inline (no array fetch to
+    // wedge on).  This keeps the loop under one vblank with the bar visible;
+    // the old CPU-drawn HUD (fenced with rsxSync each frame) pushed it to a
+    // 2-vblank cadence, halving playback fps whenever the seek bar showed.
     if (hud_is_visible() && ps->frame_count > 0) {
         static int s_hg = 0;
         if (s_hg < 12) {
@@ -272,7 +271,6 @@ void player_display_frame(PlayerState *ps) {
                      (int)ps->paused, ps->frame_count);
             plog(b); s_hg++;
         }
-        rsxSync();  // ensure prior vid_gpu_draw is complete before HUD reprograms RSX
         // While a seek is armed, show where the accumulated skip will land so
         // the user can keep tapping toward the right spot before it fires.
         u64 hud_elapsed = ps->play_base_us + audio_get_clock_us();

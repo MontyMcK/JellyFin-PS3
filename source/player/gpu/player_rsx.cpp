@@ -122,3 +122,48 @@ void rsx_draw_frame(bool render_blend, float blend_factor, u32 fw, u32 fh) {
         rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
     }
 }
+
+// HUD overlay pass — one full-screen quad sampling the pre-composed overlay
+// texture, alpha-blended over the video.  Vertices go inline into the FIFO
+// (rsxDrawVertexBegin/End): no vertex-array fetch, so no stale-binding wedge.
+// The video FP passes the sampled alpha through (MOV result.color, col), so
+// untouched overlay pixels (alpha 0) leave the video unchanged.
+void rsx_draw_hud_overlay(u32 tex_off, u32 tw, u32 th) {
+    rsxVertexProgram   *vid_vpo = (rsxVertexProgram*)  video_vp_data;
+    rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*) video_fp_data;
+    void *vp_ucode; u32 vp_size;
+    rsxVertexProgramGetUCode(vid_vpo, &vp_ucode, &vp_size);
+    rsxLoadVertexProgram(context, vid_vpo, vp_ucode);
+    rsxSetVertexAttribOutputMask(context, vid_vpo->output_mask);
+    rsxLoadFragmentProgramLocation(context, vid_fpo,
+        s_vid_fp_off, GCM_LOCATION_RSX);
+
+    bind_texture(tex_off, tw, th);
+
+    rsxSetDepthTestEnable(context, GCM_FALSE);
+    rsxSetBlendFunc(context,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
+    rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
+    rsxSetBlendEnable(context, GCM_TRUE);
+
+    // Push TEX0 before POS per vertex; the POS write latches the vertex
+    // (same ordering trick as the hud_dim inline quad).
+    const float uv_tl[4] = { 0.f, 0.f, 0.f, 1.f }, p_tl[4] = { -1.f,  1.f, 0.f, 1.f };
+    const float uv_tr[4] = { 1.f, 0.f, 0.f, 1.f }, p_tr[4] = {  1.f,  1.f, 0.f, 1.f };
+    const float uv_bl[4] = { 0.f, 1.f, 0.f, 1.f }, p_bl[4] = { -1.f, -1.f, 0.f, 1.f };
+    const float uv_br[4] = { 1.f, 1.f, 0.f, 1.f }, p_br[4] = {  1.f, -1.f, 0.f, 1.f };
+
+    rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_TEX0, uv_tl);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_POS,  p_tl);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_TEX0, uv_tr);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_POS,  p_tr);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_TEX0, uv_bl);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_POS,  p_bl);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_TEX0, uv_br);
+    rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_POS,  p_br);
+    rsxDrawVertexEnd(context);
+
+    rsxSetBlendEnable(context, GCM_FALSE);
+}

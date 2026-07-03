@@ -34,6 +34,7 @@ int  xmb_fetch_episodes(const char *series_id, const char *season_id,
                         int start_index, int *out_total);
 int  xmb_fetch_collection_items(const char *collection_id, XMBItem *arr,
                                 int max, int start_index, int *out_total);
+bool xmb_fetch_next_episode(const char *episode_id, XMBItem *out);
 
 // Sliding-window pagination: drop the first page, fetch the next one.
 // Returns the index of the first newly-visible row, or -1 if nothing came back.
@@ -52,6 +53,11 @@ bool xmb_handle_input_home(void);
 // Launch the player for one list item (xmb/ui_nav.cpp).  resume_secs > 0
 // starts playback at that saved position.
 void xmb_play_item(const XMBItem *it, u32 resume_secs);
+
+// Play an episode with the end-of-item NEXT prompt / auto-advance, resolving
+// each follower from the server so it works from any launch point (Home rows,
+// Continue Watching, search, season lists) and across season boundaries.
+void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs);
 
 // Triangle detail overlay (xmb/ui_info.cpp)
 void xmb_show_item_info(const XMBItem *it);

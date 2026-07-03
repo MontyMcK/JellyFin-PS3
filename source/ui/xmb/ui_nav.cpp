@@ -66,7 +66,8 @@ void xmb_play_item(const XMBItem *it, u32 resume_secs) {
 
 // Play items[idx] and keep advancing through the list while the user
 // accepts the player's end-of-item NEXT prompt (SELECT during the last
-// 30 s).  Used for episodes in a season and movies in a collection.
+// 90 s).  Used for movies in a collection; episodes go through
+// xmb_play_episode_with_next so the follower comes from the server.
 static void xmb_play_list_with_next(const XMBItem *items, int count, int idx,
                                     const char *label, const char *hint) {
     for (;;) {
@@ -74,6 +75,25 @@ static void xmb_play_list_with_next(const XMBItem *items, int count, int idx,
         xmb_play_item(&items[idx], 0);
         if (idx + 1 >= count || !player_take_next_request()) break;
         idx++;
+    }
+}
+
+// Play an episode and keep advancing while the user accepts the NEXT prompt
+// (or the end-of-episode countdown fires).  The follower is resolved from
+// the server before each playback, so this works no matter where the episode
+// was launched from and keeps going across season boundaries.
+void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs) {
+    XMBItem cur = *first;
+    u32 resume = resume_secs;
+    for (;;) {
+        XMBItem next;
+        bool have = xmb_fetch_next_episode(cur.id, &next);
+        if (have)
+            player_arm_next("NEXT EPISODE", "Press SELECT for next episode");
+        xmb_play_item(&cur, resume);
+        if (!have || !player_take_next_request()) break;
+        cur    = next;
+        resume = 0;
     }
 }
 
@@ -97,7 +117,10 @@ static bool xmb_input_settings(void) {
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
     if (BTN_REPEAT(up)   && g_settings_sel > 0)                      g_settings_sel--;
     if (BTN_REPEAT(down) && g_settings_sel < XMB_SETTINGS_COUNT - 1) g_settings_sel++;
-    if (BTN_PRESSED(cross) && g_settings_sel == 0) g_settings_confirm = true;  // Log Out
+    if (BTN_PRESSED(cross)) {
+        if (g_settings_sel == 0) g_settings_confirm = true;             // Log Out
+        if (g_settings_sel == 1) plog_set_enabled(!plog_enabled());     // Debug Logging
+    }
     return false;
 }
 
@@ -154,9 +177,7 @@ static void xmb_input_tv_sub(void) {
                                                  0, &g_tv_sub_total);
             g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
         } else {
-            xmb_play_list_with_next(g_tv_sub_items, g_tv_sub_count,
-                                    g_tv_sub_sel, "NEXT EPISODE",
-                                    "Press SELECT for next episode");
+            xmb_play_episode_with_next(&g_tv_sub_items[g_tv_sub_sel], 0);
             g_tv_depth = 0;
             g_tv_sub_sel = 0;
             g_tv_sub_scroll = 0;
@@ -339,7 +360,11 @@ bool xmb_handle_input_browse(void) {
             g_col_depth = 1; g_col_sub_sel = 0; g_col_sub_scroll = 0;
         } else {
             // Continue Watching launches at the saved position.
-            xmb_play_item(it, tab == XMB_TAB_RESUME ? it->resume_secs : 0);
+            u32 resume = (tab == XMB_TAB_RESUME) ? it->resume_secs : 0;
+            if (strcmp(it->type, "Episode") == 0)
+                xmb_play_episode_with_next(it, resume);
+            else
+                xmb_play_item(it, resume);
             s_movie_just_exited = true;
             init_btns();
             return false;

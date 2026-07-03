@@ -45,6 +45,7 @@ void progress_thread_fn(void *arg);
 enum { PLAYER_MENU_NONE, PLAYER_MENU_AUDIO, PLAYER_MENU_SUBS };
 
 // R2/L2 tap/hold seek input state (core/player_seek.cpp).
+enum { SEEK_IDLE, SEEK_PRESS, SEEK_SCRUB };
 struct PlayerSeekInput {
     int  state;             // SEEK_IDLE / SEEK_PRESS / SEEK_SCRUB
     int  dir;               // +1 = fwd, -1 = back

@@ -95,6 +95,35 @@ extern int g_cpu_clip_bot;
 bool cpu_row_clipped(int sy);   // true when framebuffer row sy is scissored out
 
 // -------------------------------------------------------
+// CPU compose target.  While begun, the CPU primitives (drawRect,
+// drawRectBlend, drawTTF, drawIcon, iconic glyphs) render into this
+// main-RAM A8R8G8B8 buffer with straight-alpha OVER compositing instead of
+// writing to the framebuffer.  Used by the player HUD to build its overlay
+// texture off-screen; the vertical scissor does not apply while active.
+// -------------------------------------------------------
+void cpu_rt_begin(u32 *buf, u32 w, u32 h);
+void cpu_rt_end(void);
+bool cpu_rt_on(void);
+u32  cpu_draw_w(void);          // active target width  (framebuffer or RT)
+u32  cpu_draw_h(void);          // active target height
+u32 *cpu_draw_row(u32 y);       // row pointer in the active target
+
+// Straight-alpha OVER: coverage `a` of `color` (0x00RRGGBB) onto an ARGB
+// destination pixel.  Only meaningful for the compose target.
+static inline u32 argb_over(u32 dst, u32 color, u32 a) {
+    if (a == 0) return dst;
+    u32 da = (dst >> 24) & 0xFF;
+    if (a == 255 || da == 0)
+        return (a << 24) | (color & 0x00FFFFFF);
+    u32 k    = (da * (255 - a)) / 255;   // remaining dst weight
+    u32 outa = a + k;
+    u32 r = (((color >> 16) & 0xFF) * a + ((dst >> 16) & 0xFF) * k) / outa;
+    u32 g = (((color >>  8) & 0xFF) * a + ((dst >>  8) & 0xFF) * k) / outa;
+    u32 b = (( color        & 0xFF) * a + ( dst        & 0xFF) * k) / outa;
+    return (outa << 24) | (r << 16) | (g << 8) | b;
+}
+
+// -------------------------------------------------------
 // XMB main screen — replaces the old show_main_menu().
 // -------------------------------------------------------
 void ui_run_xmb(void);

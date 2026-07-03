@@ -23,6 +23,7 @@ static FILE             *s_plog_file    = NULL;
 static sys_ppu_thread_t  s_plog_tid     = 0;
 
 void plog(const char *msg) {
+    if (!s_plog_running) return;
     while (!__sync_bool_compare_and_swap(&s_plog_lock, 0, 1))
         ;
     int next = (s_plog_wr + 1) % PLOG_RING;
@@ -68,6 +69,7 @@ static void plog_thread_fn(void *arg) {
 }
 
 void plog_start(void) {
+    if (s_plog_running) return;
     s_plog_file    = fopen("/dev_hdd0/tmp/player_log.txt", "w");
     s_plog_running = true;
     sysThreadCreate(&s_plog_tid, plog_thread_fn, NULL,
@@ -84,5 +86,49 @@ void plog_stop(void) {
     if (s_plog_file) {
         fclose(s_plog_file);
         s_plog_file = NULL;
+    }
+}
+
+// -------------------------------------------------------
+// User toggle — persisted so the choice survives restarts.
+// -------------------------------------------------------
+
+#define PLOG_SETTINGS_FILE "/dev_hdd0/tmp/jellyfin_settings.txt"
+
+static bool s_plog_enabled = false;   // off by default
+
+bool plog_enabled(void) { return s_plog_enabled; }
+
+static void plog_save_setting(void) {
+    FILE *f = fopen(PLOG_SETTINGS_FILE, "w");
+    if (f) {
+        fprintf(f, "plog=%d\n", s_plog_enabled ? 1 : 0);
+        fclose(f);
+    }
+}
+
+void plog_load_setting(void) {
+    s_plog_enabled = false;
+    FILE *f = fopen(PLOG_SETTINGS_FILE, "r");
+    if (f) {
+        char line[64];
+        while (fgets(line, sizeof(line), f)) {
+            int v;
+            if (sscanf(line, "plog=%d", &v) == 1) s_plog_enabled = (v != 0);
+        }
+        fclose(f);
+    }
+    if (s_plog_enabled) plog_start();
+}
+
+void plog_set_enabled(bool on) {
+    if (on == s_plog_enabled) return;
+    s_plog_enabled = on;
+    plog_save_setting();
+    if (on) {
+        plog_start();
+        plog("plog: enabled via settings");
+    } else {
+        plog_stop();
     }
 }
