@@ -7,6 +7,7 @@
 
 #include "ui_visuals.h"
 #include "jellyfin_api.h"
+#include "update_check.h"
 #include "plog.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out", "Debug Logging" };
@@ -133,7 +134,7 @@ void xmb_draw_settings(void) {
 
     // Version footer.
     {
-        const char *ver = "Jellyfin for PS3 \xB7 built " __DATE__;
+        const char *ver = "Jellyfin for PS3 " APP_VERSION " \xB7 built " __DATE__;
         int vw = ttf_text_width(ver, 13);
         drawTTF((u32)((W - vw) / 2),
                 (u32)((int)display_height - XMB_BOTTOM_PAD - 26),

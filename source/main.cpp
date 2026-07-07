@@ -12,6 +12,7 @@
 #include "rsxutil.h"
 #include "ui.h"
 #include "http.h"
+#include "update_check.h"
 #include "jellyfin_api.h"
 #include "thumbnail_cache.h"
 #include "plog.h"
@@ -109,6 +110,9 @@ int main(int argc, const char *argv[]) {
     crash_log("9 running=1");
     running = 1;
 
+    // One-shot GitHub release check on its own thread; fails quietly.
+    update_check_start();
+
     thumb_cache_init();
 
     crash_log("10 load_config");
@@ -146,6 +150,7 @@ int main(int argc, const char *argv[]) {
     }
 
     crash_log("14 done");
+    update_check_shutdown();
     thumb_cache_shutdown();
     http_end();
     ui_cleanup();

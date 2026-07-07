@@ -227,3 +227,10 @@ void xmb_draw_breadcrumb(int x, int y, const char *a, const char *b,
                          const char *leaf);
 void xmb_cpu_draw_settings(void);   // CPU phase: highlight rect
 void xmb_draw_settings(void);       // RSX phase: account info + entries
+
+// Update-available popup (render/ui_update_popup.cpp).  Active from the
+// frame the background release check reports a newer version until the user
+// dismisses it for the session.
+bool xmb_update_popup_active(void);
+void xmb_update_popup_input(void);  // owns the frame's input; X dismisses
+void xmb_update_popup_draw(void);   // dim + panel; call last, before flip()

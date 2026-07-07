@@ -214,7 +214,9 @@ void ui_run_xmb(void) {
 
         poll_buttons();
         bool should_exit = false;
-        if (tab == XMB_TAB_SEARCH)
+        if (xmb_update_popup_active())
+            xmb_update_popup_input();   // modal: the screen below keeps focus state
+        else if (tab == XMB_TAB_SEARCH)
             should_exit = xmb_handle_input_search();
         else if (tab == XMB_TAB_HOME)
             should_exit = xmb_handle_input_home();
@@ -229,9 +231,11 @@ void ui_run_xmb(void) {
         if (first_iter) crash_log("13.8b text_phase");
         xmb_draw_text_phase(tab);
         if (first_iter) crash_log("13.8c hints");
-        xmb_draw_hints(tab);
+        bool popup = xmb_update_popup_active();
+        if (!popup) xmb_draw_hints(tab);   // the popup swaps in its own hint
         if (first_iter) crash_log("13.8d tabs");
         xmb_draw_tabs();
+        if (popup) xmb_update_popup_draw();
 
         if (first_iter) crash_log("13.9 first flip");
         flip();

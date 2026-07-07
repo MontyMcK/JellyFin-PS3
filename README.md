@@ -40,6 +40,7 @@ Goal: consumer-quality media playback on PS3, the second-best media player on th
 - Every reposition (seek or track change) stops the server transcode, mints a fresh PlaySessionId via PlaybackInfo, and re-requests stream.ts at the target StartTimeTicks, with full decoder, audio, and jitter-buffer flush
 - Jellyfin PlaybackInfo POST with PS3 H.264 transcode profile (720p)
 - Transcode is always forced: the stream URL pins Profile=baseline / Level=31 and sets AllowVideoStreamCopy=false / AllowAudioStreamCopy=false, so any library file plays regardless of source codec, profile, resolution, or bitrate (a stream-copied High-profile track used to decode as black frames)
+- Update check at launch: a background thread asks the GitHub API for the latest release (firmware HTTPS stack, 2s timeouts) and a dismissable modal popup appears over the UI when a newer version is out; unreachable network fails quietly with no error shown
 - .pkg packaging via PSL1GHT built-in ppu_rules flow (APPID JFPS30000)
 - Crash log written synchronously to /dev_hdd0/tmp/crash_log.txt
 - Async ring-buffer logging system (player log at /dev_hdd0/tmp/player_log.txt), toggled from the Settings tab — off by default, choice persisted across restarts
@@ -68,6 +69,8 @@ make pkg
 Output: JellyFin---PS3.self and JellyFin---PS3.pkg
 
 Transfer the SELF to your PS3 via FTP or USB and launch through webMAN or multiMAN, or install the PKG directly.
+
+When cutting a release, set APP_VERSION in source/net/update_check.h to match the new release tag (leading v/V is ignored, so "2.1" matches tag "v2.1") — the update popup compares the latest GitHub release tag against it, and release tags need a numeric version for the comparison to work.
 
 ---
 
@@ -305,7 +308,8 @@ JellyFin---PS3/
     |   |-- opensans_bold.h        # Open Sans Bold (embedded)
     |   `-- font8x8.xpm            # Fallback bitmap font
     |-- net/
-    |   `-- http.cpp/h             # HTTP client
+    |   |-- http.cpp/h             # HTTP client
+    |   `-- update_check.cpp/h     # Background GitHub release check (firmware HTTPS)
     |-- player/
     |   |-- player.h               # Public entry point (show_player)
     |   |-- player_hud.h           # Public HUD API (actions, draw, menus)
@@ -352,7 +356,8 @@ JellyFin---PS3/
     |   |   |-- ui_lists.cpp       # Item/sub-list rows, thumbnails, meta line
     |   |   |-- ui_osk_draw.cpp    # Search OSK + results rendering
     |   |   |-- ui_settings.cpp    # Settings tab rendering
-    |   |   `-- ui_wave.cpp/h      # Animated wave background (RSX)
+    |   |   |-- ui_update_popup.cpp # Update-available modal popup
+    |   |   `-- ui_wave.cpp/h      # Animated wave background + modal dim quad (RSX)
     |   `-- fonts/
     |       |-- material_icons.h   # Material Icons (embedded)
     |       `-- iconic_psx.h       # PSX-style iconography
@@ -392,6 +397,7 @@ JellyFin---PS3/
 | Audio / subtitle tracks  | Working (popup menus; subtitles burned in server-side)            |
 | PlaybackInfo / transcode | Working (H.264 720p baseline profile, transcode always forced, PlaySessionId extracted) |
 | Settings                 | Working (account card, log out, Debug Logging toggle)             |
+| Update check             | Working (GitHub latest-release lookup at launch, modal popup)     |
 | PKG packaging            | Working (make pkg, APPID JFPS30000)                               |
 | Music library            | Not implemented                                                   |
 
@@ -402,6 +408,8 @@ JellyFin---PS3/
 Debug logging is **off by default** and toggled from the Settings tab (the choice persists across restarts in /dev_hdd0/tmp/jellyfin_settings.txt — it survives logout, which only removes jellyfin_config.txt). When enabled, async log output is written to /dev_hdd0/tmp/player_log.txt; while disabled, plog() discards messages with no ring-buffer or disk activity.
 
 The crash log at /dev_hdd0/tmp/crash_log.txt is always written synchronously at key lifecycle checkpoints (including per-step seek and HUD checkpoints) and survives crashes that prevent the async logger from flushing. Reading it from the bottom up pinpoints the exact step that failed on hardware.
+
+The update check writes its own trace to /dev_hdd0/tmp/update_detection.txt on every launch, independent of the Debug Logging toggle: one line per step (module load, TLS, HTTP status) plus a dump of the GitHub API response, so a silently-failed check can be diagnosed after the fact. The file is overwritten each launch.
 
 ---
 
