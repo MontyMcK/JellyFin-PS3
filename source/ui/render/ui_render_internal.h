@@ -10,5 +10,8 @@ void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y, int w, int h);
 // Draw one card (cached image or placeholder + progress strip + selection
 // frame) at (cx,cy) of size card_w x card_h.  Call after rsxSync.
 // Shared by the grid (ui_lists.cpp) and the Home shelf (ui_home.cpp).
+// tile_name != NULL swaps the loading placeholder for a colored letter
+// tile (music cards, per the album-grid design).
 void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
-                   u8 progress_pct, bool selected);
+                   u8 progress_pct, bool selected,
+                   const char *tile_name = NULL);

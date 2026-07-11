@@ -21,10 +21,13 @@ typedef struct {
     char id[64];
     char name[128];
     char type[32];
+    char artist[64];        // AlbumArtist / Artists[0] (music items only)
+    char album_id[64];      // AlbumId (Audio items — art + context lookups)
     char year_str[8];       // "2014"
-    char duration_str[16];  // "2h 49m"
+    char duration_str[16];  // "2h 49m" / "13 Tracks" / "3:36"
     char genre[32];         // "Sci-Fi"
-    char codec[12];         // "H.264"
+    char codec[12];         // "H.264" (video) / "FLAC" (audio)
+    u32  dur_secs;          // runtime in seconds (Audio items, 0 otherwise)
     u32  resume_secs;       // saved playback position (UserData), 0 = none
     u8   progress_pct;      // 0-100 watched percentage (thumbnail bar)
 } XMBItem;

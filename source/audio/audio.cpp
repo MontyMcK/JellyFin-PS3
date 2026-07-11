@@ -28,6 +28,15 @@ static u32          s_sil_blocks   = 0;
 
 u64 audio_block_count(void) { return s_audio_blocks; }
 
+// ---- PCM source (defaults to the video pipeline's decoder) ----
+static audio_avail_fn s_src_avail = adec_pcm_available;
+static audio_read_fn  s_src_read  = adec_read_pcm;
+
+void audio_set_source(audio_avail_fn avail, audio_read_fn read) {
+    s_src_avail = avail ? avail : adec_pcm_available;
+    s_src_read  = read  ? read  : adec_read_pcm;
+}
+
 u64 audio_get_clock_us(void) {
     u64 read_pts = adec_get_read_pts_us();
     if (read_pts == 0)
@@ -143,12 +152,12 @@ bool audio_write_pcm(void) {
         float *blk_buf = (float *)(uintptr_t)addr;
         // Block until the decoder fills a complete block or the timeout fires.
         int waited = 0;
-        while (adec_pcm_available() < AUDIO_BLOCK_SAMPLES && waited < 30) {
+        while (s_src_avail() < AUDIO_BLOCK_SAMPLES && waited < 30) {
             usleep(1000);
             waited++;
         }
-        if (adec_pcm_available() >= AUDIO_BLOCK_SAMPLES) {
-            adec_read_pcm(blk_buf, AUDIO_BLOCK_SAMPLES);
+        if (s_src_avail() >= AUDIO_BLOCK_SAMPLES) {
+            s_src_read(blk_buf, AUDIO_BLOCK_SAMPLES);
             s_pcm_blocks++;
         } else {
             // Decoder stall — write silence to keep DMA ring alive

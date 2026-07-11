@@ -50,28 +50,67 @@ static void xmb_build_items_url(char *url, int url_size, int tab,
                                   int start_index, int limit) {
     const char *filt = g_tab_name_filter[tab];
     const char *lid  = g_tabs[tab].library_id;
-    if (filt[0] == '#') {
-        snprintf(url, url_size,
-            "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
-            "&SortBy=SortName&SortOrder=Ascending"
-            "&NameLessThan=A"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
-            g_server, g_userid, lid, start_index, limit);
-    } else if (filt[0]) {
-        snprintf(url, url_size,
-            "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
-            "&SortBy=SortName&SortOrder=Ascending"
-            "&NameStartsWith=%c"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
-            g_server, g_userid, lid, start_index, limit,
-            (char)toupper((unsigned char)filt[0]));
-    } else {
-        snprintf(url, url_size,
-            "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
-            "&SortBy=SortName&SortOrder=Ascending"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
-            g_server, g_userid, lid, start_index, limit);
+
+    // Letter-jump filter suffix (shared by every tab).
+    char name_filt[32] = "";
+    if (filt[0] == '#')
+        snprintf(name_filt, sizeof(name_filt), "&NameLessThan=A");
+    else if (filt[0])
+        snprintf(name_filt, sizeof(name_filt), "&NameStartsWith=%c",
+                 (char)toupper((unsigned char)filt[0]));
+
+    // Music: each sub-tab is its own query.  Albums/Songs are recursive
+    // typed item queries (the library nests them under artist folders);
+    // Artists and Genres have dedicated endpoints; Playlists live in their
+    // own library, so that query runs from the root with no ParentId.
+    if (tab == XMB_TAB_MUSIC) {
+        switch (g_music_subtab) {
+        case MUSIC_ST_ARTISTS:
+            snprintf(url, url_size,
+                "%s/Artists/AlbumArtists?userId=%s&ParentId=%s"
+                "&StartIndex=%d&Limit=%d"
+                "&SortBy=SortName&SortOrder=Ascending%s",
+                g_server, g_userid, lid, start_index, limit, name_filt);
+            return;
+        case MUSIC_ST_PLAYLISTS:
+            snprintf(url, url_size,
+                "%s/Users/%s/Items?IncludeItemTypes=Playlist&Recursive=true"
+                "&StartIndex=%d&Limit=%d"
+                "&SortBy=SortName&SortOrder=Ascending%s"
+                "&Fields=ChildCount",
+                g_server, g_userid, start_index, limit, name_filt);
+            return;
+        case MUSIC_ST_GENRES:
+            snprintf(url, url_size,
+                "%s/MusicGenres?userId=%s&ParentId=%s"
+                "&StartIndex=%d&Limit=%d"
+                "&SortBy=SortName&SortOrder=Ascending%s",
+                g_server, g_userid, lid, start_index, limit, name_filt);
+            return;
+        case MUSIC_ST_SONGS:
+            snprintf(url, url_size,
+                "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
+                "&IncludeItemTypes=Audio&Recursive=true"
+                "&SortBy=SortName&SortOrder=Ascending%s"
+                "&Fields=Genres,RunTimeTicks",
+                g_server, g_userid, lid, start_index, limit, name_filt);
+            return;
+        default:   // MUSIC_ST_ALBUMS
+            snprintf(url, url_size,
+                "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
+                "&IncludeItemTypes=MusicAlbum&Recursive=true"
+                "&SortBy=SortName&SortOrder=Ascending%s"
+                "&Fields=Genres,ProductionYear,ChildCount",
+                g_server, g_userid, lid, start_index, limit, name_filt);
+            return;
+        }
     }
+
+    snprintf(url, url_size,
+        "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
+        "&SortBy=SortName&SortOrder=Ascending%s"
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
+        g_server, g_userid, lid, start_index, limit, name_filt);
 }
 
 void xmb_fetch_tab_items(int tab) {
@@ -179,6 +218,28 @@ bool xmb_fetch_next_episode(const char *episode_id, XMBItem *out) {
     *out = two[1];
     strncpy(out->type, "Episode", sizeof(out->type)-1);
     return true;
+}
+
+// Albums belonging to one artist or genre (the music sub-screen).
+// id_param is the server-side filter key: "AlbumArtistIds" or "GenreIds".
+// Sorted oldest-first so an artist's grid reads as a discography.
+int xmb_fetch_music_children(const char *id_param, const char *parent_id,
+                             XMBItem *arr, int max, int *out_total) {
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Users/%s/Items?%s=%s"
+        "&IncludeItemTypes=MusicAlbum&Recursive=true"
+        "&StartIndex=0&Limit=%d"
+        "&SortBy=ProductionYear,SortName&SortOrder=Ascending"
+        "&Fields=Genres,ProductionYear,ChildCount",
+        g_server, g_userid, id_param, parent_id, max);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return 0;
+    int n = parse_xmb_items(responseBuffer, arr, max);
+    if (out_total)
+        *out_total = xmb_json_int_range(responseBuffer,
+            (int)strlen(responseBuffer), "TotalRecordCount", n);
+    return n;
 }
 
 int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, int max,

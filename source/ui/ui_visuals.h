@@ -101,6 +101,21 @@ typedef struct {
 #define XMB_CARD_W_CAP   ((int)display_width * 300 / 1280)
 #define XMB_GRID_Y0      (XMB_CONTENT_Y + 8)
 
+// Music tab: square album cards under a sub-tab header row, with a taller
+// text band (title + artist + meta for the selected card).
+#define XMB_MUSIC_SUBTAB_H 44
+#define XMB_MUSIC_TEXT_H   68
+#define XMB_MUSIC_COLS      5
+
+// Music sub-tabs (d-pad: UP from the grid's top row focuses the header,
+// LEFT/RIGHT switch, DOWN/X drop back into the grid).
+#define MUSIC_ST_ALBUMS    0
+#define MUSIC_ST_ARTISTS   1
+#define MUSIC_ST_PLAYLISTS 2
+#define MUSIC_ST_GENRES    3
+#define MUSIC_ST_SONGS     4
+#define MUSIC_ST_COUNT     5
+
 // Resolved grid geometry for one tab (depends on tab + sub-screen depth).
 typedef struct {
     bool portrait;      // 2:3 poster cards vs 16:9 landscape stills
@@ -162,6 +177,16 @@ extern int     g_col_sub_count;
 extern XMBItem g_col_sub_items[XMB_ITEMS_MAX];
 extern int     g_col_sub_start;
 extern int     g_col_sub_total;
+extern int     g_music_subtab;
+extern bool    g_music_header;
+extern int     g_music_depth;
+extern char    g_music_parent_id[64];
+extern char    g_music_parent_name[128];
+extern XMBItem g_music_sub_items[XMB_ITEMS_MAX];
+extern int     g_music_sub_count;
+extern int     g_music_sub_sel;
+extern int     g_music_sub_scroll;
+extern int     g_music_sub_total;
 extern int     g_tab_start[XMB_TAB_COUNT];
 extern int     g_tab_total[XMB_TAB_COUNT];
 extern int     g_osk_row;
@@ -210,8 +235,23 @@ void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14);
 //   text  — titles under every card (selected emphasized) + scroll arrows
 void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
                   int sel, int scroll, int y0);
+
+// Colored letter tile — album-art placeholder (loading or artless albums)
+// and Up Next queue thumbs.  Color is a stable hash of seed (the item id).
+void xmb_draw_letter_tile(const char *seed, const char *name,
+                          int x, int y, int size);
+
+// 1:1 blit of a cached thumb at exactly w x h; false while still loading.
+bool xmb_cpu_blit_thumb(const char *item_id, int x, int y, int w, int h);
+
+// Music sub-tab header row.  active = g_music_subtab; focused = the d-pad
+// is on the header (active label pops white instead of just underlined).
+void xmb_draw_music_subtabs(int x, int y, int active, bool focused);
+// abs_start/abs_total place the loaded window inside the full library so
+// the scrollbar reflects the whole list (0 total = use count).
 void xmb_grid_text(const GridGeom *gg, const XMBItem *items, int count,
-                   int sel, int scroll, int y0, bool more_below);
+                   int sel, int scroll, int y0, bool more_below,
+                   int abs_start, int abs_total);
 void xmb_rsx_draw_osk(void);
 void xmb_cpu_draw_osk(void);
 void xmb_cpu_draw_search_results(void);

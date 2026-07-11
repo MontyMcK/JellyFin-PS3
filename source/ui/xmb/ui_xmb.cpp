@@ -29,17 +29,22 @@ static void xmb_reset_state(void) {
     g_sel = 0; g_scroll_top = 0;
     g_tv_sub_start = 0; g_tv_sub_total = 0;
     g_col_sub_start = 0; g_col_sub_total = 0;
+    g_music_subtab = MUSIC_ST_ALBUMS;
+    g_music_header = false;
+    g_music_depth  = 0;
+    g_music_sub_count = 0; g_music_sub_sel = 0;
+    g_music_sub_scroll = 0; g_music_sub_total = 0;
     g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
 }
 
 // Resolve the card-grid view for the current tab: grid geometry, which item
 // array, count, selection, scroll, grid origin, and whether more rows exist
 // below.  Returns false for tabs that don't use the grid
-// (search/settings/music).
+// (search/settings).
 static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
                           int *count, int *sel, int *scroll, int *y0,
-                          bool *more_below) {
-    if (tab == XMB_TAB_SEARCH || tab == XMB_TAB_SETTINGS || tab == XMB_TAB_MUSIC)
+                          bool *more_below, int *abs_start, int *abs_total) {
+    if (tab == XMB_TAB_SEARCH || tab == XMB_TAB_SETTINGS)
         return false;
     xmb_grid_geom(tab, gg);
     if (tab == XMB_TAB_TV && g_tv_depth > 0) {
@@ -48,6 +53,7 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
         *y0    = XMB_GRID_Y0 + 26;
         *more_below = g_tv_sub_scroll + gg->vis < g_tv_sub_count ||
                       g_tv_sub_start + g_tv_sub_count < g_tv_sub_total;
+        *abs_start = g_tv_sub_start;  *abs_total = g_tv_sub_total;
         return true;
     }
     if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
@@ -56,13 +62,24 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
         *y0    = XMB_GRID_Y0 + 26;
         *more_below = g_col_sub_scroll + gg->vis < g_col_sub_count ||
                       g_col_sub_start + g_col_sub_count < g_col_sub_total;
+        *abs_start = g_col_sub_start; *abs_total = g_col_sub_total;
+        return true;
+    }
+    if (tab == XMB_TAB_MUSIC && g_music_depth > 0) {
+        *items = g_music_sub_items; *count = g_music_sub_count;
+        *sel   = g_music_sub_sel;   *scroll = g_music_sub_scroll;
+        *y0    = XMB_GRID_Y0 + 26;
+        *more_below = g_music_sub_scroll + gg->vis < g_music_sub_count;
+        *abs_start = 0; *abs_total = g_music_sub_count;  // single page
         return true;
     }
     *items = g_items[tab];  *count = g_item_count[tab];
     *sel   = g_sel;         *scroll = g_scroll_top;
-    *y0    = XMB_GRID_Y0;
+    *y0    = XMB_GRID_Y0
+           + (tab == XMB_TAB_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
     *more_below = g_scroll_top + gg->vis < g_item_count[tab] ||
                   g_tab_start[tab] + g_item_count[tab] < g_tab_total[tab];
+    *abs_start = g_tab_start[tab]; *abs_total = g_tab_total[tab];
     return true;
 }
 
@@ -78,8 +95,10 @@ static void xmb_draw_cpu_phase(int tab) {
     } else if (tab == XMB_TAB_HOME) {
         xmb_home_cpu_phase();
     } else {
-        GridGeom gg; const XMBItem *items; int count, sel, scroll, y0; bool more;
-        if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0, &more))
+        GridGeom gg; const XMBItem *items;
+        int count, sel, scroll, y0, a_start, a_total; bool more;
+        if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0,
+                          &more, &a_start, &a_total))
             xmb_grid_cpu(&gg, items, count, sel, scroll, y0);
     }
 }
@@ -92,12 +111,20 @@ static void xmb_draw_text_phase(int tab) {
         xmb_rsx_draw_osk();
     } else if (tab == XMB_TAB_SETTINGS) {
         xmb_draw_settings();
-    } else if (tab == XMB_TAB_MUSIC) {
-        xmb_draw_empty_state(tab, "Coming soon");
     } else if (tab == XMB_TAB_HOME) {
         xmb_home_text_phase();
     } else {
         // Card-grid tabs: breadcrumb (sub-screens), empty text, grid labels.
+        if (tab == XMB_TAB_MUSIC) {
+            GridGeom mg;
+            xmb_grid_geom(XMB_TAB_MUSIC, &mg);
+            if (g_music_depth == 0)
+                xmb_draw_music_subtabs(mg.x0, XMB_CONTENT_Y + 2,
+                                       g_music_subtab, g_music_header);
+            else
+                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+                                    g_music_parent_name, "Albums", NULL);
+        }
         if (tab == XMB_TAB_TV && g_tv_depth > 0) {
             if (g_tv_depth == 1)
                 xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
@@ -111,10 +138,13 @@ static void xmb_draw_text_phase(int tab) {
                                 g_col_name, "Movies", NULL);
         }
 
-        GridGeom gg; const XMBItem *items; int count, sel, scroll, y0; bool more;
-        if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0, &more)) {
+        GridGeom gg; const XMBItem *items;
+        int count, sel, scroll, y0, a_start, a_total; bool more;
+        if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0,
+                          &more, &a_start, &a_total)) {
             bool sub = (tab == XMB_TAB_TV && g_tv_depth > 0) ||
-                       (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0);
+                       (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) ||
+                       (tab == XMB_TAB_MUSIC && g_music_depth > 0);
             if (count == 0) {
                 bool loaded = sub || g_items_loaded[tab];
                 if (loaded)
@@ -122,7 +152,8 @@ static void xmb_draw_text_phase(int tab) {
                             tab == XMB_TAB_RESUME ? "Nothing in progress"
                                                   : "No items in this library");
             } else {
-                xmb_grid_text(&gg, items, count, sel, scroll, y0, more);
+                xmb_grid_text(&gg, items, count, sel, scroll, y0, more,
+                              a_start, a_total);
             }
             // Letter jump bar on library tabs at depth 0 (not the resume
             // list — it isn't alphabetical).
@@ -153,7 +184,11 @@ static void xmb_draw_hints(int tab) {
             static const Hint h[] = {{'X',"Type"},{'C',"Clear"}};
             draw_hints_bar(h, 2);
         }
-    } else if (in_tv_sub || in_col_sub) {
+    } else if (tab == XMB_TAB_MUSIC && g_music_header) {
+        static const Hint h[] = {{'D',"Switch"},{'X',"Select"}};
+        draw_hints_bar(h, 2);
+    } else if (in_tv_sub || in_col_sub ||
+               (tab == XMB_TAB_MUSIC && g_music_depth > 0)) {
         static const Hint h[] = {{'X',"Select"},{'C',"Back"}};
         draw_hints_bar(h, 2);
     } else if (g_jumpbar_active) {
@@ -204,7 +239,7 @@ void ui_run_xmb(void) {
         if (first_iter) crash_log("13.6 wave_draw done");
 
         int tab = g_active_tab;
-        if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_MUSIC && tab != XMB_TAB_SETTINGS
+        if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_SETTINGS
             && tab != XMB_TAB_HOME)
             if (!g_items_loaded[tab]) {
                 if (first_iter) crash_log("13.7 fetch_tab_items");

@@ -6,6 +6,8 @@
 
 A native PS3 homebrew Jellyfin client written in C/C++ using PSL1GHT, targeting Evilnat CFW or HEN.
 
+Current version: **2.2 (beta)**
+
 Goal: consumer-quality media playback on PS3, the second-best media player on the platform, modelled architecturally on Movian.
 
 ---
@@ -16,6 +18,11 @@ Goal: consumer-quality media playback on PS3, the second-best media player on th
 - Home shelf: vertically-scrolling rows (Continue Watching, Next Up, Recently Added Movies/Shows) mirroring the Jellyfin web home
 - Card-grid browsing (5x2 portrait posters, 3x2 landscape stills, title/info under the selected card) on all library tabs; search and settings keep the compact row UI
 - Browse Movies, TV Shows, and Collections libraries
+- Music library: Albums / Artists / Playlists / Genres / Songs sub-tabs with d-pad header navigation, square album-art cards with colored letter-tile placeholders, artist/genre discography drill-downs (oldest first), playlists kept in their curated order, songs playable from any point with the rest queued
+- Now Playing music screen: glowing album art, an audio-reactive 28-band FFT spectrum visualizer (MediaWave-style analysis: Hann window, 2048-pt FFT, log-spaced 40Hz-16kHz bands, frame-max normalized, fast-attack/slow-fall smoothing, tapped at the audio DMA read cursor so the bars move with what you hear), track/artist/album metadata with source info ("320 kbps FLAC"), UP NEXT queue with album thumbs, focusable transport row, seek bar
+- Music playback engine: Jellyfin audio transcode stream (48kHz MP3) decoded by minimp3 into its own PCM ring, feeding the shared audio port through a pluggable source; queue auto-advance, shuffle (play-order permutation — the current track keeps playing, Up Next and the queue reorder live), pause, prev/next, video-player-style batched seek (taps/holds move the bar instantly, one stream reopen after input stops)
+- Full-queue views: d-pad navigable UP NEXT sidebar and a SELECT overlay, both in live play order
+- Scrollbars everywhere: every library grid shows its window position within the whole library (sliding pagination included), Home shelf rows carry horizontal bars plus a vertical bar for the row stack
 - Continue Watching tab: server resume list, watched-progress bars on thumbnails, playback resumes at the saved position
 - Next-episode auto-advance: a NEXT EPISODE prompt in the last 90s of any episode (SELECT to jump immediately), with a 30s countdown that starts the next episode automatically; the follower is resolved from the server, so it works from any launch point (Home rows, Continue Watching, search, season lists) and continues across season boundaries
 - Playback progress reported to the server every 10s (Sessions/Playing + Progress + Stopped), so PS3 viewing updates Continue Watching everywhere
@@ -86,6 +93,8 @@ When cutting a release, set APP_VERSION in source/net/update_check.h to match th
 | L1 / R1     | Cycle tabs (prev/next page in the season browser) |
 | Triangle    | Item info overlay               |
 
+Music tab: UP from the grid's top row focuses the sub-tab header — LEFT/RIGHT switch between Albums / Artists / Playlists / Genres / Songs, DOWN or X drops back into the grid.
+
 ### Media Player
 
 Press any button during playback to bring up the HUD. It auto-hides after 4 seconds while playing and stays up while paused.
@@ -104,6 +113,21 @@ Press any button during playback to bring up the HUD. It auto-hides after 4 seco
 Track menu: D-pad Up/Down to highlight, X to select, O to close. The active entry carries an accent dot; the CC menu has an Off entry at the top, and an active subtitle underlines the CC button. Picking a different track reopens the stream at the current position with the new track applied (subtitles can take a while to start the first time — the server extracts the track before the burn-in transcode begins).
 
 Seeking, skipping, and track changes all use the same path: the player re-requests the transcode stream at the new position, flushes the decoder, audio, and jitter buffer, then resumes. The seek bar position follows the audio PTS clock (offset by the seek base), so it tracks the real playback time after a seek.
+
+### Music Player
+
+| Button            | Action                                                          |
+|-------------------|-----------------------------------------------------------------|
+| Left / Right      | Move focus across the transport row (Rew · Prev · Play/Pause · Next · FF · Shuffle) |
+| Right past Shuffle| Enter the UP NEXT queue                                         |
+| Up / Down (queue) | Scroll the full remaining queue                                 |
+| X                 | Activate the focused control / play the highlighted queue track |
+| Triangle          | Toggle shuffle (works everywhere, queue views included)         |
+| L1 / R1           | Previous / next track (previous restarts the track when >3s in) |
+| R2 / L2 (tap)     | Seek +10s / -10s — taps batch into a single stream reopen       |
+| R2 / L2 (hold)    | Scrub: the bar keeps stepping, one reopen fires on release      |
+| Select            | Full-queue overlay (X jumps, Triangle shuffles, O closes)       |
+| O / Start         | Stop playback and return to the library                         |
 
 ### Search
 
@@ -255,6 +279,8 @@ Audio PES packets (MP3, type 0x03)
 
 **AV clock:** audio_get_clock_us() returns PTS-based time once the first PES with a valid PTS is decoded; falls back to the DMA block counter at startup. After a seek the PTS cursor is invalidated, so the clock re-seeds from the new segment.
 
+**Music path:** the music player reuses the same audio port through a pluggable PCM source (audio_set_source): its stream thread pulls the Jellyfin audio transcode endpoint (stream.mp3, 48kHz forced, with a linear-resample guard), decodes with the same embedded minimp3, and fills its own ring. The visualizer taps samples at the DMA read cursor — not at decode time — so the spectrum matches what is audible rather than what is buffered ~700ms ahead. Every music seek mints a fresh PlaybackInfo session: reusing one makes Jellyfin re-serve the running audio transcode from 0:00 (StartTimeTicks ignored), unlike the video path.
+
 ---
 
 ## Threading Model
@@ -307,6 +333,12 @@ JellyFin---PS3/
     |   |-- opensans_regular.h     # Open Sans Regular (embedded)
     |   |-- opensans_bold.h        # Open Sans Bold (embedded)
     |   `-- font8x8.xpm            # Fallback bitmap font
+    |-- music/
+    |   |-- music_player.cpp/h     # Audio-only engine: track queue, stream+decode thread,
+    |   |                          #   shuffle play order, controls, playstate reporting
+    |   |-- music_fft.cpp/h        # Visualizer analysis: 2048-pt FFT spectrum bands
+    |   `-- music_screen.cpp/h     # Now Playing screen: art, visualizer, UP NEXT,
+    |                              #   transport focus, seek, queue overlay
     |-- net/
     |   |-- http.cpp/h             # HTTP client
     |   `-- update_check.cpp/h     # Background GitHub release check (firmware HTTPS)
@@ -399,7 +431,9 @@ JellyFin---PS3/
 | Settings                 | Working (account card, log out, Debug Logging toggle)             |
 | Update check             | Working (GitHub latest-release lookup at launch, modal popup)     |
 | PKG packaging            | Working (make pkg, APPID JFPS30000)                               |
-| Music library            | Not implemented                                                   |
+| Music browsing           | Working (Albums / Artists / Playlists / Genres / Songs sub-tabs, jump bar, pagination, discography drill-downs) |
+| Music playback           | Working (48kHz MP3 transcode stream, queue auto-advance, shuffle, batched seek, playstate reporting) |
+| Music visualizer         | Working (28-band FFT spectrum, tapped at the DMA read cursor)     |
 
 ---
 

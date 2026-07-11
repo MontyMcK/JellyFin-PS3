@@ -118,8 +118,9 @@ void xmb_draw_tabs(void) {
 void xmb_draw_jumpbar(int tab) {
     GridGeom gg;
     xmb_grid_geom(tab, &gg);
-    int bar_top = XMB_GRID_Y0;
-    int bar_bot = XMB_GRID_Y0 + XMB_GRID_ROWS * gg.stride - XMB_CARD_TEXT_H;
+    int bar_top = XMB_GRID_Y0
+                + (tab == XMB_TAB_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
+    int bar_bot = bar_top + XMB_GRID_ROWS * gg.stride - XMB_CARD_TEXT_H;
     int bar_h   = bar_bot - bar_top;
     int jbar_x  = gg.x0 - JBAR_GAP * 3 - JBAR_W;
     if (jbar_x < 0) jbar_x = 0;
@@ -146,6 +147,27 @@ void xmb_draw_jumpbar(int tab) {
                   : g_jumpbar_active ? XMB_ICON_IDLE
                   : 0x00363D63UL;
         drawTTF((u32)jbar_x, (u32)ty, jbar_labels[i], font_px, color, sel);
+    }
+}
+
+// Music sub-tab header — "Albums  Artists  Playlists  Genres  Songs" over
+// the grid.  The active sub-tab carries the accent underline; while the
+// d-pad focuses the header its label pops white so it's obvious LEFT/RIGHT
+// will switch it.
+void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
+    static const char *labels[MUSIC_ST_COUNT] =
+        { "Albums", "Artists", "Playlists", "Genres", "Songs" };
+    const float px = 16.0f;
+    for (int i = 0; i < MUSIC_ST_COUNT; i++) {
+        bool is_active = (i == active);
+        u32 color = is_active ? (focused ? XMB_WHITE : XMB_TEXT)
+                              : XMB_TEXT_FAINT;
+        drawTTF((u32)x, (u32)y, labels[i], px, color, is_active);
+        int w = ttf_text_width(labels[i], px, is_active);
+        if (is_active)
+            drawRect((u32)x, (u32)(y + 24), (u32)w, 3,
+                     focused ? XMB_KEY_SEL : XMB_ACCENT);
+        x += w + 34;
     }
 }
 

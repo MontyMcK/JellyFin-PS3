@@ -15,6 +15,8 @@
 
 extern u32 running;
 
+volatile bool g_stream_cancel = false;
+
 // How long to wait for the server's response headers.  A burn-in request
 // (SubtitleMethod=Encode) makes Jellyfin extract the subtitle track from the
 // source file before the transcode produces any output, and headers are only
@@ -107,7 +109,7 @@ int stream_open(const char *url) {
         // Keep the system callback pumped so quit still works, and give up
         // at the deadline instead of freezing the player.
         sysUtilCheckCallback();
-        if (!running) { netClose(sock); return -1; }
+        if (!running || g_stream_cancel) { netClose(sock); return -1; }
         u64 now = timing_get_us();
         if (now - hdr_t0 >= STREAM_HDR_DEADLINE_US) {
             plog("stream_open: header timeout");

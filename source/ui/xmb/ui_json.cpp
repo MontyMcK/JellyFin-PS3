@@ -112,11 +112,26 @@ int parse_xmb_items(const char *json, XMBItem *arr, int max) {
         xmb_json_str_range(obj, olen, "Type", it.type, sizeof(it.type));
         if (!it.id[0]) continue;
 
+        bool is_album = strcmp(it.type, "MusicAlbum") == 0 ||
+                        strcmp(it.type, "Playlist")   == 0;
+        bool is_audio = strcmp(it.type, "Audio")      == 0;
+
         int year = xmb_json_int_range(obj, olen, "ProductionYear", 0);
         if (year > 0) snprintf(it.year_str, sizeof(it.year_str), "%d", year);
 
         long long ticks = xmb_json_ll_range(obj, olen, "RunTimeTicks", 0);
-        if (ticks > 0) {
+        if (is_album) {
+            // Albums/playlists show a track count, not a duration.
+            int n = xmb_json_int_range(obj, olen, "ChildCount", 0);
+            if (n > 0)
+                snprintf(it.duration_str, sizeof(it.duration_str),
+                         "%d Track%s", n, n == 1 ? "" : "s");
+        } else if (is_audio && ticks > 0) {
+            int secs = (int)(ticks / 10000000LL);
+            it.dur_secs = (u32)secs;
+            snprintf(it.duration_str, sizeof(it.duration_str), "%d:%02d",
+                     secs / 60, secs % 60);
+        } else if (ticks > 0) {
             int total_min = (int)(ticks / 600000000LL);
             int h = total_min / 60, m = total_min % 60;
             if (h > 0) snprintf(it.duration_str, sizeof(it.duration_str), "%dh %dm", h, m);
@@ -138,14 +153,32 @@ int parse_xmb_items(const char *json, XMBItem *arr, int max) {
 
         char container[16] = "";
         xmb_json_str_range(obj, olen, "Container", container, sizeof(container));
-        if (strstr(container, "hevc") || strstr(container, "h265") ||
-            strstr(container, "265"))
+        if (is_album) {
+            // no codec chip on album cards
+        } else if (is_audio) {
+            for (int i = 0; container[i] && i < (int)sizeof(it.codec)-1; i++)
+                it.codec[i] = (container[i] >= 'a' && container[i] <= 'z')
+                                  ? container[i] - 32 : container[i];
+        } else if (strstr(container, "hevc") || strstr(container, "h265") ||
+                   strstr(container, "265"))
             strncpy(it.codec, "H.265", sizeof(it.codec)-1);
         else
             strncpy(it.codec, "H.264", sizeof(it.codec)-1);
 
+        // "AlbumArtist" is the display string; per-track credits fall back
+        // to the Artists array.  ("AlbumArtists":[ can't false-match — the
+        // searcher requires the :"...  suffix.)
+        xmb_json_str_range(obj, olen, "AlbumArtist", it.artist, sizeof(it.artist));
+        if (!it.artist[0])
+            xmb_json_first_arr_str(obj, olen, "Artists",
+                                   it.artist, sizeof(it.artist));
+        if (is_audio)
+            xmb_json_str_range(obj, olen, "AlbumId",
+                               it.album_id, sizeof(it.album_id));
+
         decode_unicode_escapes(it.name);
         decode_unicode_escapes(it.genre);
+        decode_unicode_escapes(it.artist);
         arr[count++] = it;
     }
     return count;

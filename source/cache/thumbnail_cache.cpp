@@ -269,6 +269,12 @@ void thumb_request(const char *item_id, int w, int h) {
     lock_release();
 }
 
+int thumb_max_square(void) {
+    int e = 1;
+    while ((size_t)(e + 1) * (size_t)(e + 1) <= s_max_px) e++;
+    return e;
+}
+
 const Bitmap *thumb_get(const char *item_id, int w, int h) {
     if (!item_id || !item_id[0]) return NULL;
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {

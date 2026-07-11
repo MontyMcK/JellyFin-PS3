@@ -34,6 +34,8 @@ int  xmb_fetch_episodes(const char *series_id, const char *season_id,
                         int start_index, int *out_total);
 int  xmb_fetch_collection_items(const char *collection_id, XMBItem *arr,
                                 int max, int start_index, int *out_total);
+int  xmb_fetch_music_children(const char *id_param, const char *parent_id,
+                              XMBItem *arr, int max, int *out_total);
 bool xmb_fetch_next_episode(const char *episode_id, XMBItem *out);
 
 // Sliding-window pagination: drop the first page, fetch the next one.

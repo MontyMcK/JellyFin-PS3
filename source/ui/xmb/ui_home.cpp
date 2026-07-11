@@ -296,13 +296,39 @@ void xmb_home_text_phase(void) {
                 drawTTF((u32)cx, (u32)(ty + 19), row->items[c].year_str, 13, XMB_TEXT_FAINT);
         }
 
-        // Off-screen content chevrons, just outside the centered strip.
-        int cev_y = card_y + ch / 2 - 11;
-        if (row->scroll > 0)
-            drawIcon((u32)(x0 - 26), (u32)cev_y, 0xE5CB, 22, XMB_ICON_IDLE);
-        if (row->scroll + vis < row->count)
-            drawIcon((u32)(x0 + row_strip_w(row->kind) + 4), (u32)cev_y,
-                     0xE5CC, 22, XMB_ICON_IDLE);
+        // Horizontal scrollbar under the row when cards run off-screen —
+        // thumb size/position show where the window sits in the row.
+        if (row->count > vis) {
+            int sw    = row_strip_w(row->kind);
+            int bar_y = card_y + ch + HOME_LABEL_H - 3;
+            drawRect((u32)x0, (u32)bar_y, (u32)sw, 3, XMB_TRACK);
+            int tw2 = sw * vis / row->count;
+            if (tw2 < 24) tw2 = 24;
+            if (tw2 > sw) tw2 = sw;
+            int rng = row->count - vis;
+            int off = rng > 0 ? (sw - tw2) * row->scroll / rng : 0;
+            if (off < 0)        off = 0;
+            if (off > sw - tw2) off = sw - tw2;
+            drawRect((u32)(x0 + off), (u32)bar_y, (u32)tw2, 3, XMB_ACCENT);
+        }
+    }
+
+    // Vertical scrollbar for the row stack itself (right screen edge).
+    {
+        int stack_h = row_abs_top(HOME_ROWS_N) - view_top();
+        int vp      = view_bot() - view_top();
+        if (stack_h > vp) {
+            int bar_x = (int)display_width - 18;
+            drawRect((u32)bar_x, (u32)view_top(), 3, (u32)vp, XMB_TRACK);
+            int th = vp * vp / stack_h;
+            if (th < 24) th = 24;
+            int rng = stack_h - vp;
+            int off = rng > 0 ? (vp - th) * s_vscroll / rng : 0;
+            if (off < 0)       off = 0;
+            if (off > vp - th) off = vp - th;
+            drawRect((u32)bar_x, (u32)(view_top() + off), 3, (u32)th,
+                     XMB_ACCENT);
+        }
     }
 
     g_cpu_clip_top = 0; g_cpu_clip_bot = 0;

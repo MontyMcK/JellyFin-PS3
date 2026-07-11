@@ -36,6 +36,18 @@ int     g_tv_sub_count  = 0;
 int     g_tv_sub_sel    = 0;
 int     g_tv_sub_scroll = 0;
 
+// Music tab state (sub-tab header + Artist/Genre→Albums sub-screen)
+int  g_music_subtab = 0;              // MUSIC_ST_* — which content shows
+bool g_music_header = false;          // d-pad focus is on the sub-tab row
+int  g_music_depth  = 0;              // 0 = sub-tab root, 1 = albums-of-parent
+char g_music_parent_id[64];
+char g_music_parent_name[128];
+XMBItem g_music_sub_items[XMB_ITEMS_MAX];
+int     g_music_sub_count  = 0;
+int     g_music_sub_sel    = 0;
+int     g_music_sub_scroll = 0;
+int     g_music_sub_total  = 0;
+
 // Collections sub-screen state (Collection→Movies)
 int  g_col_depth      = 0;
 char g_col_id[64];
