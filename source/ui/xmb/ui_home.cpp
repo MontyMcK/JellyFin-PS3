@@ -1,6 +1,6 @@
 // Home shelf screen — a vertically-scrolling stack of horizontally-scrolling
-// rows (Continue Watching, Next Up, Recently Added Movies/Shows, and a Music
-// "coming soon" stub), mirroring the Jellyfin web home.  Each row carries its
+// rows (Continue Watching, Next Up, Recently Added Movies/Shows/Music),
+// mirroring the Jellyfin web home.  Each row carries its
 // own card aspect ratio.  Card images / selection are drawn in the CPU phase
 // (xmb_draw_card, shared with the grid); titles / chevrons in the text phase.
 
@@ -10,6 +10,7 @@
 #include "ui_internal.h"
 #include "ui_render_internal.h"
 #include "jellyfin_api.h"
+#include "music_screen.h"
 
 // -------------------------------------------------------
 // Model
@@ -17,7 +18,7 @@
 
 #define HOME_ROW_MAX 25
 
-typedef enum { HROW_LANDSCAPE, HROW_PORTRAIT, HROW_STUB } HomeRowKind;
+typedef enum { HROW_LANDSCAPE, HROW_PORTRAIT, HROW_SQUARE, HROW_STUB } HomeRowKind;
 
 typedef struct {
     const char *title;
@@ -59,6 +60,7 @@ static int row_card_h(HomeRowKind k) {
 }
 static int row_card_w(HomeRowKind k) {
     int h = row_card_h(k);
+    if (k == HROW_SQUARE) return h;   // album art is square
     return (k == HROW_PORTRAIT) ? h * 2 / 3 : h * 16 / 9;
 }
 static int row_band_h(HomeRowKind k) {
@@ -102,7 +104,7 @@ static void home_init_once(void) {
     s_rows[HR_NEXTUP].title   = "Next Up";                  s_rows[HR_NEXTUP].kind   = HROW_LANDSCAPE;
     s_rows[HR_MOVIES].title   = "Recently Added in Movies"; s_rows[HR_MOVIES].kind   = HROW_PORTRAIT;
     s_rows[HR_SHOWS].title    = "Recently Added in Shows";  s_rows[HR_SHOWS].kind    = HROW_PORTRAIT;
-    s_rows[HR_MUSIC].title    = "Music";                    s_rows[HR_MUSIC].kind    = HROW_STUB;
+    s_rows[HR_MUSIC].title    = "Recently Added in Music"; s_rows[HR_MUSIC].kind    = HROW_SQUARE;
 }
 
 static void home_fetch_row(int r) {
@@ -118,6 +120,14 @@ static void home_fetch_row(int r) {
         snprintf(url, sizeof(url),
             "%s/Shows/NextUp?userId=%s&Limit=%d&Fields=%s",
             g_server, g_userid, HOME_ROW_MAX, fields);
+    } else if (r == HR_MUSIC) {
+        const char *lib = g_tabs[XMB_TAB_MUSIC].library_id;
+        if (!lib[0]) { row->count = 0; row->loaded = true; return; }
+        snprintf(url, sizeof(url),
+            "%s/Users/%s/Items?ParentId=%s&IncludeItemTypes=MusicAlbum"
+            "&Recursive=true&SortBy=DateCreated&SortOrder=Descending"
+            "&Limit=%d&Fields=%s",
+            g_server, g_userid, lib, HOME_ROW_MAX, fields);
     } else if (r == HR_MOVIES || r == HR_SHOWS) {
         int   tab  = (r == HR_MOVIES) ? XMB_TAB_MOVIES : XMB_TAB_TV;
         const char *lib  = g_tabs[tab].library_id;
@@ -245,7 +255,8 @@ void xmb_home_cpu_phase(void) {
             int cx = x0 + (c - row->scroll) * (cw + HOME_CARD_GAP);
             bool sel = (r == s_focus_row && c == s_focus_col);
             xmb_draw_card(row->items[c].id, cx, card_y, cw, ch,
-                          row->items[c].progress_pct, sel);
+                          row->items[c].progress_pct, sel,
+                          r == HR_MUSIC ? row->items[c].name : NULL);
         }
     }
 
@@ -266,9 +277,16 @@ void xmb_home_text_phase(void) {
         int x0 = row_origin_x(row->kind);
         bool row_focused = (r == s_focus_row);
 
-        // Row header.
+        // Row header, with a dim item count when the row overflows the screen
+        // (replaces the old horizontal scrollbar as the "there's more" cue).
         drawTTF((u32)x0, (u32)(vy + 4), row->title, 18,
                 row_focused ? XMB_TEXT : XMB_TEXT_DIM, true);
+        if (row->kind != HROW_STUB && row->count > row_visible_cols(row->kind)) {
+            char cnt[8];
+            snprintf(cnt, sizeof(cnt), "%d", row->count);
+            drawTTF((u32)(x0 + ttf_text_width(row->title, 18, true) + 10),
+                    (u32)(vy + 9), cnt, 13, XMB_TEXT_FAINT);
+        }
 
         if (row->kind == HROW_STUB) {
             const char *msg = "Coming soon";
@@ -296,40 +314,10 @@ void xmb_home_text_phase(void) {
                 drawTTF((u32)cx, (u32)(ty + 19), row->items[c].year_str, 13, XMB_TEXT_FAINT);
         }
 
-        // Horizontal scrollbar under the row when cards run off-screen —
-        // thumb size/position show where the window sits in the row.
-        if (row->count > vis) {
-            int sw    = row_strip_w(row->kind);
-            int bar_y = card_y + ch + HOME_LABEL_H - 3;
-            drawRect((u32)x0, (u32)bar_y, (u32)sw, 3, XMB_TRACK);
-            int tw2 = sw * vis / row->count;
-            if (tw2 < 24) tw2 = 24;
-            if (tw2 > sw) tw2 = sw;
-            int rng = row->count - vis;
-            int off = rng > 0 ? (sw - tw2) * row->scroll / rng : 0;
-            if (off < 0)        off = 0;
-            if (off > sw - tw2) off = sw - tw2;
-            drawRect((u32)(x0 + off), (u32)bar_y, (u32)tw2, 3, XMB_ACCENT);
-        }
     }
 
-    // Vertical scrollbar for the row stack itself (right screen edge).
-    {
-        int stack_h = row_abs_top(HOME_ROWS_N) - view_top();
-        int vp      = view_bot() - view_top();
-        if (stack_h > vp) {
-            int bar_x = (int)display_width - 18;
-            drawRect((u32)bar_x, (u32)view_top(), 3, (u32)vp, XMB_TRACK);
-            int th = vp * vp / stack_h;
-            if (th < 24) th = 24;
-            int rng = stack_h - vp;
-            int off = rng > 0 ? (vp - th) * s_vscroll / rng : 0;
-            if (off < 0)       off = 0;
-            if (off > vp - th) off = vp - th;
-            drawRect((u32)bar_x, (u32)(view_top() + off), 3, (u32)th,
-                     XMB_ACCENT);
-        }
-    }
+    // No scrollbars: horizontal overflow is signalled by the count in the row
+    // header, vertical by the next row peeking in from the bottom edge.
 
     g_cpu_clip_top = 0; g_cpu_clip_bot = 0;
 }
@@ -353,6 +341,13 @@ static void home_activate(void) {
         g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items,
                                            XMB_ITEMS_MAX, 0, &g_tv_sub_total);
         g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+        init_btns();
+        return;
+    }
+
+    // Albums open the music album screen (queue + Now Playing).
+    if (strcmp(it->type, "MusicAlbum") == 0) {
+        music_screen_open_album(it, "Home");
         init_btns();
         return;
     }

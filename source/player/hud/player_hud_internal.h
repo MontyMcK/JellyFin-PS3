@@ -46,7 +46,7 @@
 #define MENU_PAD             16            // popup inner padding
 #define MENU_DOT_COL         22            // width of the current-entry dot column
 
-#define MATERIAL_MUSIC_NOTE  0xE405
+#define MATERIAL_MUSIC_NOTE  ICON_MUSIC   // Tabler music glyph (icons.h)
 
 // Focus slot indices
 #define FOCUS_REW    0

@@ -230,7 +230,7 @@ void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
         const float ph_px = 32.0f;
         drawIcon((u32)(cx + (card_w - (int)ph_px) / 2),
                  (u32)(cy + (card_h - (int)ph_px) / 2),
-                 0xE3F4, ph_px, 0x00262C4EUL);
+                 ICON_PHOTO, ph_px, 0x00262C4EUL);
     }
 
     // Watched-progress strip along the bottom edge of the card.

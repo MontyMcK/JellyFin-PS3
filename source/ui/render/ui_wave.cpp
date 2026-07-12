@@ -7,6 +7,29 @@
 #include "ui_wave.h"
 #include "ui_visuals.h"
 
+// --- CPU-vs-GPU background compositing -----------------------------------
+// On real PS3, the framebuffer lives in RSX-local VRAM and PPU writes to it
+// are uncached and very slow (a full-screen CPU fill costs ~150-180ms), so the
+// XMB background is rendered with the RSX (wave_draw's immediate-mode path) and
+// only small UI elements (text, key cells) are composited by the CPU.
+//
+// RPCS3 emulates that VRAM as ordinary host RAM, and — crucially — presents the
+// GPU-rendered surface from its render-target cache on flip, silently dropping
+// any later CPU writes to the same buffer.  The result is a frame where the GPU
+// wave shows but every CPU-drawn element is invisible.
+//
+// The fix is: on the emulator, composite the *entire* frame — background
+// included — on the CPU so no GPU op owns the display surface and the flip
+// presents exactly what we drew.  On hardware, keep the GPU wave.
+//
+// This is a COMPILE-TIME switch, not runtime detection.  A startup probe that
+// timed one full-screen CPU write misclassified real hardware (PPU write-
+// gathering beat the threshold), which put a retail PS3 on the CPU path —
+// every frame then read back uncached VRAM and the whole UI crawled.  Build
+// with 0 (default) for real hardware; flip to 1 only for RPCS3 test builds.
+#define UI_CPU_BG_EMU 0
+bool ui_cpu_bg(void) { return UI_CPU_BG_EMU != 0; }
+
 #define WAVE_STEP_PX    20
 #define WAVE_NS         8      // vertical slices per ribbon (fade resolution)
 #define WAVE_MAX_COLS   98     // x columns: supports up to ~1940px wide (720p uses 65)
@@ -106,6 +129,71 @@ void wave_init(void) {
     rsxAddressToOffset(s_wave_fp_buf, &s_wave_fp_offset);
 }
 
+// CPU rasterisation of the XMB background — gradient plus the three translucent
+// ribbons — straight into the current framebuffer.  Mirrors the GPU wave_draw()
+// math (grad_sample / wave_crest / over8) and tools/ui_preview/preview.c's
+// cumulative per-pixel blend, including the animated phase, so the two paths
+// look identical.  Used only when ui_cpu_bg() is true (emulator).
+static void wave_draw_cpu(void) {
+    u32 *fb = color_buffer[curr_fb];
+    if (!fb) return;
+    const int W = (int)display_width;
+    const int H = (int)display_height;
+
+    // Vertical gradient: one colour per row, then a flat row fill (fast).
+    for (int y = 0; y < H; y++) {
+        u8 r, g, b;
+        grad_sample((float)y, (float)H, &r, &g, &b);
+        u32 c = ((u32)r << 16) | ((u32)g << 8) | (u32)b;
+        u32 *row = fb + (u32)y * W;
+        for (int x = 0; x < W; x++) row[x] = c;
+    }
+
+    // Advance the animation phase exactly like the GPU path.
+    for (int li = 0; li < 3; li++) {
+        s_wave_phase[li] += WAVE_DPHASE[li];
+        if (s_wave_phase[li] > 62.83f) s_wave_phase[li] -= 62.83f;
+    }
+
+    // Ribbons back-to-front, each composited over whatever is already in the
+    // framebuffer (gradient + earlier ribbons) — same cumulative blend as
+    // wave_bg().  Alpha fades linearly from the crest (WAVE_ALPHA) to 0 at the
+    // screen bottom; step it per row to avoid a per-pixel divide.
+    for (int li = 0; li < 3; li++) {
+        u32 cr = (WAVE_COLOR[li] >> 16) & 0xFF;
+        u32 cg = (WAVE_COLOR[li] >>  8) & 0xFF;
+        u32 cb =  WAVE_COLOR[li]        & 0xFF;
+        for (int x = 0; x < W; x++) {
+            float cy = wave_crest(li, (float)x, (float)W, (float)H);
+            int y0 = (int)cy;
+            if (y0 < 0)  y0 = 0;
+            if (y0 >= H) continue;
+            // Fractional coverage of the crest pixel — without it the curve's
+            // top edge lands on whole pixels and staircases; scaling the first
+            // pixel's alpha by how much of it the ribbon actually covers
+            // feathers the edge to match the crest's true sub-pixel position.
+            float topcov = 1.0f - (cy - (float)y0);
+            if (topcov < 0.0f) topcov = 0.0f;
+            if (topcov > 1.0f) topcov = 1.0f;
+            float denom = (float)(H - y0);
+            if (denom < 1.0f) continue;
+            float a_f  = (float)WAVE_ALPHA[li];
+            float step = -(float)WAVE_ALPHA[li] / denom;
+            u32  *col  = fb + (u32)y0 * W + x;
+            for (int y = y0; y < H; y++, a_f += step, col += W) {
+                u32 a = (u32)(y == y0 ? a_f * topcov : a_f);
+                if (!a) continue;
+                u32 bgp = *col;
+                u32 ia  = 255 - a;
+                u32 nr = (a * cr + ia * ((bgp >> 16) & 0xFF)) / 255;
+                u32 ng = (a * cg + ia * ((bgp >>  8) & 0xFF)) / 255;
+                u32 nb = (a * cb + ia * ( bgp        & 0xFF)) / 255;
+                *col = (nr << 16) | (ng << 8) | nb;
+            }
+        }
+    }
+}
+
 // Push one immediate-mode vertex (colour latched first, position last — the
 // position write commits the vertex, matching the HUD dim quad ordering).
 static inline void wave_vtx(float x, float y, u8 r, u8 g, u8 b) {
@@ -116,6 +204,7 @@ static inline void wave_vtx(float x, float y, u8 r, u8 g, u8 b) {
 }
 
 void wave_draw(void) {
+    if (ui_cpu_bg()) { wave_draw_cpu(); return; }
     if (!s_wave_fp_buf) return;
 
     rsxVertexProgram  *vpo = (rsxVertexProgram*)  wave_vp_data;

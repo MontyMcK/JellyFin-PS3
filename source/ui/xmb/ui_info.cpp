@@ -101,7 +101,7 @@ void xmb_show_item_info(const XMBItem *it) {
                     mx += cw + 18;
                 }
                 if (detail.community_rating[0]) {
-                    drawIcon((u32)mx, (u32)(Y + 1), 0xE838, 18.0f, 0x00E8B64CUL);
+                    drawIcon((u32)mx, (u32)(Y + 1), ICON_STAR, 18.0f, 0x00E8B64CUL);
                     drawTTF((u32)(mx + 24), (u32)Y, detail.community_rating,
                             18, XMB_TEXT_DIM);
                 }

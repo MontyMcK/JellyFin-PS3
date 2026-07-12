@@ -168,7 +168,7 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
             u32  clr = sel ? XMB_KEY_LABEL_SEL : XMB_TEXT;
             if (k->kind == OK_BACK) {
                 drawIcon((u32)(cx + (kw - 22) / 2),
-                         (u32)(ry + (OSK_KEY_H - 22) / 2), 0xE14A, 22.0f, clr);
+                         (u32)(ry + (OSK_KEY_H - 22) / 2), ICON_BACKSPACE, 22.0f, clr);
             } else {
                 char chbuf[2] = { k->ch, '\0' };
                 const char *lbl = (k->kind == OK_CHAR) ? chbuf : k->label;

@@ -7,12 +7,19 @@
 #include <rsx/rsx.h>
 
 #include "ui_visuals.h"
+#include "ui_wave.h"
 
 // -------------------------------------------------------
 // RSX drawing
 // -------------------------------------------------------
 
+void cpuClearFb(u32 color);   // defined below; used by clearScreen on emulator
+
 void clearScreen(u32 color) {
+    // Where CPU framebuffer writes are cheap (emulator), clear on the CPU so no
+    // GPU op owns the display surface — otherwise RPCS3 presents the cached GPU
+    // surface on flip and drops every CPU-drawn UI element.  See ui_wave.cpp.
+    if (ui_cpu_bg()) { cpuClearFb(color); return; }
     rsxSetClearColor(context, color);
     rsxSetClearDepthStencil(context, 0xffff);
     rsxClearSurface(context,

@@ -51,28 +51,58 @@ static void draw_clipped(u32 x, u32 y, const char *text, float px,
     }
 }
 
-// Opaque filled circle — CPU row fills (write-only, fast).
+// Anti-aliased filled circle: opaque row spans inside, per-pixel coverage
+// blending along the rim (only the ~2px edge band reads the framebuffer, so
+// this stays cheap on real hardware too).
 static void fill_circle(int cx, int cy, int r, u32 color) {
-    for (int dy = -r; dy <= r; dy++) {
-        int hw = (int)(sqrtf((float)(r * r - dy * dy)) + 0.5f);
-        if (hw <= 0) continue;
-        drawRect((u32)(cx - hw), (u32)(cy + dy), (u32)(hw * 2), 1, color);
+    float rf = (float)r;
+    for (int dy = -r - 1; dy <= r + 1; dy++) {
+        float yy = (float)dy;
+        float in2 = (rf - 1.0f) * (rf - 1.0f) - yy * yy;
+        int hw_in = in2 > 0.0f ? (int)sqrtf(in2) : -1;
+        if (hw_in >= 0)
+            drawRect((u32)(cx - hw_in), (u32)(cy + dy),
+                     (u32)(hw_in * 2 + 1), 1, color);
+        float out2 = (rf + 1.0f) * (rf + 1.0f) - yy * yy;
+        if (out2 <= 0.0f) continue;
+        int hw_out = (int)sqrtf(out2) + 1;
+        for (int dx = hw_in + 1; dx <= hw_out; dx++) {
+            float d   = sqrtf((float)dx * (float)dx + yy * yy);
+            float cov = rf + 0.5f - d;
+            if (cov <= 0.0f) continue;
+            if (cov > 1.0f) cov = 1.0f;
+            u8 a = (u8)(cov * 255.0f);
+            drawRectBlend((u32)(cx + dx), (u32)(cy + dy), 1, 1, color, a);
+            if (dx > 0)
+                drawRectBlend((u32)(cx - dx), (u32)(cy + dy), 1, 1, color, a);
+        }
     }
 }
 
-// 1px circle outline, alpha-blended — the play button's soft glow rings.
-// Blended pixels read the framebuffer back, so keep these thin.
-static void ring_blend(int cx, int cy, int r, u32 color, u8 alpha) {
-    int px = cx + r, py = cy;
-    for (int a = 1; a <= 64; a++) {
-        float ang = (float)a * (2.0f * 3.14159265f / 64.0f);
-        int nx = cx + (int)(cosf(ang) * (float)r + 0.5f);
-        int ny = cy + (int)(sinf(ang) * (float)r + 0.5f);
-        if (nx != px || ny != py)
-            drawRectBlend((u32)nx, (u32)ny, 1, 1, color, alpha);
-        px = nx; py = ny;
+// Anti-aliased circle outline of thickness t, alpha-blended — a continuous
+// band (unlike the old 64-sample ring, which rendered as dots).
+static void ring_aa(int cx, int cy, float r, float t, u32 color, u8 alpha) {
+    float half = t * 0.5f;
+    int   R    = (int)(r + half) + 2;
+    for (int dy = -R; dy <= R; dy++) {
+        float yy   = (float)dy;
+        float lo2  = (r - half - 1.0f) * (r - half - 1.0f) - yy * yy;
+        float hi2  = (r + half + 1.0f) * (r + half + 1.0f) - yy * yy;
+        if (hi2 <= 0.0f) continue;
+        int x_hi = (int)sqrtf(hi2) + 1;
+        int x_lo = lo2 > 0.0f ? (int)sqrtf(lo2) : 0;
+        for (int dx = x_lo; dx <= x_hi; dx++) {
+            float d   = sqrtf((float)dx * (float)dx + yy * yy);
+            float cov = half + 0.5f - fabsf(d - r);
+            if (cov <= 0.0f) continue;
+            if (cov > 1.0f) cov = 1.0f;
+            u8 a = (u8)((float)alpha * cov);
+            if (a == 0) continue;
+            drawRectBlend((u32)(cx + dx), (u32)(cy + dy), 1, 1, color, a);
+            if (dx > 0)
+                drawRectBlend((u32)(cx - dx), (u32)(cy + dy), 1, 1, color, a);
+        }
     }
-    (void)py;
 }
 
 // Four-segment breadcrumb (the shared helper caps at three).
@@ -87,7 +117,7 @@ static void draw_breadcrumb4(int x, int y, const char *a, const char *b,
                 is_leaf ? 0x00C5CBE3UL : XMB_TEXT_FAINT);
         x += ttf_text_width(parts[i], px);
         if (!is_leaf) {
-            drawIcon((u32)(x + 4), (u32)(y - 1), 0xE5CC, 16.0f, XMB_TEXT_FAINT);
+            drawIcon((u32)(x + 4), (u32)(y - 1), ICON_CHEVRON_RIGHT, 16.0f, XMB_TEXT_FAINT);
             x += 24;
         }
     }
@@ -270,7 +300,7 @@ static void draw_queue_overlay(const MusicTrack *tracks, int count,
 
     drawTTF((u32)(mx + 26), (u32)(my + 18), "QUEUE", 14, XMB_TEXT_FAINT, true);
     if (music_is_shuffle())
-        drawIcon((u32)(mx + 92), (u32)(my + 16), 0xE043, 18.0f, XMB_ACCENT);
+        drawIcon((u32)(mx + 92), (u32)(my + 16), ICON_SHUFFLE, 18.0f, XMB_ACCENT);
     if (ctx_title[0])
         draw_clipped((u32)(mx + 124), (u32)(my + 18), ctx_title, 14,
                      XMB_TEXT_DIM, mw - 240);
@@ -297,7 +327,7 @@ static void draw_queue_overlay(const MusicTrack *tracks, int count,
                      XMB_PANEL_HI);
         // Playing marker / play-order number (track # when unshuffled).
         if (p == cur_pos)
-            drawIcon((u32)(mx + 24), (u32)(ry + 10), 0xE405, 20.0f,
+            drawIcon((u32)(mx + 24), (u32)(ry + 10), ICON_MUSIC, 20.0f,
                      XMB_ACCENT);
         else {
             int shown = (!music_is_shuffle() && t->track_num > 0)
@@ -476,21 +506,20 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
         bool paused = music_is_paused();
 
         static const int T_OFF[5] = { -130, -72, 0, 72, 130 };
-        static const int T_CP[5]  = { 0xE020, 0xE045, 0, 0xE044, 0xE01F };
+        static const int T_CP[5]  = { ICON_SEEK_BACK, ICON_SKIP_BACK, 0, ICON_SKIP_FWD, ICON_SEEK_FWD };
         static const float T_PX[5] = { 22.0f, 26.0f, 0.0f, 26.0f, 22.0f };
 
         for (int i = 0; i < 5; i++) {
             bool fc = (i == s_t_focus);
             int  ix = cx + T_OFF[i];
             if (i == 2) {
-                // Play/pause disc with glow rings.
-                if (fc) ring_blend(cx, cy, 34, 0x00E9EBF5UL, 150);
-                ring_blend(cx, cy, 31, XMB_ACCENT, 60);
-                ring_blend(cx, cy, 28, XMB_ACCENT, 110);
+                // Play/pause disc — clean two-tone AA fill; focus is a
+                // single crisp ring instead of the old dotted glow.
+                if (fc) ring_aa(cx, cy, 30.5f, 2.0f, 0x00E9EBF5UL, 235);
                 fill_circle(cx, cy, 26, XMB_ACCENT_DEEP);
                 fill_circle(cx, cy, 24, XMB_ACCENT);
                 drawIcon((u32)(cx - 14), (u32)(cy - 14),
-                         paused ? 0xE037 : 0xE034, 28.0f, XMB_WHITE);
+                         paused ? ICON_PLAY : ICON_PAUSE, 28.0f, XMB_WHITE);
             } else {
                 int half = (int)(T_PX[i] * 0.5f);
                 u32 col  = fc ? XMB_WHITE
@@ -509,7 +538,7 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
             bool on = music_is_shuffle();
             u32 col = on ? XMB_ACCENT
                          : fc ? 0x00AEB5D2UL : 0x00363D63UL;
-            drawIcon((u32)(cx + 182 - 10), (u32)(cy - 10), 0xE043, 20.0f,
+            drawIcon((u32)(cx + 182 - 10), (u32)(cy - 10), ICON_SHUFFLE, 20.0f,
                      col);
             if (fc)
                 drawRect((u32)(cx + 182 - 8), (u32)(cy + 38), 16, 3,
