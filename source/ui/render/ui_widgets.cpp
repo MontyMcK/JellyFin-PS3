@@ -6,19 +6,21 @@
 #include <time.h>
 
 #include "ui_visuals.h"
+#include "ui_wave.h"
+#include "icons.h"
 
 // -------------------------------------------------------
-// Tab icon codepoints (Material Icons)
+// Tab icon codepoints (Tabler Icons)
 // -------------------------------------------------------
 
 static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
-    0xE8B6,  // XMB_TAB_SEARCH      (search/magnifier)
-    0xE88A,  // XMB_TAB_HOME        (house)
-    0xE54D,  // XMB_TAB_MOVIES      (movie/film)
-    0xE333,  // XMB_TAB_TV          (TV)
-    0xE3A1,  // XMB_TAB_MUSIC       (music note)
-    0xE8EF,  // XMB_TAB_COLLECTIONS (collections/four squares)
-    0xE8B8,  // XMB_TAB_SETTINGS    (settings/gear)
+    ICON_SEARCH,       // XMB_TAB_SEARCH
+    ICON_HOME,         // XMB_TAB_HOME
+    ICON_MOVIE,        // XMB_TAB_MOVIES
+    ICON_TV,           // XMB_TAB_TV
+    ICON_MUSIC,        // XMB_TAB_MUSIC
+    ICON_COLLECTIONS,  // XMB_TAB_COLLECTIONS
+    ICON_SETTINGS,     // XMB_TAB_SETTINGS
 };
 
 // -------------------------------------------------------
@@ -68,7 +70,7 @@ void xmb_draw_divider(void) {
 // -------------------------------------------------------
 
 void xmb_draw_tabs(void) {
-    const int TAB_SPACING = 96;
+    const int TAB_SPACING = 72;
     const int icon_cy     = XMB_TOPBAR_H + 30;   // icon centerline
 
     // Pack only the enabled tabs and center *that* group.  Centering on the
@@ -83,33 +85,28 @@ void xmb_draw_tabs(void) {
     const int group_w      = (n - 1) * TAB_SPACING;
     const int tab_group_x0 = (int)display_width / 2 - group_w / 2;
 
+    // Uniform icon row; the active tab is white with its label and a short
+    // accent underline beneath (no size jump, no L1/R1 chips — the bumpers
+    // still switch tabs, the hints bar can advertise that where relevant).
     for (int i = 0; i < n; i++) {
         int  t      = enabled[i];
         int  cx     = tab_group_x0 + i * TAB_SPACING;
         bool active = (t == g_active_tab);
-        int icon_px = active ? 60 : 28;
+        int icon_px = active ? 30 : 26;
         int icon_x  = cx - icon_px / 2;
         int icon_y  = icon_cy - icon_px / 2;
 
         drawIcon((u32)icon_x, (u32)icon_y, TAB_CODEPOINTS[t], (float)icon_px,
-                 active ? XMB_TEXT : XMB_ICON_IDLE);
+                 active ? XMB_WHITE : XMB_ICON_IDLE);
 
-        // Label under the active icon only.
         if (active) {
             int lw = ttf_text_width(g_tabs[t].label, 14);
-            drawTTF((u32)(cx - lw / 2), (u32)(XMB_TOPBAR_H + 60),
+            drawTTF((u32)(cx - lw / 2), (u32)(XMB_TOPBAR_H + 52),
                     g_tabs[t].label, 14, XMB_TEXT);
+            drawRect((u32)(cx - 13), (u32)(XMB_TOPBAR_H + 74), 26, 3,
+                     XMB_ACCENT);
         }
     }
-
-    // L1 / R1 flank the tab group as quiet paging hints.
-    const float lr_px = 26.0f;
-    int lx = tab_group_x0 - TAB_SPACING / 2 - iconic_adv_px('l', lr_px) / 2;
-    int rx = tab_group_x0 + group_w + TAB_SPACING / 2
-             - iconic_adv_px('r', lr_px) / 2;
-    if (lx < 0) lx = 0;
-    draw_iconic_glyph_vcentered((u32)lx, icon_cy, 'l', lr_px, XMB_TEXT_FAINT);
-    draw_iconic_glyph_vcentered((u32)rx, icon_cy, 'r', lr_px, XMB_TEXT_FAINT);
 }
 
 // Alphabetical jump bar rendered to the left of the item list.
@@ -171,40 +168,14 @@ void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
     }
 }
 
-// Render an array of (glyph, label) hint pairs as a centered horizontal row
-// at the bottom of the screen.  Quiet by design: small dim glyphs and labels
-// that read at a glance without competing with content.
+// Controller-hints bar — intentionally a no-op (2026-07-12 redesign): the
+// persistent button legend added chrome without earning it, and the controls
+// are discoverable by use.  Call sites keep passing their Hint arrays so the
+// per-screen mappings stay documented in code and the bar can come back with
+// one edit here if it's ever missed.
 void draw_hints_bar(const Hint *hints, int n) {
-    if (n <= 0) return;
-
-    const float icon_px = 24.0f;
-    const float text_px = 15.0f;
-    const int   gap_it  =  7;   // pixels between icon and its label
-    const int   gap_sep = 26;   // pixels between hint pairs
-
-    // Measure total width
-    int total_w = 0;
-    for (int i = 0; i < n; i++) {
-        total_w += iconic_adv_px(hints[i].glyph, icon_px);
-        total_w += gap_it;
-        total_w += ttf_text_width(hints[i].label, text_px);
-        if (i < n - 1) total_w += gap_sep;
-    }
-
-    int x = ((int)display_width - total_w) / 2;
-    if (x < (int)XMB_ITEM_PAD) x = (int)XMB_ITEM_PAD;
-    int cy = (int)display_height - (int)XMB_BOTTOM_PAD + 34;
-    if (cy < 0 || (u32)cy >= display_height) return;
-
-    for (int i = 0; i < n; i++) {
-        draw_iconic_glyph_vcentered((u32)x, cy, hints[i].glyph, icon_px,
-                                    0x00AEB5D2UL);
-        x += iconic_adv_px(hints[i].glyph, icon_px) + gap_it;
-        drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), hints[i].label,
-                text_px, XMB_TEXT_DIM);
-        x += ttf_text_width(hints[i].label, text_px);
-        if (i < n - 1) x += gap_sep;
-    }
+    (void)hints;
+    (void)n;
 }
 
 // -------------------------------------------------------
@@ -238,7 +209,8 @@ void xmb_draw_breadcrumb(int x, int y, const char *a, const char *b,
         // Chevron between segments.
         bool more = (i < 2) && parts[i + 1];
         if (more) {
-            drawIcon((u32)(x + 4), (u32)(y - 1), 0xE5CC, 16.0f, XMB_TEXT_FAINT);
+            drawIcon((u32)(x + 4), (u32)(y - 1), ICON_CHEVRON_RIGHT, 16.0f,
+                     XMB_TEXT_FAINT);
             x += 24;
         }
     }

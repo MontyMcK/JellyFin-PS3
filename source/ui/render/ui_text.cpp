@@ -1,4 +1,4 @@
-// Text and glyph rendering — bitmap font, Open Sans TTF, Material Icons,
+// Text and glyph rendering — bitmap font, Open Sans TTF, Tabler Icons,
 // Iconic PSx.  Owns all font state and the stb_truetype implementation.
 
 #include <stdio.h>
@@ -13,8 +13,9 @@
 #include "font8x8.xpm"
 #include "opensans_regular.h"
 #include "opensans_bold.h"
-#include "material_icons.h"
+#include "tabler_icons.h"
 #include "iconic_psx.h"
+#include "icons.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #ifdef __GNUC__
@@ -252,6 +253,35 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
     }
 }
 
+void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
+                       bool bold) {
+    if (!s_ttf_ok) { drawTTF(x, (u32)(cy - (int)(px * 0.5f)), text, px, color, bold); return; }
+    stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
+    float scale = stbtt_ScaleForPixelHeight(fi, px);
+    int ascent;
+    stbtt_GetFontVMetrics(fi, &ascent, NULL, NULL);
+    int baseline = (int)((float)ascent * scale);
+
+    // Union of every glyph's bitmap box (baseline-relative) = the ink extent.
+    int y0min = 0, y1max = 0;
+    bool any = false;
+    for (const char *p = text; *p; p++) {
+        int gx0, gy0, gx1, gy1;
+        stbtt_GetCodepointBitmapBox(fi, (unsigned char)*p, scale, scale,
+                                    &gx0, &gy0, &gx1, &gy1);
+        if (gx1 <= gx0 && gy1 <= gy0) continue;   // space etc.
+        if (!any || gy0 < y0min) y0min = gy0;
+        if (!any || gy1 > y1max) y1max = gy1;
+        any = true;
+    }
+    if (!any) return;
+
+    // drawTTF puts glyph ink at y + baseline + gy; centre that span on cy.
+    int y = cy - baseline - (y0min + y1max) / 2;
+    if (y < 0) y = 0;
+    drawTTF(x, (u32)y, text, px, color, bold);
+}
+
 void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
     if (!s_icons_ok) return;
     float scale = stbtt_ScaleForPixelHeight(&s_icons, px);
@@ -381,7 +411,7 @@ void ttf_init(void) {
         s_ttf_ok = true;
     if (stbtt_InitFont(&s_font_bold, (unsigned char*)OpenSans_Bold_ttf, 0))
         s_ttf_bold_ok = true;
-    if (stbtt_InitFont(&s_icons, (unsigned char*)MaterialIcons_Regular_ttf, 0))
+    if (stbtt_InitFont(&s_icons, (unsigned char*)TablerIcons_ttf, 0))
         s_icons_ok = true;
     if (stbtt_InitFont(&s_iconic, (unsigned char*)Iconic_PSx_ttf, 0))
         s_iconic_ok = true;
@@ -427,7 +457,7 @@ void ttf_prewarm_hud(void) {
         float sc = stbtt_ScaleForPixelHeight(&s_icons, 24.0f);
         int w, h, xo, yo;
         unsigned char *bm = stbtt_GetCodepointBitmap(
-            &s_icons, sc, sc, 0xE405, &w, &h, &xo, &yo);
+            &s_icons, sc, sc, ICON_MUSIC, &w, &h, &xo, &yo);
         if (bm) stbtt_FreeBitmap(bm, NULL);
     }
     // Iconic PSx: rewind 'L' and fast-forward 'R' at ROW_ICON_PX (24px).

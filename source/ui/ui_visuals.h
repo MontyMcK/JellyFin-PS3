@@ -1,6 +1,7 @@
 #pragma once
 #include <ppu-types.h>
 #include "ui.h"
+#include "icons.h"
 
 // -------------------------------------------------------
 // XMB tab indices

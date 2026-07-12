@@ -34,8 +34,9 @@ void xmb_switch_tab(int new_tab) {
     g_scroll_top = 0;
     g_tv_depth = 0; g_tv_sub_sel = 0; g_tv_sub_scroll = 0; g_tv_sub_start = 0; g_tv_sub_total = 0;
     g_col_depth = 0; g_col_sub_sel = 0; g_col_sub_scroll = 0; g_col_sub_start = 0; g_col_sub_total = 0;
-    // Music keeps its sub-tab across visits but drops depth/header focus.
-    g_music_depth = 0; g_music_header = false;
+    // Music keeps its sub-tab across visits and lands with the header
+    // focused, so Albums/Artists/Playlists/... is one LEFT/RIGHT away.
+    g_music_depth = 0; g_music_header = (new_tab == XMB_TAB_MUSIC);
     g_music_sub_sel = 0; g_music_sub_scroll = 0;
     g_music_sub_count = 0; g_music_sub_total = 0;
     if (new_tab == XMB_TAB_SEARCH) {

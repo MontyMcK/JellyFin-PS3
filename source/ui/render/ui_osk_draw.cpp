@@ -73,7 +73,7 @@ void xmb_rsx_draw_osk(void) {
     {
         int fx = osk_x0 + 14;
         int fy = XMB_CONTENT_Y + 8;
-        drawIcon((u32)fx, (u32)(fy + (OSK_FIELD_H - 20) / 2), 0xE8B6, 20.0f,
+        drawIcon((u32)fx, (u32)(fy + (OSK_FIELD_H - 20) / 2), ICON_SEARCH, 20.0f,
                  XMB_TEXT_FAINT);
         int tx = fx + 30;
         int ty = fy + (OSK_FIELD_H - 18) / 2 - 2;
@@ -99,7 +99,7 @@ void xmb_rsx_draw_osk(void) {
             {   // Backspace: Material icon, centered in the key.
                 bool sel = (r == g_osk_row && g_osk_col == 1);
                 drawIcon((u32)(bsx + (OSK_KEY_W - 22) / 2),
-                         (u32)(ry + (OSK_KEY_H - 22) / 2), 0xE14A, 22.0f,
+                         (u32)(ry + (OSK_KEY_H - 22) / 2), ICON_BACKSPACE, 22.0f,
                          sel ? XMB_KEY_LABEL_SEL : XMB_TEXT);
             }
             osk_key_label(clx, OSK_KEY_W, ry, "Clear",

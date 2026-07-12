@@ -11,7 +11,7 @@
 #include "plog.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out", "Debug Logging" };
-static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  = { 0xE879, 0xE868 };  // exit_to_app, bug_report
+static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  = { ICON_LOGOUT, ICON_BUG };
 
 #define SET_PANEL_H 96
 #define SET_ROW_H   56
