@@ -29,6 +29,16 @@ int  parse_jf_items(const char *json, JFItem *arr, int max);
 void save_config(void);
 int  load_config(void);
 
+// Per-install device identity (api_auth.cpp).  Generated once and persisted;
+// a fixed id let any other login (e.g. an RPCS3 test run) take over this
+// install's Jellyfin device slot and revoke its token.
+const char *jf_device_id(void);
+
+// Raised by the http layer when an authenticated request comes back 401 —
+// the saved token is dead.  The XMB loop drops the session and returns to
+// the login screen instead of silently rendering an empty library.
+extern volatile bool g_auth_expired;
+
 // Full per-item detail (populated by jellyfin_fetch_item_detail)
 typedef struct {
     char overview[1024];       // Plot summary

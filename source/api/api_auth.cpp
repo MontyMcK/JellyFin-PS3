@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <io/pad.h>
 #include <sysutil/sysutil.h>
@@ -9,6 +10,34 @@
 #include "jellyfin_api.h"
 #include "ui.h"
 #include "ui_visuals.h"
+#include "timing.h"
+
+volatile bool g_auth_expired = false;
+
+// Per-install DeviceId, generated once and persisted.  Jellyfin keys device
+// sessions on this string: with the old fixed "ps3" id, a login from ANY
+// machine (an RPCS3 test run, a second console) took over the slot and
+// revoked this install's token — which then failed as a silent empty
+// library.  Survives logout on purpose so one install keeps one identity.
+static char s_device_id[24] = "";
+
+const char *jf_device_id(void) {
+    if (s_device_id[0]) return s_device_id;
+    FILE *f = fopen("/dev_hdd0/tmp/jellyfin_device_id.txt", "r");
+    if (f) {
+        if (fscanf(f, "%23s", s_device_id) != 1) s_device_id[0] = '\0';
+        fclose(f);
+    }
+    if (!s_device_id[0]) {
+        u32 a = (u32)time(NULL);
+        u32 b = (u32)timing_get_us();
+        snprintf(s_device_id, sizeof(s_device_id), "ps3-%08x%08x",
+                 a ^ 0x9e3779b9u, b);
+        f = fopen("/dev_hdd0/tmp/jellyfin_device_id.txt", "w");
+        if (f) { fprintf(f, "%s\n", s_device_id); fclose(f); }
+    }
+    return s_device_id;
+}
 
 void save_config(void) {
     FILE *f = fopen("/dev_hdd0/tmp/jellyfin_config.txt", "w");

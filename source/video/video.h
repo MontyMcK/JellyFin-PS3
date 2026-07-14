@@ -3,12 +3,22 @@
 #include <sys/mutex.h>
 
 #define TS_PACKET_SIZE   188
-#define JBUF_SIZE         16   // max buffered decoded frames (~28 MB at 1280×720)
+#define JBUF_SIZE         12   // max buffered decoded frames (~43 MB at 1280×720;
+                               // trimmed from 16 so the boot-time reservation
+                               // leaves room for the resident thumbnail cache)
 #define JBUF_PREFILL      12   // frames to decode before display starts
 
 // ---- VDEC lifecycle ----
 bool vdec_open(void);
 void vdec_close(void);
+// Boot-time reservations: the VDEC arena and jitter-buffer slots are grabbed
+// once at startup (main.cpp) and cached forever — allocated per-session they
+// raced the UI for a heap with only a few MB of slack and lost at random.
+void vdec_reserve_mem(void);
+bool jbuf_reserve(u32 fw, u32 fh);
+// Free the cached decoder arena + AU buffers (normally never called; the
+// reservation is permanent by design).
+void vdec_release_mem(void);
 
 // EndSequence + StartSequence without close/reopen — faster seek flush.
 void vdec_flush(void);

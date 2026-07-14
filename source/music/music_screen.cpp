@@ -584,11 +584,10 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
                                       {'C', "Back"}};
             draw_hints_bar(h, 3);
         } else {
-            static const Hint h[4] = {{'X', "Select"},
+            static const Hint h[3] = {{'X', "Select"},
                                       {'T', "Shuffle"},
-                                      {'B', "Queue"},
                                       {'C', "Back"}};
-            draw_hints_bar(h, 4);
+            draw_hints_bar(h, 3);
         }
     }
 }

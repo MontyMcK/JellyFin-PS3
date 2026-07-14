@@ -17,6 +17,13 @@ void      hud_shutdown(void);
 void      hud_gpu_init(void);
 void      hud_gpu_shutdown(void);
 
+// Allocate (or reuse) the cached display-sized overlay buffers.  Call this
+// BEFORE vdec_open/jbuf_alloc on the first session so the cached buffers
+// land LOW in the heap: allocated late they sit where the next session's
+// jitter buffer needs to go, and that session dies with jbuf_alloc FAILED.
+// Idempotent — later calls just clear the buffers.
+void      hud_overlay_alloc(void);
+
 // Process input for one frame.  l2/r2 are edge-detected presses from raw padData.
 HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused);
 

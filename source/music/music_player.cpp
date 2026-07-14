@@ -208,9 +208,10 @@ static void build_audio_url(char *url, int url_sz, const char *item_id,
         "&AudioSampleRate=48000"
         "&MaxAudioChannels=2"
         "&Static=false"
-        "&DeviceId=ps3"
+        "&DeviceId=%s"
         "&StartTimeTicks=%llu",
-        g_server, item_id, (unsigned long long)start_secs * 10000000ULL);
+        g_server, item_id, jf_device_id(),
+        (unsigned long long)start_secs * 10000000ULL);
     if (s_session_id[0] && n > 0 && n < url_sz)
         snprintf(url + n, url_sz - n, "&PlaySessionId=%s", s_session_id);
 }

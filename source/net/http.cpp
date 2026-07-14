@@ -14,6 +14,12 @@
 
 #include "http.h"
 
+// Jellyfin-layer hooks (api_auth.cpp): the per-install device id sent in the
+// MediaBrowser identity, and the expired-session flag raised on any
+// authenticated 401 so the UI can bounce back to the login screen.
+extern const char *jf_device_id(void);
+extern volatile bool g_auth_expired;
+
 static char s_raw_buf[RESPONSE_SIZE + 4096];
 
 // Serializes http_request() — it shares s_raw_buf, and the playback progress
@@ -226,11 +232,12 @@ static int build_headers(char *req, int cap, const char *method,
     if (token && token[0])
         snprintf(auth, sizeof(auth),
             "MediaBrowser Client=\"PS3\", Device=\"PS3\","
-            " DeviceId=\"ps3\", Version=\"0.1\", Token=\"%s\"", token);
+            " DeviceId=\"%s\", Version=\"0.1\", Token=\"%s\"",
+            jf_device_id(), token);
     else
         snprintf(auth, sizeof(auth),
             "MediaBrowser Client=\"PS3\", Device=\"PS3\","
-            " DeviceId=\"ps3\", Version=\"0.1\"");
+            " DeviceId=\"%s\", Version=\"0.1\"", jf_device_id());
 
     int rlen = 0;
     rlen += snprintf(req+rlen, cap-rlen,
@@ -292,6 +299,11 @@ int http_request(int method, const char *url, const char *body,
                                &body_off, &body_len);
     netClose(sock);
 
+    // 401 on a request that carried a token: the saved session is dead
+    // (revoked server-side).  Login itself sends no token, so a wrong
+    // password can't trip this.
+    if (status == 401 && token && token[0]) g_auth_expired = true;
+
     memset(out, 0, out_size);
     if (body_len > out_size - 1) body_len = out_size - 1;
     if (body_len > 0) memcpy(out, s_raw_buf + body_off, body_len);
@@ -303,11 +315,25 @@ int http_request(int method, const char *url, const char *body,
 
 int http_fetch_binary(const char *url, const char *token,
                       uint8_t *out, int out_size) {
+    // MUST hold the same lock as http_request().  This runs on the thumbnail
+    // fetch thread; the UI/seek/progress paths run http_request() on other
+    // threads.  The PS3 sys/net resolver + connection setup are not reentrant,
+    // so two concurrent HTTP calls corrupt shared net-stack state — observed
+    // as a thumbnail fetch that hangs PAST the socket timeouts (the socket
+    // timeouts can't bound a wedged netGetHostByName / connect), which with a
+    // single fetch thread kills all poster loading after a tab switch.  Also
+    // guards s_bin_buf.  Bounded by the connect/IO timeouts in http_connect,
+    // so the UI can never wait more than one in-flight fetch.
+    if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
+
     char host[256]; int port; char path[512];
     url_parse(url, host, sizeof(host), &port, path, sizeof(path));
 
     int sock = http_connect(host, port);
-    if (sock < 0) return -1;
+    if (sock < 0) {
+        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        return -1;
+    }
 
     char req[2048];
     int  rlen = build_headers(req, sizeof(req), "GET", path, host, port,
@@ -319,8 +345,13 @@ int http_fetch_binary(const char *url, const char *token,
                                &body_off, &body_len);
     netClose(sock);
 
-    if (status != 200 || body_len <= 0) return -1;
+    if (status != 200 || body_len <= 0) {
+        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        return -1;
+    }
     if (body_len > out_size) body_len = out_size;
     memcpy(out, s_bin_buf + body_off, body_len);
+
+    if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
     return body_len;
 }

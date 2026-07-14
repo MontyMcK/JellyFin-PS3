@@ -27,7 +27,7 @@
 // gathering beat the threshold), which put a retail PS3 on the CPU path —
 // every frame then read back uncached VRAM and the whole UI crawled.  Build
 // with 0 (default) for real hardware; flip to 1 only for RPCS3 test builds.
-#define UI_CPU_BG_EMU 0
+#define UI_CPU_BG_EMU (0)
 bool ui_cpu_bg(void) { return UI_CPU_BG_EMU != 0; }
 
 #define WAVE_STEP_PX    20

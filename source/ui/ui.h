@@ -103,7 +103,7 @@ bool cpu_row_clipped(int sy);   // true when framebuffer row sy is scissored out
 
 // -------------------------------------------------------
 // CPU compose target.  While begun, the CPU primitives (drawRect,
-// drawRectBlend, drawTTF, drawIcon, iconic glyphs) render into this
+// drawRectBlend, drawTTF, drawIcon, PS button sprites) render into this
 // main-RAM A8R8G8B8 buffer with straight-alpha OVER compositing instead of
 // writing to the framebuffer.  Used by the player HUD to build its overlay
 // texture off-screen; the vertical scissor does not apply while active.

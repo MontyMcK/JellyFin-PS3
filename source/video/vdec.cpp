@@ -23,6 +23,7 @@ extern void crash_log(const char *msg);
 
 static u32  s_vdec     = 0;
 static u8  *s_vdec_mem = NULL;
+static u32  s_vdec_mem_size = 0;   // bytes actually allocated (cached)
 static u8  *s_au_bufs[AU_BUF_COUNT] = {};
 static int  s_au_buf_idx = 0;
 
@@ -83,14 +84,29 @@ bool vdec_open(void) {
     const u32 NUM_SPUS = 3; //was 4
     u32 mem_size_aligned = ((attr.mem_size * NUM_SPUS) + (1024*1024-1))
                            & ~(u32)(1024*1024-1);
+    // The arena is CACHED across vdec_close/vdec_open (seek reopens the
+    // decoder): once the jitter buffer packs the heap tightly around a
+    // freed 96MB hole, memalign can't get slightly-more-than-96MB back
+    // and the re-open fails mid-seek.  Only vdec_release_mem() frees it.
+    if (s_vdec_mem && s_vdec_mem_size < mem_size_aligned) {
+        free(s_vdec_mem);
+        s_vdec_mem = NULL;
+        s_vdec_mem_size = 0;
+    }
     crash_log("v5 memalign vdec_mem");
     plog("vdec_open: memalign vdec_mem");
-    s_vdec_mem = (u8*)memalign(1024*1024, mem_size_aligned);
-    if (!s_vdec_mem) { plog("vdec_open: vdec_mem alloc FAILED (4x SPU size)"); return false; }
+    if (!s_vdec_mem) {
+        s_vdec_mem = (u8*)memalign(1024*1024, mem_size_aligned);
+        if (!s_vdec_mem) { plog("vdec_open: vdec_mem alloc FAILED (3x SPU size)"); return false; }
+        s_vdec_mem_size = mem_size_aligned;
+    } else {
+        plog("vdec_open: vdec_mem reused");
+    }
 
     crash_log("v6 memalign au_bufs");
     plog("vdec_open: memalign au_bufs");
     for (int i = 0; i < AU_BUF_COUNT; i++) {
+        if (s_au_bufs[i]) continue;    // cached across seek reopens too
         s_au_bufs[i] = (u8*)memalign(128, AU_BUF_SIZE);
         if (!s_au_bufs[i]) { plog("vdec_open: au_buf alloc FAILED"); return false; }
     }
@@ -146,17 +162,41 @@ void vdec_close(void) {
         vdecClose(s_vdec);
         s_vdec = 0;
     }
-    crash_log("c4 free vdec_mem");
-    if (s_vdec_mem)  { free(s_vdec_mem);  s_vdec_mem  = NULL; }
-    crash_log("c5 free au_bufs");
-    for (int i = 0; i < AU_BUF_COUNT; i++) {
-        if (s_au_bufs[i]) { free(s_au_bufs[i]); s_au_bufs[i] = NULL; }
-    }
+    // Arena and AU buffers deliberately NOT freed here — the seek path
+    // does vdec_close/vdec_open back-to-back and re-allocating the 96MB
+    // arena into a jbuf-fragmented heap fails.  vdec_release_mem() frees
+    // them when the player really exits.
     crash_log("c6 unload H264");
     sysModuleUnload(SYSMODULE_VDEC_H264);
     crash_log("c7 unload VDEC");
     sysModuleUnload(SYSMODULE_VDEC);
     crash_log("c8 vdec_close done");
+}
+
+void vdec_release_mem(void) {
+    crash_log("c9 vdec_release_mem");
+    if (s_vdec_mem)  { free(s_vdec_mem);  s_vdec_mem  = NULL; }
+    s_vdec_mem_size = 0;
+    for (int i = 0; i < AU_BUF_COUNT; i++) {
+        if (s_au_bufs[i]) { free(s_au_bufs[i]); s_au_bufs[i] = NULL; }
+    }
+}
+
+// Boot-time reservation: grab the arena before the UI touches the heap so
+// it always lands at the same low address.  96MB matches vdec_open's math
+// (H.264 queryAttr mem_size 33368829 x 3 SPUs, 1MB-aligned); if a firmware
+// ever reports a bigger attr, vdec_open frees this and re-allocates.
+void vdec_reserve_mem(void) {
+    const u32 RESERVE = 96 * 1024 * 1024;
+    if (!s_vdec_mem) {
+        s_vdec_mem = (u8*)memalign(1024*1024, RESERVE);
+        if (s_vdec_mem) s_vdec_mem_size = RESERVE;
+        plog(s_vdec_mem ? "vdec_reserve: 96MB arena ok"
+                        : "vdec_reserve: 96MB arena FAILED");
+    }
+    for (int i = 0; i < AU_BUF_COUNT; i++) {
+        if (!s_au_bufs[i]) s_au_bufs[i] = (u8*)memalign(128, AU_BUF_SIZE);
+    }
 }
 
 void vdec_reset_counters(void) {

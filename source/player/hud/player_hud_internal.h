@@ -24,7 +24,7 @@
 #define TIME_GAP             12            // gap between time label edge and seek bar
 #define RCTRL_GAP            12            // gap between remaining time and right controls
 
-#define ROW_ICON_PX          36.0f         // L2/R2 iconic glyph size
+#define ROW_ICON_PX          36.0f         // L2/R2 button sprite height
 #define ROW_TEXT_PX          18.0f         // time + audio label text size
 #define MUSIC_ICON_PX        24.0f
 #define CC_TEXT_PX           20.0f

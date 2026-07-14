@@ -18,7 +18,7 @@ int     g_item_count[XMB_TAB_COUNT];
 bool    g_items_loaded[XMB_TAB_COUNT];
 
 // UI navigation state
-int  g_active_tab = XMB_TAB_MOVIES;
+int  g_active_tab = XMB_TAB_HOME;
 int  g_sel        = 0;
 int  g_scroll_top = 0;
 

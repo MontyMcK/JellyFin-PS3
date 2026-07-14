@@ -172,6 +172,10 @@ void show_player(const JFItem *item, u32 resume_secs) {
     // every exit path; the UI simply refetches its thumbs.
     thumb_cache_shutdown();
 
+    // Claim the cached HUD overlay buffers before the big allocations so
+    // they sit low in the heap once and forever (see player_hud.h).
+    hud_overlay_alloc();
+
     crash_log("p2 vdec_open begin");
     plog("show_player: vdec_open");
     if (!vdec_open()) {

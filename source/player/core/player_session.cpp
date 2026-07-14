@@ -83,11 +83,11 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
         "&MaxAudioChannels=2"
         "&MaxFramerate=30"
         "&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false"
-        "&DeviceId=ps3&Static=false"
+        "&DeviceId=%s&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",
-        g_server, ps->item->id, ps->req_w, ps->req_h, ps->item->id,
-        (unsigned long long)start_ticks);
+        g_server, ps->item->id, ps->req_w, ps->req_h, jf_device_id(),
+        ps->item->id, (unsigned long long)start_ticks);
     if (audio_idx >= 0 && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
     if (sub_idx >= 0 && n > 0 && n < url_sz)

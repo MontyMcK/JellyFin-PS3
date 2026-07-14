@@ -50,25 +50,33 @@ struct OvlKey {
 static OvlKey s_ovl_key;
 static bool   s_ovl_key_valid = false;
 
+// The overlay buffers are CACHED across player sessions.  They're sized to
+// the DISPLAY (fixed at boot), not the movie, so there's never a reason to
+// re-allocate them — and doing so is what used to lose the seek bar: the
+// per-video RSX textures change size with each movie's resolution, and
+// after a session at a different resolution the freed holes no longer fit
+// an 8MB display-sized re-alloc, hud_draw saw NULL buffers and drew nothing.
 void hud_overlay_alloc(void) {
+    u32 bytes = display_width * display_height * 4;
+    if (!s_ovl_stage) s_ovl_stage = (u32*)memalign(128, bytes);
+    if (!s_ovl_tex) {
+        s_ovl_tex = (u32*)rsxMemalign(64, bytes);
+        if (s_ovl_tex) rsxAddressToOffset(s_ovl_tex, &s_ovl_tex_off);
+    }
     s_ovl_w = display_width;
     s_ovl_h = display_height;
-    u32 bytes = s_ovl_w * s_ovl_h * 4;
-    s_ovl_stage = (u32*)memalign(128, bytes);
-    s_ovl_tex   = (u32*)rsxMemalign(64, bytes);
     if (s_ovl_stage) memset(s_ovl_stage, 0, bytes);
-    if (s_ovl_tex) {
-        memset((void*)s_ovl_tex, 0, bytes);
-        rsxAddressToOffset(s_ovl_tex, &s_ovl_tex_off);
-    }
+    if (s_ovl_tex)   memset((void*)s_ovl_tex, 0, bytes);
     if (!s_ovl_stage || !s_ovl_tex) plog("hud_ovl: alloc FAILED");
     s_ovl_prev_y0 = s_ovl_prev_y1 = 0;
     s_ovl_key_valid = false;
 }
 
 void hud_overlay_free(void) {
-    if (s_ovl_stage) { free(s_ovl_stage);   s_ovl_stage = NULL; }
-    if (s_ovl_tex)   { rsxFree(s_ovl_tex);  s_ovl_tex   = NULL; }
+    // Keep the buffers (see hud_overlay_alloc) — just drop stale state so
+    // the next session starts with a clean compose.
+    s_ovl_prev_y0 = s_ovl_prev_y1 = 0;
+    s_ovl_key_valid = false;
 }
 
 // Extend the dirty row span of the current compose.
@@ -164,6 +172,13 @@ static u32 ctrl_color(int slot) {
     if (g_hud.focus < 0)     return HUD_ACCENT;
     if (g_hud.focus == slot) return HUD_FOCUSED;
     return HUD_DIMMED;
+}
+
+// Sprite-brightness equivalent of ctrl_color() for the L2/R2 button sprites.
+static u32 ctrl_bright(int slot) {
+    if (g_hud.focus < 0)     return 220;
+    if (g_hud.focus == slot) return 255;
+    return 110;
 }
 
 // -------------------------------------------------------
@@ -266,8 +281,8 @@ static void hud_compose(u64 elapsed_us, bool paused) {
     int rctrl_x0 = dw - RIGHT_PAD - rctrl_w;   // left edge of right controls
 
     // ---- Left controls block: rewind + play/pause + fast-forward ----
-    int w_rew    = iconic_adv_px('L', ROW_ICON_PX);
-    int w_ff     = iconic_adv_px('R', ROW_ICON_PX);
+    int w_rew    = ps_btn_width('L', (int)ROW_ICON_PX);
+    int w_ff     = ps_btn_width('R', (int)ROW_ICON_PX);
     int lctrl_x1 = LEFT_PAD + w_rew + CTRL_GAP + PP_W + CTRL_GAP + w_ff;
 
     // ---- Seek bar (between elapsed time and remaining time) ----
@@ -298,18 +313,18 @@ static void hud_compose(u64 elapsed_us, bool paused) {
         drawTTF((u32)rem_x, (u32)time_y, rem_str, ROW_TEXT_PX, HUD_ACCENT);
 
     // ---- Left transport controls ----
-    // Iconic glyphs: ink vertically centred on the control row.
+    // Button sprites: vertically centred on the control row.
     int lx = LEFT_PAD;
 
-    draw_iconic_glyph_vcentered((u32)lx, ctrl_cy, 'L', ROW_ICON_PX,
-                                ctrl_color(FOCUS_REW));
+    draw_ps_button_vcentered((u32)lx, ctrl_cy, 'L', (int)ROW_ICON_PX,
+                             ctrl_bright(FOCUS_REW));
     lx += w_rew + CTRL_GAP;
 
     draw_pp_symbol(lx + PP_W / 2, ctrl_cy, paused, ctrl_color(FOCUS_PP));
     lx += PP_W + CTRL_GAP;
 
-    draw_iconic_glyph_vcentered((u32)lx, ctrl_cy, 'R', ROW_ICON_PX,
-                                ctrl_color(FOCUS_FF));
+    draw_ps_button_vcentered((u32)lx, ctrl_cy, 'R', (int)ROW_ICON_PX,
+                             ctrl_bright(FOCUS_FF));
 
     // ---- Audio / CC (right of the seek bar, same row) ----
     int audio_icon_y = audio_cy - (int)(MUSIC_ICON_PX * 0.5f);

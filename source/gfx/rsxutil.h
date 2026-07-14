@@ -11,6 +11,12 @@
 extern gcmContextData *context;
 extern u32 display_width;
 extern u32 display_height;
+// Pixel aspect ratio of the current video mode (width/height of one pixel,
+// as num/den).  1:1 on HD modes; SD modes (720×576 / 720×480) have
+// non-square pixels, so anything that must look round/undistorted on the
+// TV — the video letterbox fit in particular — has to factor this in.
+extern u32 display_par_num;
+extern u32 display_par_den;
 extern u32 curr_fb;
 
 extern u32  color_pitch;

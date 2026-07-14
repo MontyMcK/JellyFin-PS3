@@ -9,6 +9,7 @@
 
 #include "ui_internal.h"
 #include "ui_wave.h"
+#include "thumbnail_cache.h"
 
 extern void crash_log(const char *msg);
 
@@ -25,7 +26,7 @@ static void xmb_reset_state(void) {
     g_settings_confirm = false;
     memset(g_search_buf, 0, sizeof(g_search_buf));
     g_search_results_count = 0;
-    g_active_tab = XMB_TAB_MOVIES;
+    g_active_tab = XMB_TAB_HOME;
     g_sel = 0; g_scroll_top = 0;
     g_tv_sub_start = 0; g_tv_sub_total = 0;
     g_col_sub_start = 0; g_col_sub_total = 0;
@@ -198,7 +199,7 @@ static void xmb_draw_hints(int tab) {
         static const Hint h[] = {{'X',"Open"},{'T',"Info"}};
         draw_hints_bar(h, 2);
     } else {
-        static const Hint h[] = {{'E',"Jump"},{'X',"Select"},{'T',"Info"}};
+        static const Hint h[] = {{'E',"Nav"},{'X',"Select"},{'T',"Info"}};
         draw_hints_bar(h, 3);
     }
 }
@@ -212,13 +213,13 @@ void ui_run_xmb(void) {
     xmb_detect_tabs();
     crash_log("13.3 detect_tabs done");
 
-    if (!g_tabs[XMB_TAB_MOVIES].enabled) {
+    if (!g_tabs[g_active_tab].enabled) {
         for (int t = 0; t < XMB_TAB_COUNT; t++) {
             if (g_tabs[t].enabled) { g_active_tab = t; break; }
         }
     }
 
-    OSK_Y0 = XMB_CONTENT_Y + 58;
+    OSK_Y0 = XMB_CONTENT_Y + UIS_H(80);
 
     crash_log("13.4 init_btns");
     init_btns();
@@ -232,6 +233,7 @@ void ui_run_xmb(void) {
         waitflip();
         if (first_iter) crash_log("13.5b syscb");
         sysUtilCheckCallback();
+        thumb_cache_tick();   // age out thumbs nothing on screen still wants
         if (first_iter) crash_log("13.5c clearScreen");
         clearScreen(XMB_BG);
         if (first_iter) crash_log("13.5d wave_draw");

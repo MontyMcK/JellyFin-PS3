@@ -32,8 +32,12 @@ struct ORow {
     int  n;
 };
 
-const int   OSK_MAX_ROWS = 6;       // letters use 5 rows, symbols use 6
-const float OSK_LBL_PX   = 31.5f;   // 150% of the 21px search-bar OSK labels
+const int OSK_MAX_ROWS = 6;         // letters use 5 rows, symbols use 6
+
+// Character-key label size follows the key height (31.5px on 44px keys at
+// 720p, proportionally smaller on SD framebuffers).  Not a namespace const:
+// display_height isn't known until init_screen has run.
+static float osk_lbl_px(void) { return (float)OSK_KEY_H * 0.72f; }
 
 OKey okey(OKind kind, char ch, const char *label, int cols) {
     OKey k; k.kind = kind; k.ch = ch; k.label = label; k.cols = cols;
@@ -89,7 +93,7 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
     int W       = (int)display_width;
     int total_w = 10 * OSK_STEP_X - OSK_GAP;
     int barx    = (W - total_w) / 2;
-    int y0      = XMB_CONTENT_Y + 58;
+    int y0      = XMB_CONTENT_Y + UIS_H(80);
     const int field_h = 40;
 
     waitflip();
@@ -172,7 +176,7 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
             } else {
                 char chbuf[2] = { k->ch, '\0' };
                 const char *lbl = (k->kind == OK_CHAR) ? chbuf : k->label;
-                float lbl_px = (k->kind == OK_CHAR) ? OSK_LBL_PX : 18.0f;
+                float lbl_px = (k->kind == OK_CHAR) ? osk_lbl_px() : 18.0f;
                 int lw = ttf_text_width(lbl, lbl_px);
                 int lx = cx + (kw - lw) / 2;
                 int ly = ry + (OSK_KEY_H - (int)lbl_px) / 2;
