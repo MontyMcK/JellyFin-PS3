@@ -14,6 +14,8 @@
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "../../source/gfx/stb_truetype.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "../../source/gfx/stb_image.h"
 
 typedef uint32_t u32;
 typedef uint8_t  u8;
@@ -78,7 +80,7 @@ static const u32 display_width = W, display_height = H;
 #define XMB_TAB_COUNT 7
 
 // ---- fonts ----
-static stbtt_fontinfo s_font, s_font_bold, s_icons, s_iconic;
+static stbtt_fontinfo s_font, s_font_bold, s_icons;
 static u8 s_g2l[256], s_l2g[256];
 
 static void gamma_init(void) {
@@ -198,23 +200,106 @@ static void draw_glyph_font(stbtt_fontinfo *fi, u32 x, u32 y, int cp, float px, 
 static void drawIcon(u32 x, u32 y, int cp, float px, u32 color) {
     draw_glyph_font(&s_icons, x, y, cp, px, color);
 }
-static void draw_iconic_glyph(u32 x, u32 y, char g, float px, u32 color) {
-    draw_glyph_font(&s_iconic, x, y, (unsigned char)g, px, color);
+// ---- PS button sprites (mirrors ui_widgets.cpp) ----
+#define PS_SHEET_DIM 1536
+#define PS_TILE      128
+static const struct { char glyph; int row, col; } PS_TILES[] = {
+    { 'X', 10, 5 }, { 'C', 11, 7 }, { 'S', 10, 11 }, { 'T', 9, 1 },
+    { 'A',  5, 8 }, { 'B',  5, 6 }, { 'D',  9, 3 }, { 'E',  9, 3 },
+    { 'L',  6, 7 }, { 'R',  5, 3 },
+};
+#define PS_NTILES ((int)(sizeof PS_TILES / sizeof PS_TILES[0]))
+static u32 *s_ps_px[PS_NTILES];
+static int  s_ps_w[PS_NTILES], s_ps_h[PS_NTILES];
+
+static void ps_sprites_load(void) {
+    int w, h, comp;
+    unsigned char *img = stbi_load(
+        "../../playstation-series_sheet_double.png", &w, &h, &comp, 4);
+    if (!img || w != PS_SHEET_DIM || h != PS_SHEET_DIM) {
+        fprintf(stderr, "missing/bad playstation-series_sheet_double.png\n");
+        exit(1);
+    }
+    for (int i = 0; i < PS_NTILES; i++) {
+        int tx = PS_TILES[i].col * PS_TILE, ty = PS_TILES[i].row * PS_TILE;
+        int x0 = PS_TILE, y0 = PS_TILE, x1 = -1, y1 = -1;
+        for (int y = 0; y < PS_TILE; y++) {
+            const unsigned char *p = img + (((ty + y) * w + tx) * 4);
+            for (int x = 0; x < PS_TILE; x++)
+                if (p[x * 4 + 3]) {
+                    if (x < x0) x0 = x;
+                    if (x > x1) x1 = x;
+                    if (y < y0) y0 = y;
+                    if (y > y1) y1 = y;
+                }
+        }
+        if (x1 < 0) continue;
+        int mw = x1 - x0 + 1, mh = y1 - y0 + 1;
+        u32 *m = malloc((size_t)mw * mh * 4);
+        for (int y = 0; y < mh; y++) {
+            const unsigned char *p = img + (((ty + y0 + y) * w + tx + x0) * 4);
+            for (int x = 0; x < mw; x++)
+                m[y * mw + x] = ((u32)p[x*4+3] << 24) | ((u32)p[x*4] << 16) |
+                                ((u32)p[x*4+1] << 8) | p[x*4+2];
+        }
+        s_ps_px[i] = m; s_ps_w[i] = mw; s_ps_h[i] = mh;
+    }
+    stbi_image_free(img);
 }
-static int iconic_adv_px(char g, float px) {
-    float sc = stbtt_ScaleForPixelHeight(&s_iconic, px);
-    int adv; stbtt_GetCodepointHMetrics(&s_iconic, (unsigned char)g, &adv, NULL);
-    return (int)(adv * sc);
+
+static int ps_tile_idx(char glyph) {
+    for (int i = 0; i < PS_NTILES; i++)
+        if (PS_TILES[i].glyph == glyph) return i;
+    return -1;
 }
-static void draw_iconic_glyph_vcentered(u32 x, int cy, char g, float px, u32 color) {
-    float scale = stbtt_ScaleForPixelHeight(&s_iconic, px);
-    int ascent; stbtt_GetFontVMetrics(&s_iconic, &ascent, NULL, NULL);
-    int baseline = (int)(ascent * scale);
-    int x0, y0, x1, y1;
-    stbtt_GetCodepointBitmapBox(&s_iconic, (unsigned char)g, scale, scale, &x0, &y0, &x1, &y1);
-    int y = cy - (y1 - y0) / 2 - baseline - y0;
-    if (y < 0) y = 0;
-    draw_iconic_glyph(x, (u32)y, g, px, color);
+
+static int ps_btn_width(char glyph, int h) {
+    int i = ps_tile_idx(glyph);
+    if (i < 0 || !s_ps_px[i] || h <= 0) return h;
+    return s_ps_w[i] * h / s_ps_h[i];
+}
+
+static void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
+    int i = ps_tile_idx(glyph);
+    if (i < 0 || !s_ps_px[i] || h <= 0) return;
+    const u32 *m = s_ps_px[i];
+    int mw = s_ps_w[i], mh = s_ps_h[i];
+    int dw = mw * h / mh, dh = h;
+    int dx0 = (int)x, dy0 = cy - dh / 2;
+    for (int oy = 0; oy < dh; oy++) {
+        int sy = dy0 + oy;
+        if (sy < 0 || sy >= H) continue;
+        u32 *row = fb + (u32)sy * W;
+        int my0 = oy * mh / dh, my1 = (oy + 1) * mh / dh;
+        if (my1 <= my0) my1 = my0 + 1;
+        for (int ox = 0; ox < dw; ox++) {
+            int sx = dx0 + ox;
+            if (sx < 0 || sx >= W) continue;
+            int mx0 = ox * mw / dw, mx1 = (ox + 1) * mw / dw;
+            if (mx1 <= mx0) mx1 = mx0 + 1;
+            u32 ar = 0, ag = 0, ab = 0, aa = 0, np = 0;
+            for (int my = my0; my < my1; my++) {
+                const u32 *src = m + my * mw;
+                for (int mx = mx0; mx < mx1; mx++) {
+                    u32 s = src[mx], a = s >> 24;
+                    ar += ((s >> 16) & 0xFF) * a;
+                    ag += ((s >>  8) & 0xFF) * a;
+                    ab += ( s        & 0xFF) * a;
+                    aa += a; np++;
+                }
+            }
+            if (!aa) continue;
+            u32 a = aa / np;
+            u32 r = (ar / aa) * bright / 255;
+            u32 g = (ag / aa) * bright / 255;
+            u32 b = (ab / aa) * bright / 255;
+            u32 bg = row[sx];
+            u32 ro = (a * r + (255 - a) * ((bg >> 16) & 0xFF)) / 255;
+            u32 go = (a * g + (255 - a) * ((bg >>  8) & 0xFF)) / 255;
+            u32 bo = (a * b + (255 - a) * ( bg        & 0xFF)) / 255;
+            row[sx] = (ro << 16) | (go << 8) | bo;
+        }
+    }
 }
 
 // ---- background: gradient + translucent waves (mirrors ui_wave.cpp) ----
@@ -308,30 +393,27 @@ static void xmb_draw_tabs_ex(int active, const int *enabled) {
             drawTTF(cx - lw / 2, XMB_TOPBAR_H + 60, TAB_LABELS[t], 14, XMB_TEXT, 0);
         }
     }
-    const float lr = 26.0f;
-    int lx = x0 - SP/2 - iconic_adv_px('l', lr)/2;
-    int rx = x0 + gw + SP/2 - iconic_adv_px('r', lr)/2;
-    draw_iconic_glyph_vcentered(lx, icon_cy, 'l', lr, XMB_TEXT_FAINT);
-    draw_iconic_glyph_vcentered(rx, icon_cy, 'r', lr, XMB_TEXT_FAINT);
 }
 
 static void xmb_draw_tabs(int active) { xmb_draw_tabs_ex(active, NULL); }
 
 typedef struct { char glyph; const char *label; } Hint;
 static void draw_hints_bar(const Hint *hints, int n) {
-    const float icon_px = 24.0f, text_px = 15.0f;
-    const int gap_it = 7, gap_sep = 26;
+    const int icon_h = 24;
+    const float text_px = 15.0f;
+    const int gap_it = 8, gap_sep = 26;
     int total = 0;
     for (int i = 0; i < n; i++) {
-        total += iconic_adv_px(hints[i].glyph, icon_px) + gap_it
+        total += ps_btn_width(hints[i].glyph, icon_h) + gap_it
                + ttf_text_width(hints[i].label, text_px);
         if (i < n-1) total += gap_sep;
     }
-    int x = (W - total) / 2;
+    int x = W - XMB_ITEM_PAD - total;
+    if (x < XMB_ITEM_PAD) x = XMB_ITEM_PAD;
     int cy = H - XMB_BOTTOM_PAD + 34;
     for (int i = 0; i < n; i++) {
-        draw_iconic_glyph_vcentered(x, cy, hints[i].glyph, icon_px, 0x00AEB5D2);
-        x += iconic_adv_px(hints[i].glyph, icon_px) + gap_it;
+        draw_ps_button_vcentered(x, cy, hints[i].glyph, icon_h, 255);
+        x += ps_btn_width(hints[i].glyph, icon_h) + gap_it;
         drawTTF(x, cy - (int)(text_px*0.55f), hints[i].label, text_px, XMB_TEXT_DIM, 0);
         x += ttf_text_width(hints[i].label, text_px);
         if (i < n-1) x += gap_sep;
@@ -435,7 +517,7 @@ static void screen_movies(void) {
     xmb_draw_jumpbar(gx0, stride);
     drawIcon(gx0+grid_w+10, XMB_GRID_Y0 + XMB_GRID_ROWS*stride - 60, 0xE313, 22, XMB_ICON_IDLE);
 
-    Hint h[] = {{'E',"Jump"},{'X',"Select"},{'T',"Info"}};
+    Hint h[] = {{'E',"Nav"},{'X',"Select"},{'T',"Info"}};
     draw_hints_bar(h, 3);
     save_ppm("1_movies.ppm");
 }
@@ -709,7 +791,7 @@ int main(void) {
     stbtt_InitFont(&s_font, load_file("../../source/gfx/fonts/OpenSans-Regular.ttf"), 0);
     stbtt_InitFont(&s_font_bold, load_file("../../source/gfx/fonts/OpenSans-Bold.ttf"), 0);
     stbtt_InitFont(&s_icons, load_file("../../source/gfx/fonts/MaterialIcons-Regular.ttf"), 0);
-    stbtt_InitFont(&s_iconic, load_file("iconic_psx.ttf"), 0);
+    ps_sprites_load();
     screen_movies();
     screen_search();
     screen_settings();

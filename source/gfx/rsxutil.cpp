@@ -22,6 +22,9 @@ u32 first_fb = 1;
 u32 display_width;
 u32 display_height;
 
+u32 display_par_num = 1;
+u32 display_par_den = 1;
+
 u32 depth_pitch;
 u32 depth_offset;
 u32 *depth_buffer;
@@ -128,9 +131,23 @@ void init_screen(void *host_addr,u32 size)
 
 	display_width = res.width;
 	display_height = res.height;
+
+	// Pixel aspect = display aspect (4:3 or 16:9) divided by the framebuffer
+	// aspect.  1:1 on HD modes; 720×576/720×480 SD modes come out non-square.
 	{
-		char b[64];
-		snprintf(b,sizeof(b),"2.4 res %ux%u",display_width,display_height);
+		u32 dar_w = 16, dar_h = 9;
+		if (state.displayMode.aspect == VIDEO_ASPECT_4_3) { dar_w = 4; dar_h = 3; }
+		display_par_num = dar_w * display_height;
+		display_par_den = dar_h * display_width;
+		if (display_par_num == display_par_den)
+			display_par_num = display_par_den = 1;
+	}
+	{
+		char b[80];
+		snprintf(b,sizeof(b),"2.4 res %ux%u aspect=%u par=%u/%u",
+		         display_width,display_height,
+		         (unsigned)state.displayMode.aspect,
+		         display_par_num,display_par_den);
 		crash_log(b);
 	}
 

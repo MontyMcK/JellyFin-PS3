@@ -3,11 +3,15 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 #include <time.h>
 
+#include "ui.h"
 #include "ui_visuals.h"
 #include "ui_wave.h"
 #include "icons.h"
+#include "stb_image.h"
+#include "ps_buttons_png.h"
 
 // -------------------------------------------------------
 // Tab icon codepoints (Tabler Icons)
@@ -71,7 +75,7 @@ void xmb_draw_divider(void) {
 
 void xmb_draw_tabs(void) {
     const int TAB_SPACING = 72;
-    const int icon_cy     = XMB_TOPBAR_H + 30;   // icon centerline
+    const int icon_cy     = XMB_TOPBAR_H + UIS_H(30);   // icon centerline
 
     // Pack only the enabled tabs and center *that* group.  Centering on the
     // full XMB_TAB_COUNT span would leave a gap (and shove the row off to the
@@ -101,9 +105,9 @@ void xmb_draw_tabs(void) {
 
         if (active) {
             int lw = ttf_text_width(g_tabs[t].label, 14);
-            drawTTF((u32)(cx - lw / 2), (u32)(XMB_TOPBAR_H + 52),
+            drawTTF((u32)(cx - lw / 2), (u32)(XMB_TOPBAR_H + UIS_H(52)),
                     g_tabs[t].label, 14, XMB_TEXT);
-            drawRect((u32)(cx - 13), (u32)(XMB_TOPBAR_H + 74), 26, 3,
+            drawRect((u32)(cx - 13), (u32)(XMB_TOPBAR_H + UIS_H(74)), 26, 3,
                      XMB_ACCENT);
         }
     }
@@ -168,14 +172,181 @@ void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
     }
 }
 
-// Controller-hints bar — intentionally a no-op (2026-07-12 redesign): the
-// persistent button legend added chrome without earning it, and the controls
-// are discoverable by use.  Call sites keep passing their Hint arrays so the
-// per-screen mappings stay documented in code and the bar can come back with
-// one edit here if it's ever missed.
+// -------------------------------------------------------
+// PS button sprites (Kenney "PlayStation Series" sheet)
+// -------------------------------------------------------
+// The sheet is a 12x12 grid of 128px tiles embedded as a PNG in
+// ps_buttons_png.h.  On first use it's decoded with stb_image, the tiles
+// we need are trimmed to their alpha bounding box and kept as small ARGB
+// masters, and the 9MB decode buffer is freed.  Drawing scales a master
+// to the requested height with an area-average filter — cheap at hint
+// sizes and clean at any scale, so no per-size caching is needed.
+
+#define PS_SHEET_DIM  1536
+#define PS_TILE       128
+
+// Hint glyph -> sheet tile.  All plain white solid variants — no coloured
+// face buttons, no red d-pad highlights.
+static const struct { char glyph; int row, col; } PS_TILES[] = {
+    { 'X', 10, 5 },   // Cross (white solid)
+    { 'C', 11, 7 },   // Circle (white solid)
+    { 'S', 10, 11 },  // Square (white solid)
+    { 'T',  9, 1 },   // Triangle (white solid)
+    { 'A',  5, 8 },   // START
+    { 'B',  5, 6 },   // SELECT
+    { 'D',  9, 3 },   // D-pad, plain white (Switch)
+    { 'E',  9, 3 },   // D-pad, plain white (Jump)
+    { 'L',  6, 7 },   // L2
+    { 'R',  5, 3 },   // R2
+};
+#define PS_NTILES ((int)(sizeof PS_TILES / sizeof PS_TILES[0]))
+
+static u32 *s_ps_px[PS_NTILES];             // trimmed ARGB masters
+static int  s_ps_w[PS_NTILES], s_ps_h[PS_NTILES];
+static int  s_ps_state = 0;                 // 0=not loaded, 1=ok, -1=failed
+
+static int ps_tile_idx(char glyph) {
+    for (int i = 0; i < PS_NTILES; i++)
+        if (PS_TILES[i].glyph == glyph) return i;
+    return -1;
+}
+
+static void ps_sprites_load(void) {
+    if (s_ps_state) return;
+    s_ps_state = -1;
+    int w, h, comp;
+    unsigned char *img = stbi_load_from_memory(
+        ps_buttons_png, (int)ps_buttons_png_len, &w, &h, &comp, 4);
+    if (!img) return;
+    if (w != PS_SHEET_DIM || h != PS_SHEET_DIM) { stbi_image_free(img); return; }
+
+    for (int i = 0; i < PS_NTILES; i++) {
+        int tx = PS_TILES[i].col * PS_TILE, ty = PS_TILES[i].row * PS_TILE;
+        // Alpha bounding box inside the tile.
+        int x0 = PS_TILE, y0 = PS_TILE, x1 = -1, y1 = -1;
+        for (int y = 0; y < PS_TILE; y++) {
+            const unsigned char *p = img + (((ty + y) * w + tx) * 4);
+            for (int x = 0; x < PS_TILE; x++) {
+                if (p[x * 4 + 3]) {
+                    if (x < x0) x0 = x;
+                    if (x > x1) x1 = x;
+                    if (y < y0) y0 = y;
+                    if (y > y1) y1 = y;
+                }
+            }
+        }
+        if (x1 < 0) continue;               // empty tile — leave master NULL
+        int mw = x1 - x0 + 1, mh = y1 - y0 + 1;
+        u32 *m = (u32 *)malloc((size_t)mw * mh * 4);
+        if (!m) continue;
+        for (int y = 0; y < mh; y++) {
+            const unsigned char *p = img + (((ty + y0 + y) * w + tx + x0) * 4);
+            for (int x = 0; x < mw; x++)
+                m[y * mw + x] = ((u32)p[x*4+3] << 24) | ((u32)p[x*4] << 16) |
+                                ((u32)p[x*4+1] << 8) | p[x*4+2];
+        }
+        s_ps_px[i] = m; s_ps_w[i] = mw; s_ps_h[i] = mh;
+    }
+    stbi_image_free(img);
+    s_ps_state = 1;
+}
+
+int ps_btn_width(char glyph, int h) {
+    ps_sprites_load();
+    int i = ps_tile_idx(glyph);
+    if (s_ps_state != 1 || i < 0 || !s_ps_px[i] || h <= 0) return h;
+    return s_ps_w[i] * h / s_ps_h[i];
+}
+
+// Blit one button sprite scaled to height h, vertically centred on cy.
+// bright scales the sprite's RGB (255 = as-authored) so the HUD can dim
+// unfocused controls the way ctrl_color() dims its vector glyphs.
+void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
+    ps_sprites_load();
+    int i = ps_tile_idx(glyph);
+    if (s_ps_state != 1 || i < 0 || !s_ps_px[i] || h <= 0) return;
+    const u32 *m = s_ps_px[i];
+    int mw = s_ps_w[i], mh = s_ps_h[i];
+    int dw = mw * h / mh, dh = h;
+    if (dw <= 0) return;
+    int dx0 = (int)x, dy0 = cy - dh / 2;
+    bool rt  = cpu_rt_on();
+    u32  tw_ = cpu_draw_w();
+    for (int oy = 0; oy < dh; oy++) {
+        int sy = dy0 + oy;
+        if (cpu_row_clipped(sy)) continue;
+        u32 *row = cpu_draw_row((u32)sy);
+        int my0 = oy * mh / dh, my1 = (oy + 1) * mh / dh;
+        if (my1 <= my0) my1 = my0 + 1;
+        for (int ox = 0; ox < dw; ox++) {
+            int sx = dx0 + ox;
+            if (sx < 0 || (u32)sx >= tw_) continue;
+            int mx0 = ox * mw / dw, mx1 = (ox + 1) * mw / dw;
+            if (mx1 <= mx0) mx1 = mx0 + 1;
+            // Area-average the source box (alpha-weighted colour).
+            u32 ar = 0, ag = 0, ab = 0, aa = 0, np = 0;
+            for (int my = my0; my < my1; my++) {
+                const u32 *src = m + my * mw;
+                for (int mx = mx0; mx < mx1; mx++) {
+                    u32 s = src[mx], a = s >> 24;
+                    ar += ((s >> 16) & 0xFF) * a;
+                    ag += ((s >>  8) & 0xFF) * a;
+                    ab += ( s        & 0xFF) * a;
+                    aa += a; np++;
+                }
+            }
+            if (!aa) continue;
+            u32 a = aa / np;
+            u32 r = (ar / aa) * bright / 255;
+            u32 g = (ag / aa) * bright / 255;
+            u32 b = (ab / aa) * bright / 255;
+            u32 c = (r << 16) | (g << 8) | b;
+            if (rt) { row[sx] = argb_over(row[sx], c, a); continue; }
+            if (a == 255) { row[sx] = c; continue; }
+            u32 bg = row[sx];
+            u32 ro = (a * r + (255 - a) * ((bg >> 16) & 0xFF)) / 255;
+            u32 go = (a * g + (255 - a) * ((bg >>  8) & 0xFF)) / 255;
+            u32 bo = (a * b + (255 - a) * ( bg        & 0xFF)) / 255;
+            row[sx] = (ro << 16) | (go << 8) | bo;
+        }
+    }
+}
+
+// -------------------------------------------------------
+// Controller-hints bar — sprite buttons + labels, bottom-right
+// -------------------------------------------------------
+
 void draw_hints_bar(const Hint *hints, int n) {
-    (void)hints;
-    (void)n;
+    if (n <= 0) return;
+    ps_sprites_load();
+    if (s_ps_state != 1) return;
+
+    const int   icon_h  = UIS_H(24);
+    const float text_px = (float)UIS_H(15);
+    const int   gap_it  = UIS_W(8);    // icon to its label
+    const int   gap_sep = UIS_W(26);   // between hint pairs
+
+    int total_w = 0;
+    for (int i = 0; i < n; i++) {
+        total_w += ps_btn_width(hints[i].glyph, icon_h);
+        total_w += gap_it;
+        total_w += ttf_text_width(hints[i].label, text_px);
+        if (i < n - 1) total_w += gap_sep;
+    }
+
+    int x = (int)display_width - XMB_ITEM_PAD - total_w;
+    if (x < (int)XMB_ITEM_PAD) x = (int)XMB_ITEM_PAD;
+    int cy = (int)display_height - XMB_BOTTOM_PAD + UIS_H(34);
+    if (cy < 0 || (u32)cy >= display_height) return;
+
+    for (int i = 0; i < n; i++) {
+        draw_ps_button_vcentered((u32)x, cy, hints[i].glyph, icon_h, 255);
+        x += ps_btn_width(hints[i].glyph, icon_h) + gap_it;
+        drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), hints[i].label,
+                text_px, XMB_TEXT_DIM);
+        x += ttf_text_width(hints[i].label, text_px);
+        if (i < n - 1) x += gap_sep;
+    }
 }
 
 // -------------------------------------------------------

@@ -1,6 +1,8 @@
 #include "video.h"
 #include "video_internal.h"
+#include "plog.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <malloc.h>
@@ -24,12 +26,41 @@ static u32  s_jbuf_fw = 0, s_jbuf_fh = 0;
 static int  s_jb_wr = 0, s_jb_rd = 0;
 static volatile int s_jb_n = 0;
 
-bool jbuf_alloc(u32 fw, u32 fh) {
-    s_jbuf_fw = fw; s_jbuf_fh = fh;
+// Slot buffers are CACHED once allocated: jbuf_reserve() grabs them at boot
+// (before the UI fragments the heap) and jbuf_free() keeps them.  The big
+// three (VDEC arena, these slots, HUD overlay) total ~162MB against a heap
+// with only a few MB of slack, so allocating them per-session made every
+// session a dice roll on whatever the UI had done to the heap layout.
+static u32 s_jbuf_slot_bytes = 0;     // capacity of each cached slot
+
+// Allocate the slot buffers if not already cached (or cached too small).
+// Returns false with NOTHING left allocated on failure (the old code leaked
+// the partial slots, so each failed attempt made the next one worse).
+bool jbuf_reserve(u32 fw, u32 fh) {
+    u32 need = fw * fh * 4;
+    if (s_jbuf_data[0] && s_jbuf_slot_bytes >= need) return true;
     for (int i = 0; i < JBUF_SIZE; i++) {
-        s_jbuf_data[i] = (u8*)memalign(128, fw * fh * 4);
-        if (!s_jbuf_data[i]) return false;
+        if (s_jbuf_data[i]) { free(s_jbuf_data[i]); s_jbuf_data[i] = NULL; }
     }
+    s_jbuf_slot_bytes = 0;
+    for (int i = 0; i < JBUF_SIZE; i++) {
+        s_jbuf_data[i] = (u8*)memalign(128, need);
+        if (!s_jbuf_data[i]) {
+            char buf[64];
+            snprintf(buf, sizeof(buf), "jbuf_reserve: slot %d of %d FAILED (%u KB)",
+                     i, JBUF_SIZE, need / 1024);
+            plog(buf);
+            for (int j = 0; j < i; j++) { free(s_jbuf_data[j]); s_jbuf_data[j] = NULL; }
+            return false;
+        }
+    }
+    s_jbuf_slot_bytes = need;
+    return true;
+}
+
+bool jbuf_alloc(u32 fw, u32 fh) {
+    if (!jbuf_reserve(fw, fh)) return false;
+    s_jbuf_fw = fw; s_jbuf_fh = fh;
     s_jb_wr = s_jb_rd = s_jb_n = 0;
     memset(s_jbuf_pts, 0, sizeof(s_jbuf_pts));
     memset(s_jbuf_dur, 0, sizeof(s_jbuf_dur));
@@ -42,9 +73,7 @@ bool jbuf_alloc(u32 fw, u32 fh) {
 }
 
 void jbuf_free(void) {
-    for (int i = 0; i < JBUF_SIZE; i++) {
-        if (s_jbuf_data[i]) { free(s_jbuf_data[i]); s_jbuf_data[i] = NULL; }
-    }
+    // Slot buffers stay cached (see jbuf_reserve) — only session state dies.
     s_jb_wr = s_jb_rd = s_jb_n = 0;
     sysMutexDestroy(s_jbuf_mtx);
 }

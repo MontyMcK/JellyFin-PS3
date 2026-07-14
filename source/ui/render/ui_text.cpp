@@ -1,5 +1,5 @@
-// Text and glyph rendering — bitmap font, Open Sans TTF, Tabler Icons,
-// Iconic PSx.  Owns all font state and the stb_truetype implementation.
+// Text and glyph rendering — bitmap font, Open Sans TTF, Tabler Icons.
+// Owns all font state and the stb_truetype implementation.
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -14,7 +14,6 @@
 #include "opensans_regular.h"
 #include "opensans_bold.h"
 #include "tabler_icons.h"
-#include "iconic_psx.h"
 #include "icons.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -41,8 +40,6 @@ static stbtt_fontinfo  s_font_bold;
 static bool            s_ttf_bold_ok = false;
 static stbtt_fontinfo  s_icons;
 static bool            s_icons_ok    = false;
-static stbtt_fontinfo  s_iconic;
-static bool            s_iconic_ok   = false;
 
 // Gamma LUTs for correct anti-aliasing.  Blending coverage in linear light
 // (instead of straight 8-bit sRGB) stops the soft glyph edges from going muddy
@@ -324,82 +321,6 @@ void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
 }
 
 // -------------------------------------------------------
-// Iconic PSx glyphs (controller buttons)
-// -------------------------------------------------------
-
-// Draw one Iconic PSx glyph (single ASCII char) at (x,y).
-void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color) {
-    if (!s_iconic_ok) return;
-    int cp = (unsigned char)glyph;
-    float scale = stbtt_ScaleForPixelHeight(&s_iconic, px);
-    int ascent;
-    stbtt_GetFontVMetrics(&s_iconic, &ascent, NULL, NULL);
-    int baseline = (int)((float)ascent * scale);
-    int w, h, xoff, yoff;
-    unsigned char *bm = stbtt_GetCodepointBitmap(
-        &s_iconic, scale, scale, cp, &w, &h, &xoff, &yoff);
-    if (!bm) return;
-    u32 r_fg = (color >> 16) & 0xFF;
-    u32 g_fg = (color >>  8) & 0xFF;
-    u32 b_fg =  color        & 0xFF;
-    int dx0 = (int)x + xoff;
-    int dy0 = (int)y + baseline + yoff;
-    bool rt = cpu_rt_on();
-    u32  tw_ = cpu_draw_w();
-    u32  th_ = cpu_draw_h();
-    for (int gy = 0; gy < h; gy++) {
-        int sy = dy0 + gy;
-        if (sy < 0 || (u32)sy >= th_) continue;
-        u32 *row = cpu_draw_row((u32)sy);
-        for (int gx = 0; gx < w; gx++) {
-            int sx = dx0 + gx;
-            if (sx < 0 || (u32)sx >= tw_) continue;
-            u32 a = bm[gy * w + gx];
-            if (a == 0) continue;
-            if (rt) { row[sx] = argb_over(row[sx], color, a); continue; }
-            if (a == 255) { row[sx] = color; continue; }
-            u32 bg   = row[sx];
-            u32 r_bg = (bg >> 16) & 0xFF;
-            u32 g_bg = (bg >>  8) & 0xFF;
-            u32 b_bg =  bg        & 0xFF;
-            row[sx] = (((a*r_fg + (255-a)*r_bg)/255) << 16) |
-                      (((a*g_fg + (255-a)*g_bg)/255) <<  8) |
-                       ((a*b_fg + (255-a)*b_bg)/255);
-        }
-    }
-    stbtt_FreeBitmap(bm, NULL);
-}
-
-// Draw one Iconic PSx glyph with its ink vertically centred on cy.
-// draw_iconic_glyph()'s y is the top of the em box, but a glyph's ink only
-// covers part of that, so em-box centring sits visibly off — centre on the
-// actual bitmap box instead.
-void draw_iconic_glyph_vcentered(u32 x, int cy, char glyph, float px, u32 color) {
-    if (!s_iconic_ok) return;
-    float scale = stbtt_ScaleForPixelHeight(&s_iconic, px);
-    int ascent;
-    stbtt_GetFontVMetrics(&s_iconic, &ascent, NULL, NULL);
-    int baseline = (int)((float)ascent * scale);
-    int x0, y0, x1, y1;
-    stbtt_GetCodepointBitmapBox(&s_iconic, (unsigned char)glyph,
-                                scale, scale, &x0, &y0, &x1, &y1);
-    // draw_iconic_glyph puts the ink top at y + baseline + y0; pick y so the
-    // ink spans [cy - h/2, cy + h/2).
-    int y = cy - (y1 - y0) / 2 - baseline - y0;
-    if (y < 0) y = 0;
-    draw_iconic_glyph(x, (u32)y, glyph, px, color);
-}
-
-// Return the advance width in pixels for one Iconic PSx glyph.
-int iconic_adv_px(char glyph, float px) {
-    if (!s_iconic_ok) return (int)px;
-    float sc = stbtt_ScaleForPixelHeight(&s_iconic, px);
-    int adv;
-    stbtt_GetCodepointHMetrics(&s_iconic, (unsigned char)glyph, &adv, NULL);
-    return (int)((float)adv * sc);
-}
-
-// -------------------------------------------------------
 // Lifecycle
 // -------------------------------------------------------
 
@@ -413,8 +334,6 @@ void ttf_init(void) {
         s_ttf_bold_ok = true;
     if (stbtt_InitFont(&s_icons, (unsigned char*)TablerIcons_ttf, 0))
         s_icons_ok = true;
-    if (stbtt_InitFont(&s_iconic, (unsigned char*)Iconic_PSx_ttf, 0))
-        s_iconic_ok = true;
 }
 
 // Warm the malloc pool and stbtt i-cache for every glyph the HUD will ever draw.
@@ -459,20 +378,6 @@ void ttf_prewarm_hud(void) {
         unsigned char *bm = stbtt_GetCodepointBitmap(
             &s_icons, sc, sc, ICON_MUSIC, &w, &h, &xo, &yo);
         if (bm) stbtt_FreeBitmap(bm, NULL);
-    }
-    // Iconic PSx: rewind 'L' and fast-forward 'R' at ROW_ICON_PX (24px).
-    // Play/pause now uses CPU-drawn primitives — no Iconic glyph needed.
-    if (s_iconic_ok) {
-        static const struct { int cp; float px; } iconic[] = {
-            { 'L', 24.0f }, { 'R', 24.0f },
-        };
-        for (int i = 0; i < 2; i++) {
-            float sc = stbtt_ScaleForPixelHeight(&s_iconic, iconic[i].px);
-            int w, h, xo, yo;
-            unsigned char *bm = stbtt_GetCodepointBitmap(
-                &s_iconic, sc, sc, iconic[i].cp, &w, &h, &xo, &yo);
-            if (bm) stbtt_FreeBitmap(bm, NULL);
-        }
     }
 }
 

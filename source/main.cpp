@@ -16,6 +16,8 @@
 #include "jellyfin_api.h"
 #include "thumbnail_cache.h"
 #include "plog.h"
+#include "video.h"
+#include "player_hud.h"
 
 SYS_PROCESS_PARAM(1001, 0x8000000);
 
@@ -96,6 +98,22 @@ int main(int argc, const char *argv[]) {
     crash_log("7c splash flip");
     flip();
     crash_log("7d splash done");
+
+    // Reserve the player's big buffers NOW, while the heap is pristine:
+    // HUD overlay (~8MB x2), VDEC arena (96MB), jitter buffer (16 slots).
+    // They are cached for the app's lifetime — allocated per-session they
+    // raced thumbnails/UI for a heap with only a few MB of slack, and a
+    // movie could fail to start depending on what the UI had allocated
+    // (jbuf_alloc FAILED even on the first play after some boots).
+    crash_log("7e media reserve");
+    hud_overlay_alloc();
+    vdec_reserve_mem();
+    {
+        u32 rw = display_width  < 1280 ? display_width  : 1280;
+        u32 rh = display_height < 720  ? display_height : 720;
+        if (!jbuf_reserve(rw, rh)) crash_log("7e jbuf_reserve FAILED");
+    }
+    crash_log("7f media reserve done");
 
     crash_log("8 http_init");
     if (http_init() != HTTP_SUCCESS) {

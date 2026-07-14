@@ -58,22 +58,31 @@ typedef struct {
 #define XMB_ICON_IDLE   0x00646C96UL   // inactive tab icons / chrome glyphs
 
 // -------------------------------------------------------
-// XMB layout constants (pixel values, assume 720p minimum)
+// XMB layout constants — pixel values authored at 1280×720.
+// UIS_W/UIS_H scale them down proportionally on SD framebuffers
+// (576i → 720×576, 480i/p → 720×480); HD modes keep the authored
+// sizes.  Runtime expressions: fine everywhere they're used (no
+// array sizes), evaluated after init_screen() sets display_*.
 // -------------------------------------------------------
-#define XMB_TOPBAR_H    64
-#define XMB_TABBAR_H    80
-#define XMB_DIVIDER_Y   (XMB_TOPBAR_H + XMB_TABBAR_H)
-#define XMB_CONTENT_Y   (XMB_DIVIDER_Y + 30)
-#define XMB_BOTTOM_PAD  70
-#define XMB_ITEM_H      90
-#define XMB_THUMB_W     52
-#define XMB_THUMB_H     74
-#define XMB_ITEM_PAD    40
+#define UIS_W(px) ((int)display_width  < 1280 ? (px) * (int)display_width  / 1280 : (px))
+#define UIS_H(px) ((int)display_height <  720 ? (px) * (int)display_height /  720 : (px))
 
-// Centered narrow list layout (search results keep this style)
-#define XMB_LIST_W      780                         // ~60% of 1280
-#define XMB_ROW_H        88                         // row visual height
-#define XMB_ROW_GAP      16                         // vertical gap between rows
+#define XMB_TOPBAR_H    UIS_H(64)
+#define XMB_TABBAR_H    UIS_H(80)
+#define XMB_DIVIDER_Y   (XMB_TOPBAR_H + XMB_TABBAR_H)
+#define XMB_CONTENT_Y   (XMB_DIVIDER_Y + UIS_H(30))
+#define XMB_BOTTOM_PAD  UIS_H(70)
+#define XMB_ITEM_H      UIS_H(90)
+#define XMB_THUMB_W     UIS_H(52)
+#define XMB_THUMB_H     UIS_H(74)
+#define XMB_ITEM_PAD    UIS_W(40)
+
+// Centered narrow list layout (search results keep this style).
+// 780 (~60% of 1280) when it fits, otherwise the framebuffer minus margins.
+#define XMB_LIST_W      ((int)display_width - 2 * XMB_ITEM_PAD < 780 \
+                             ? (int)display_width - 2 * XMB_ITEM_PAD : 780)
+#define XMB_ROW_H       UIS_H(88)                   // row visual height
+#define XMB_ROW_GAP     UIS_H(16)                   // vertical gap between rows
 #define XMB_ROW_STRIDE  (XMB_ROW_H + XMB_ROW_GAP)
 #define XMB_ROW_RADIUS    8                         // reserved for future rounded corners
 
@@ -92,8 +101,8 @@ typedef struct {
 #define XMB_GRID_ROWS       2
 #define XMB_PORTRAIT_COLS   5
 #define XMB_LANDSCAPE_COLS  3
-#define XMB_CARD_GAP_X   24
-#define XMB_CARD_TEXT_H  50                         // text band under each row
+#define XMB_CARD_GAP_X   UIS_W(24)
+#define XMB_CARD_TEXT_H  UIS_H(50)                  // text band under each row
 // Cards are sized to fill the space between the content area and the hints
 // bar at any resolution.  The 26px reserve covers the breadcrumb offset on
 // sub-screens so the bottom row's text band never runs into the hints bar.
@@ -104,8 +113,8 @@ typedef struct {
 
 // Music tab: square album cards under a sub-tab header row, with a taller
 // text band (title + artist + meta for the selected card).
-#define XMB_MUSIC_SUBTAB_H 44
-#define XMB_MUSIC_TEXT_H   68
+#define XMB_MUSIC_SUBTAB_H UIS_H(44)
+#define XMB_MUSIC_TEXT_H   UIS_H(68)
 #define XMB_MUSIC_COLS      5
 
 // Music sub-tabs (d-pad: UP from the grid's top row focuses the header,
@@ -134,10 +143,16 @@ void xmb_grid_geom(int tab, GridGeom *gg);
 #define JBAR_W       20
 #define JBAR_GAP      8
 
-// OSK constants (pixels)
-#define OSK_KEY_W    80
-#define OSK_KEY_H    44
+// OSK constants (pixels).  Keys are sized so the widest keyboard row —
+// 11 step units on the login OSK (Caps + zxcvbnm + backspace) — fits the
+// framebuffer with a small margin; capped at the 720p-authored 80px so HD
+// modes are unchanged.  A 720px-wide SD framebuffer otherwise overflows
+// both edges (the 576i "can't enter my server address" report).
+#define OSK_UNITS_MAX 11
 #define OSK_GAP       8
+#define OSK_KEY_W_FIT (((int)display_width - 24) / OSK_UNITS_MAX - OSK_GAP)
+#define OSK_KEY_W     (OSK_KEY_W_FIT < 80 ? OSK_KEY_W_FIT : 80)
+#define OSK_KEY_H     UIS_H(44)
 #define OSK_STEP_X   (OSK_KEY_W + OSK_GAP)
 #define OSK_STEP_Y   (OSK_KEY_H + OSK_GAP)
 
@@ -219,9 +234,11 @@ typedef struct { char glyph; const char *label; } Hint;
 // -------------------------------------------------------
 // Functions implemented in ui_visuals.cpp
 // -------------------------------------------------------
-void draw_iconic_glyph(u32 x, u32 y, char glyph, float px, u32 color);
-void draw_iconic_glyph_vcentered(u32 x, int cy, char glyph, float px, u32 color);
-int  iconic_adv_px(char glyph, float px);
+// PS button sprites (Kenney sheet, ui_widgets.cpp).  Same glyph codes the
+// old Iconic PSx font used: X/C/S/T face buttons, A=START, B=SELECT,
+// D/E=d-pad, L=L2, R=R2.  bright scales RGB (255 = as-authored).
+int  ps_btn_width(char glyph, int h);
+void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright);
 
 void visuals_cleanup(void);
 void ttf_init(void);

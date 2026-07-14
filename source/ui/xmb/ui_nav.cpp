@@ -6,6 +6,7 @@
 #include <ctype.h>
 
 #include "ui_internal.h"
+#include "thumbnail_cache.h"
 #include "jellyfin_api.h"
 #include "player.h"
 #include "music_screen.h"
@@ -29,6 +30,7 @@ void xmb_switch_tab(int new_tab) {
         g_tab_name_filter[old][0] = '\0';
     }
     g_jumpbar_active = false;
+    thumb_cache_retarget();
     g_active_tab = new_tab;
     g_sel = 0;
     g_scroll_top = 0;

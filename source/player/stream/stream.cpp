@@ -67,11 +67,12 @@ int stream_open(const char *url) {
     if (g_token[0])
         snprintf(auth, sizeof(auth),
             "MediaBrowser Client=\"PS3\", Device=\"PS3\","
-            " DeviceId=\"ps3\", Version=\"0.1\", Token=\"%s\"", g_token);
+            " DeviceId=\"%s\", Version=\"0.1\", Token=\"%s\"",
+            jf_device_id(), g_token);
     else
         snprintf(auth, sizeof(auth),
             "MediaBrowser Client=\"PS3\", Device=\"PS3\","
-            " DeviceId=\"ps3\", Version=\"0.1\"");
+            " DeviceId=\"%s\", Version=\"0.1\"", jf_device_id());
 
     char req[2048];
     int rlen = snprintf(req, sizeof(req),
