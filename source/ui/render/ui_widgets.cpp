@@ -12,6 +12,7 @@
 #include "icons.h"
 #include "stb_image.h"
 #include "ps_buttons_png.h"
+#include "plog.h"
 
 // -------------------------------------------------------
 // Tab icon codepoints (Tabler Icons)
@@ -249,6 +250,11 @@ static void ps_sprites_load(void) {
     }
     stbi_image_free(img);
     s_ps_state = 1;
+}
+
+void ps_sprites_preload(void) {
+    ps_sprites_load();
+    plog(s_ps_state == 1 ? "ps_sprites: sheet ok" : "ps_sprites: sheet FAILED");
 }
 
 int ps_btn_width(char glyph, int h) {

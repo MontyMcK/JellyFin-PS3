@@ -1,3 +1,4 @@
+#include "../../build_config.h"
 #include <math.h>
 #include <string.h>
 #include <rsx/rsx.h>
@@ -25,10 +26,10 @@
 // This is a COMPILE-TIME switch, not runtime detection.  A startup probe that
 // timed one full-screen CPU write misclassified real hardware (PPU write-
 // gathering beat the threshold), which put a retail PS3 on the CPU path —
-// every frame then read back uncached VRAM and the whole UI crawled.  Build
-// with 0 (default) for real hardware; flip to 1 only for RPCS3 test builds.
-#define UI_CPU_BG_EMU (0)
-bool ui_cpu_bg(void) { return UI_CPU_BG_EMU != 0; }
+// every frame then read back uncached VRAM and the whole UI crawled.
+// The flag lives in build_config.h (BUILD_FOR_RPCS3) — the single switch
+// for emulator vs hardware builds.
+bool ui_cpu_bg(void) { return BUILD_FOR_RPCS3 != 0; }
 
 #define WAVE_STEP_PX    20
 #define WAVE_NS         8      // vertical slices per ribbon (fade resolution)

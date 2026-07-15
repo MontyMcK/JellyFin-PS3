@@ -26,7 +26,6 @@ static char s_raw_buf[RESPONSE_SIZE + 4096];
 // reporter calls it from its own thread while the UI/seek paths use it too.
 static sys_mutex_t s_http_mtx;
 static bool        s_http_mtx_ok = false;
-static char s_bin_buf[64*1024];
 
 // Bounds so a slow/unreachable/keep-alive server can never hang us forever.
 #define HTTP_CONNECT_TIMEOUT_MS 5000
@@ -322,7 +321,7 @@ int http_fetch_binary(const char *url, const char *token,
     // as a thumbnail fetch that hangs PAST the socket timeouts (the socket
     // timeouts can't bound a wedged netGetHostByName / connect), which with a
     // single fetch thread kills all poster loading after a tab switch.  Also
-    // guards s_bin_buf.  Bounded by the connect/IO timeouts in http_connect,
+    // Bounded by the connect/IO timeouts in http_connect,
     // so the UI can never wait more than one in-flight fetch.
     if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
 
@@ -340,8 +339,14 @@ int http_fetch_binary(const char *url, const char *token,
                               token, "image/jpeg,image/*", 0);
     send_all(sock, req, rlen);
 
+    // Read the response directly into the caller's buffer.  The old 64KB
+    // staging buffer silently TRUNCATED anything bigger, which stbi would
+    // then reject with "outofdata" — a real trap for full-size art, and 64KB
+    // of BSS besides.  (It was NOT the blank-poster bug, despite the earlier
+    // hunch: those failures were all reason=outofmem on 12-25KB images, i.e.
+    // heap exhaustion — see img_arena.h.  Keeping this anyway: it's correct.)
     int body_off, body_len;
-    int status = read_response(sock, s_bin_buf, sizeof(s_bin_buf),
+    int status = read_response(sock, (char*)out, out_size,
                                &body_off, &body_len);
     netClose(sock);
 
@@ -349,8 +354,7 @@ int http_fetch_binary(const char *url, const char *token,
         if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
         return -1;
     }
-    if (body_len > out_size) body_len = out_size;
-    memcpy(out, s_bin_buf + body_off, body_len);
+    memmove(out, out + body_off, body_len);
 
     if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
     return body_len;
