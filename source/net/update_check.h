@@ -3,7 +3,7 @@
 // Version built into this binary.  Keep in step with the GitHub release tag
 // (leading 'v'/'V' is ignored when comparing, so "2.0-beta" matches
 // "V2.0-beta").  Bump this when cutting a release.
-#define APP_VERSION "2.2-beta"
+#define APP_VERSION "2.2.1-beta"
 
 // One-shot background check of the project's GitHub releases.  Runs entirely
 // on its own low-priority thread: start it once after http_init() succeeds
