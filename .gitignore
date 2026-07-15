@@ -11,3 +11,4 @@ build/
 *.elf
 *.map
 obj/
+tools/ui_preview/preview

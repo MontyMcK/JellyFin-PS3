@@ -239,6 +239,12 @@ typedef struct { char glyph; const char *label; } Hint;
 // D/E=d-pad, L=L2, R=R2.  bright scales RGB (255 = as-authored).
 int  ps_btn_width(char glyph, int h);
 void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright);
+// Decode the sheet now rather than on the first hints bar.  It is a 1536x1536
+// PNG: ~9MB of output plus a comparable working set, transient but far bigger
+// than anything else the UI asks for.  Left lazy it ran after the thumbnail
+// cache had taken the heap down to nothing and would simply fail (glyphs gone,
+// permanently — s_ps_state latches -1).  Call it at boot while there is room.
+void ps_sprites_preload(void);
 
 void visuals_cleanup(void);
 void ttf_init(void);

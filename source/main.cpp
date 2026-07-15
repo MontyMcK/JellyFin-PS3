@@ -11,10 +11,13 @@
 
 #include "rsxutil.h"
 #include "ui.h"
+#include "ui_visuals.h"
 #include "http.h"
 #include "update_check.h"
 #include "jellyfin_api.h"
 #include "thumbnail_cache.h"
+#include "img_arena.h"
+#include "meminfo.h"
 #include "plog.h"
 #include "video.h"
 #include "player_hud.h"
@@ -113,7 +116,28 @@ int main(int argc, const char *argv[]) {
         u32 rh = display_height < 720  ? display_height : 720;
         if (!jbuf_reserve(rw, rh)) crash_log("7e jbuf_reserve FAILED");
     }
-    crash_log("7f media reserve done");
+    // The image decoder gets a reserved home too.  Thumbnail SLOTS were already
+    // reserved, but the decode that fills them still called malloc per image
+    // (~455KB output + working set) — and thumb_cache_init() below allocates
+    // slots until the heap runs dry, so on hardware there was never anything
+    // left and every decode failed with outofmem.  Measured stb peak for the
+    // largest card (450x253) is 657KB baseline / 1005KB progressive JPEG, so
+    // 4MB is ~4x the worst case; the HB line logs the real high-water mark as
+    // arenaPeak — retune from that rather than from guesswork.
+    img_arena_reserve(4 * 1024 * 1024);
+    // Big one-shot transient (~9MB+), so do it here rather than on first draw.
+    ps_sprites_preload();
+    {
+        u32 total = 0, avail = 0;
+        char buf[96];
+        if (meminfo_get(&total, &avail))
+            snprintf(buf, sizeof(buf), "7f reserve done: free=%uKB of %uKB",
+                     avail / 1024, total / 1024);
+        else
+            snprintf(buf, sizeof(buf), "7f reserve done (meminfo unavailable)");
+        crash_log(buf);
+        plog(buf);
+    }
 
     crash_log("8 http_init");
     if (http_init() != HTTP_SUCCESS) {

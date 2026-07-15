@@ -2,6 +2,7 @@
 #include "video_internal.h"
 #include "plog.h"
 #include "timing.h"
+#include "meminfo.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -136,10 +137,18 @@ bool vdec_open(void) {
     { char buf[80]; snprintf(buf, sizeof(buf), "vdec_cb_opd32: code=0x%08x toc=0x%08x fn=0x%08x",
         (unsigned)s_vdec_cb_opd32.func, (unsigned)s_vdec_cb_opd32.rtoc, (unsigned)closure.fn); plog(buf); }
     crash_log("v7 vdecOpen");
-    plog("vdec_open: vdecOpen");
+    { char buf[64]; snprintf(buf, sizeof(buf), "vdec_open: vdecOpen (free=%uKB)",
+        meminfo_avail_kb()); plog(buf); }
     s32 oret = vdecOpen(&codec, &cfg, &closure, &s_vdec);
     if (oret != 0) {
-        char buf[64]; snprintf(buf, sizeof(buf), "vdec_open: vdecOpen FAILED ret=%d", (int)oret);
+        // vdecOpen allocates on top of the arena above (PPU thread stack, SPU
+        // thread group, internal state).  0x80610180 is CELL_VDEC_ERROR_FATAL,
+        // which is what it returns when it can't get that memory — so log what
+        // was actually free rather than guessing.  Anything holding main RAM
+        // that the player doesn't need must be released BEFORE this point.
+        char buf[80]; snprintf(buf, sizeof(buf),
+            "vdec_open: vdecOpen FAILED ret=%d (0x%08x) free=%uKB",
+            (int)oret, (unsigned)oret, meminfo_avail_kb());
         plog(buf); return false;
     }
 

@@ -1,3 +1,13 @@
+// Route stb_image's allocations through the boot-reserved decode scratch (see
+// img_arena.h).  These only bind the implementation compiled into THIS file;
+// the arena is armed per-thread, so stb users on other threads transparently
+// keep using the real heap.  Every realloc site in stb_image passes the old
+// size (STBI_REALLOC_SIZED), so plain STBI_REALLOC is never needed.
+#include "img_arena.h"
+#define STBI_MALLOC(sz)                 img_arena_malloc(sz)
+#define STBI_FREE(p)                    img_arena_free(p)
+#define STBI_REALLOC_SIZED(p,oldsz,newsz) img_arena_realloc(p,oldsz,newsz)
+
 #define STB_IMAGE_IMPLEMENTATION
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -25,6 +35,7 @@
 #include "jellyfin_api.h"
 #include "plog.h"
 #include "glog.h"
+#include "meminfo.h"
 #include "timing.h"
 #include "ui_visuals.h"
 
@@ -40,7 +51,15 @@ static bool d_fetch_gated = false;   // fetch thread's last-known gate state
 // distinct (id,size) thumbs on screen than a single grid page) plus light
 // prefetch.  Slot pixel budget is the largest grid card, which is >= any Home
 // card, so more slots only costs slot headers + that fixed bitmap each.
-#define THUMB_CACHE_SIZE  48
+//
+// 48 was too many to actually pay for: each slot is the largest card of either
+// orientation (~455KB), so 48 asked for ~22MB on top of the player's ~146MB of
+// boot reservations and ran the heap dry — hardware logged "slotsFailed=2",
+// i.e. the cache was allocating until failure and leaving nothing behind it.
+// A cache that eats the memory its own decoder needs is worse than a smaller
+// one: 32 working slots (~15MB) beat 46 that can never be filled.  Two full
+// screens of cards still fit, and eviction is ~3s anyway.
+#define THUMB_CACHE_SIZE  32
 #define FETCH_BUF_SIZE    (256*1024)
 
 typedef enum { SLOT_EMPTY = 0, SLOT_QUEUED, SLOT_READY } SlotState;
@@ -110,6 +129,11 @@ static int find_slot(const char *id, u32 w, u32 h) {
 static int claim_slot(void) {
     int best = -1; u32 best_age = 0;
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
+        // A slot whose pixel buffer failed to allocate at init has nowhere to
+        // decode into — the fetch thread would blit straight through a NULL
+        // bmp.pixels.  Harmless while every decode was failing anyway; a crash
+        // the moment they start succeeding.  Never hand one out.
+        if (!s_slots[i].bmp.pixels) continue;
         if (s_slots[i].state == SLOT_EMPTY) return i;
         u32 age = s_frame - s_slots[i].last_touch;
         // Prefer READY over QUEUED at similar age: bias QUEUED down slightly
@@ -196,6 +220,13 @@ static void fetch_thread_fn(void *arg) {
             continue;
         }
 
+        // Decode out of the reserved scratch, not the heap.  Everything stbi
+        // allocates here (output buffer + working set) lives in the arena and
+        // is reclaimed wholesale by the next begin(), so px stays valid until
+        // then — which is why every exit below ends the arena only after the
+        // pixels have been consumed.
+        img_arena_begin();
+
         int w, h, ch;
         unsigned char *px = stbi_load_from_memory(
             (const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch, 4);
@@ -204,16 +235,17 @@ static void fetch_thread_fn(void *arg) {
             snprintf(msg, sizeof(msg), "thumb: decode failed %s", item_id);
             plog(msg);
             d_decode_fail++;
-            // stbi's own reason ("outofmem" vs a format complaint) plus a
-            // direct heap probe: can we even get ~512KB right now (roughly a
-            // 230x345 decode's transient)?  Together these say in one shot
-            // whether this is a heap ceiling or an undecodable image.
+            // Kept from the hunt that found this bug: stbi's own reason plus a
+            // direct heap probe.  With the arena in place a decode should no
+            // longer be able to fail for "outofmem" — if that ever reappears
+            // here, the arena is undersized (compare peak= in the HB line).
             const char *reason = stbi_failure_reason();
             void *probe = malloc(512 * 1024);
-            glogf("decode FAIL %s bytes=%d reason=%s probe512=%s",
+            glogf("decode FAIL %s bytes=%d reason=%s probe512=%s arenaPeak=%uKB",
                   item_id, bytes, reason ? reason : "(null)",
-                  probe ? "ok" : "FAIL");
+                  probe ? "ok" : "FAIL", (unsigned)(img_arena_peak() / 1024));
             if (probe) free(probe);
+            img_arena_end();
             lock_acquire();
             fail_note(item_id);
             if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
@@ -230,6 +262,7 @@ static void fetch_thread_fn(void *arg) {
         lock_release();
         if (!still_ours) {
             stbi_image_free(px);
+            img_arena_end();
             d_steal_drop++;
             glogf("fetch DROP (slot reused mid-fetch) %s", item_id);
             continue;
@@ -251,6 +284,7 @@ static void fetch_thread_fn(void *arg) {
             }
         }
         stbi_image_free(px);
+        img_arena_end();
 
         lock_acquire();
         bool published = (strncmp(s_slots[si].item_id, item_id, 64) == 0);
@@ -269,8 +303,10 @@ static void fetch_thread_fn(void *arg) {
 }
 
 void thumb_cache_init(void) {
-    // Reset slot state but keep the cached pixel buffers (a plain memset
-    // would drop the pointers and leak the bitmaps every player session).
+    // Carry the pixel pointer through the reset: at boot it is NULL and gets
+    // allocated below, and a plain memset here would drop (and leak) any
+    // buffer that survived.  thumb_cache_shutdown frees them on the way into
+    // the player, so coming back out this re-allocates them.
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         u32 *px = s_slots[i].bmp.pixels;
         memset(&s_slots[i], 0, sizeof(s_slots[i]));
@@ -296,9 +332,6 @@ void thumb_cache_init(void) {
     // Pixels live in MAIN memory (not RSX local): the UI blits cards with
     // the CPU every frame, and CPU reads of RSX-local memory are far too
     // slow (and the GPU transfer engine proved freeze-prone for this).
-    // The buffers are CACHED across shutdown/init (shutdown only stops the
-    // fetch thread) so they keep one permanent home in the heap alongside
-    // the player's boot-time reservations instead of re-racing for space.
     int failed = 0;
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         Bitmap *b = &s_slots[i].bmp;
@@ -316,21 +349,46 @@ void thumb_cache_init(void) {
     s_running = true;
     int trc = sysThreadCreate(&s_thread, fetch_thread_fn, NULL, 1500, 65536, 0, "thumb_fetch");
     d_fetch_gated = false;
-    glogf("INIT max_px=%u portrait=%dx%d landscape=%dx%d slotsFailed=%d "
-          "thrRC=%d frame=0 hold=0",
+    // slotsFailed>0 or a low freeKB means the cache is over-provisioned for
+    // this console's budget — trim THUMB_CACHE_SIZE rather than hope.
+    glogf("INIT max_px=%u portrait=%dx%d landscape=%dx%d slots=%d slotsFailed=%d "
+          "slotMem=%uKB arena=%uKB thrRC=%d freeKB=%u frame=0 hold=0",
           (unsigned)s_max_px, gp.card_w, gp.card_h, gl.card_w, gl.card_h,
-          failed, trc);
+          THUMB_CACHE_SIZE, failed,
+          (unsigned)((s_max_px * 4 * THUMB_CACHE_SIZE) / 1024),
+          (unsigned)(img_arena_size() / 1024), trc, meminfo_avail_kb());
 }
 
 void thumb_cache_shutdown(void) {
-    glogf("SHUTDOWN (frame=%u hold=%u)", s_frame, s_fetch_hold);
+    glogf("SHUTDOWN (frame=%u hold=%u freeKB=%u)", s_frame, s_fetch_hold,
+          meminfo_avail_kb());
     s_running = false;
     if (s_thread) {
         u64 tret;
         sysThreadJoin(s_thread, &tret);
         s_thread = 0;
     }
-    // Slot pixel buffers stay cached — see thumb_cache_init.
+    // Hand the pixel buffers back — this runs on the way INTO the player
+    // (player.cpp), and vdecOpen needs the room.  The cache and a playing
+    // movie are never live at the same time, so holding ~14MB of posters
+    // resident through playback only starves the decoder: it left ~3MB free
+    // and vdecOpen returned CELL_VDEC_ERROR_FATAL (0x80610180).
+    //
+    // Caching these across shutdown/init (added with the visibility-driven
+    // rework) was meant to stop them re-racing the heap for space — but the
+    // player's own buffers are all boot-reserved and never freed, so the heap
+    // is in the same shape on the way back out and these same-sized blocks
+    // drop straight back into the holes they left.  claim_slot() skips any
+    // slot whose re-alloc did fail, so a partial recovery degrades to fewer
+    // thumbnails rather than a crash.
+    for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
+        if (s_slots[i].bmp.pixels) {
+            free(s_slots[i].bmp.pixels);
+            s_slots[i].bmp.pixels = NULL;
+        }
+        s_slots[i].state = SLOT_EMPTY;
+        s_slots[i].item_id[0] = '\0';
+    }
 }
 
 void thumb_request(const char *item_id, int w, int h) {
@@ -432,12 +490,16 @@ void thumb_cache_tick(void) {
         bool gated = (s32)(hold - frame) > 0;
         glogf("HB f=%u thr=%d gate=%d(hold=%u) slots E/Q/R=%d/%d/%d | "
               "req=%u qOK=%u qFULL=%u szDrop=%u failList=%u | "
-              "fOK=%u fFail=%u dFail=%u drop=%u | get H/M=%u/%u",
+              "fOK=%u fFail=%u dFail=%u drop=%u | get H/M=%u/%u | "
+              "freeKB=%u arenaPeak=%uKB/%uKB",
               frame, run ? 1 : 0, gated ? 1 : 0, hold,
               n_empty, n_queued, n_ready,
               d_req, d_claim_ok, d_claim_fail, d_size_drop, d_fail_drop,
               d_fetch_ok, d_fetch_fail, d_decode_fail, d_steal_drop,
-              d_get_hit, d_get_miss);
+              d_get_hit, d_get_miss,
+              meminfo_avail_kb(),
+              (unsigned)(img_arena_peak() / 1024),
+              (unsigned)(img_arena_size() / 1024));
         d_req = d_claim_ok = d_claim_fail = d_size_drop = d_fail_drop = 0;
         d_fetch_ok = d_fetch_fail = d_decode_fail = d_steal_drop = 0;
         d_get_hit = d_get_miss = 0;
