@@ -10,6 +10,7 @@
 #include "ui_internal.h"
 #include "ui_wave.h"
 #include "thumbnail_cache.h"
+#include "slog.h"
 
 extern void crash_log(const char *msg);
 
@@ -83,6 +84,52 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
     *abs_start = g_tab_start[tab]; *abs_total = g_tab_total[tab];
     return true;
 }
+
+#if BUILD_FOR_RPCS3
+// STATE breadcrumb for menu navigation.  Called once per frame from the XMB
+// loop, but only emits when the *effective* (tab, depth, selection, count)
+// actually changes — so the host log-assert harness sees exactly one MENU
+// line per navigation step rather than one per frame.  Reuses xmb_grid_view()
+// (above) to resolve sel/total for whichever grid/sub-screen is active.
+static void slog_menu_tick(void) {
+    int         tab   = g_active_tab;
+    const char *ctx   = g_tabs[tab].label;
+    int         sel   = -1, total = 0, depth = 0;
+
+    if (tab == XMB_TAB_SETTINGS) {
+        sel = g_settings_sel; total = XMB_SETTINGS_COUNT;
+    } else if (tab == XMB_TAB_SEARCH) {
+        sel = g_search_focus_results ? 1 : 0; total = g_search_results_count;
+    } else {
+        GridGeom gg; const XMBItem *items;
+        int count, s, scroll, y0, a_start, a_total; bool more;
+        if (xmb_grid_view(tab, &gg, &items, &count, &s, &scroll, &y0,
+                          &more, &a_start, &a_total)) {
+            sel   = s;
+            total = (a_total > count) ? a_total : count;   // paged vs. loaded
+            depth = (tab == XMB_TAB_TV)          ? g_tv_depth
+                  : (tab == XMB_TAB_COLLECTIONS) ? g_col_depth
+                  : (tab == XMB_TAB_MUSIC)       ? g_music_depth : 0;
+        }
+        // else: Home — no grid; just track the tab (sel stays 0).
+        else { sel = 0; total = 0; }
+    }
+
+    bool header = (tab == XMB_TAB_MUSIC && g_music_header);
+
+    static int  s_tab = -1, s_sel = -2, s_total = -1, s_depth = -1;
+    static bool s_header = false;
+    if (tab != s_tab || sel != s_sel || total != s_total ||
+        depth != s_depth || header != s_header) {
+        s_tab = tab; s_sel = sel; s_total = total; s_depth = depth;
+        s_header = header;
+        slog_state("MENU tab=%s depth=%d sel=%d total=%d%s",
+                   ctx, depth, sel, total, header ? " header=1" : "");
+    }
+}
+#else
+static inline void slog_menu_tick(void) {}
+#endif
 
 // CPU draw phase — direct framebuffer writes, runs after rsxSync().
 static void xmb_draw_cpu_phase(int tab) {
@@ -260,6 +307,8 @@ void ui_run_xmb(void) {
         else
             should_exit = xmb_handle_input_browse();
         if (should_exit) break;
+
+        slog_menu_tick();   // STATE: MENU ... (emulator-only, emits on change)
 
         rsxSync();
 

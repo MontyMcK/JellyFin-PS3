@@ -8,6 +8,7 @@
 
 #include "player_internal.h"
 #include "plog.h"
+#include "slog.h"
 
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
     if (act == HUD_ACTION_AUDIO_TRACK) {
@@ -46,6 +47,9 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
                      ps->tracks.audio[ps->cur_audio].index,
                      ps->tracks.audio[ps->cur_audio].label);
             plog(buf);
+            slog_state("AUDIO_TRACK sel=%d idx=%d label=%.30s",
+                       ps->cur_audio, ps->tracks.audio[ps->cur_audio].index,
+                       ps->tracks.audio[ps->cur_audio].label);
         } else if (ps->menu_kind == PLAYER_MENU_SUBS &&
                    sel >= 0 && sel <= ps->tracks.n_subs &&
                    sel - 1 != ps->cur_sub) {
@@ -60,6 +64,12 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
             else
                 snprintf(buf, sizeof(buf), "hud: subs -> off");
             plog(buf);
+            if (ps->cur_sub >= 0)
+                slog_state("SUB_TRACK sel=%d idx=%d label=%.30s", ps->cur_sub,
+                           ps->tracks.subs[ps->cur_sub].index,
+                           ps->tracks.subs[ps->cur_sub].label);
+            else
+                slog_state("SUB_TRACK sel=-1 off=1");
         }
     }
     return act;

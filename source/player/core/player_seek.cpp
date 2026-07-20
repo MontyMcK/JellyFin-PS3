@@ -27,6 +27,7 @@
 #include "plog.h"
 #include "ui.h"
 #include "jellyfin_api.h"
+#include "slog.h"
 
 extern void crash_log(const char *msg);
 
@@ -174,6 +175,8 @@ bool player_execute_seek(PlayerState *ps) {
             ps->total_secs);
         plog(buf);
     }
+    slog_state("SEEK delta=%d target=%llds total=%us",
+               delta, (long long)(target_us / 1000000LL), ps->total_secs);
 
     // 1) Stop the decode thread so nothing feeds VDEC mid-flush.
     //    Use the decode-only flag so the audio + upload threads
@@ -299,6 +302,8 @@ bool player_execute_seek(PlayerState *ps) {
         plog(buf);
     }
     crash_log("sk6 seek done");
+    slog_state("SEEK_DONE target=%llds jbuf=%d",
+               (long long)(target_us / 1000000LL), jbuf_count());
     ps->seek_dbg_frames = 120;   // log resumed position for ~2s
     if (ps->paused) ps->show_seek_frame = true;  // reveal target while paused
     // A scrub paused the video to race the position; now that its seek
