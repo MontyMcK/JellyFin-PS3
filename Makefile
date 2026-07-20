@@ -5,7 +5,7 @@ $(error "Please set PSL1GHT in your environment. export PSL1GHT=<path>")
 endif
 
 ICON0       := $(CURDIR)/ICON0.PNG
-SFOXML      := $(HOME)/ps3dev/ps3py/sfo.xml
+SFOXML      := $(PS3DEV)/bin/sfo.xml
 
 include $(PSL1GHT)/ppu_rules
 
