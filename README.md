@@ -6,7 +6,7 @@
 
 A native PS3 homebrew Jellyfin client written in C/C++ using PSL1GHT, targeting Evilnat CFW or HEN.
 
-Current version: **2.2 (beta)**
+Current version: **2.2.1 (beta)**
 
 Goal: consumer-quality media playback on PS3, the second-best media player on the platform, modelled architecturally on Movian.
 
