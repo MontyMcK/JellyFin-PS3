@@ -1,6 +1,7 @@
 #include "timing.h"
 #include "audio.h"
 #include "plog.h"
+#include "../build_config.h"
 #include <stdio.h>
 #include <ppu-asm.h>
 #include <sys/systime.h>
@@ -155,10 +156,50 @@ void timing_frame_shown(void) {
 static s64  s_avsync_smooth_us    = 0;
 static bool s_avsync_initialized  = false;
 
-s64 avsync_compute_diff(u64 video_pts_us) {
+// Video-PTS base correction.
+//
+// The audio read cursor is the master clock and is always transcode-RELATIVE
+// (starts ~0).  For A/V to compare correctly the video PTS must share that base.
+// A normal (re)open returns video relative too (also ~0), so they already agree.
+// A subtitle burn-in reopen (SubtitleMethod=Encode) instead returns the video
+// PTS ABSOLUTE (~StartTimeTicks) while audio still resets to ~0 — e.g. audio
+// 1.36s vs video 39.42s at a 37.87s seek target.  The ~seek-target gap makes
+// avsync_is_locked() never trip and disables the drift bias.
+//
+// Fix: fold out only the LABEL part — the known play_base (== StartTimeTicks) —
+// leaving the true, sub-second A/V content residual for the drift bias to
+// converge.  We must NOT subtract the raw video-minus-audio gap (that would zero
+// the real residual too and freeze the desync).  A per-stream latch decides
+// absolute-vs-relative once, from the first frame, using the audio clock as the
+// always-relative reference: if the first video PTS sits > 3s from the audio
+// clock, the stream is absolute -> subtract play_base; else relative -> 0.
+// Reset per stream via avsync_reset() (seek / track-change reopen, session
+// start).  Normal (non-subtitle) playback keeps gap<3s so nothing is folded.
+static s64  s_avsync_vbase_us  = 0;      // label offset folded out of video pts
+static bool s_avsync_vbase_set = false;  // latched for the current stream?
+static const s64 AVSYNC_ABS_THRESH_US = 3000000;   // >3s from audio clk => absolute video pts
+
+s64 avsync_compute_diff(u64 video_pts_us, u64 play_base_us) {
     if (video_pts_us == 0) return 0;
     u64 audio_clk = audio_get_clock_us();
     if (audio_clk == 0) return 0;
+    if (!s_avsync_vbase_set) {
+        s64 gap = (s64)video_pts_us - (s64)audio_clk;
+        s_avsync_vbase_us  = (gap > AVSYNC_ABS_THRESH_US || gap < -AVSYNC_ABS_THRESH_US)
+                             ? (s64)play_base_us : 0;
+        s_avsync_vbase_set = true;
+        if (s_avsync_vbase_us != 0) {
+            char b[112];
+            snprintf(b, sizeof(b),
+                "avsync_vbase: absolute video pts, folding out label=%llds "
+                "(residual A/V content offset stays)",
+                (long long)(s_avsync_vbase_us / 1000000));
+            plog(b);
+        }
+    }
+    if (s_avsync_vbase_us != 0)
+        video_pts_us = (video_pts_us > (u64)s_avsync_vbase_us)
+                       ? video_pts_us - (u64)s_avsync_vbase_us : 0;
     s64 raw_diff = (s64)video_pts_us - (s64)audio_clk;
     if (!s_avsync_initialized) {
         s_avsync_smooth_us   = raw_diff;
@@ -184,7 +225,14 @@ s64 avsync_biased_period(s64 nominal_vblank_us) {
     // Video behind (smooth < 0) → consume MORE per vblank → speed video up.
     // Quadratic bias: delta = sign(smooth) * min((|smooth|/1000)^2, 5000).
     // At ±10ms gives ±100µs bias; caps at ±5000µs around ±71ms.
-    if (!avsync_is_locked()) return nominal_vblank_us;
+    // Engage the correction for sub-second offsets too, not only once "locked"
+    // (<41ms).  A subtitle burn-in reopen leaves the video/audio content ~0.2s
+    // apart; with the label folded out (see avsync_compute_diff) that residual
+    // is well under a second, and letting the (capped ±5ms/vblank) bias act on
+    // it converges A/V in ~1s instead of leaving a permanent lip-sync gap.  A
+    // gap larger than this is a mislatch, not real drift — leave it to lock.
+    if (!s_avsync_initialized) return nominal_vblank_us;
+    { s64 s = s_avsync_smooth_us; if (s > 1500000 || s < -1500000) return nominal_vblank_us; }
     s64 smooth   = avsync_get_smoothed_diff();
     s64 abs_ms   = (smooth < 0 ? -smooth : smooth) / 1000;
     s64 delta_us = abs_ms * abs_ms;
@@ -195,4 +243,6 @@ s64 avsync_biased_period(s64 nominal_vblank_us) {
 void avsync_reset(void) {
     s_avsync_smooth_us   = 0;
     s_avsync_initialized = false;
+    s_avsync_vbase_us  = 0;
+    s_avsync_vbase_set = false;
 }

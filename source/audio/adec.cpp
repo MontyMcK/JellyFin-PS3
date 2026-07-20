@@ -6,17 +6,40 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/mutex.h>
 #include <sys/cond.h>
 #include <sys/thread.h>
 
 extern void crash_log(const char *msg);
 
-// ~683 ms of stereo audio at 48 kHz.  Power of two for cheap modulo.
-#define PCM_RING_CAP 32768
+// PCM ring (decoded audio).  Power of two for cheap modulo.
+//
+// The sub-burn desync: a subtitle burn-in reopen (SubtitleMethod=Encode)
+// delivers its audio in a large FRONT-LOADED burst — the server ships ~10s of
+// audio while the subtitle-burning video encoder warms up, so the muxed stream
+// is audio-heavy at the start.  The shared decode thread back-pressures only on
+// the VIDEO jitter buffer (decode_thread_fn), so to collect its 12 video frames
+// it must read through the whole audio burst, flooding the audio path.  The
+// audio must therefore BUFFER that burst; the first audio/video PES start
+// ALIGNED (~1s apart), so as long as nothing is dropped the audio plays FIFO in
+// sync.  We buffer it COMPRESSED, in the PES queue below (~KB), and keep this
+// decoded-PCM ring small by back-pressuring the decoder to consumption
+// (adec_thread_fn) — decoding the whole burst to float PCM would cost ~8 MB.
+// ~1.37s @ 48 kHz stereo float = 512 KB.
+#define PCM_RING_CAP        (1 << 16)
+#define PCM_RING_HIGHWATER  48000        // ~1.0s: decoder idles above this
 
-// PES queue: raw PES packets queued by demux thread, consumed by adec thread.
-#define PES_QUEUE_SLOTS 32
+// PES queue: raw (compressed) PES packets queued by the demux/decode thread,
+// consumed by the adec thread.  This is where the sub-burn burst is HELD: with
+// the decoder back-pressured, ~10s of compressed audio waits here as it drains
+// to the small PCM ring in sync with playback.  Undersized, it drops the oldest
+// PES (adec_push_pes) and audio skips ~10s ahead — the original bug (was 32
+// slots).  Measured worst case for the ~10s 2F2F burst: depth 80 PES, max PES
+// 2894 bytes (see adec_pes_hwm telemetry).  256 slots gives >3x depth margin
+// (~30s of burst) and 8192-byte slots >2.5x the largest PES; 256*8192 = 2 MB,
+// vs the ~8 MB a PCM-side buffer of the same duration would cost.
+#define PES_QUEUE_SLOTS 256
 #define PES_SLOT_BYTES  8192
 
 // ---- MP3 decoder + PCM ring ----
@@ -77,7 +100,21 @@ void adec_init(void) {
 static void push_samples(const short *pcm, int n, int channels) {
     sysMutexLock(s_pcm_mtx, 0);
     for (int i = 0; i < n; i++) {
-        if (s_n >= PCM_RING_CAP) break;
+        if (s_n >= PCM_RING_CAP) {
+#if BUILD_FOR_RPCS3
+            // Ring overflow => audio dropped => playback skips ahead.  With the
+            // enlarged ring this should never fire on a sub-burn burst; log it
+            // (throttled) so a regression is visible.
+            static u64 s_drop_samples = 0;
+            if ((s_drop_samples++ % 48000) == 0) {
+                char b[64];
+                snprintf(b, sizeof(b), "adec_drop: ring full, dropped ~%llus of audio",
+                         (unsigned long long)(s_drop_samples / 48000));
+                plog(b);
+            }
+#endif
+            break;
+        }
         float l = pcm[i * channels    ] * (1.0f / 32768.0f);
         float r = (channels >= 2) ? pcm[i * channels + 1] * (1.0f / 32768.0f) : l;
         s_ring[s_wr * 2    ] = l;
@@ -101,6 +138,12 @@ static void adec_decode_pes(const u8 *pes, int pes_len) {
         if (!s_pts_valid) {
             s_read_pts_us = pes_pts_us;
             s_pts_valid   = true;
+#if BUILD_FOR_RPCS3
+            { char b[64];
+              snprintf(b, sizeof(b), "adec_first_pes: pts=%lluus",
+                       (unsigned long long)pes_pts_us);
+              plog(b); }
+#endif
         }
         sysMutexUnlock(s_pcm_mtx);
     }
@@ -138,11 +181,35 @@ void adec_push_pes(const u8 *pes, int pes_len) {
         // queue full — drop oldest to avoid back-pressuring the demux thread
         s_pes_q_rd = (s_pes_q_rd + 1) % PES_QUEUE_SLOTS;
         s_pes_q_n--;
+#if BUILD_FOR_RPCS3
+        // A dropped PES = skipped audio = playback jumps ahead.  Count it.
+        static u64 s_pes_drops = 0;
+        if ((s_pes_drops++ % 32) == 0) {
+            char b[64];
+            snprintf(b, sizeof(b), "adec_pes_drop: queue full, drops=%llu",
+                     (unsigned long long)s_pes_drops);
+            plog(b);
+        }
+#endif
     }
     memcpy(s_pes_q[s_pes_q_wr], pes, pes_len);
     s_pes_q_len[s_pes_q_wr] = pes_len;
     s_pes_q_wr = (s_pes_q_wr + 1) % PES_QUEUE_SLOTS;
     s_pes_q_n++;
+#if BUILD_FOR_RPCS3
+    // Sizing telemetry: worst-case PES length (-> PES_SLOT_BYTES) and worst-case
+    // queue depth (-> PES_QUEUE_SLOTS) so the buffers are sized to the real burst.
+    { static int s_max_len = 0, s_max_depth = 0;
+      bool chg = false;
+      if (pes_len > s_max_len)   { s_max_len = pes_len;     chg = true; }
+      if (s_pes_q_n > s_max_depth){ s_max_depth = s_pes_q_n; chg = true; }
+      if (chg) {
+        char b[80];
+        snprintf(b, sizeof(b), "adec_pes_hwm: max_len=%d max_depth=%d/%d",
+                 s_max_len, s_max_depth, PES_QUEUE_SLOTS);
+        plog(b);
+      } }
+#endif
     sysCondSignal(s_pes_cond);
     sysMutexUnlock(s_pes_mtx);
 }
@@ -165,6 +232,13 @@ static void adec_thread_fn(void *arg) {
         s_pes_q_rd = (s_pes_q_rd + 1) % PES_QUEUE_SLOTS;
         s_pes_q_n--;
         sysMutexUnlock(s_pes_mtx);
+
+        // Back-pressure: don't decode further ahead than the PCM ring high-water.
+        // This keeps the decoded-PCM ring small while the compressed burst waits
+        // in the (cheap) PES queue, draining in sync with playback.  The popped
+        // PES is held in local_pes meanwhile; the demux keeps filling the queue.
+        while (s_adec_run && s_n >= PCM_RING_HIGHWATER)
+            usleep(2000);
 
         adec_decode_pes(local_pes, local_len);
     }

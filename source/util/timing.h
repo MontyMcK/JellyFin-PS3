@@ -38,7 +38,7 @@ void timing_shutdown(void);
 
 // Audio-video difference in microseconds.  Positive = video PTS is ahead of
 // audio PTS.  Returns 0 if either clock is invalid (no PTS yet, empty jbuf).
-s64  avsync_compute_diff(u64 video_pts_us);
+s64  avsync_compute_diff(u64 video_pts_us, u64 play_base_us);
 
 // Smoothed AV diff via exponential moving average.  Updated by avsync_compute_diff.
 s64  avsync_get_smoothed_diff(void);

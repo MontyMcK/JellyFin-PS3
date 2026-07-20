@@ -271,6 +271,11 @@ void show_player(const JFItem *item, u32 resume_secs) {
     player_status_screen(item->name, "Streaming... START=stop");
 
     video_reset();
+    // Clear any avsync state (incl. the video-PTS base correction) left over
+    // from a previous playback session so the first frame of THIS stream
+    // re-latches cleanly.  Seeks/track-changes reset it via avsync_reset() in
+    // the seek path; this covers session start.
+    avsync_reset();
 
     if (!jbuf_alloc(ps.req_w, ps.req_h)) {
         plog("show_player: jbuf_alloc FAILED");

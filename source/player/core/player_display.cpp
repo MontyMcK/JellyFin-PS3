@@ -91,7 +91,8 @@ void player_display_frame(PlayerState *ps) {
 
     if (!ps->paused && s_vid_frame_ready && s_timing_ready && jbuf_count() > 0) {
         // Measurement only — result discarded; EMA updated for logging.
-        { u64 vpts = jbuf_peek_pts_us(); (void)avsync_compute_diff(vpts); }
+        // play_base lets avsync fold out an absolute (sub-burn) video PTS.
+        { u64 vpts = jbuf_peek_pts_us(); (void)avsync_compute_diff(vpts, ps->play_base_us); }
 
         s64  dur_a = jbuf_peek_dur();
 #ifdef VID_DISABLE_BLEND
