@@ -31,6 +31,47 @@
 
 extern void crash_log(const char *msg);
 
+// A startup status screen ("Initializing decoder…", etc.) followed by a long
+// CPU-only stretch.  flip() is ASYNCHRONOUS — it queues the frame and returns
+// while the RSX is still reading the glyph-blit source memory.  The work that
+// runs right after each of these screens (thumb_cache_shutdown, vdec_open's
+// 96 MB memalign + heap reorg, jbuf_alloc, the prefill) frees/moves the heap
+// out from under those in-flight blits.  On real hardware the RSX has already
+// drained by then; RPCS3 has not, so it reads the freed pages (poisoned to
+// 0xfeed0000), fails to decode the NV3089 blit, and its FIFO watchdog kills the
+// RSX thread ("Dead FIFO commands queue state") — which is exactly why movie
+// playback took the whole emulator down.  Draining the FIFO before the blocking
+// work removes the use-after-free.  Hardware is byte-for-byte unaffected: the
+// rsxSync() is compiled out and this is a plain flip() there.
+static inline void player_startup_flip(void) {
+    flip();
+#if BUILD_FOR_RPCS3
+    rsxSync();   // block until the RSX has consumed the just-queued blits
+#endif
+}
+
+// A cosmetic "loading" screen shown between the XMB and live video.
+//
+// The bitmap-font text path (drawHeader/drawText) renders each glyph with the
+// RSX NV3089 transfer-scale engine.  On RPCS3 that engine is freeze-prone — the
+// same reason thumbnail_cache blits its cards with the CPU instead — and firing
+// it here, during the fragile XMB->player transition, wedges the RSX FIFO
+// ("Dead FIFO ... nv3089 decode_transfer_registers: Timer expired") and kills
+// playback before it starts.  So on the emulator we DROP the glyph blits and
+// just present a drained frame; the status text is only cosmetic and hardware
+// (where NV3089 is fine) still draws it in full.  The flip keeps the display
+// alive through the long vdec_open/stream stalls that follow.
+static inline void player_status_screen(const char *name, const char *msg) {
+#if !BUILD_FOR_RPCS3
+    drawHeader();
+    drawTextf(40, 100, "%.70s", name);
+    drawText(40, 130, msg);
+#else
+    (void)name; (void)msg;
+#endif
+    player_startup_flip();
+}
+
 // -------------------------------------------------------
 // End-of-item auto-advance ("Next Episode")
 // -------------------------------------------------------
@@ -97,6 +138,20 @@ void show_player(const JFItem *item, u32 resume_secs) {
     plog("show_player: enter");
     plog("show_player: BUILD=seek-diag-1");
     init_btns();
+
+#if BUILD_FOR_RPCS3
+    // Drain the XMB's final frame off the RSX before the first long PPU stall.
+    // The last grid frame still has its movie-poster thumbnail blits (128x48,
+    // NV3089) queued; the network calls just below (get_play_session_id /
+    // fetch_tracks) then block the PPU for ~seconds while thumb_cache_shutdown
+    // is about to free those poster bitmaps.  On real hardware the RSX drains
+    // in the background and waits happily; RPCS3 sees the FIFO not advance and
+    // trips its dead-FIFO watchdog ("Timer expired" in nv3089), killing the RSX
+    // and taking playback down before it starts.  Emptying the FIFO here means
+    // every startup stall (network, then vdec_open) runs on an idle queue with
+    // nothing for the watchdog to fire on.  Compiled out on hardware.
+    rsxSync();
+#endif
     {
         static bool s_logged_cbufs = false;
         if (!s_logged_cbufs) {
@@ -162,10 +217,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
     build_stream_url(url, sizeof(url), &ps, (u64)resume_secs * 10000000ULL);
     plog_url("url", url);
 
-    drawHeader();
-    drawTextf(40, 100, "%.70s", item->name);
-    drawText(40, 130, "Initializing decoder...");
-    flip();
+    player_status_screen(item->name, "Initializing decoder...");
 
     // Release the UI thumbnail cache (joins its fetch thread, frees ~15 MB
     // of card bitmaps) — the decoder + jitter buffer below need every MB,
@@ -198,10 +250,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
     plog("show_player: audio_open done");
     crash_log("p5 audio_open OK");
 
-    drawHeader();
-    drawTextf(40, 100, "%.70s", item->name);
-    drawText(40, 130, "Connecting to stream...");
-    flip();
+    player_status_screen(item->name, "Connecting to stream...");
 
     crash_log("p6 stream_open begin");
     plog("show_player: stream_open");
@@ -219,10 +268,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
     plog("show_player: stream_open OK");
     crash_log("p7 stream_open OK");
 
-    drawHeader();
-    drawTextf(40, 100, "%.70s", item->name);
-    drawText(40, 130, "Streaming... START=stop");
-    flip();
+    player_status_screen(item->name, "Streaming... START=stop");
 
     video_reset();
 

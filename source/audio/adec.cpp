@@ -2,6 +2,7 @@
 #include "minimp3.h"
 #include "adec.h"
 #include "plog.h"
+#include "../build_config.h"   // relative: source/ is not on the -I path
 
 #include <stdio.h>
 #include <string.h>
@@ -167,6 +168,19 @@ static void adec_thread_fn(void *arg) {
 
         adec_decode_pes(local_pes, local_len);
     }
+#if BUILD_FOR_RPCS3
+    // Exit freeze fix: this thread otherwise just falls off the end and returns.
+    // On RPCS3 a PPU thread that merely returns is parked in state 0x40[ret] and
+    // never marked exited ("Returning from the thread entry function!" in
+    // RPCS3.log), so the sys_ppu_thread_join() in adec_stop() blocks forever —
+    // the movie hangs on exit.  sysThreadExit(0) makes the thread formally exit
+    // so the join completes.  NB: every other thread in this codebase already
+    // ends this way (player_threads.cpp, thumbnail_cache, music_player, plog,
+    // update_check) — adec_thread_fn is the lone omission, so hardware would be
+    // equally correct with this call; it's gated only to honour the byte-for-
+    // byte hardware rule in build_config.h.
+    sysThreadExit(0);
+#endif
 }
 
 void adec_start(void) {
