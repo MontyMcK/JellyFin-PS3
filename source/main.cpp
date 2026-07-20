@@ -21,6 +21,7 @@
 #include "plog.h"
 #include "video.h"
 #include "player_hud.h"
+#include "slog.h"
 
 SYS_PROCESS_PARAM(1001, 0x8000000);
 
@@ -169,6 +170,7 @@ int main(int argc, const char *argv[]) {
     while (running) {
         if (!g_server[0]) {
             crash_log("11 get_server");
+            slog_state("SERVER_URL_SCREEN");
             char new_server[256] = "http://";
             if (get_input(new_server, sizeof(new_server),
                           "Server URL (e.g. http://192.168.1.2:8096)", false) != 1)
@@ -182,9 +184,11 @@ int main(int argc, const char *argv[]) {
         if (!g_token[0]) {
             crash_log("12 do_login");
             if (!do_login()) { g_server[0] = '\0'; continue; }
+            slog_state("LOGIN_OK userid=%s", g_userid);
         }
 
         crash_log("13 show_main_menu");
+        slog_state("MAIN_MENU_ENTER");
         show_main_menu();
         // If the menu returned with no token, the user logged out. Keep the
         // server URL (jellyfin_logout preserves it) so the loop goes straight

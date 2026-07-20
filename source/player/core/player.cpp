@@ -27,6 +27,7 @@
 #include "jellyfin_api.h"
 #include "rsxutil.h"
 #include "thumbnail_cache.h"
+#include "slog.h"
 
 extern void crash_log(const char *msg);
 
@@ -331,6 +332,10 @@ void show_player(const JFItem *item, u32 resume_secs) {
     }
 
     crash_log("p9 threads started");
+    slog_state("PLAYBACK_STARTED item_id=%s name=%.40s total=%us "
+               "resume=%us w=%u h=%u",
+               item->id, item->name, ps.total_secs,
+               (unsigned)(ps.play_base_us / 1000000ULL), ps.req_w, ps.req_h);
 
     crash_log("p10 loop");
     // Paused-idle gate state (see below).  flip_queued: whether the previous
@@ -421,6 +426,10 @@ void show_player(const JFItem *item, u32 resume_secs) {
                   (unsigned long long)cur_tid,
                   (unsigned long long)s_loop_frame_dur);
               plog(buf); }
+            slog_state("PLAYBACK_%s pos=%llus",
+                       ps.paused ? "PAUSED" : "RESUMED",
+                       (unsigned long long)((ps.play_base_us +
+                           audio_get_clock_us()) / 1000000ULL));
         } else if (act == HUD_ACTION_SEEK) {
             if (!player_execute_seek(&ps)) break;
         }
@@ -446,6 +455,26 @@ void show_player(const JFItem *item, u32 resume_secs) {
             continue;
         }
         if (pause_settle > 0) pause_settle--;
+
+#if BUILD_FOR_RPCS3
+        // AV-sync heartbeat (~1 Hz) — the app already measures drift, so the
+        // choppy-audio / desync bug is visible in the log as diff_us climbing
+        // or jbuf underrunning, without needing to eyeball a screenshot.
+        {
+            static u64 s_avsync_next_us = 0;
+            u64 hb_now = timing_get_us();
+            if (!ps.paused && hb_now >= s_avsync_next_us) {
+                s_avsync_next_us = hb_now + 1000000ULL;
+                slog_state("AVSYNC diff_us=%lld locked=%d jbuf=%d pos=%llus "
+                           "frame=%d",
+                           (long long)avsync_get_smoothed_diff(),
+                           (int)avsync_is_locked(), jbuf_count(),
+                           (unsigned long long)((ps.play_base_us +
+                               audio_get_clock_us()) / 1000000ULL),
+                           ps.frame_count);
+            }
+        }
+#endif
 
         player_display_frame(&ps);
 
@@ -532,4 +561,9 @@ void show_player(const JFItem *item, u32 resume_secs) {
     ui_restore_rsx_state();
     crash_log("p19 done");
     plog("show_player: done");
+    slog_state("PLAYBACK_STOPPED reason=%s frames=%d vdec_err=%d",
+               user_stopped     ? "user_stop"
+             : s_next_requested ? "next_item"
+             : s_vdec_error     ? "vdec_error" : "eof",
+               ps.frame_count, (int)s_vdec_error);
 }
