@@ -256,16 +256,24 @@ While paused with no input, the display loop stops redrawing entirely (paused-id
 Audio PES packets (MP3, type 0x03)
         |
         v
-  adec_push_pes()
-  PES header stripped (9 + buf[8] bytes)
+  adec_push_pes()  [decode thread copies each PES whole]
         |
         v
-  minimp3 decode loop
-  mp3dec_decode_frame() -> 1152 samples/frame
+  PES queue (256 slots x 8KB, ~2MB)
+  buffers the compressed audio burst that a burned-in
+  subtitle transcode front-loads (~10s) instead of
+  dropping it; overwrites oldest only on true overflow
+        |
+        v
+  adec thread: PES header stripped (9 + buf[8] bytes)
+  minimp3 decode loop -> 1152 samples/frame
   short PCM -> float32, interleaved L/R
         |
         v
-  PCM ring buffer (8192 sample-pairs, ~170ms at 48kHz)
+  PCM ring buffer (65536 sample-pairs, ~1.37s at 48kHz)
+  back-pressure: adec idles while the ring is above its
+  ~1.0s highwater, so the burst waits compressed in the
+  PES queue rather than overflowing PCM
         |
         v
   Audio thread (priority 750)
@@ -278,6 +286,8 @@ Audio PES packets (MP3, type 0x03)
 ```
 
 **AV clock:** audio_get_clock_us() returns PTS-based time once the first PES with a valid PTS is decoded; falls back to the DMA block counter at startup. After a seek the PTS cursor is invalidated, so the clock re-seeds from the new segment.
+
+**Burned-in subtitles (audio desync fix):** selecting a subtitle track switches the server to SubtitleMethod=Encode, which reopens the transcode and front-loads several seconds of audio while the subtitle-burning video encoder warms up. Previously the 32-slot PES queue and a small PCM ring overflowed and dropped ~10s of audio, so playback skipped ~10s ahead of the picture (on real hardware too). Now the 256-slot PES queue holds the burst compressed and the adec thread back-pressures on the PCM highwater, so nothing is dropped. Because a burned-sub reopen also restarts the video PTS at an absolute value, avsync folds that PTS back onto the relative audio base (timing.cpp) so the ±5ms drift lock re-acquires. Confirmed in sync on the emulator and real PS3.
 
 **Music path:** the music player reuses the same audio port through a pluggable PCM source (audio_set_source): its stream thread pulls the Jellyfin audio transcode endpoint (stream.mp3, 48kHz forced, with a linear-resample guard), decodes with the same embedded minimp3, and fills its own ring. The visualizer taps samples at the DMA read cursor — not at decode time — so the spectrum matches what is audible rather than what is buffered ~700ms ahead. Every music seek mints a fresh PlaybackInfo session: reusing one makes Jellyfin re-serve the running audio transcode from 0:00 (StartTimeTicks ignored), unlike the video path.
 
@@ -426,7 +436,7 @@ JellyFin---PS3/
 | AV sync                  | Locked (plus or minus 5ms via PTS clock + EMA bias)               |
 | HUD overlay              | Working (GPU-composited texture, compose-on-change, zero per-frame cost) |
 | Seek / rewind / skip     | Working (tap-to-skip + hold-to-scrub, StartTimeTicks re-request + full pipeline flush) |
-| Audio / subtitle tracks  | Working (popup menus; subtitles burned in server-side)            |
+| Audio / subtitle tracks  | Working (popup menus; subtitles burned in server-side; audio stays in sync via PES-queue burst buffering) |
 | PlaybackInfo / transcode | Working (H.264 720p baseline profile, transcode always forced, PlaySessionId extracted) |
 | Settings                 | Working (account card, log out, Debug Logging toggle)             |
 | Update check             | Working (GitHub latest-release lookup at launch, modal popup)     |
