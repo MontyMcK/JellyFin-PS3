@@ -10,6 +10,7 @@
 #include <sys/thread.h>
 
 #include "plog.h"
+#include "jf_paths.h"
 
 #define PLOG_RING  256
 #define PLOG_LEN   128
@@ -93,14 +94,16 @@ void plog_stop(void) {
 // User toggle — persisted so the choice survives restarts.
 // -------------------------------------------------------
 
-#define PLOG_SETTINGS_FILE "/dev_hdd0/tmp/jellyfin_settings.txt"
+// Persistent (survives reboot): stored in the app data dir, NOT /dev_hdd0/tmp
+// (which is wiped on boot).  See jf_paths.h.
+#define PLOG_SETTINGS_NAME "jellyfin_settings.txt"
 
 static bool s_plog_enabled = false;   // off by default
 
 bool plog_enabled(void) { return s_plog_enabled; }
 
 static void plog_save_setting(void) {
-    FILE *f = fopen(PLOG_SETTINGS_FILE, "w");
+    FILE *f = fopen(jf_data_path(PLOG_SETTINGS_NAME), "w");
     if (f) {
         fprintf(f, "plog=%d\n", s_plog_enabled ? 1 : 0);
         fclose(f);
@@ -109,7 +112,7 @@ static void plog_save_setting(void) {
 
 void plog_load_setting(void) {
     s_plog_enabled = false;
-    FILE *f = fopen(PLOG_SETTINGS_FILE, "r");
+    FILE *f = fopen(jf_data_path(PLOG_SETTINGS_NAME), "r");
     if (f) {
         char line[64];
         while (fgets(line, sizeof(line), f)) {

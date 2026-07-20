@@ -11,6 +11,7 @@
 #include "ui.h"
 #include "ui_visuals.h"
 #include "timing.h"
+#include "jf_paths.h"
 
 volatile bool g_auth_expired = false;
 
@@ -23,7 +24,7 @@ static char s_device_id[24] = "";
 
 const char *jf_device_id(void) {
     if (s_device_id[0]) return s_device_id;
-    FILE *f = fopen("/dev_hdd0/tmp/jellyfin_device_id.txt", "r");
+    FILE *f = fopen(jf_data_path("jellyfin_device_id.txt"), "r");
     if (f) {
         if (fscanf(f, "%23s", s_device_id) != 1) s_device_id[0] = '\0';
         fclose(f);
@@ -33,14 +34,14 @@ const char *jf_device_id(void) {
         u32 b = (u32)timing_get_us();
         snprintf(s_device_id, sizeof(s_device_id), "ps3-%08x%08x",
                  a ^ 0x9e3779b9u, b);
-        f = fopen("/dev_hdd0/tmp/jellyfin_device_id.txt", "w");
+        f = fopen(jf_data_path("jellyfin_device_id.txt"), "w");
         if (f) { fprintf(f, "%s\n", s_device_id); fclose(f); }
     }
     return s_device_id;
 }
 
 void save_config(void) {
-    FILE *f = fopen("/dev_hdd0/tmp/jellyfin_config.txt", "w");
+    FILE *f = fopen(jf_data_path("jellyfin_config.txt"), "w");
     if (f) {
         fprintf(f, "%s\n%s\n%s\n%s\n", g_server, g_username, g_token, g_userid);
         fclose(f);
@@ -48,7 +49,7 @@ void save_config(void) {
 }
 
 int load_config(void) {
-    FILE *f = fopen("/dev_hdd0/tmp/jellyfin_config.txt", "r");
+    FILE *f = fopen(jf_data_path("jellyfin_config.txt"), "r");
     if (!f) return 0;
     fscanf(f, "%255s\n%63s\n%255s\n%63s\n", g_server, g_username, g_token, g_userid);
     fclose(f);
@@ -73,7 +74,7 @@ void jellyfin_logout(void) {
     g_username[0] = '\0';
 
     // Remove the saved config so a restart does not auto-login.
-    remove("/dev_hdd0/tmp/jellyfin_config.txt");
+    remove(jf_data_path("jellyfin_config.txt"));
 }
 
 static void trim(char *s) {
