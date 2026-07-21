@@ -10,8 +10,8 @@
 #include "update_check.h"
 #include "plog.h"
 
-static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out", "Debug Logging" };
-static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  = { ICON_LOGOUT, ICON_BUG };
+static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out", "Debug Logging", "Screen Size" };
+static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  = { ICON_LOGOUT, ICON_BUG, ICON_TV };
 
 #define SET_PANEL_H 96
 #define SET_ROW_H   56
@@ -130,14 +130,101 @@ void xmb_draw_settings(void) {
                     (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
                     val, 18, plog_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
+        if (i == 2) {   // Screen Size — right-aligned overscan percentage
+            int pm = (int)(overscan_frac() * 1000.0f + 0.5f);   // permille
+            char val[16];
+            if (pm == 0) snprintf(val, sizeof(val), "Off");
+            else         snprintf(val, sizeof(val), "%d.%d%%", pm / 10, pm % 10);
+            int vw = ttf_text_width(val, 18, sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
+                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
+                    val, 18, pm ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
     }
 
-    // Version footer.
+    // Version footer — skip it if a large overscan inset has squeezed the
+    // bottom-anchored footer up into the last (top-anchored) action row.
     {
-        const char *ver = "Jellyfin for PS3 " APP_VERSION " \xB7 built " __DATE__;
-        int vw = ttf_text_width(ver, 13);
-        drawTTF((u32)((W - vw) / 2),
-                (u32)((int)display_height - XMB_BOTTOM_PAD - 26),
-                ver, 13, XMB_TEXT_FAINT);
+        int footer_y = (int)display_height - XMB_BOTTOM_PAD - 26;
+        int last_row_bottom = settings_row_y(XMB_SETTINGS_COUNT - 1) + SET_ROW_H;
+        if (footer_y > last_row_bottom + 6) {
+            const char *ver = "Jellyfin for PS3 " APP_VERSION " \xB7 built " __DATE__;
+            int vw = ttf_text_width(ver, 13);
+            drawTTF((u32)((W - vw) / 2), (u32)footer_y, ver, 13, XMB_TEXT_FAINT);
+        }
     }
+}
+
+// -------------------------------------------------------
+// Overscan calibration screen (Settings > Screen Size)
+// -------------------------------------------------------
+// A full-screen takeover: a light "safe-area" field inset by the current
+// overscan, with a bright border and corner L-brackets the user aligns to the
+// visible edges of their CRT (d-pad left/right adjusts).  Because the field is
+// drawn at exactly the inset that the whole UI will use, matching the corners
+// to the screen edges guarantees nothing else clips.
+
+#define OVL_FIELD   0x00C8CCDAUL   // light safe-area field
+#define OVL_SURND   0x00101018UL   // near-black surround (over the wave)
+#define OVL_INK     0x00202634UL   // dark title text on the field
+#define OVL_INK_DIM 0x003A4256UL   // dark secondary text
+
+void xmb_overscan_calib_cpu(void) {
+    int W = (int)display_width, H = (int)display_height;
+    int ox = overscan_x(), oy = overscan_y();
+    if (W - 2 * ox < 40 || H - 2 * oy < 40) { ox = 0; oy = 0; }
+
+    // Flat surround covers the animated wave so the frame edges read cleanly.
+    drawRect(0, 0, (u32)W, (u32)H, OVL_SURND);
+    // The light field = the area that survives the inset everywhere else.
+    drawRect((u32)ox, (u32)oy, (u32)(W - 2 * ox), (u32)(H - 2 * oy), OVL_FIELD);
+
+    // Thin accent border at the inset edge.
+    const int t = 4;
+    drawRect((u32)ox, (u32)oy,            (u32)(W - 2 * ox), (u32)t, XMB_ACCENT);
+    drawRect((u32)ox, (u32)(H - oy - t),  (u32)(W - 2 * ox), (u32)t, XMB_ACCENT);
+    drawRect((u32)ox, (u32)oy, (u32)t, (u32)(H - 2 * oy), XMB_ACCENT);
+    drawRect((u32)(W - ox - t), (u32)oy, (u32)t, (u32)(H - 2 * oy), XMB_ACCENT);
+
+    // Bolder corner L-brackets — the primary alignment guide.
+    const int arm = (W < 1000 ? 40 : 64), ct = 7;
+    // top-left
+    drawRect((u32)ox, (u32)oy, (u32)arm, (u32)ct, XMB_ACCENT);
+    drawRect((u32)ox, (u32)oy, (u32)ct, (u32)arm, XMB_ACCENT);
+    // top-right
+    drawRect((u32)(W - ox - arm), (u32)oy, (u32)arm, (u32)ct, XMB_ACCENT);
+    drawRect((u32)(W - ox - ct),  (u32)oy, (u32)ct,  (u32)arm, XMB_ACCENT);
+    // bottom-left
+    drawRect((u32)ox, (u32)(H - oy - ct),  (u32)arm, (u32)ct, XMB_ACCENT);
+    drawRect((u32)ox, (u32)(H - oy - arm), (u32)ct,  (u32)arm, XMB_ACCENT);
+    // bottom-right
+    drawRect((u32)(W - ox - arm), (u32)(H - oy - ct),  (u32)arm, (u32)ct, XMB_ACCENT);
+    drawRect((u32)(W - ox - ct),  (u32)(H - oy - arm), (u32)ct,  (u32)arm, XMB_ACCENT);
+}
+
+void xmb_overscan_calib_text(void) {
+    int W = (int)display_width, H = (int)display_height;
+    int cy = H / 2;
+
+    const char *title = "Screen Size";
+    int tw = ttf_text_width(title, 26, true);
+    drawTTF((u32)((W - tw) / 2), (u32)(cy - 78), title, 26, OVL_INK, true);
+
+    const char *l1 = "Match the corners to the edges of your screen";
+    int l1w = ttf_text_width(l1, 16);
+    drawTTF((u32)((W - l1w) / 2), (u32)(cy - 34), l1, 16, OVL_INK_DIM);
+
+    int pm = (int)(overscan_frac() * 1000.0f + 0.5f);
+    char pct[16];
+    snprintf(pct, sizeof(pct), "%d.%d%%", pm / 10, pm % 10);
+    int pw = ttf_text_width(pct, 30, true);
+    drawTTF((u32)((W - pw) / 2), (u32)(cy - 2), pct, 30, XMB_ACCENT_DEEP, true);
+
+    const char *hint = "D-pad Left / Right to adjust";
+    int hw = ttf_text_width(hint, 15);
+    drawTTF((u32)((W - hw) / 2), (u32)(cy + 44), hint, 15, OVL_INK_DIM);
+
+    const char *keys = "Cross  Save        Circle  Cancel";
+    int kw = ttf_text_width(keys, 15);
+    drawTTF((u32)((W - kw) / 2), (u32)(cy + 70), keys, 15, OVL_INK_DIM);
 }

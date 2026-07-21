@@ -65,7 +65,14 @@ void player_display_frame(PlayerState *ps) {
     log_refresh_rate();
 
     // ---- Duration-consumption gate logic (Movian-style temporal blend) ----
-    s64 vblank_period_us = avsync_biased_period(16683);
+    // Drain one true vblank of content per real vblank.  The nominal period MUST
+    // track the actual display refresh (timing_vblank_period_us), NOT a hardcoded
+    // 16683: that constant is the 59.94Hz value and undershoots ~17% on a 50Hz
+    // PAL display (20000us), leaving the avsync loop to carry a permanent
+    // ~+3.4ms bias that never locks — the reported CRT judder.  Applies to both
+    // hardware and emulator; on a 59.94Hz display it evaluates to 16683 as before.
+    s64 nominal_vblank_us = timing_vblank_period_us();
+    s64 vblank_period_us  = avsync_biased_period(nominal_vblank_us);
     static int  s_pure_count = 0;
     static int  s_mid_count  = 0;
     static s64  s_spill_max  = 0;
@@ -171,15 +178,16 @@ void player_display_frame(PlayerState *ps) {
                 plog(buf2);
                 s64  smooth = avsync_get_smoothed_diff();
                 bool locked = avsync_is_locked();
-                s64  biased = avsync_biased_period(16683);
-                char buf3[160];
+                s64  biased = avsync_biased_period(nominal_vblank_us);
+                char buf3[176];
                 snprintf(buf3, sizeof(buf3),
-                    "avsync: smooth=%lldus locked=%d audio=%lluus video=%lluus bias=%lldus",
+                    "avsync: smooth=%lldus locked=%d audio=%lluus video=%lluus bias=%lldus nom=%lldus",
                     (long long)smooth,
                     locked ? 1 : 0,
                     (unsigned long long)audio_get_clock_us(),
                     (unsigned long long)jbuf_peek_pts_us(),
-                    (long long)(biased - 16683));
+                    (long long)(biased - nominal_vblank_us),
+                    (long long)nominal_vblank_us);
                 plog(buf3);
             }
         }

@@ -28,3 +28,11 @@ u64  audio_get_clock_us(void);
 
 // True once PTS tracking has started (first decoded PES with a valid PTS).
 bool audio_clock_valid(void);
+
+// Master output volume, 0..100 % (100 = unity, bit-exact).  Applied as a linear
+// gain to every PCM block.  audio_set_volume() clamps and persists the value;
+// audio_volume_load() restores it at startup.  Driven by the player HUD's
+// volume slider (d-pad up/down on the speaker control).
+int  audio_get_volume(void);
+void audio_set_volume(int pct);
+void audio_volume_load(void);

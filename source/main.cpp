@@ -19,6 +19,8 @@
 #include "img_arena.h"
 #include "meminfo.h"
 #include "plog.h"
+#include "overscan.h"
+#include "audio.h"
 #include "video.h"
 #include "player_hud.h"
 #include "slog.h"
@@ -94,6 +96,8 @@ int main(int argc, const char *argv[]) {
     crash_log("6 ui_init");
     ui_init();
     plog_load_setting();   // starts logging only if the user enabled it
+    overscan_load();       // restore the user's CRT overscan calibration
+    audio_volume_load();   // restore the saved master volume
 
     crash_log("7 splash drawHeader");
     drawHeader();

@@ -1,6 +1,7 @@
 #include "audio.h"
 #include "adec.h"
 #include "plog.h"
+#include "jf_paths.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +36,46 @@ static audio_read_fn  s_src_read  = adec_read_pcm;
 void audio_set_source(audio_avail_fn avail, audio_read_fn read) {
     s_src_avail = avail ? avail : adec_pcm_available;
     s_src_read  = read  ? read  : adec_read_pcm;
+}
+
+// ---- Master volume (0..100 %) ----
+// Applied as a linear gain to the float PCM block just before it is DMA'd to
+// the audio port.  100 % = unity (no scaling, bit-exact).  Persisted so the
+// level is remembered across sessions.  Adjusted from the player HUD's volume
+// slider (d-pad up/down on the speaker control).
+#define VOLUME_FILE "jellyfin_volume.txt"
+static volatile int s_volume_pct = 100;
+
+int  audio_get_volume(void) { return s_volume_pct; }
+
+void audio_set_volume(int pct) {
+    if (pct < 0)   pct = 0;
+    if (pct > 100) pct = 100;
+    if (pct == s_volume_pct) return;
+    s_volume_pct = pct;
+    FILE *f = fopen(jf_data_path(VOLUME_FILE), "w");
+    if (f) { fprintf(f, "%d\n", pct); fclose(f); }
+}
+
+void audio_volume_load(void) {
+    FILE *f = fopen(jf_data_path(VOLUME_FILE), "r");
+    if (!f) return;
+    int pct = 100;
+    if (fscanf(f, "%d", &pct) == 1) {
+        if (pct < 0)   pct = 0;
+        if (pct > 100) pct = 100;
+        s_volume_pct = pct;
+    }
+    fclose(f);
+}
+
+// Scale one interleaved-stereo float block in place by the master volume.
+static void apply_volume(float *buf, int n_pairs) {
+    int pct = s_volume_pct;
+    if (pct >= 100) return;              // unity: leave the block untouched
+    float g = (float)pct / 100.0f;
+    int n = n_pairs * 2;                 // L/R interleaved
+    for (int i = 0; i < n; i++) buf[i] *= g;
 }
 
 u64 audio_get_clock_us(void) {
@@ -158,6 +199,7 @@ bool audio_write_pcm(void) {
         }
         if (s_src_avail() >= AUDIO_BLOCK_SAMPLES) {
             s_src_read(blk_buf, AUDIO_BLOCK_SAMPLES);
+            apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES);
             s_pcm_blocks++;
         } else {
             // Decoder stall — write silence to keep DMA ring alive

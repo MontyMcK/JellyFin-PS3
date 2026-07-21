@@ -13,6 +13,13 @@ void timing_register_vblank(void);
 // fps_num/fps_den = e.g. 30/1 or 24000/1001.
 void timing_init(u32 fps_num, u32 fps_den);
 
+// Nominal per-vblank duration in microseconds for the DETECTED display refresh
+// (1e6 * display_den / display_num): 59.94Hz->16683, 50Hz->20000, 60Hz->16666,
+// 30Hz->33333.  The duration-consumption gate must drain exactly this much
+// content per real vblank; using a fixed 16683 assumes a 60Hz-family display and
+// mis-paces playback on a 50Hz (PAL) one.  Valid after timing_init().
+s64  timing_vblank_period_us(void);
+
 // Non-blocking: returns true when it is time to display the next frame.
 bool timing_frame_due(void);
 

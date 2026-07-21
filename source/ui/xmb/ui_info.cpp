@@ -60,7 +60,7 @@ void xmb_show_item_info(const XMBItem *it) {
         rsxSync();
         {
             int X = XMB_ITEM_PAD;
-            int Y = XMB_TOPBAR_H + 12;
+            int Y = XMB_OY + XMB_TOPBAR_H + 12;
             int max_w = (int)display_width - 2 * X;
 
             // Title, truncated to the content width.

@@ -33,10 +33,11 @@ static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
 // -------------------------------------------------------
 
 void xmb_draw_topbar(void) {
+    const int oy = XMB_OY;   // shift the top bar down out of the CRT overscan
     // Brand: "Jellyfin" + accent "PS3" tag on a shared baseline.
-    drawTTF(XMB_ITEM_PAD, 20, "Jellyfin", 22, XMB_TEXT, true);
-    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", 22, true) + 8, 27, "PS3",
-            13, XMB_ACCENT, true);
+    drawTTF(XMB_ITEM_PAD, (u32)(20 + oy), "Jellyfin", 22, XMB_TEXT, true);
+    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", 22, true) + 8,
+            (u32)(27 + oy), "PS3", 13, XMB_ACCENT, true);
 
     // Clock: "13/6  21:34" right-aligned, date dimmer than time.
     time_t now = time(NULL);
@@ -48,8 +49,8 @@ void xmb_draw_topbar(void) {
     int tw = ttf_text_width(t_str, 19);
     int dw = ttf_text_width(d_str, 13);
     int tx = (int)display_width - (int)XMB_ITEM_PAD - tw;
-    drawTTF((u32)tx, 22, t_str, 19, XMB_TEXT_DIM);
-    drawTTF((u32)(tx - dw - 10), 27, d_str, 13, XMB_TEXT_FAINT);
+    drawTTF((u32)tx, (u32)(22 + oy), t_str, 19, XMB_TEXT_DIM);
+    drawTTF((u32)(tx - dw - 10), (u32)(27 + oy), d_str, 13, XMB_TEXT_FAINT);
 }
 
 // Faded hairline under the tab bar — bright at the center, dissolving
@@ -76,7 +77,8 @@ void xmb_draw_divider(void) {
 
 void xmb_draw_tabs(void) {
     const int TAB_SPACING = 72;
-    const int icon_cy     = XMB_TOPBAR_H + UIS_H(30);   // icon centerline
+    const int oy          = XMB_OY;                          // overscan shift
+    const int icon_cy     = oy + XMB_TOPBAR_H + UIS_H(30);   // icon centerline
 
     // Pack only the enabled tabs and center *that* group.  Centering on the
     // full XMB_TAB_COUNT span would leave a gap (and shove the row off to the
@@ -106,9 +108,9 @@ void xmb_draw_tabs(void) {
 
         if (active) {
             int lw = ttf_text_width(g_tabs[t].label, 14);
-            drawTTF((u32)(cx - lw / 2), (u32)(XMB_TOPBAR_H + UIS_H(52)),
+            drawTTF((u32)(cx - lw / 2), (u32)(oy + XMB_TOPBAR_H + UIS_H(52)),
                     g_tabs[t].label, 14, XMB_TEXT);
-            drawRect((u32)(cx - 13), (u32)(XMB_TOPBAR_H + UIS_H(74)), 26, 3,
+            drawRect((u32)(cx - 13), (u32)(oy + XMB_TOPBAR_H + UIS_H(74)), 26, 3,
                      XMB_ACCENT);
         }
     }

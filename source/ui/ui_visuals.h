@@ -2,6 +2,7 @@
 #include <ppu-types.h>
 #include "ui.h"
 #include "icons.h"
+#include "overscan.h"   // overscan_x()/overscan_y() feed the layout anchors below
 
 // -------------------------------------------------------
 // XMB tab indices
@@ -67,15 +68,23 @@ typedef struct {
 #define UIS_W(px) ((int)display_width  < 1280 ? (px) * (int)display_width  / 1280 : (px))
 #define UIS_H(px) ((int)display_height <  720 ? (px) * (int)display_height /  720 : (px))
 
+// CRT overscan inset (Settings > Screen Size).  0 by default, so with no
+// calibration every anchor below is byte-identical to before.  Folded into the
+// top/bottom/side anchors so the WHOLE XMB clears the bezel: top chrome shifts
+// down by XMB_OY, bottom hints lift by XMB_OY, and the centered content plus
+// edge-anchored brand/clock inset by XMB_OX (via XMB_ITEM_PAD).
+#define XMB_OY          overscan_y()
+#define XMB_OX          overscan_x()
+
 #define XMB_TOPBAR_H    UIS_H(64)
 #define XMB_TABBAR_H    UIS_H(80)
-#define XMB_DIVIDER_Y   (XMB_TOPBAR_H + XMB_TABBAR_H)
+#define XMB_DIVIDER_Y   (XMB_OY + XMB_TOPBAR_H + XMB_TABBAR_H)
 #define XMB_CONTENT_Y   (XMB_DIVIDER_Y + UIS_H(30))
-#define XMB_BOTTOM_PAD  UIS_H(70)
+#define XMB_BOTTOM_PAD  (UIS_H(70) + XMB_OY)
 #define XMB_ITEM_H      UIS_H(90)
 #define XMB_THUMB_W     UIS_H(52)
 #define XMB_THUMB_H     UIS_H(74)
-#define XMB_ITEM_PAD    UIS_W(40)
+#define XMB_ITEM_PAD    (UIS_W(40) + XMB_OX)
 
 // Centered narrow list layout (search results keep this style).
 // 780 (~60% of 1280) when it fits, otherwise the framebuffer minus margins.
@@ -221,10 +230,18 @@ extern bool g_jumpbar_active;
 extern int  g_jumpbar_sel;
 extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 
-// Settings tab state (defined in ui.cpp)
-#define XMB_SETTINGS_COUNT 2   // number of selectable settings entries
-extern int  g_settings_sel;        // highlighted settings entry
-extern bool g_settings_confirm;    // true while the logout confirm prompt is up
+// Settings tab state (defined in ui_xmb_state.cpp)
+#define XMB_SETTINGS_COUNT 3   // number of selectable settings entries
+extern int   g_settings_sel;       // highlighted settings entry
+extern bool  g_settings_confirm;   // true while the logout confirm prompt is up
+extern bool  g_overscan_calib;     // true while the overscan calibration screen is up
+extern float g_overscan_calib_prev; // frac to restore if calibration is cancelled
+
+// Full-screen overscan calibration screen (Settings > Screen Size).  Split into
+// CPU (rects) and text (labels) phases like the rest of the XMB.  Defined in
+// ui_settings.cpp; driven from the XMB loop when g_overscan_calib is set.
+void xmb_overscan_calib_cpu(void);
+void xmb_overscan_calib_text(void);
 
 // -------------------------------------------------------
 // Hints bar
