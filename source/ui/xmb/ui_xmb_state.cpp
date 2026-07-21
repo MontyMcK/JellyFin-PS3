@@ -73,5 +73,7 @@ int  g_jumpbar_sel    = 1;
 char g_tab_name_filter[XMB_TAB_COUNT][4];
 
 // Settings tab state
-int  g_settings_sel     = 0;
-bool g_settings_confirm = false;
+int   g_settings_sel      = 0;
+bool  g_settings_confirm  = false;
+bool  g_overscan_calib    = false;
+float g_overscan_calib_prev = 0.0f;

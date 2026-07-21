@@ -9,6 +9,7 @@
 #include "player_hud_internal.h"
 #include "ui.h"
 #include "timing.h"
+#include "audio.h"
 
 HudState g_hud;
 
@@ -33,6 +34,7 @@ void hud_init(u32 total_secs, const char *audio_label) {
     g_hud.focus        = -1;
     g_hud.incr_idx     = 0;
     g_hud.cc_active    = false;
+    g_hud.vol_active   = false;
     g_hud.menu_visible = false;
     g_hud.menu_n       = 0;
     g_hud.menu_choice  = -1;
@@ -93,9 +95,19 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
         g_hud.visible      = false;
         g_hud.focus        = -1;
         g_hud.menu_visible = false;
+        g_hud.vol_active   = false;
         return HUD_ACTION_NONE;
     }
     if (!g_hud.visible) return HUD_ACTION_NONE;
+
+    // Volume slider modal: while open, up/down change the level and X/O close
+    // it (d-pad left/right are swallowed so focus stays on the speaker).
+    if (g_hud.vol_active) {
+        if (BTN_REPEAT(up))        audio_set_volume(audio_get_volume() + VOL_STEP);
+        else if (BTN_REPEAT(down)) audio_set_volume(audio_get_volume() - VOL_STEP);
+        else if (BTN_PRESSED(cross) || BTN_PRESSED(circle)) g_hud.vol_active = false;
+        return HUD_ACTION_NONE;
+    }
 
     // While a popup menu is open it owns the input: up/down move the cursor,
     // X picks the entry, circle closes without picking.
@@ -115,8 +127,8 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     }
 
     // D-pad left/right move the focus cursor across the control row, in screen
-    // order: REW · PLAY/PAUSE · FF · AUDIO · CC.  This is how you reach the
-    // AUDIO and CC controls.  R2/L2 (handled in the main loop) still scrub.
+    // order: REW · PLAY/PAUSE · FF · AUDIO · VOLUME · CC.  This is how you reach
+    // the AUDIO, VOLUME and CC controls.  R2/L2 (handled in the main loop) scrub.
     // The reveal press above is swallowed so the bar only navigates once it's
     // already showing.
     if (!was_hidden) {
@@ -135,10 +147,11 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     // X (cross) activates the focused control.
     if (BTN_PRESSED(cross)) {
         switch (g_hud.focus) {
-        case FOCUS_REW:   g_hud.seek_delta = -s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
-        case FOCUS_FF:    g_hud.seek_delta = +s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
-        case FOCUS_AUDIO: return HUD_ACTION_AUDIO_TRACK;
-        case FOCUS_CC:    return HUD_ACTION_SUBTITLE;
+        case FOCUS_REW:    g_hud.seek_delta = -s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
+        case FOCUS_FF:     g_hud.seek_delta = +s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
+        case FOCUS_AUDIO:  return HUD_ACTION_AUDIO_TRACK;
+        case FOCUS_VOLUME: g_hud.vol_active = true; return HUD_ACTION_NONE;
+        case FOCUS_CC:     return HUD_ACTION_SUBTITLE;
         case FOCUS_PP:
         default:          return HUD_ACTION_TOGGLE_PAUSE;
         }

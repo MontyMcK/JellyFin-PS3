@@ -312,16 +312,22 @@ void ui_run_xmb(void) {
 
         rsxSync();
 
-        if (first_iter) crash_log("13.8 cpu_phase");
-        xmb_draw_cpu_phase(tab);
-        if (first_iter) crash_log("13.8b text_phase");
-        xmb_draw_text_phase(tab);
-        if (first_iter) crash_log("13.8c hints");
-        bool popup = xmb_update_popup_active();
-        if (!popup) xmb_draw_hints(tab);   // the popup swaps in its own hint
-        if (first_iter) crash_log("13.8d tabs");
-        xmb_draw_tabs();
-        if (popup) xmb_update_popup_draw();
+        if (g_overscan_calib) {
+            // Full-screen overscan calibration takeover — no chrome/hints/tabs.
+            xmb_overscan_calib_cpu();
+            xmb_overscan_calib_text();
+        } else {
+            if (first_iter) crash_log("13.8 cpu_phase");
+            xmb_draw_cpu_phase(tab);
+            if (first_iter) crash_log("13.8b text_phase");
+            xmb_draw_text_phase(tab);
+            if (first_iter) crash_log("13.8c hints");
+            bool popup = xmb_update_popup_active();
+            if (!popup) xmb_draw_hints(tab);   // the popup swaps in its own hint
+            if (first_iter) crash_log("13.8d tabs");
+            xmb_draw_tabs();
+            if (popup) xmb_update_popup_draw();
+        }
 
         if (first_iter) crash_log("13.9 first flip");
         flip();

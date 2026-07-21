@@ -151,6 +151,17 @@ void timing_frame_shown(void) {
     s_vsync_err   -= (s64)s_vsyncs_next * (s64)(s_fps_num * s_display_den);
 }
 
+// Nominal per-vblank duration (µs) for the detected display refresh, derived
+// from the same s_display_num/den the Bresenham accumulator above uses.  The
+// duration-consumption gate (player_display.cpp) drains this much content per
+// real vblank, so it stays correct at ANY refresh: 16683 at 59.94Hz NTSC,
+// 20000 at 50Hz PAL, 33333 at 30Hz.  Replaces a hardcoded 16683 that silently
+// assumed a 60Hz display and undershot ~17% on a 50Hz CRT (judder).
+s64 timing_vblank_period_us(void) {
+    if (s_display_num == 0) return 16683;   // defensive; never happens post-init
+    return (s64)1000000 * (s64)s_display_den / (s64)s_display_num;
+}
+
 // ---- AV sync EMA ----
 
 static s64  s_avsync_smooth_us    = 0;

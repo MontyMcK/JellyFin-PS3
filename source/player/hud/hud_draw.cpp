@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
+#include <math.h>
 
 #include <ppu-types.h>
 #include <rsx/rsx.h>
@@ -24,6 +25,7 @@
 #include "ui_visuals.h"
 #include "rsxutil.h"
 #include "plog.h"
+#include "audio.h"   // audio_get_volume() for the volume slider
 
 // -------------------------------------------------------
 // Overlay buffers + compose-on-change state
@@ -44,7 +46,8 @@ struct OvlKey {
     u32  total_secs;
     s32  focus, incr_idx;
     s32  menu_sel, menu_cur, menu_n;
-    u8   paused, cc, menu_vis, title_on;
+    s32  vol_pct;
+    u8   paused, cc, menu_vis, title_on, vol_active;
     char audio[64];
 };
 static OvlKey s_ovl_key;
@@ -159,6 +162,42 @@ static void draw_pp_symbol(int cx, int cy, bool paused, u32 color) {
     }
 }
 
+// Speaker/volume glyph drawn with CPU primitives (the embedded Tabler font is a
+// 20-glyph subset with no volume icon).  A filled box + cone with two sound-wave
+// arcs, centred at (cx, cy) inside a box of height h.
+#define SPK_PUT(X,Y) do { int _x=(X),_y=(Y); \
+    if (_x>=0 && (u32)_x<tw && _y>=0 && (u32)_y<th) cpu_draw_row((u32)_y)[_x]=color; } while (0)
+static void draw_speaker(int cx, int cy, int h, u32 color) {
+    if (cpu_rt_on()) color |= 0xFF000000u;
+    u32 tw = cpu_draw_w(), th = cpu_draw_h();
+    int box_w  = h * 34 / 100;
+    int box_h  = h * 46 / 100;
+    int box_x0 = cx - h / 2;
+    int cone_x0 = box_x0 + box_w;
+    int cone_x1 = cx + h / 20;                 // cone mouth, left of the waves
+    // Box (magnet).
+    for (int y = cy - box_h / 2; y <= cy + box_h / 2; y++)
+        for (int x = box_x0; x < cone_x0; x++) SPK_PUT(x, y);
+    // Cone: height ramps from the box height up to the full h at the mouth.
+    int cone_w = cone_x1 - cone_x0;
+    for (int x = cone_x0; x <= cone_x1; x++) {
+        float t  = cone_w > 0 ? (float)(x - cone_x0) / (float)cone_w : 0.0f;
+        int   hh = box_h + (int)((float)(h - box_h) * t);
+        for (int y = cy - hh / 2; y <= cy + hh / 2; y++) SPK_PUT(x, y);
+    }
+    // Two sound-wave arcs to the right of the mouth.
+    for (int k = 1; k <= 2; k++) {
+        int r = h * (2 + k) / 10 + (cone_x1 - cx);
+        for (int a = -45; a <= 45; a += 2) {
+            float rad = (float)a * 3.14159265f / 180.0f;
+            int x = cx + (int)((float)r * cosf(rad));
+            int y = cy + (int)((float)r * sinf(rad));
+            SPK_PUT(x, y); SPK_PUT(x + 1, y);  // 2px stroke
+        }
+    }
+}
+#undef SPK_PUT
+
 static void fmt_time(char *buf, int sz, u32 secs) {
     u32 h = secs / 3600;
     u32 m = (secs % 3600) / 60;
@@ -191,10 +230,11 @@ static void draw_menu(int dw, int dh) {
         int tw = MENU_DOT_COL + ttf_text_width(g_hud.menu_items[i], ROW_TEXT_PX);
         if (tw > max_w) max_w = tw;
     }
+    int ox  = overscan_x();
     int mw = max_w + 2 * MENU_PAD;
-    if (mw > dw - 2 * RIGHT_PAD) mw = dw - 2 * RIGHT_PAD;
+    if (mw > dw - 2 * (RIGHT_PAD + ox)) mw = dw - 2 * (RIGHT_PAD + ox);
     int mh  = MENU_TITLE_H + g_hud.menu_n * MENU_ROW_H + MENU_PAD;
-    int mx1 = dw - RIGHT_PAD;
+    int mx1 = dw - RIGHT_PAD - ox;
     int mx0 = mx1 - mw;
     int my1 = dh - HUD_STRIP_H - 6;
     int my0 = my1 - mh;
@@ -235,16 +275,21 @@ static void hud_compose(u64 elapsed_us, bool paused) {
 
     cpu_rt_begin(s_ovl_stage, s_ovl_w, s_ovl_h);
 
+    // CRT overscan inset: lift the effective bottom by oy and pad the left/right
+    // edges by ox so the transport row, times and buttons clear the bezel (#21).
+    int ox = overscan_x(), oy = overscan_y();
     int dw = (int)s_ovl_w;
-    int dh = (int)s_ovl_h;
+    int dh = (int)s_ovl_h - oy;
+    int lpad = LEFT_PAD + ox;   // left inset incl. overscan
+    int rpad = RIGHT_PAD + ox;  // right inset incl. overscan
 
     // ---- Title (top-left, only while paused) ----
     if (paused && g_hud.title[0]) {
         int tw = ttf_text_width(g_hud.title, TITLE_PX);
-        if (tw > dw - 2 * LEFT_PAD) tw = dw - 2 * LEFT_PAD;
-        ovl_dim((u32)(LEFT_PAD - 12), (u32)(TITLE_TOP_PAD - 8),
+        if (tw > dw - 2 * lpad) tw = dw - 2 * lpad;
+        ovl_dim((u32)(lpad - 12), (u32)(TITLE_TOP_PAD + oy - 8),
                 (u32)(tw + 24), (u32)((int)TITLE_PX + 16), 185);
-        drawTTF((u32)LEFT_PAD, (u32)TITLE_TOP_PAD, g_hud.title, TITLE_PX,
+        drawTTF((u32)lpad, (u32)(TITLE_TOP_PAD + oy), g_hud.title, TITLE_PX,
                 HUD_FOCUSED);
     }
 
@@ -273,17 +318,19 @@ static void hud_compose(u64 elapsed_us, bool paused) {
         rem_w = ttf_text_width(rem_str, ROW_TEXT_PX);
     }
 
-    // ---- Right controls block: audio + CC ----
+    // ---- Right controls block: audio + volume + CC ----
     int w_music  = (int)MUSIC_ICON_PX;
     int w_alabel = ttf_text_width(g_hud.audio_label, ROW_TEXT_PX);
+    int w_spk    = (int)SPK_ICON_PX;
     int w_cc     = ttf_text_width("CC", CC_TEXT_PX);
-    int rctrl_w  = w_music + ICON_LABEL_GAP + w_alabel + AUDIO_SEP + w_cc;
-    int rctrl_x0 = dw - RIGHT_PAD - rctrl_w;   // left edge of right controls
+    int rctrl_w  = w_music + ICON_LABEL_GAP + w_alabel + AUDIO_SEP
+                 + w_spk + AUDIO_SEP + w_cc;
+    int rctrl_x0 = dw - rpad - rctrl_w;        // left edge of right controls
 
     // ---- Left controls block: rewind + play/pause + fast-forward ----
     int w_rew    = ps_btn_width('L', (int)ROW_ICON_PX);
     int w_ff     = ps_btn_width('R', (int)ROW_ICON_PX);
-    int lctrl_x1 = LEFT_PAD + w_rew + CTRL_GAP + PP_W + CTRL_GAP + w_ff;
+    int lctrl_x1 = lpad + w_rew + CTRL_GAP + PP_W + CTRL_GAP + w_ff;
 
     // ---- Seek bar (between elapsed time and remaining time) ----
     int track_x0 = lctrl_x1 + TIME_GAP + elapsed_w + TIME_GAP;
@@ -314,7 +361,7 @@ static void hud_compose(u64 elapsed_us, bool paused) {
 
     // ---- Left transport controls ----
     // Button sprites: vertically centred on the control row.
-    int lx = LEFT_PAD;
+    int lx = lpad;
 
     draw_ps_button_vcentered((u32)lx, ctrl_cy, 'L', (int)ROW_ICON_PX,
                              ctrl_bright(FOCUS_REW));
@@ -326,9 +373,10 @@ static void hud_compose(u64 elapsed_us, bool paused) {
     draw_ps_button_vcentered((u32)lx, ctrl_cy, 'R', (int)ROW_ICON_PX,
                              ctrl_bright(FOCUS_FF));
 
-    // ---- Audio / CC (right of the seek bar, same row) ----
+    // ---- Audio / Volume / CC (right of the seek bar, same row) ----
     int audio_icon_y = audio_cy - (int)(MUSIC_ICON_PX * 0.5f);
     int audio_text_y = audio_cy - (int)(ROW_TEXT_PX   * 0.5f);
+    int spk_icon_y   = audio_cy - (int)(SPK_ICON_PX   * 0.5f);
     int cc_text_y    = audio_cy - (int)(CC_TEXT_PX    * 0.5f);
     int rx = rctrl_x0;
 
@@ -339,12 +387,42 @@ static void hud_compose(u64 elapsed_us, bool paused) {
             ctrl_color(FOCUS_AUDIO));
     rx += w_alabel + AUDIO_SEP;
 
+    int spk_x = rx;
+    (void)spk_icon_y;
+    draw_speaker(spk_x + w_spk / 2, audio_cy, (int)SPK_ICON_PX,
+                 ctrl_color(FOCUS_VOLUME));
+    rx += w_spk + AUDIO_SEP;
+
     drawTTF((u32)rx, (u32)cc_text_y, "CC", CC_TEXT_PX,
             ctrl_color(FOCUS_CC), /*bold=*/true);
     // Subtitles on: accent underline beneath the CC button.
     if (g_hud.cc_active)
         drawRect((u32)rx, (u32)(cc_text_y + (int)CC_TEXT_PX + 3),
                  (u32)w_cc, 2, HUD_ACCENT);
+
+    // ---- Volume slider (vertical, above the speaker) while adjusting ----
+    if (g_hud.vol_active) {
+        int vol       = audio_get_volume();          // 0..100
+        int spk_cx    = spk_x + w_spk / 2;
+        int track_x   = spk_cx - VOL_TRACK_W / 2;
+        int track_bot = strip_y - 12;
+        int track_top = track_bot - VOL_TRACK_H;
+        int fill_h    = VOL_TRACK_H * vol / 100;
+        // Backdrop so the slider reads over bright video (also sets the upload
+        // span for these rows — they sit above the transport strip).
+        ovl_dim((u32)(spk_cx - 24), (u32)(track_top - 30),
+                48, (u32)((track_bot - track_top) + 40), 205);
+        drawRect((u32)track_x, (u32)track_top, VOL_TRACK_W, VOL_TRACK_H,
+                 HUD_ACCENT_DIM);
+        drawRect((u32)track_x, (u32)(track_bot - fill_h), VOL_TRACK_W,
+                 (u32)fill_h, HUD_ACCENT);
+        draw_circle(spk_cx, track_bot - fill_h, VOL_KNOB_R, HUD_FOCUSED);
+        char vbuf[8];
+        snprintf(vbuf, sizeof(vbuf), "%d", vol);
+        int vw = ttf_text_width(vbuf, ROW_TEXT_PX);
+        drawTTF((u32)(spk_cx - vw / 2), (u32)(track_top - 24), vbuf,
+                ROW_TEXT_PX, HUD_FOCUSED);
+    }
 
     if (g_hud.menu_visible && g_hud.menu_n > 0)
         draw_menu(dw, dh);
@@ -397,6 +475,8 @@ void hud_draw(u64 elapsed_us, bool paused) {
     key.cc           = g_hud.cc_active ? 1 : 0;
     key.menu_vis     = g_hud.menu_visible ? 1 : 0;
     key.title_on     = (paused && g_hud.title[0]) ? 1 : 0;
+    key.vol_active   = g_hud.vol_active ? 1 : 0;
+    key.vol_pct      = audio_get_volume();
     snprintf(key.audio, sizeof(key.audio), "%s", g_hud.audio_label);
 
     if (!s_ovl_key_valid || memcmp(&key, &s_ovl_key, sizeof(key)) != 0) {

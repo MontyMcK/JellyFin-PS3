@@ -112,6 +112,15 @@ void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs) {
 
 // Settings tab — account actions (Log Out).
 static bool xmb_input_settings(void) {
+    if (g_overscan_calib) {
+        // Modal calibration: d-pad L/R adjusts the inset, X saves, O restores.
+        if (BTN_REPEAT(left))  overscan_set_frac(overscan_frac() - OVERSCAN_STEP_FRAC);
+        if (BTN_REPEAT(right)) overscan_set_frac(overscan_frac() + OVERSCAN_STEP_FRAC);
+        if (BTN_PRESSED(cross))  { overscan_save(); g_overscan_calib = false; }
+        if (BTN_PRESSED(circle)) { overscan_set_frac(g_overscan_calib_prev);
+                                   g_overscan_calib = false; }
+        return false;
+    }
     if (g_settings_confirm) {
         // Modal confirm: swallow all other input until resolved.
         if (BTN_PRESSED(cross)) {
@@ -128,6 +137,10 @@ static bool xmb_input_settings(void) {
     if (BTN_PRESSED(cross)) {
         if (g_settings_sel == 0) g_settings_confirm = true;             // Log Out
         if (g_settings_sel == 1) plog_set_enabled(!plog_enabled());     // Debug Logging
+        if (g_settings_sel == 2) {                                      // Screen Size
+            g_overscan_calib_prev = overscan_frac();
+            g_overscan_calib      = true;
+        }
     }
     return false;
 }

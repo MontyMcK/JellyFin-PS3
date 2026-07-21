@@ -27,9 +27,16 @@
 #define ROW_ICON_PX          36.0f         // L2/R2 button sprite height
 #define ROW_TEXT_PX          18.0f         // time + audio label text size
 #define MUSIC_ICON_PX        24.0f
+#define SPK_ICON_PX          24.0f         // volume/speaker glyph height
 #define CC_TEXT_PX           20.0f
 #define ICON_LABEL_GAP        6
 #define AUDIO_SEP            16            // horizontal gap between audio btn and CC btn
+
+// Volume slider (shown above the speaker control while adjusting)
+#define VOL_STEP              5            // % per d-pad step
+#define VOL_TRACK_W           6            // slider track width
+#define VOL_TRACK_H          90            // slider track height
+#define VOL_KNOB_R            7            // slider knob radius
 
 #define PP_H                 22            // play/pause primitive bounding height (px)
 #define PP_W                 22            // play/pause primitive bounding width  (px)
@@ -48,13 +55,14 @@
 
 #define MATERIAL_MUSIC_NOTE  ICON_MUSIC   // Tabler music glyph (icons.h)
 
-// Focus slot indices
+// Focus slot indices — screen order across the control row.
 #define FOCUS_REW    0
 #define FOCUS_PP     1
 #define FOCUS_FF     2
 #define FOCUS_AUDIO  3
-#define FOCUS_CC     4
-#define FOCUS_COUNT  5
+#define FOCUS_VOLUME 4
+#define FOCUS_CC     5
+#define FOCUS_COUNT  6
 
 // -------------------------------------------------------
 // State (defined in hud_core.cpp)
@@ -70,6 +78,7 @@ struct HudState {
     int  focus;        // -1=none, 0..FOCUS_COUNT-1=focused slot
     int  incr_idx;     // 0=10s  1=30s  2=5min
     bool cc_active;    // subtitles on -> underline the CC button
+    bool vol_active;   // volume slider open (speaker control clicked)
 
     // Popup menu state.  Items are caller-owned pointers (track labels live
     // in the player's static JFTracks, so they outlive the menu).
