@@ -72,6 +72,11 @@ void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs);
 // Triangle detail overlay (xmb/ui_info.cpp)
 void xmb_show_item_info(const XMBItem *it);
 
+// Resume-or-restart prompt for a partly-watched item (xmb/ui_info.cpp).
+// Returns seconds to start at (0 = beginning), or <0 if the user cancelled.
+// Returns 0 without prompting when the item is not meaningfully resumable.
+int xmb_resume_choice(const XMBItem *it);
+
 // -------------------------------------------------------
 // Home shelf screen (xmb/ui_home.cpp) — stacked horizontal rows
 // (Continue Watching, Next Up, Recently Added Movies/Shows, Music stub).

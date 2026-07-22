@@ -3,7 +3,7 @@
 // Version built into this binary.  Keep in step with the GitHub release tag
 // (leading 'v'/'V' is ignored when comparing, so "2.0-beta" matches
 // "V2.0-beta").  Bump this when cutting a release.
-#define APP_VERSION "2.2.1-beta"
+#define APP_VERSION "2.2.2-beta"
 
 // One-shot background check of the project's GitHub releases.  Runs entirely
 // on its own low-priority thread: start it once after http_init() succeeds
@@ -16,6 +16,12 @@ void update_check_start(void);
 // Join the worker before tearing the network down at exit.  Safe to call
 // even if update_check_start() was never called.
 void update_check_shutdown(void);
+
+// True once the worker has finished (whether or not it found an update).  At
+// that point it has already unloaded the HTTP/HTTPS/SSL modules and freed its
+// pools, so callers that ran the check early (before reserving big buffers) can
+// poll this to know its memory is released again.
+bool update_check_done(void);
 
 // True once the check has finished AND found a release newer than
 // APP_VERSION; copies the release tag (e.g. "V2.1") into out.  Poll it from
