@@ -14,6 +14,7 @@
 #include "ui_visuals.h"
 #include "http.h"
 #include "update_check.h"
+#include <unistd.h>   // usleep
 #include "jellyfin_api.h"
 #include "thumbnail_cache.h"
 #include "img_arena.h"
@@ -107,6 +108,39 @@ int main(int argc, const char *argv[]) {
     flip();
     crash_log("7d splash done");
 
+    // Bring the network up and run the one-shot update check BEFORE reserving
+    // the big buffers below.  The check has to load the HTTPS + SSL PRX modules;
+    // once vdec_reserve_mem() (96MB) + the jitter buffer have claimed the heap
+    // there is not enough left, and on the real console sysModuleLoad(HTTPS)
+    // failed with 0x80010004 (ENOMEM) so the "New version" popup never appeared
+    // (RPCS3 has RAM to spare, which hid it).  Run it here while the heap is
+    // still free and WAIT for it to finish: it unloads those modules and frees
+    // its pools before we reserve, so the reservations still land on a clean
+    // heap.  http_init() brings up SYSMODULE_NET once, up front (a single
+    // allocation, not the alloc/free churn that fragments a big contiguous
+    // reservation), and the app keeps it for the Jellyfin API.
+    crash_log("8 http_init");
+    if (http_init() != HTTP_SUCCESS) {
+        crash_log("8 FAILED");
+        drawHeader();
+        drawTTF(40, 96, "Network initialisation failed.", 16, 0x0099A0BC);
+        flip();
+        while (running) sysUtilCheckCallback();
+        return 1;
+    }
+    crash_log("9 running=1");
+    running = 1;
+    crash_log("8b update check");
+    update_check_start();
+    // Wait (responsively) until it finishes so its HTTPS/SSL memory is released
+    // before we reserve VDEC.  Bounded by the check's own 2s network timeouts;
+    // the "Starting..." splash stays up meanwhile.
+    while (!update_check_done() && running) {
+        sysUtilCheckCallback();
+        usleep(16000);
+    }
+    crash_log("8c update check done");
+
     // Reserve the player's big buffers NOW, while the heap is pristine:
     // HUD overlay (~8MB x2), VDEC arena (96MB), jitter buffer (16 slots).
     // They are cached for the app's lifetime — allocated per-session they
@@ -143,22 +177,6 @@ int main(int argc, const char *argv[]) {
         crash_log(buf);
         plog(buf);
     }
-
-    crash_log("8 http_init");
-    if (http_init() != HTTP_SUCCESS) {
-        crash_log("8 FAILED");
-        drawHeader();
-        drawTTF(40, 96, "Network initialisation failed.", 16, 0x0099A0BC);
-        flip();
-        while (running) sysUtilCheckCallback();
-        return 1;
-    }
-
-    crash_log("9 running=1");
-    running = 1;
-
-    // One-shot GitHub release check on its own thread; fails quietly.
-    update_check_start();
 
     thumb_cache_init();
 

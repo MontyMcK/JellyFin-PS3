@@ -206,10 +206,15 @@ static void xmb_input_tv_sub(void) {
                                                  0, &g_tv_sub_total);
             g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
         } else {
-            xmb_play_episode_with_next(&g_tv_sub_items[g_tv_sub_sel], 0);
-            g_tv_depth = 0;
-            g_tv_sub_sel = 0;
-            g_tv_sub_scroll = 0;
+            // A partly-watched episode asks resume vs. start over first.
+            int resume = xmb_resume_choice(&g_tv_sub_items[g_tv_sub_sel]);
+            if (resume >= 0) {
+                xmb_play_episode_with_next(&g_tv_sub_items[g_tv_sub_sel],
+                                           (u32)resume);
+                g_tv_depth = 0;
+                g_tv_sub_sel = 0;
+                g_tv_sub_scroll = 0;
+            }
         }
     }
 }
@@ -519,12 +524,18 @@ bool xmb_handle_input_browse(void) {
                 g_music_sub_sel = 0; g_music_sub_scroll = 0;
             }
         } else {
-            // Continue Watching launches at the saved position.
-            u32 resume = (tab == XMB_TAB_RESUME) ? it->resume_secs : 0;
-            if (strcmp(it->type, "Episode") == 0)
-                xmb_play_episode_with_next(it, resume);
-            else
-                xmb_play_item(it, resume);
+            // The Continue Watching row launches straight at the saved
+            // position; from any other tab (Movies, etc.) a partly-watched
+            // item first asks the user resume vs. start over.
+            int resume;
+            if (tab == XMB_TAB_RESUME) resume = (int)it->resume_secs;
+            else                       resume = xmb_resume_choice(it);
+            if (resume >= 0) {
+                if (strcmp(it->type, "Episode") == 0)
+                    xmb_play_episode_with_next(it, (u32)resume);
+                else
+                    xmb_play_item(it, (u32)resume);
+            }
             s_movie_just_exited = true;
             init_btns();
             return false;

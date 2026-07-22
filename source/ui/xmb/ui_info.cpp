@@ -189,3 +189,99 @@ void xmb_show_item_info(const XMBItem *it) {
     g_info_cooldown_until = timing_get_us() + 500000;
     init_btns();
 }
+
+// Resume-or-restart prompt for a partly-watched item.  Blocks with its own
+// draw/input loop over the wave background, exactly like xmb_show_item_info.
+// Returns where playback should start:
+//   >= 0  play at this many seconds (0 = from the beginning)
+//   <  0  the user cancelled — don't play.
+// Items with no meaningful resume point (< 10 s watched) skip the prompt and
+// return 0 (start from the beginning) so a fresh item plays immediately.
+int xmb_resume_choice(const XMBItem *it) {
+    if (!it || it->resume_secs < 10) return 0;
+
+    // Format the saved position as H:MM:SS / M:SS.
+    char tstr[16];
+    u32 s = it->resume_secs;
+    if (s >= 3600) snprintf(tstr, sizeof(tstr), "%u:%02u:%02u",
+                            s / 3600, (s % 3600) / 60, s % 60);
+    else           snprintf(tstr, sizeof(tstr), "%u:%02u", s / 60, s % 60);
+    char opt_resume[48];
+    snprintf(opt_resume, sizeof(opt_resume), "Resume from %s", tstr);
+    char sub[48];
+    snprintf(sub, sizeof(sub), "Stopped at %s", tstr);
+    const char *opts[2] = { opt_resume, "Start from beginning" };
+
+    rsxSync();
+    flip();
+    init_btns();
+
+    int  sel   = 0;       // 0 = resume (default), 1 = start over
+    bool armed = false;   // wait for the launching cross/circle to release
+    while (running) {
+        waitflip();
+        sysUtilCheckCallback();
+        poll_buttons();
+
+        if (!armed) {
+            if (!btn_cur.cross && !btn_cur.circle) armed = true;
+        } else {
+            if (BTN_PRESSED(circle)) { init_btns(); return -1; }
+            if (BTN_PRESSED(up))     sel = 0;
+            if (BTN_PRESSED(down))   sel = 1;
+            if (BTN_PRESSED(cross)) {
+                int r = (sel == 0) ? (int)it->resume_secs : 0;
+                init_btns();
+                return r;
+            }
+        }
+
+        clearScreen(XMB_BG);
+        wave_draw();
+        rsxSync();
+
+        int pw = UIS_W(560), ph = UIS_H(236);
+        int px = ((int)display_width  - pw) / 2;
+        int py = ((int)display_height - ph) / 2;
+        drawRect((u32)px, (u32)py, (u32)pw, (u32)ph, XMB_PANEL);
+        drawRect((u32)px, (u32)py, (u32)pw, 1, XMB_HAIRLINE);
+        drawRect((u32)px, (u32)(py + ph - 1), (u32)pw, 1, XMB_HAIRLINE);
+        drawRect((u32)px, (u32)py, 1, (u32)ph, XMB_HAIRLINE);
+        drawRect((u32)(px + pw - 1), (u32)py, 1, (u32)ph, XMB_HAIRLINE);
+
+        int cx    = px + 32;
+        int max_w = pw - 64;
+        int y     = py + 30;
+
+        // Item title, truncated to the panel width.
+        {
+            char tbuf[132];
+            snprintf(tbuf, sizeof(tbuf), "%s", it->name);
+            int len = (int)strlen(tbuf);
+            while (len > 1 && ttf_text_width(tbuf, 25, true) > max_w)
+                tbuf[--len] = '\0';
+            drawTTF((u32)cx, (u32)y, tbuf, 25, XMB_WHITE, true);
+        }
+        y += 40;
+        drawTTF((u32)cx, (u32)y, sub, 15, XMB_TEXT_DIM);
+        y += 34;
+
+        // Two option rows; the selected one gets the panel-hi fill + accent bar.
+        int ow = max_w, oh = UIS_H(46);
+        for (int i = 0; i < 2; i++) {
+            int oy = y + i * (oh + 10);
+            if (i == sel) {
+                drawRect((u32)cx, (u32)oy, (u32)ow, (u32)oh, XMB_PANEL_HI);
+                drawRect((u32)(cx - 4), (u32)oy, 3, (u32)oh, XMB_ACCENT);
+            }
+            drawTTF_vcentered((u32)(cx + 16), oy + oh / 2, opts[i], 19,
+                              i == sel ? XMB_TEXT : XMB_TEXT_DIM);
+        }
+
+        { static const Hint h[] = {{'X', "Select"}, {'C', "Back"}};
+          draw_hints_bar(h, 2); }
+        flip();
+    }
+    init_btns();
+    return -1;
+}
