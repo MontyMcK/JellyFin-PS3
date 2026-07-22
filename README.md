@@ -1,476 +1,340 @@
 <div align="center">
-  <img src="ICON0.PNG" alt="JellyFin PS3 banner">
+  <img src="ICON0.PNG" alt="JellyFin PS3">
+
+  # JellyFin PS3
+
+  **A native Jellyfin client for the PlayStation 3.**
+
+  Play your whole Jellyfin library, movies, TV and music, straight from the couch.
+  It's built to feel like it belongs on the console instead of a web page squeezed
+  onto a TV.
+
+  [![Latest release](https://img.shields.io/github/v/release/MontyMcK/JellyFin-PS3?include_prereleases&sort=semver&label=release&color=8b5cf6)](../../releases/latest)
+  [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-8b5cf6)](LICENSE)
+
+  C/C++ · PSL1GHT · Evilnat CFW / HEN
+
 </div>
-
-# JellyFin PS3
-
-A native PS3 homebrew Jellyfin client written in C/C++ using PSL1GHT, targeting Evilnat CFW or HEN.
-
-Current version: **2.2.1 (beta)**
-
-Goal: consumer-quality media playback on PS3, the second-best media player on the platform, modelled architecturally on Movian.
 
 ---
 
-## Features
+## Screenshots
 
-- XMB-style UI: background gradient with translucent animated wave ribbons, top-bar clock, icon tab bar
-- Home shelf: vertically-scrolling rows (Continue Watching, Next Up, Recently Added Movies/Shows) mirroring the Jellyfin web home
-- Card-grid browsing (5x2 portrait posters, 3x2 landscape stills, title/info under the selected card) on all library tabs; search and settings keep the compact row UI
-- Browse Movies, TV Shows, and Collections libraries
-- Music library: Albums / Artists / Playlists / Genres / Songs sub-tabs with d-pad header navigation, square album-art cards with colored letter-tile placeholders, artist/genre discography drill-downs (oldest first), playlists kept in their curated order, songs playable from any point with the rest queued
-- Now Playing music screen: glowing album art, an audio-reactive 28-band FFT spectrum visualizer (MediaWave-style analysis: Hann window, 2048-pt FFT, log-spaced 40Hz-16kHz bands, frame-max normalized, fast-attack/slow-fall smoothing, tapped at the audio DMA read cursor so the bars move with what you hear), track/artist/album metadata with source info ("320 kbps FLAC"), UP NEXT queue with album thumbs, focusable transport row, seek bar
-- Music playback engine: Jellyfin audio transcode stream (48kHz MP3) decoded by minimp3 into its own PCM ring, feeding the shared audio port through a pluggable source; queue auto-advance, shuffle (play-order permutation — the current track keeps playing, Up Next and the queue reorder live), pause, prev/next, video-player-style batched seek (taps/holds move the bar instantly, one stream reopen after input stops)
-- Full-queue views: d-pad navigable UP NEXT sidebar and a SELECT overlay, both in live play order
-- Scrollbars everywhere: every library grid shows its window position within the whole library (sliding pagination included), Home shelf rows carry horizontal bars plus a vertical bar for the row stack
-- Continue Watching tab: server resume list, watched-progress bars on thumbnails, playback resumes at the saved position
-- Next-episode auto-advance: a NEXT EPISODE prompt in the last 90s of any episode (SELECT to jump immediately), with a 30s countdown that starts the next episode automatically; the follower is resolved from the server, so it works from any launch point (Home rows, Continue Watching, search, season lists) and continues across season boundaries
-- Playback progress reported to the server every 10s (Sessions/Playing + Progress + Stopped), so PS3 viewing updates Continue Watching everywhere
-- TV show browser, Series then Seasons then Episodes
-- Collections browser, Collection then Movies
-- Live search across your Jellyfin library (fires on every keystroke)
-- Custom on-screen keyboard for login and search
-- Item info overlay (overview, rating, genres, studios, video and audio stream info)
-- Thumbnail cache to keep browsing responsive
-- Open Sans and Material Icons font rendering via stb_truetype
-- Hardware H.264 decode via PS3 VDEC (SPU-accelerated)
-- Movian-style temporal frame blending, smooth 60fps display loop with crossfade between decoded 24fps frames
-- Bresenham 2:3 pulldown, locked to hardware vsync via gcmSetVBlankHandler
-- AV sync locked to within plus or minus 5ms using audio PTS clock plus EMA smoothing
-- MP3 audio decode via minimp3 with PCM ring buffer
-- Interleaved stereo DMA audio output at 48kHz
-- Double-buffered RSX GPU blit via custom vertex and fragment shaders
-- In-player HUD: one compact strip with a focusable control row (rewind, play/pause, fast-forward, AUDIO, CC), seek bar, and elapsed/remaining times — composed into a texture only when its content changes and GPU-blended over the video, so a visible seek bar costs the display loop nothing
-- Audio track and subtitle selection via popup menus (Jellyfin AudioStreamIndex / SubtitleStreamIndex); subtitles are burned in server-side (SubtitleMethod=Encode) since the PS3 has no subtitle renderer
-- Title overlay in the top-left while paused
-- Seek: R2/L2 tap skips 10s (rapid taps batch into one jump), hold pauses and scrubs the bar in 25s steps with a single reposition on release
-- Every reposition (seek or track change) stops the server transcode, mints a fresh PlaySessionId via PlaybackInfo, and re-requests stream.ts at the target StartTimeTicks, with full decoder, audio, and jitter-buffer flush
-- Jellyfin PlaybackInfo POST with PS3 H.264 transcode profile (720p)
-- Transcode is always forced: the stream URL pins Profile=baseline / Level=31 and sets AllowVideoStreamCopy=false / AllowAudioStreamCopy=false, so any library file plays regardless of source codec, profile, resolution, or bitrate (a stream-copied High-profile track used to decode as black frames)
-- Update check at launch: a background thread asks the GitHub API for the latest release (firmware HTTPS stack, 2s timeouts) and a dismissable modal popup appears over the UI when a newer version is out; unreachable network fails quietly with no error shown
-- .pkg packaging via PSL1GHT built-in ppu_rules flow (APPID JFPS30000)
-- Crash log written synchronously to /dev_hdd0/tmp/crash_log.txt
-- Async ring-buffer logging system (player log at /dev_hdd0/tmp/player_log.txt), toggled from the Settings tab — off by default, choice persisted across restarts
+<div align="center">
+
+**Home**
+
+<img src="docs/screenshots/home.png" alt="Home screen with Continue Watching, Next Up and Recently Added rows" width="80%">
+
+**Movies**
+
+<img src="docs/screenshots/movies.png" alt="Movies library as a poster grid with an A-Z jump bar" width="80%">
+
+**Now Playing (Music)**
+
+<img src="docs/screenshots/music.png" alt="Now Playing music screen with album art and a real-time spectrum visualizer" width="80%">
+
+</div>
+
+---
+
+## What it does
+
+- **Movies, TV, Collections and Music.** Everything shows up as poster and still
+  card grids, with an A-Z jump bar and scrollbars so you always know where you are
+  in a big library.
+- **A home shelf** that mirrors the Jellyfin web app, with Continue Watching, Next
+  Up, and Recently Added rows.
+- **Hardware H.264 playback** through the PS3's VDEC. The display loop runs at a
+  smooth 60 fps and blends frames so 24 fps content doesn't judder.
+- **AV sync stays locked to within ±5 ms** off the audio clock.
+- **Resume and progress reporting.** Stop watching on the PS3 and it shows up as
+  Continue Watching everywhere else. The next episode auto-advances, too.
+- **An in-player HUD** with a seek bar, transport controls, and audio/subtitle
+  track menus. Subtitles are burned in on the server side.
+- **Seek, skip and scrub.** Tap to jump 10 seconds, or hold to scrub the bar.
+- **A full music player.** Albums, Artists, Playlists, Genres and Songs, a play
+  queue with shuffle, and a Now Playing screen whose 28-band spectrum visualizer
+  actually reacts to what you're hearing.
+- **Live search**, an on-screen keyboard, item info overlays, and a thumbnail cache
+  that keeps browsing quick.
+- **An update check at launch** that pops up quietly when a newer release is out.
 
 ---
 
 ## Requirements
 
-- PS3 with Evilnat CFW or HEN (CEX)
-- PSL1GHT toolchain (ppu-gcc at /usr/local/ps3dev/ppu/bin/)
-- Jellyfin server reachable from your PS3 (local network recommended; port-forwarded remote also works)
-- sfo.xml at ~/ps3dev/ps3py/sfo.xml (used by ppu_rules for the .pkg target)
+- A PS3 running **Evilnat CFW** or **HEN** (CEX)
+- A **Jellyfin server** the console can reach (a local network is easiest)
+- To build it yourself: the **PSL1GHT toolchain** (`ppu-gcc` under
+  `/usr/local/ps3dev/`) and `sfo.xml` at `~/ps3dev/ps3py/sfo.xml`, which the
+  `.pkg` target uses
 
 ---
 
-## Building
+## Install
+
+Grab `JellyFin---PS3.pkg` from the [latest release](../../releases/latest) and
+install it. If you'd rather run the `.self` directly, copy it over FTP or USB and
+launch it through webMAN or multiMAN.
+
+## Build from source
 
 ```bash
-# Build SELF only
-make clean && make
-
-# Build installable PKG
-make pkg
+make clean && make      # SELF only
+make pkg                # installable PKG
 ```
 
-Output: JellyFin---PS3.self and JellyFin---PS3.pkg
+That gives you `JellyFin---PS3.self` and `JellyFin---PS3.pkg`.
 
-Transfer the SELF to your PS3 via FTP or USB and launch through webMAN or multiMAN, or install the PKG directly.
-
-When cutting a release, set APP_VERSION in source/net/update_check.h to match the new release tag (leading v/V is ignored, so "2.1" matches tag "v2.1") — the update popup compares the latest GitHub release tag against it, and release tags need a numeric version for the comparison to work.
+> Cutting a release? Bump `APP_VERSION` in `source/net/update_check.h` to match the
+> release tag so the update check compares against the right number.
 
 ---
 
 ## Controls
 
+**Menus.** `X` select · `O` back · `D-pad` navigate · `L1`/`R1` switch tabs ·
+`△` item info. In Music, press `Up` from the top row to reach the sub-tab header.
+
+**Video player.** Press any button to bring up the HUD (it hides itself again after
+4 seconds). `Left`/`Right` move across the control row and `X` activates whatever's
+focused. `R2`/`L2` tap to skip ±10 seconds, or hold to scrub. `Start` stops. During
+the last-90-seconds prompt, `Select` jumps to the next episode.
+
+**Music player.** `Left`/`Right` move across the transport row, and going `Right`
+past Shuffle drops you into the UP NEXT queue. `L1`/`R1` are previous/next track,
+`△` toggles shuffle, `R2`/`L2` seek, and `Select` opens the full-queue overlay.
+
+**Search.** Type on the on-screen keyboard, press `Down` to jump into the results,
+and `△` to toggle caps.
+
+<details>
+<summary>Full button reference</summary>
+
 ### Menus
 
-| Button      | Action                          |
-|-------------|---------------------------------|
-| X           | Select / confirm                |
-| O           | Back                            |
-| D-pad       | Navigate                        |
-| L1 / R1     | Cycle tabs (prev/next page in the season browser) |
-| Triangle    | Item info overlay               |
+| Button   | Action                                             |
+|----------|----------------------------------------------------|
+| X        | Select / confirm                                   |
+| O        | Back                                               |
+| D-pad    | Navigate                                           |
+| L1 / R1  | Cycle tabs (prev/next page in the season browser)  |
+| Triangle | Item info overlay                                  |
 
-Music tab: UP from the grid's top row focuses the sub-tab header — LEFT/RIGHT switch between Albums / Artists / Playlists / Genres / Songs, DOWN or X drops back into the grid.
+### Video player
 
-### Media Player
-
-Press any button during playback to bring up the HUD. It auto-hides after 4 seconds while playing and stays up while paused.
-
-| Button          | Action                                                                  |
-|-----------------|-------------------------------------------------------------------------|
-| Start           | Stop / exit player                                                      |
+| Button          | Action                                                            |
+|-----------------|-------------------------------------------------------------------|
+| Start           | Stop / exit player                                                |
 | Left / Right    | Move focus across the control row (Rew · Play/Pause · FF · AUDIO · CC) |
-| X               | Activate the focused control (the reveal press is swallowed)           |
-| X on Rew / FF   | Seek -10s / +10s                                                        |
-| X on AUDIO / CC | Open the audio / subtitle track popup menu                              |
-| R2 / L2 (tap)   | Skip +10s / -10s (taps within 1s batch into one seek)                   |
-| R2 / L2 (hold)  | Pause and scrub the seek bar; the seek fires once on release            |
-| Select          | Jump to the next episode/movie (during the NEXT prompt, last 90s)       |
+| X               | Activate the focused control                                      |
+| R2 / L2 (tap)   | Skip +10 s / -10 s (taps within 1 s batch into one seek)          |
+| R2 / L2 (hold)  | Pause and scrub the seek bar; seek fires once on release          |
+| Select          | Jump to the next episode/movie (during the NEXT prompt, last 90 s)|
 
-Track menu: D-pad Up/Down to highlight, X to select, O to close. The active entry carries an accent dot; the CC menu has an Off entry at the top, and an active subtitle underlines the CC button. Picking a different track reopens the stream at the current position with the new track applied (subtitles can take a while to start the first time — the server extracts the track before the burn-in transcode begins).
+### Music player
 
-Seeking, skipping, and track changes all use the same path: the player re-requests the transcode stream at the new position, flushes the decoder, audio, and jitter buffer, then resumes. The seek bar position follows the audio PTS clock (offset by the seek base), so it tracks the real playback time after a seek.
-
-### Music Player
-
-| Button            | Action                                                          |
-|-------------------|-----------------------------------------------------------------|
-| Left / Right      | Move focus across the transport row (Rew · Prev · Play/Pause · Next · FF · Shuffle) |
-| Right past Shuffle| Enter the UP NEXT queue                                         |
-| Up / Down (queue) | Scroll the full remaining queue                                 |
-| X                 | Activate the focused control / play the highlighted queue track |
-| Triangle          | Toggle shuffle (works everywhere, queue views included)         |
-| L1 / R1           | Previous / next track (previous restarts the track when >3s in) |
-| R2 / L2 (tap)     | Seek +10s / -10s — taps batch into a single stream reopen       |
-| R2 / L2 (hold)    | Scrub: the bar keeps stepping, one reopen fires on release      |
-| Select            | Full-queue overlay (X jumps, Triangle shuffles, O closes)       |
-| O / Start         | Stop playback and return to the library                         |
+| Button             | Action                                                        |
+|--------------------|---------------------------------------------------------------|
+| Left / Right       | Move focus across the transport row                           |
+| Right past Shuffle | Enter the UP NEXT queue                                        |
+| Up / Down (queue)  | Scroll the full remaining queue                               |
+| X                  | Activate control / play the highlighted queue track           |
+| Triangle           | Toggle shuffle                                                 |
+| L1 / R1            | Previous / next track (previous restarts when >3 s in)        |
+| R2 / L2            | Seek (tap batches, hold scrubs)                               |
+| Select             | Full-queue overlay                                            |
+| O / Start          | Stop playback and return to the library                       |
 
 ### Search
 
-| Button   | Action                                  |
-|----------|-----------------------------------------|
-| D-pad    | Move cursor on keyboard / in results    |
-| X        | Type character / play result            |
-| Triangle | Toggle caps lock                        |
-| O / CLEAR| Reset search, return to keyboard        |
-| Down     | Jump from keyboard to results           |
-| Up       | Jump from first result back to keyboard |
+| Button    | Action                                  |
+|-----------|-----------------------------------------|
+| D-pad     | Move cursor on keyboard / in results    |
+| X         | Type character / play result            |
+| Triangle  | Toggle caps lock                        |
+| O / CLEAR | Reset search, return to keyboard        |
+| Down      | Jump from keyboard to results           |
+| Up        | Jump from first result back to keyboard |
+
+</details>
 
 ---
 
-## Video Pipeline
+## How it works
+
+The architecture leans heavily on [Movian](https://github.com/andoma/showtime).
+Its media player was the reference the whole app was built from.
+
+**Video.** An HTTP MPEG-TS transcode stream gets demuxed on a decode thread. H.264
+access units go to the PS3 VDEC (SPU-accelerated), decoded frames land in a 16-slot
+jitter buffer, and a Movian-style 60 fps display loop blits them through the RSX. A
+crossfade shader blends between decoded 24 fps frames using a Bresenham accumulator
+locked to hardware vsync, which is what kills the usual 2:3 pulldown judder.
+
+**Audio.** MP3 gets decoded with minimp3 into a PCM ring and pushed to the PS3 audio
+DMA at 48 kHz. The audio PTS drives the master clock, and an EMA keeps AV sync inside
+±5 ms.
+
+**Seeking.** Jellyfin's transcode isn't byte-seekable, so seeks copy Movian's
+flush-and-reopen path: stop the decode thread, flush the decoder, audio and jitter
+buffer, re-request the stream at the new `StartTimeTicks`, then resume. The audio
+clock re-seeds from the new segment, so the seek bar snaps to the right spot on its
+own.
+
+**Music.** The music player reuses the same audio port through a pluggable PCM
+source that pulls Jellyfin's audio transcode endpoint. The spectrum visualizer taps
+samples at the DMA read cursor rather than at decode time, so the bars match what's
+coming out of the speakers instead of what's buffered a fraction of a second ahead.
+
+<details>
+<summary>Deeper technical notes (pipelines, HUD, threading, file layout)</summary>
+
+### Video pipeline
 
 ```
 HTTP stream (MPEG-TS)
         |
         v
-  Decode thread
-  stream_read() -> 188-byte TS packets
-        |
-        v
-  video_feed_ts()
+  Decode thread: stream_read() -> 188-byte TS packets -> video_feed_ts()
   TS demuxer -> PAT/PMT -> PES reassembly
         |
-        +- Audio PES -> adec_push_pes() -> minimp3 -> PCM ring buffer
+        +- Audio PES -> adec_push_pes() -> minimp3 -> PCM ring
         |
         +- Video PES -> vdecDecodeAu() -> VDEC (SPU H.264)
                 |
                 v
-         VDEC callback
-         vdec_pull_frame() -> YUV -> ARGB
+         VDEC callback: vdec_pull_frame() -> YUV -> ARGB
                 |
                 v
-         Jitter buffer (16 slots, ~28 MB at 720p)
-         PTS + per-frame duration stored per slot
+         Jitter buffer (16 slots, ~28 MB at 720p, PTS + duration per slot)
                 |
                 v
-         Upload thread (priority 850)
-         memcpy -> RSX-local texture (double-buffered)
-         Also uploads frame B for blend
+         Upload thread -> RSX-local texture (double-buffered, A + B for blend)
                 |
                 v
-         Display loop (Movian-style, 60fps)
-         timing_flip_due() <- Bresenham accumulator
-         gcmSetVBlankHandler <- hardware vsync at 59.94 Hz
+         Display loop (60fps): Bresenham gate + gcmSetVBlankHandler @ 59.94 Hz
                 |
                 v
-         RSX GPU blit
-         Crossfade shader blends frame A -> B mid-pulldown
-         rsxSync() -> flip()
+         RSX blit: crossfade shader blends A -> B mid-pulldown, flip()
 ```
 
-**FPS detection:** VDEC frame_rate_code maps to exact fractional fps (ISO 13818-2). Display refresh rate queried via videoGetState, 59.94 Hz detected and used for the Bresenham accumulator.
+- **FPS detection:** VDEC `frame_rate_code` maps to exact fractional fps
+  (ISO 13818-2); refresh rate comes from `videoGetState` (59.94 Hz).
+- **Temporal blending:** each frame carries a remaining duration. When it drops
+  below one vblank and the next frame is ready, the shader crossfades on the
+  fractional remainder, so there's no fixed pulldown pattern to fight.
+- **AV sync:** `avsync_compute_diff()` takes video PTS minus audio PTS and smooths
+  it with an EMA; each vblank period gets nudged ±5000 µs to correct drift. It's
+  locked once that stays below ~41.6 ms.
 
-**Temporal blending:** Each decoded frame carries a remaining duration (us). The display loop consumes vblank periods from that budget. When a frame's remaining duration falls below one vblank period and the next frame is available, the shader crossfades A to B based on the fractional time remaining, eliminating judder on 24fps content without a fixed pulldown pattern.
+### Seek pipeline
 
-**AV sync:** avsync_compute_diff() computes video PTS minus audio PTS. An EMA smooths it over time; avsync_biased_period() nudges each vblank period plus or minus 5000 us to correct drift. Locked = absolute EMA below 41 667 us (about 1 frame at 24fps).
-
----
-
-## Seek Pipeline
-
-Seek, rewind, and skip are modelled on Movian's flush-and-reposition path, adapted to a single-socket Jellyfin transcode (which is not byte-seekable).
-
-```
-User seeks (Left/Right, L2/R2, or Rew/FF button)
-        |
-        v
-  Compute target = audio_clock + delta, clamp >= 0
-  Convert to Jellyfin 100-ns ticks (StartTimeTicks)
-        |
-        v
-  Stop decode thread (dec_run flag + join)
-  Audio and upload threads keep running, idle on empty buffers
-        |
-        v
-  Flush (mirrors Movian mp_flush):
-    vdec_flush()        end + restart VDEC sequence, drop reference frames
-    adec_flush()        empty PES queue + PCM ring, invalidate PTS cursors
-    jbuf_clear()        drop all buffered decoded frames
-    video_reset_demux() re-acquire PAT/PMT for the new segment
-    avsync_reset()      forget the smoothed AV diff
-        |
-        v
-  Re-request stream at new offset (StartTimeTicks)
-  Re-prefill jitter buffer
-        |
-        v
-  Respawn decode thread on the new socket
-  Resume (audio clock re-seeds from the new segment's first PTS)
-```
-
-The audio clock drives the seek bar, so the bar jumps to the new position automatically once the first PTS of the new segment is decoded. A SEEK_REOPEN_VDEC compile define switches the decoder reset from sequence end/restart to a full vdec_close() + vdec_open() rebuild, a slower but bulletproof fallback for A/B testing on hardware.
-
----
-
-## HUD Overlay
-
-The in-player HUD (dim strip, seek bar, controls, paused title, track menu) went through several architectures on the way to one that doesn't cost the display loop anything:
-
-- The first approach drew the dim strip as a GPU quad using vertex arrays (rsxBindVertexArrayAttrib + rsxDrawVertexArray). This hard-froze the console when paused, because the GPU stalled fetching a stale TEX0 attribute array left bound by the video path.
-- The second approach blended the strip on the PPU directly into the framebuffer. It never froze, but color_buffer is CPU-writable RSX VRAM, and per-pixel read-modify-write over the bus pushed frame time from about 16.7ms to about 183ms (around 5fps) whenever the HUD was visible.
-- The third approach fixed the strip with an inline GPU quad (rsxDrawVertexBegin / rsxDrawVertex4f / rsxDrawVertexEnd — no vertex-array fetch, so no stale-binding wedge), but the text and controls were still CPU-drawn into VRAM every frame behind an rsxSync fence. That work pushed each iteration just past one vblank, so VSYNC quantised the loop to a 2-vblank cadence whenever the bar was visible — video at half rate, the seek bar and the player splitting the frame budget.
-- The current approach removes the HUD from the per-frame path entirely. The whole overlay is composed with the CPU into a main-RAM staging buffer only when its content changes (the time string ticks once a second; everything else is input-driven), the dirty rows are uploaded to an RSX texture, and every frame the GPU draws one full-screen alpha-blended quad over the video (rsx_draw_hud_overlay, reusing the video shaders — the fragment program passes texture alpha through). Vertices go inline, no rsxSync is needed, and per-frame cost is a few FIFO words.
-
-The CPU draw primitives (drawRect, drawTTF, drawIcon, iconic glyphs) support an off-screen compose target with straight-alpha OVER compositing (cpu_rt_begin/end in ui_draw.cpp) for this; the XMB screen paths are unchanged.
-
-The three dim-strip implementations are still kept behind compile defines in hud_dim.cpp for hardware A/B testing:
-
-| Define              | Path                                                  |
-|---------------------|-------------------------------------------------------|
-| (none, default)     | Inline GPU quad, fast and freeze-proof                |
-| HUD_DIM_CPU         | CPU pixel blend, slow but bulletproof fallback        |
-| HUD_DIM_GPU_ARRAY   | Original array-fetch quad, known to freeze, test only |
-
-While paused with no input, the display loop stops redrawing entirely (paused-idle gate in player.cpp): the frame is pixel-identical anyway, so the loop just polls input at vblank rate until something changes. Pausing is instant, scrubbing stays responsive, and the console goes quiet.
-
----
-
-## Audio Pipeline
+Modelled on Movian's `mp_flush` reposition path:
 
 ```
-Audio PES packets (MP3, type 0x03)
-        |
-        v
-  adec_push_pes()  [decode thread copies each PES whole]
-        |
-        v
-  PES queue (256 slots x 8KB, ~2MB)
-  buffers the compressed audio burst that a burned-in
-  subtitle transcode front-loads (~10s) instead of
-  dropping it; overwrites oldest only on true overflow
-        |
-        v
-  adec thread: PES header stripped (9 + buf[8] bytes)
-  minimp3 decode loop -> 1152 samples/frame
-  short PCM -> float32, interleaved L/R
-        |
-        v
-  PCM ring buffer (65536 sample-pairs, ~1.37s at 48kHz)
-  back-pressure: adec idles while the ring is above its
-  ~1.0s highwater, so the burst waits compressed in the
-  PES queue rather than overflowing PCM
-        |
-        v
-  Audio thread (priority 750)
-  sysEventQueueReceive() -> DMA event
-  Blocks up to 100ms waiting for 256 samples
-        |
-        v
-  PS3 audio DMA (8 blocks x 256 samples, 48kHz)
-  Interleaved layout: L0 R0 L1 R1 ... (per SDK spec)
+Compute target = audio_clock + delta -> Jellyfin 100-ns ticks (StartTimeTicks)
+Stop decode thread (audio + upload keep running, idle on empty buffers)
+Flush: vdec_flush() · adec_flush() · jbuf_clear() · video_reset_demux() · avsync_reset()
+Re-request stream at new StartTimeTicks -> re-prefill jitter buffer
+Respawn decode thread -> resume (audio clock re-seeds from new segment)
 ```
 
-**AV clock:** audio_get_clock_us() returns PTS-based time once the first PES with a valid PTS is decoded; falls back to the DMA block counter at startup. After a seek the PTS cursor is invalidated, so the clock re-seeds from the new segment.
+`SEEK_REOPEN_VDEC` swaps the decoder reset for a full close/open rebuild. It's
+slower but bulletproof, handy for A/B testing on hardware.
 
-**Burned-in subtitles (audio desync fix):** selecting a subtitle track switches the server to SubtitleMethod=Encode, which reopens the transcode and front-loads several seconds of audio while the subtitle-burning video encoder warms up. Previously the 32-slot PES queue and a small PCM ring overflowed and dropped ~10s of audio, so playback skipped ~10s ahead of the picture (on real hardware too). Now the 256-slot PES queue holds the burst compressed and the adec thread back-pressures on the PCM highwater, so nothing is dropped. Because a burned-sub reopen also restarts the video PTS at an absolute value, avsync folds that PTS back onto the relative audio base (timing.cpp) so the ±5ms drift lock re-acquires. Confirmed in sync on the emulator and real PS3.
+### HUD overlay
 
-**Music path:** the music player reuses the same audio port through a pluggable PCM source (audio_set_source): its stream thread pulls the Jellyfin audio transcode endpoint (stream.mp3, 48kHz forced, with a linear-resample guard), decodes with the same embedded minimp3, and fills its own ring. The visualizer taps samples at the DMA read cursor — not at decode time — so the spectrum matches what is audible rather than what is buffered ~700ms ahead. Every music seek mints a fresh PlaybackInfo session: reusing one makes Jellyfin re-serve the running audio transcode from 0:00 (StartTimeTicks ignored), unlike the video path.
+The in-player HUD gets composed by the CPU into a staging buffer **only when its
+content changes**, uploaded to an RSX texture, and then drawn each frame as one
+alpha-blended quad over the video. That way a visible seek bar costs the display
+loop almost nothing. Getting there took a few tries: a vertex-array quad that froze
+the console on pause, a CPU framebuffer blend that tanked to ~5 fps, and a per-frame
+CPU draw that halved the frame rate. The earlier dim-strip paths are still kept
+behind compile defines for hardware testing:
 
----
+| Define            | Path                                                  |
+|-------------------|-------------------------------------------------------|
+| (none, default)   | Inline GPU quad, fast and freeze-proof                |
+| HUD_DIM_CPU       | CPU pixel blend, slow but bulletproof fallback        |
+| HUD_DIM_GPU_ARRAY | Original array-fetch quad, known to freeze, test only |
 
-## Threading Model
+While paused with no input, the display loop stops redrawing altogether. The frame
+is pixel-identical anyway, so it just polls input at vblank rate until something
+changes.
 
-| Thread         | Priority | Role                                                       |
-|----------------|----------|------------------------------------------------------------|
-| Display (main) | default  | Bresenham gate, RSX blit, flip, input poll, seek control   |
-| Decode         | 800      | TS demux, VDEC submit, jitter buffer fill                  |
-| Upload         | 850      | memcpy jitter buffer to RSX texture (A + B)                |
-| Audio          | 750      | DMA event loop, PCM ring drain                             |
-| Progress       | 1100     | POST position to Jellyfin every ~10s (Continue Watching)   |
-| Async log      | 1200     | Ring-buffer drain to player_log.txt (when logging enabled) |
+### Audio & burned-in subtitles
 
-On seek, only the decode thread is stopped and respawned; the audio and upload threads stay alive and idle on empty buffers.
+Picking a subtitle track flips the server to `SubtitleMethod=Encode`, which
+front-loads several seconds of audio while the subtitle-burning encoder warms up. A
+256-slot PES queue holds that burst compressed and the decoder back-pressures on the
+PCM highwater, so nothing gets dropped and playback stays in sync. It used to skip
+about 10 seconds ahead on real hardware before this fix.
 
----
+### Threading model
 
-## File Structure
+| Thread         | Priority | Role                                                     |
+|----------------|----------|----------------------------------------------------------|
+| Display (main) | default  | Bresenham gate, RSX blit, flip, input poll, seek control |
+| Decode         | 800      | TS demux, VDEC submit, jitter buffer fill                |
+| Upload         | 850      | memcpy jitter buffer to RSX texture (A + B)              |
+| Audio          | 750      | DMA event loop, PCM ring drain                           |
+| Progress       | 1100     | POST position to Jellyfin every ~10 s                    |
+| Async log      | 1200     | Ring-buffer drain to `player_log.txt` (when enabled)     |
 
-Source is organised into subdirectories by domain.
+On a seek, only the decode thread gets stopped and respawned.
+
+### Source layout
 
 ```
-JellyFin---PS3/
-|-- Makefile
-|-- ICON0.PNG
-`-- source/
-    |-- main.cpp                  # Entry point, synchronous crash_log
-    |-- api/
-    |   |-- jellyfin_api.cpp/h     # Jellyfin REST API surface and shared state
-    |   |-- api_auth.cpp           # Login / authentication
-    |   |-- api_browse.cpp         # Libraries, items, seasons, episodes, search
-    |   |-- api_detail.cpp         # Item detail, PlaybackInfo, transcode URL
-    |   `-- api_playstate.cpp      # Playback progress reporting (Continue Watching)
-    |-- audio/
-    |   |-- audio.cpp/h            # Audio port, DMA ring buffer, audio thread, PTS clock
-    |   |-- adec.cpp/h             # MP3 decode via minimp3, PCM ring buffer, adec_flush
-    |   `-- minimp3.h              # Embedded MP3 decoder
-    |-- cache/
-    |   `-- thumbnail_cache.cpp/h  # Thumbnail caching for browse views
-    |-- gfx/
-    |   |-- rsxutil.cpp/h          # RSX helpers, shader blit, framebuffer access
-    |   |-- bitmap.cpp/h           # Image loading
-    |   |-- video_shaders.h        # Video vertex/fragment ucode (YUV to ARGB + crossfade)
-    |   |-- hud_dim_shaders.h      # HUD dim-quad vertex/fragment ucode
-    |   |-- hud_dim_vp.vasm        # HUD dim vertex program source
-    |   |-- hud_dim_fp.vasm        # HUD dim fragment program source
-    |   |-- wave_shaders.h         # Wave background shader ucode
-    |   |-- stb_truetype.h         # TTF rasterizer
-    |   |-- stb_image.h            # Image decoder
-    |   |-- opensans_regular.h     # Open Sans Regular (embedded)
-    |   |-- opensans_bold.h        # Open Sans Bold (embedded)
-    |   `-- font8x8.xpm            # Fallback bitmap font
-    |-- music/
-    |   |-- music_player.cpp/h     # Audio-only engine: track queue, stream+decode thread,
-    |   |                          #   shuffle play order, controls, playstate reporting
-    |   |-- music_fft.cpp/h        # Visualizer analysis: 2048-pt FFT spectrum bands
-    |   `-- music_screen.cpp/h     # Now Playing screen: art, visualizer, UP NEXT,
-    |                              #   transport focus, seek, queue overlay
-    |-- net/
-    |   |-- http.cpp/h             # HTTP client
-    |   `-- update_check.cpp/h     # Background GitHub release check (firmware HTTPS)
-    |-- player/
-    |   |-- player.h               # Public entry point (show_player)
-    |   |-- player_hud.h           # Public HUD API (actions, draw, menus)
-    |   |-- player_internal.h      # PlayerState, thread contexts, internal API
-    |   |-- core/
-    |   |   |-- player.cpp         # Orchestrator: session setup, display loop, teardown
-    |   |   |-- player_session.cpp # Stream URL builder, error screen, prefill
-    |   |   |-- player_menu.cpp    # AUDIO / CC track popup handling
-    |   |   |-- player_seek.cpp    # R2/L2 tap/hold machine + flush-and-reopen seek
-    |   |   `-- player_display.cpp # Blend gate, frame swap, HUD overlay, diagnostics
-    |   |-- hud/
-    |   |   |-- hud_core.cpp       # HUD state, input, focus navigation, public API
-    |   |   |-- hud_dim.cpp        # Dim quad fallbacks + overlay buffer lifecycle
-    |   |   `-- hud_draw.cpp       # Overlay compose-on-change (seek bar, transport
-    |   |                          #   row, title, menu) + per-frame GPU quad
-    |   |-- gpu/
-    |   |   |-- player_gpu.cpp     # RSX buffer alloc/free, vid_gpu_draw wrapper
-    |   |   `-- player_rsx.cpp/h   # RSX frame draw (blit + crossfade)
-    |   |-- threads/
-    |   |   `-- player_threads.cpp # Decode / upload / audio thread bodies + spawn
-    |   `-- stream/
-    |       `-- stream.cpp/h       # HTTP MPEG-TS reader (chunked transfer, TS ring)
-    |-- ui/
-    |   |-- ui.cpp/h               # UI lifecycle (init / RSX state restore / cleanup)
-    |   |-- ui_visuals.h           # Shared XMB layout constants, state externs, draw API
-    |   |-- ui_internal.h          # Cross-file declarations internal to the UI module
-    |   |-- input/
-    |   |   `-- ui_input.cpp       # Multi-pad polling, edge detection, nav auto-repeat
-    |   |-- osk/
-    |   |   `-- ui_osk_login.cpp   # Login on-screen keyboard (get_input)
-    |   |-- xmb/
-    |   |   |-- ui_xmb.cpp         # XMB main loop (input dispatch + draw phases)
-    |   |   |-- ui_xmb_state.cpp   # Tab/item/navigation globals
-    |   |   |-- ui_nav.cpp         # Tab switching, browse input, episode play loop
-    |   |   |-- ui_home.cpp        # Home shelf (Continue Watching / Next Up rows)
-    |   |   |-- ui_fetch.cpp       # Library fetch, pagination, next-episode lookup
-    |   |   |-- ui_search.cpp      # Search tab input + live search
-    |   |   |-- ui_info.cpp        # Triangle item info overlay
-    |   |   `-- ui_json.cpp        # JSON parsing helpers (parse_xmb_items)
-    |   |-- render/
-    |   |   |-- ui_text.cpp        # Fonts: TTF/icons/iconic rendering, prewarm
-    |   |   |-- ui_draw.cpp        # Primitives: clears, CPU rects, unicode decode
-    |   |   |-- ui_widgets.cpp     # Tab bar, jump bar, hints bar, topbar L1/R1
-    |   |   |-- ui_lists.cpp       # Item/sub-list rows, thumbnails, meta line
-    |   |   |-- ui_osk_draw.cpp    # Search OSK + results rendering
-    |   |   |-- ui_settings.cpp    # Settings tab rendering
-    |   |   |-- ui_update_popup.cpp # Update-available modal popup
-    |   |   `-- ui_wave.cpp/h      # Animated wave background + modal dim quad (RSX)
-    |   `-- fonts/
-    |       |-- material_icons.h   # Material Icons (embedded)
-    |       `-- iconic_psx.h       # PSX-style iconography
-    |-- util/
-    |   |-- timing.cpp/h           # Frame pacing, Bresenham accumulator, AV sync EMA
-    |   `-- plog.cpp/h             # Async ring-buffer logging + settings toggle
-    `-- video/
-        |-- video.cpp/h            # Session glue: feed TS, reset, public video API
-        |-- video_internal.h       # Internal cross-module API (submit, jbuf producer)
-        |-- ts_demux.cpp/h         # MPEG-TS demux: PAT/PMT, PES reassembly, PTS
-        |-- vdec.cpp               # VDEC init/flush, H.264 AU submit, frame pull, fps detection
-        `-- jbuf.cpp               # Jitter buffer (16 decoded-frame slots + producer API)
+source/
+|-- api/      Jellyfin REST surface (auth, browse, detail, playstate)
+|-- audio/    Audio port + DMA ring, minimp3 decode
+|-- cache/    Thumbnail caching
+|-- gfx/      RSX helpers, shaders, embedded fonts, stb_image/truetype
+|-- music/    Audio-only engine, FFT visualizer, Now Playing screen
+|-- net/      HTTP client, GitHub update check
+|-- player/   Core loop, HUD, GPU draw, decode/upload/audio threads, TS stream
+|-- ui/       XMB UI: input, OSK, home shelf, browse, search, settings, rendering
+|-- util/     Frame pacing / AV sync, async logging
+`-- video/    Session glue, TS demux, VDEC, jitter buffer
 ```
 
----
-
-## Status
-
-| Feature                  | Status                                                            |
-|--------------------------|-------------------------------------------------------------------|
-| Login / Auth             | Working                                                           |
-| Home shelf               | Working (Continue Watching, Next Up, Recently Added rows)         |
-| Movie browsing           | Working                                                           |
-| TV show browsing         | Working (Series, Seasons, Episodes)                               |
-| Collections browsing     | Working                                                           |
-| Continue Watching        | Working (resume tab, thumbnail progress bars, resume + reporting) |
-| Next-episode advance     | Working (SELECT prompt at 90s, 30s auto-advance countdown, server-resolved across seasons, any launch point) |
-| Search                   | Working (live, keystroke-driven)                                  |
-| Item info overlay        | Working (overview, rating, genres, studios, video/audio info)     |
-| Thumbnail cache          | Working                                                           |
-| Video playback           | Working (720p H.264, Movian-style 60fps display loop)             |
-| Temporal frame blending  | Working (crossfade shader, eliminates 2:3 judder)                 |
-| Audio playback           | Working (48kHz stereo MP3, zero silence blocks)                   |
-| AV sync                  | Locked (plus or minus 5ms via PTS clock + EMA bias)               |
-| HUD overlay              | Working (GPU-composited texture, compose-on-change, zero per-frame cost) |
-| Seek / rewind / skip     | Working (tap-to-skip + hold-to-scrub, StartTimeTicks re-request + full pipeline flush) |
-| Audio / subtitle tracks  | Working (popup menus; subtitles burned in server-side; audio stays in sync via PES-queue burst buffering) |
-| PlaybackInfo / transcode | Working (H.264 720p baseline profile, transcode always forced, PlaySessionId extracted) |
-| Settings                 | Working (account card, log out, Debug Logging toggle)             |
-| Update check             | Working (GitHub latest-release lookup at launch, modal popup)     |
-| PKG packaging            | Working (make pkg, APPID JFPS30000)                               |
-| Music browsing           | Working (Albums / Artists / Playlists / Genres / Songs sub-tabs, jump bar, pagination, discography drill-downs) |
-| Music playback           | Working (48kHz MP3 transcode stream, queue auto-advance, shuffle, batched seek, playstate reporting) |
-| Music visualizer         | Working (28-band FFT spectrum, tapped at the DMA read cursor)     |
+</details>
 
 ---
 
 ## Logging
 
-Debug logging is **off by default** and toggled from the Settings tab (the choice persists across restarts in /dev_hdd0/tmp/jellyfin_settings.txt — it survives logout, which only removes jellyfin_config.txt). When enabled, async log output is written to /dev_hdd0/tmp/player_log.txt; while disabled, plog() discards messages with no ring-buffer or disk activity.
-
-The crash log at /dev_hdd0/tmp/crash_log.txt is always written synchronously at key lifecycle checkpoints (including per-step seek and HUD checkpoints) and survives crashes that prevent the async logger from flushing. Reading it from the bottom up pinpoints the exact step that failed on hardware.
-
-The update check writes its own trace to /dev_hdd0/tmp/update_detection.txt on every launch, independent of the Debug Logging toggle: one line per step (module load, TLS, HTTP status) plus a dump of the GitHub API response, so a silently-failed check can be diagnosed after the fact. The file is overwritten each launch.
+Debug logging is **off by default** and you toggle it from the Settings tab. That
+choice sticks across restarts in `/dev_hdd0/tmp/jellyfin_settings.txt`. When it's on,
+output goes to `/dev_hdd0/tmp/player_log.txt`. A crash log always gets written
+synchronously to `/dev_hdd0/tmp/crash_log.txt`, and the launch update check leaves
+its own trace in `/dev_hdd0/tmp/update_detection.txt`.
 
 ---
 
 ## Acknowledgments
 
-Huge thanks to the [**ps3dev**](https://github.com/ps3dev) team for keeping
-[**PSL1GHT**](https://github.com/ps3dev/PSL1GHT) alive — maintaining the SDK,
-toolchain, and libraries that make open PS3 homebrew like JellyFin PS3 possible.
-Their continued stewardship of the PS3 development ecosystem is what this project
-is built on. PSL1GHT is MIT-licensed, Copyright (c) 2011 PSL1GHT Development Team.
+- **[Movian](https://github.com/andoma/showtime)** (formerly Showtime). The whole
+  app was built using Movian's media player as a reference. The video display loop,
+  the temporal frame blending, and the flush-and-reopen seek path all follow how
+  Movian does it. Big thanks to Andreas Öman and everyone who's worked on it.
+- **[ps3dev](https://github.com/ps3dev)** for keeping
+  **[PSL1GHT](https://github.com/ps3dev/PSL1GHT)** alive: the SDK, toolchain, and
+  libraries that make open PS3 homebrew possible in the first place. PSL1GHT is
+  MIT-licensed, Copyright (c) 2011 PSL1GHT Development Team.
+- The authors of the embedded libraries (minimp3, stb_image, stb_truetype), and the
+  Jellyfin project itself.
 
 ---
 
 ## License
 
 JellyFin PS3 is free software licensed under the **GNU General Public License v3.0**
-(or, at your option, any later version). See the [LICENSE](LICENSE) file for the full text.
+(or, at your option, any later version). The full text lives in the
+[LICENSE](LICENSE) file.
 
 Copyright (C) 2026 Montague McKeefry
 
@@ -478,5 +342,5 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-Bundled third-party components retain their own licenses — notably the PSL1GHT SDK
-(MIT, Copyright (c) 2011 PSL1GHT Development Team), which is GPLv3-compatible.
+Bundled third-party components keep their own licenses. The main one is the PSL1GHT
+SDK (MIT), which is GPLv3-compatible.
