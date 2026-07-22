@@ -8,7 +8,10 @@
   Browse and play your whole Jellyfin library — movies, TV, and music — from the
   couch, with a UI that feels like it belongs on the console.
 
-  Version **2.2.1 (beta)** · C/C++ · PSL1GHT · Evilnat CFW / HEN
+  [![Latest release](https://img.shields.io/github/v/release/MontyMcK/JellyFin-PS3?include_prereleases&sort=semver&label=release&color=8b5cf6)](../../releases/latest)
+  [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-8b5cf6)](LICENSE)
+
+  C/C++ · PSL1GHT · Evilnat CFW / HEN
 
 </div>
 
