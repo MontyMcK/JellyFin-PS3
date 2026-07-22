@@ -459,4 +459,14 @@ The update check writes its own trace to /dev_hdd0/tmp/update_detection.txt on e
 
 ## License
 
-MIT
+JellyFin PS3 is free software licensed under the **GNU General Public License v3.0**
+(or, at your option, any later version). See the [LICENSE](LICENSE) file for the full text.
+
+Copyright (C) 2026 Montague McKeefry
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+Bundled third-party components retain their own licenses — notably the PSL1GHT SDK
+(MIT, Copyright (c) 2011 PSL1GHT Development Team), which is GPLv3-compatible.
