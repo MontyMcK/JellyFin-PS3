@@ -1,0 +1,27 @@
+!!ARBfp1.0
+# Planar YUV420 (3 separate L8 textures) -> RGB, BT.601 limited range (SD sources; coefficients from Movian cmatrix_ITUR_BT_601).
+# Structured to avoid cgcomp weak spots: each RGB channel computed in its OWN
+# register, constants pre-negated (no in-op negation), no read-after-write on
+# an output component, result assembled with MOVs (the pattern proven to work).
+PARAM off = { 0.06274, 0.50196, 0.50196, 0.0 };  # Y-16/255, Cb/Cr-128/255
+PARAM ky  = { 1.16438, 0.0, 0.0, 1.0 };
+PARAM cr  = { 1.59600, 0.0, 0.0, 0.0 };  # R += 1.59600*Cr'
+PARAM cg  = {-0.39180,-0.81300, 0.0, 0.0 };  # G += -0.39180*Cb' + -0.81300*Cr'
+PARAM cb  = { 2.01720, 0.0, 0.0, 0.0 };  # B += 2.01720*Cb'
+TEX R0.x, fragment.texcoord[0], texture[0], 2D;   # Y
+TEX R1.x, fragment.texcoord[0], texture[1], 2D;   # Cb
+TEX R2.x, fragment.texcoord[0], texture[2], 2D;   # Cr
+SUB R0.x, R0.x, off.x;
+SUB R1.x, R1.x, off.y;
+SUB R2.x, R2.x, off.z;
+MUL R3.x, R0.x, ky.x;            # luma
+MAD R4.x, R2.x, cr.x, R3.x;      # Rc
+MAD R5.x, R1.x, cg.x, R3.x;      # luma + cg.x*Cb'
+MAD R6.x, R2.x, cg.y, R5.x;      # Gc
+MAD R7.x, R1.x, cb.x, R3.x;      # Bc
+MOV R8.x, R4.x;
+MOV R8.y, R6.x;
+MOV R8.z, R7.x;
+MOV R8.w, ky.w;
+MOV result.color, R8;
+END

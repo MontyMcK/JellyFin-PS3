@@ -6,10 +6,12 @@
 #include <ppu-types.h>
 #include <sysutil/sysutil.h>
 
+#include "../../build_config.h"   // relative: source/ is not on the -I path
 #include "player_internal.h"
 #include "stream.h"
 #include "video.h"
 #include "plog.h"
+#include "hd1080.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "rsxutil.h"
@@ -20,11 +22,21 @@
 // -------------------------------------------------------
 
 void show_error(const char *line1, const char *line2) {
+#if !BUILD_FOR_RPCS3
     drawHeader();
     drawText(40, 100, line1);
     if (line2 && line2[0]) drawText(40, 130, line2);
     drawText(40, 160, "O: back");
     flip();
+#else
+    // Emulator: the bitmap-font (NV3089) glyph blits dead-lock the RSX FIFO in
+    // the fragile post-failure state (Dead FIFO ... nv3089 decode_transfer),
+    // taking the whole emulator down instead of showing this message.  So drop
+    // the text and just hold a drained frame; the reason is in player_log.txt.
+    // Mirrors player_status_screen()'s gating in player.cpp.
+    (void)line1; (void)line2;
+    flip();
+#endif
     init_btns();
     while (running) {
         sysUtilCheckCallback();
@@ -72,13 +84,20 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
                       u64 start_ticks) {
     int audio_idx = player_audio_stream_idx(ps);
     int sub_idx   = player_sub_stream_idx(ps);
+    // 1080p (Alpha): 1080p exceeds baseline/level-3.1, so ask for a High-profile
+    // level-4.2 transcode at a higher ceiling bitrate.  Gated — OFF reproduces
+    // the exact baseline/31/4Mbps query the 720p ship path sends.
+    const bool hd        = hd1080_enabled();
+    const char *profile  = hd ? "high" : "baseline";
+    const char *level    = hd ? "42"   : "31";
+    unsigned    vbitrate = hd ? 10000000u : 4000000u;
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
-        "&Profile=baseline"
-        "&Level=31"
+        "&Profile=%s"
+        "&Level=%s"
         "&MaxWidth=%u&MaxHeight=%u"
-        "&VideoBitrate=4000000"
+        "&VideoBitrate=%u"
         "&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000"
         "&MaxAudioChannels=2"
         "&MaxFramerate=30"
@@ -86,8 +105,8 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
         "&DeviceId=%s&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",
-        g_server, ps->item->id, ps->req_w, ps->req_h, jf_device_id(),
-        ps->item->id, (unsigned long long)start_ticks);
+        g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vbitrate,
+        jf_device_id(), ps->item->id, (unsigned long long)start_ticks);
     if (audio_idx >= 0 && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
     if (sub_idx >= 0 && n > 0 && n < url_sz)
@@ -106,7 +125,7 @@ void player_prefill(PlayerState *ps, bool fatal_on_eof, int guard_max) {
     u8   ts_pkt[TS_PACKET_SIZE];
     bool first_pkt = true;
     int  guard     = 0;
-    while (jbuf_count() < JBUF_PREFILL && running && !s_vdec_error &&
+    while (jbuf_count() < jbuf_prefill_target() && running && !s_vdec_error &&
            guard < guard_max) {
         sysUtilCheckCallback();
         int rd = stream_read(ps->sock, ts_pkt, TS_PACKET_SIZE);

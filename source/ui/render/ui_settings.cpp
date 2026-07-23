@@ -9,9 +9,12 @@
 #include "jellyfin_api.h"
 #include "update_check.h"
 #include "plog.h"
+#include "hd1080.h"
 
-static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] = { "Log Out", "Debug Logging", "Screen Size" };
-static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  = { ICON_LOGOUT, ICON_BUG, ICON_TV };
+static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
+    { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)" };
+static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  =
+    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE };
 
 #define SET_PANEL_H 96
 #define SET_ROW_H   56
@@ -139,6 +142,13 @@ void xmb_draw_settings(void) {
             drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
                     (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
                     val, 18, pm ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
+        if (i == 3) {   // 1080p Playback (Alpha) — right-aligned On/Off state
+            const char *val = hd1080_enabled() ? "On" : "Off";
+            int vw = ttf_text_width(val, 18, sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
+                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
+                    val, 18, hd1080_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
     }
 

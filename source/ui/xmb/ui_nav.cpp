@@ -12,6 +12,7 @@
 #include "music_screen.h"
 #include "plog.h"
 #include "timing.h"
+#include "hd1080.h"
 
 // -------------------------------------------------------
 // Tab switching
@@ -141,6 +142,8 @@ static bool xmb_input_settings(void) {
             g_overscan_calib_prev = overscan_frac();
             g_overscan_calib      = true;
         }
+        if (g_settings_sel == 3)                                        // 1080p (Alpha)
+            hd1080_set_enabled(!hd1080_enabled());
     }
     return false;
 }
