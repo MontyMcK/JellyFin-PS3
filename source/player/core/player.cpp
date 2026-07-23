@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "plog.h"
+#include "hd1080.h"
 #include "stream.h"
 #include "audio.h"
 #include "adec.h"
@@ -186,9 +187,17 @@ void show_player(const JFItem *item, u32 resume_secs) {
     ps.cur_sub   = -1;               // subtitles start off
     ps.menu_kind = PLAYER_MENU_NONE;
 
-    // H.264 level 3.1 caps at 1280×720 @ 30fps
-    ps.req_w = display_width  < 1280 ? display_width  : 1280;
-    ps.req_h = display_height < 720  ? display_height : 720;
+    // Baseline H.264 level 3.1 caps at 1280×720 @ 30fps.  1080p (Alpha) asks
+    // the server for a full 1920×1080 High-profile transcode instead — flat,
+    // not capped to the display mode, so the frame is decoded at full res and
+    // downscaled at present.  Gated: OFF => the exact 720p ship path.
+    if (hd1080_enabled()) {
+        ps.req_w = 1920;
+        ps.req_h = 1080;
+    } else {
+        ps.req_w = display_width  < 1280 ? display_width  : 1280;
+        ps.req_h = display_height < 720  ? display_height : 720;
+    }
 
     if (!jellyfin_get_play_session_id(item->id, ps.session_id,
                                       sizeof(ps.session_id), &ps.total_secs)) {
@@ -290,10 +299,11 @@ void show_player(const JFItem *item, u32 resume_secs) {
     {
         char buf[72];
         snprintf(buf, sizeof(buf), "jbuf: %d slots %ux%u ~%u KB each",
-                 JBUF_SIZE, ps.req_w, ps.req_h, ps.req_w * ps.req_h * 4 / 1024);
+                 jbuf_cap(), ps.req_w, ps.req_h,
+                 vid_frame_bytes(ps.req_w, ps.req_h) / 1024);
         plog(buf);
     }
-    for (int i = 0; i < JBUF_SIZE; i++) {
+    for (int i = 0; i < jbuf_cap(); i++) {
         char buf[64];
         snprintf(buf, sizeof(buf), "jbuf_addr: slot=%d ptr=%p", i, (void*)jbuf_slot_ptr(i));
         plog(buf);

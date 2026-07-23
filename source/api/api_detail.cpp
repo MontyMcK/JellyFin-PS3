@@ -7,6 +7,7 @@
 
 #include "jellyfin_api.h"
 #include "plog.h"
+#include "hd1080.h"
 
 // Defined in jellyfin_api.cpp
 int json_get_in_range(const char *start, int len,
@@ -356,17 +357,23 @@ bool jellyfin_get_play_session_id(const char *item_id,
         return false;
     }
 
+    // 1080p (Alpha): the device profile the server sees must permit the higher
+    // resolution/level/bitrate, otherwise it caps the transcode back to 720p
+    // baseline regardless of the stream URL.  Gated — OFF sends the exact
+    // shipped 720p profile below.
+    const bool hd = hd1080_enabled();
+
     char url[768];
     snprintf(url, sizeof(url),
         "%s/Items/%s/PlaybackInfo"
         "?UserId=%s"
-        "&MaxStreamingBitrate=8000000"
+        "&MaxStreamingBitrate=%u"
         "&StartTimeTicks=0"
         "&AutoOpenLiveStream=true",
-        g_server, item_id, g_userid);
+        g_server, item_id, g_userid, hd ? 10000000u : 8000000u);
 
     // Stored in read-only data — avoids putting ~700 bytes on the stack.
-    static const char body[] =
+    static const char body_sd[] =
         "{\"DeviceProfile\":{"
           "\"Name\":\"PS3\","
           "\"MaxStreamingBitrate\":8000000,"
@@ -420,6 +427,64 @@ bool jellyfin_get_play_session_id(const char *item_id,
             "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
           "]"
         "}}";
+
+    // 1080p (Alpha) device profile: identical to body_sd except the video
+    // CodecProfile ceiling is raised to High / level 4.2 / 1920×1080 / 10Mbps
+    // and the streaming/static bitrate caps follow.  See hd1080.h.
+    static const char body_hd[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":10000000,"
+          "\"MaxStaticBitrate\":10000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"mp3\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"2\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"high|main|baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"42\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1920\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"1080\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"10000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    const char *body = hd ? body_hd : body_sd;
 
     int status = http_request(1, url, body, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) {

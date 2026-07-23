@@ -11,20 +11,27 @@
 #include "rsxutil.h"
 #include "video_shaders.h"
 #include "player_rsx.h"
+#include "video.h"      // vid_frame_bytes()
 
 // -------------------------------------------------------
 // Video GPU blit state (allocated per playback session)
 // -------------------------------------------------------
 
-// Double-buffered textures: upload thread writes to tex_buf[disp_idx^1],
-// display thread binds tex_buf[disp_idx] for RSX draw.
-volatile u32 *s_vid_tex_buf[2]    = {NULL, NULL};
-u32           s_vid_tex_off[2]    = {0, 0};
-// Second pair for frame B (temporal blend — next jbuf slot)
-volatile u32 *s_vid_tex_buf_b[2]  = {NULL, NULL};
-u32  s_vid_tex_off_b[2]  = {0, 0};
-u32 *s_vid_fp_buf        = NULL;  // RSX-local FP ucode copy
+// Planar YUV plane textures, double-buffered: upload thread fills [disp_idx^1],
+// display thread binds [disp_idx].  Three SEPARATE textures per frame
+// (Movian-style — sub-regions of one buffer weren't honoured by RPCS3, so all
+// planes read luma).  Indexed [dbuf 0/1][plane 0=Y 1=Cb 2=Cr]; A = current
+// frame, B = next frame for the temporal blend.
+volatile u8 *s_yuvA_buf[2][3] = {};  u32 s_yuvA_off[2][3] = {};
+volatile u8 *s_yuvB_buf[2][3] = {};  u32 s_yuvB_off[2][3] = {};
+u32 *s_vid_fp_buf        = NULL;  // RGB passthrough FP (HUD overlay pass)
 u32  s_vid_fp_off        = 0;
+// YUV->RGB fragment programs for the video quad: BT.709 (HD) and BT.601 (SD),
+// selected per-frame by resolution at draw time.
+u32 *s_vid_fp_buf_yuv    = NULL;
+u32  s_vid_fp_off_yuv    = 0;
+u32 *s_vid_fp_buf_yuv601 = NULL;
+u32  s_vid_fp_off_yuv601 = 0;
 u8  *s_vid_vbuf          = NULL;  // RSX-local 4-vertex quad buffer
 u32  s_vid_vbuf_off      = 0;
 volatile int  s_vid_disp_idx    = 0;
@@ -91,14 +98,23 @@ static void vid_gpu_build_quad(u32 fw, u32 fh) {
 // -------------------------------------------------------
 
 void vid_gpu_init(u32 fw, u32 fh) {
-    s_vid_tex_buf[0] = (u32*)rsxMemalign(64, fw * fh * 4);
-    rsxAddressToOffset(const_cast<u32*>(s_vid_tex_buf[0]), &s_vid_tex_off[0]);
-    s_vid_tex_buf[1] = (u32*)rsxMemalign(64, fw * fh * 4);
-    rsxAddressToOffset(const_cast<u32*>(s_vid_tex_buf[1]), &s_vid_tex_off[1]);
-    s_vid_tex_buf_b[0] = (u32*)rsxMemalign(64, fw * fh * 4);
-    rsxAddressToOffset(const_cast<u32*>(s_vid_tex_buf_b[0]), &s_vid_tex_off_b[0]);
-    s_vid_tex_buf_b[1] = (u32*)rsxMemalign(64, fw * fh * 4);
-    rsxAddressToOffset(const_cast<u32*>(s_vid_tex_buf_b[1]), &s_vid_tex_off_b[1]);
+    // Planar: allocate Y (fw×fh) + Cb/Cr (½×½) as three independent RSX
+    // textures, double-buffered, for frame A and B.  Height padded to a
+    // macroblock to match the decoder's coded size.
+    {
+        u32 fh_pad = (fh + 15u) & ~15u;
+        u32 ysz = fw * fh_pad;
+        u32 csz = (fw / 2u) * (fh_pad / 2u);
+        for (int db = 0; db < 2; db++) {
+            u32 sz[3] = { ysz, csz, csz };
+            for (int p = 0; p < 3; p++) {
+                s_yuvA_buf[db][p] = (u8*)rsxMemalign(64, sz[p]);
+                rsxAddressToOffset(const_cast<u8*>(s_yuvA_buf[db][p]), &s_yuvA_off[db][p]);
+                s_yuvB_buf[db][p] = (u8*)rsxMemalign(64, sz[p]);
+                rsxAddressToOffset(const_cast<u8*>(s_yuvB_buf[db][p]), &s_yuvB_off[db][p]);
+            }
+        }
+    }
     s_vid_disp_idx    = 0;
     s_vid_frame_ready = false;
     s_vid_b_present   = false;
@@ -109,6 +125,23 @@ void vid_gpu_init(u32 fw, u32 fh) {
     s_vid_fp_buf = (u32*)rsxMemalign(256, fp_size);
     memcpy(s_vid_fp_buf, fp_ucode, fp_size);
     rsxAddressToOffset(s_vid_fp_buf, &s_vid_fp_off);
+
+    // Upload both YUV->RGB programs for the video quad (the HUD overlay still
+    // uses the RGB passthrough): BT.709 for HD frames, BT.601 for SD.
+    {
+        rsxFragmentProgram *yuv_fpo = (rsxFragmentProgram*)video_fp_yuv_data;
+        void *yfp_ucode; u32 yfp_size;
+        rsxFragmentProgramGetUCode(yuv_fpo, &yfp_ucode, &yfp_size);
+        s_vid_fp_buf_yuv = (u32*)rsxMemalign(256, yfp_size);
+        memcpy(s_vid_fp_buf_yuv, yfp_ucode, yfp_size);
+        rsxAddressToOffset(s_vid_fp_buf_yuv, &s_vid_fp_off_yuv);
+
+        rsxFragmentProgram *y601_fpo = (rsxFragmentProgram*)video_fp_yuv601_data;
+        rsxFragmentProgramGetUCode(y601_fpo, &yfp_ucode, &yfp_size);
+        s_vid_fp_buf_yuv601 = (u32*)rsxMemalign(256, yfp_size);
+        memcpy(s_vid_fp_buf_yuv601, yfp_ucode, yfp_size);
+        rsxAddressToOffset(s_vid_fp_buf_yuv601, &s_vid_fp_off_yuv601);
+    }
 
     // 4 vertices: float4 pos + float2 uv = 24 bytes each
     s_vid_vbuf = (u8*)rsxMemalign(128, 4 * 24);
@@ -126,12 +159,16 @@ void vid_gpu_init(u32 fw, u32 fh) {
 // -------------------------------------------------------
 
 void vid_gpu_free(void) {
-    if (s_vid_tex_buf[0])   { rsxFree(const_cast<u32*>(s_vid_tex_buf[0]));   s_vid_tex_buf[0]   = NULL; }
-    if (s_vid_tex_buf[1])   { rsxFree(const_cast<u32*>(s_vid_tex_buf[1]));   s_vid_tex_buf[1]   = NULL; }
-    if (s_vid_tex_buf_b[0]) { rsxFree(const_cast<u32*>(s_vid_tex_buf_b[0])); s_vid_tex_buf_b[0] = NULL; }
-    if (s_vid_tex_buf_b[1]) { rsxFree(const_cast<u32*>(s_vid_tex_buf_b[1])); s_vid_tex_buf_b[1] = NULL; }
-    if (s_vid_fp_buf)       { rsxFree(s_vid_fp_buf);       s_vid_fp_buf       = NULL; }
-    if (s_vid_vbuf)         { rsxFree(s_vid_vbuf);         s_vid_vbuf         = NULL; }
+    for (int db = 0; db < 2; db++) {
+        for (int p = 0; p < 3; p++) {
+            if (s_yuvA_buf[db][p]) { rsxFree(const_cast<u8*>(s_yuvA_buf[db][p])); s_yuvA_buf[db][p] = NULL; }
+            if (s_yuvB_buf[db][p]) { rsxFree(const_cast<u8*>(s_yuvB_buf[db][p])); s_yuvB_buf[db][p] = NULL; }
+        }
+    }
+    if (s_vid_fp_buf)        { rsxFree(s_vid_fp_buf);        s_vid_fp_buf        = NULL; }
+    if (s_vid_fp_buf_yuv)    { rsxFree(s_vid_fp_buf_yuv);    s_vid_fp_buf_yuv    = NULL; }
+    if (s_vid_fp_buf_yuv601) { rsxFree(s_vid_fp_buf_yuv601); s_vid_fp_buf_yuv601 = NULL; }
+    if (s_vid_vbuf)          { rsxFree(s_vid_vbuf);          s_vid_vbuf          = NULL; }
 }
 
 // -------------------------------------------------------

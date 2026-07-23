@@ -165,8 +165,9 @@ bool player_spawn_decode(PlayerState *ps);
 // GPU blit state (defined in gpu/player_gpu.cpp)
 // -------------------------------------------------------
 
-extern volatile u32 * s_vid_tex_buf[2];
-extern volatile u32 * s_vid_tex_buf_b[2];
+// Planar YUV plane textures: [dbuf][plane 0=Y 1=Cb 2=Cr].
+extern volatile u8  * s_yuvA_buf[2][3];  extern u32 s_yuvA_off[2][3];
+extern volatile u8  * s_yuvB_buf[2][3];  extern u32 s_yuvB_off[2][3];
 extern volatile int   s_vid_disp_idx;
 extern volatile bool  s_vid_frame_ready;
 extern volatile bool  s_vid_b_present;
