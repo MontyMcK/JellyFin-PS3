@@ -1,0 +1,20 @@
+!!ARBfp1.0
+# Unpacked UYVY (RPCS3 gives raw YUV in the colour channels, no matrix applied)
+# -> RGB, BT.709 limited range.  Channel order observed from the passthrough:
+# white habit read as pink => luma in RED, chroma in GREEN/BLUE, i.e.
+#   sample = (Y, Cb, Cr, a) in (x, y, z, w).
+# Uses vectorised SUB + DP3 (dot products) so there are no per-channel swizzle
+# source reads (which cgcomp miscompiles -> black).
+PARAM off = { 0.06274, 0.50196, 0.50196, 0.0 };  # Y-16/255, Cb-128/255, Cr-128/255
+PARAM cR  = { 1.16438, 0.00000, 1.79274, 0.0 };  # R = 1.164Y' + 1.793Cr'
+PARAM cG  = { 1.16438,-0.21325,-0.53291, 0.0 };  # G = 1.164Y' - .213Cb' - .533Cr'
+PARAM cB  = { 1.16438, 2.11240, 0.00000, 0.0 };  # B = 1.164Y' + 2.112Cb'
+PARAM one = { 0.0, 0.0, 0.0, 1.0 };
+TEX R0, fragment.texcoord[0], texture[0], 2D;
+SUB R0, R0, off;
+DP3 R1.x, R0, cR;
+DP3 R1.y, R0, cG;
+DP3 R1.z, R0, cB;
+MOV R1.w, one.w;
+MOV result.color, R1;
+END

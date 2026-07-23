@@ -13,6 +13,7 @@
 #include "stream.h"
 #include "audio.h"
 #include "adec.h"
+#include "hd1080.h"
 #include "video.h"
 #include "timing.h"
 #include "player_internal.h"
@@ -64,12 +65,12 @@ void decode_thread_fn(void *arg) {
     int  hb_fr_last            = 0;
 
     while (running && *playing && *ctx->dec_run && !s_vdec_error) {
-        if (jbuf_count() >= JBUF_SIZE) {
+        if (jbuf_count() >= jbuf_cap()) {
             usleep(1000);
             continue;
         }
 
-        for (int batch = 0; batch < 128 && jbuf_count() < JBUF_SIZE; batch++) {
+        for (int batch = 0; batch < 128 && jbuf_count() < jbuf_cap(); batch++) {
             int rd = stream_read(ctx->sock, ts_pkt, TS_PACKET_SIZE);
             if (rd < 0) {
                 plog("playing=0 reason=stream_eof");
@@ -90,7 +91,7 @@ void decode_thread_fn(void *arg) {
         }
 
         // Drain all decoded frames from VDEC into the jitter buffer
-        while (s_frames_ready > 0 && jbuf_count() < JBUF_SIZE) {
+        while (s_frames_ready > 0 && jbuf_count() < jbuf_cap()) {
             if (!vdec_pull_frame()) break;
         }
 
@@ -171,10 +172,20 @@ void progress_thread_fn(void *arg) {
 // Upload thread — memcpy jbuf front slot → RSX-local back texture
 // -------------------------------------------------------
 
+// Copy one planar YUV420P frame (Y|Cb|Cr, tight) from a jbuf slot into three
+// separate RSX plane textures.  Uses the decoder's ACTUAL dims (jbuf_fw/fh).
+static void upload_yuv_planes(const u8 *slot, volatile u8 *dst[3]) {
+    u32 fw = jbuf_fw(), fh = jbuf_fh();
+    u32 cw = fw / 2, ch = fh / 2;
+    u32 ysz = fw * fh, csz = cw * ch;
+    memcpy((void*)dst[0], (const void*)slot,             ysz);   // Y
+    memcpy((void*)dst[1], (const void*)(slot + ysz),      csz);   // Cb
+    memcpy((void*)dst[2], (const void*)(slot + ysz + csz), csz);  // Cr
+}
+
 void upload_thread_fn(void *arg) {
     UploadCtx     *ctx     = (UploadCtx*)arg;
     volatile bool *playing = ctx->playing;
-    u32 nbytes = ctx->fw * ctx->fh * 4;
 
     while (running && *playing && !s_vdec_error) {
         if (s_vid_frame_ready) {
@@ -191,13 +202,9 @@ void upload_thread_fn(void *arg) {
 
         __asm__ volatile("sync" ::: "memory");
         int back = s_vid_disp_idx ^ 1;
-        memcpy((void*)(u32*)s_vid_tex_buf[back], (const void*)slot_a, nbytes);
-        if (slot_b) {
-            memcpy((void*)(u32*)s_vid_tex_buf_b[back], (const void*)slot_b, nbytes);
-            s_vid_b_present = true;
-        } else {
-            s_vid_b_present = false;
-        }
+        upload_yuv_planes(slot_a, s_yuvA_buf[back]);
+        if (slot_b) { upload_yuv_planes(slot_b, s_yuvB_buf[back]); s_vid_b_present = true; }
+        else        { s_vid_b_present = false; }
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = true;
     }
