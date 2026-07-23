@@ -21,6 +21,7 @@
 #include "meminfo.h"
 #include "plog.h"
 #include "overscan.h"
+#include "hd1080.h"
 #include "audio.h"
 #include "video.h"
 #include "player_hud.h"
@@ -98,6 +99,7 @@ int main(int argc, const char *argv[]) {
     ui_init();
     plog_load_setting();   // starts logging only if the user enabled it
     overscan_load();       // restore the user's CRT overscan calibration
+    hd1080_load();         // restore the 1080p playback (Alpha) toggle
     audio_volume_load();   // restore the saved master volume
 
     crash_log("7 splash drawHeader");
@@ -151,8 +153,18 @@ int main(int argc, const char *argv[]) {
     hud_overlay_alloc();
     vdec_reserve_mem();
     {
-        u32 rw = display_width  < 1280 ? display_width  : 1280;
-        u32 rh = display_height < 720  ? display_height : 720;
+        // The jitter-buffer slots must hold a whole DECODED planar-YUV frame,
+        // whose size is the transcode size we request (player.cpp), NOT the
+        // display mode.  Reserved up front, before the UI fragments the heap:
+        // 24 x 1.32MB at 720p, 16 x 3.13MB on the 1080p (Alpha) path.  If the
+        // toggle changes at runtime, jbuf_reserve() re-grabs on next play.
+        u32 rw, rh;
+        if (hd1080_enabled()) {
+            rw = 1920; rh = 1080;
+        } else {
+            rw = display_width  < 1280 ? display_width  : 1280;
+            rh = display_height < 720  ? display_height : 720;
+        }
         if (!jbuf_reserve(rw, rh)) crash_log("7e jbuf_reserve FAILED");
     }
     // The image decoder gets a reserved home too.  Thumbnail SLOTS were already

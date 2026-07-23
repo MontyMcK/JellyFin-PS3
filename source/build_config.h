@@ -25,4 +25,4 @@
 //  dev_hdd0/tmp/jellyfin_config.txt (keep the server URL on the LAN).
 // =========================================================================
 
-#define BUILD_FOR_RPCS3 0
+#define BUILD_FOR_RPCS3 1

@@ -1,0 +1,1138 @@
+[2026-07-21 09:16:42] vdec_reserve: 96MB arena ok
+[2026-07-21 09:16:42] img_arena: 4096KB scratch ok
+[2026-07-21 09:16:43] ps_sprites: sheet ok
+[2026-07-21 09:16:43] 7f reserve done: free=15688KB of 214016KB
+[2026-07-21 09:16:43] thumb: ready bd398365f68fb62190496923c5dd4256 (311x467)
+[2026-07-21 09:16:43] thumb: ready b02fb3e2a684b9a1da7106540192b410 (311x467)
+[2026-07-21 09:16:43] thumb: ready dbd131f2bbe38502ff83059291d2fd96 (312x176)
+[2026-07-21 09:16:43] thumb: ready a135c559926c4f9075fb7b99d3d7624a (311x467)
+[2026-07-21 09:16:43] thumb: ready 7ff6f4898a85cfff6617717c44f6e40e (312x176)
+[2026-07-21 09:16:43] thumb: ready 828cc57ee84e0555fd88f7ad843dcc74 (312x176)
+[2026-07-21 09:16:43] thumb: ready 07e850a50f0835be33511dc75e9d8c5b (311x234)
+[2026-07-21 09:16:43] thumb: ready 40b19bcc6016770450089eec574c55b3 (311x234)
+[2026-07-21 09:16:43] thumb: ready 8bfe20620a892887df48b69af610756a (312x176)
+[2026-07-21 09:16:43] thumb: ready 3d5fbb4d6091892edf136b8f49ebe6cf (312x175)
+[2026-07-21 09:16:43] thumb: ready 60f4a1409301aa15d92e80bdc7707af3 (187x280)
+[2026-07-21 09:16:43] thumb: ready 54f72379c37ba1607b89bc97bacdc11a (187x280)
+[2026-07-21 09:16:43] thumb: ready 19b62a72efb62f0a078be1061b3185bd (187x280)
+[2026-07-21 09:16:43] thumb: ready b0a1bcaec966edc74819deb253940976 (187x280)
+[2026-07-21 09:16:43] thumb: ready 3cd95bc1607417365437385a92aee3da (187x280)
+[2026-07-21 09:16:43] thumb: ready 36e95be6f8165735199bd7e3184a4fee (187x280)
+[2026-07-21 09:16:43] thumb: ready 0bfaa612c7fe259610ead15186a2cbb9 (187x280)
+[2026-07-21 09:16:43] thumb: ready d0d589e4b16d4b202ca1e90cf5d44782 (187x280)
+[2026-07-21 09:16:47] thumb: ready 2d836ad1c84b876a361a597e41d0d04f (230x345)
+[2026-07-21 09:16:47] thumb: ready 2438b2039980efedabf8cc9462807325 (230x345)
+[2026-07-21 09:16:47] thumb: ready fa8156671b01aff3281c9ecc0ca7ab68 (230x345)
+[2026-07-21 09:16:47] thumb: ready fbf89f3b792752285827f343f61ff3c5 (230x345)
+[2026-07-21 09:16:47] thumb: ready 212f958b23a9e4584d4a518ac56739bd (230x346)
+[2026-07-21 09:16:47] thumb: ready 0ab40e86f8af150e1aec44db0470d6fe (230x345)
+[2026-07-21 09:16:47] thumb: ready a135c559926c4f9075fb7b99d3d7624a (230x345)
+[2026-07-21 09:16:47] thumb: ready d19a128a3e981952a38a989aedc87fbe (230x345)
+[2026-07-21 09:16:47] thumb: ready 4a661c2247916a32188af669679f5b28 (230x345)
+[2026-07-21 09:16:47] thumb: ready b02fb3e2a684b9a1da7106540192b410 (230x345)
+[2026-07-21 09:16:47] thumb: ready 4ae231b49108db4410cf5744a0252267 (230x345)
+[2026-07-21 09:16:47] thumb: ready bd398365f68fb62190496923c5dd4256 (230x345)
+[2026-07-21 09:16:47] thumb: ready 210510918318d86fa4f268a13c01eb05 (230x345)
+[2026-07-21 09:16:47] thumb: ready 8c5a33ebe8320f97f18e4beffa92959a (259x345)
+[2026-07-21 09:16:47] thumb: ready 17c57a6210d58dd0d324e7d6842ef58b (230x345)
+[2026-07-21 09:16:47] thumb: ready fcd3e2339aefa6c7d362c4e084fac3f9 (230x345)
+[2026-07-21 09:16:48] thumb: ready 0c839f2dd0bfe3f9f0bed80914479b69 (230x345)
+[2026-07-21 09:16:48] thumb: ready 9cb128d61c65c29c54684af3c5587438 (230x345)
+[2026-07-21 09:16:48] thumb: ready cf61a6d7d8fb83b7d6f123b822f76cfc (230x345)
+[2026-07-21 09:16:48] thumb: ready c758bbe457ecde289be9a5b2738157fa (230x345)
+[2026-07-21 09:16:49] show_player: enter
+[2026-07-21 09:16:49] show_player: BUILD=seek-diag-1
+[2026-07-21 09:16:49] color_buffer[0]=0xce215fc0
+[2026-07-21 09:16:49] color_buffer[1]=0xcda2cf80
+[2026-07-21 09:16:49] playbackinfo: runtime=6461s
+[2026-07-21 09:16:49] playbackinfo: session=18155bdc276841c88a5ae583a6f3002a
+[2026-07-21 09:16:49] fetch_tracks: 1 audio, 8 subs
+[2026-07-21 09:16:49] url[0]: http://192.168.1.2:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&Profile=ba
+[2026-07-21 09:16:49] url[1]: seline&Level=31&MaxWidth=1280&MaxHeight=720&VideoBitrate=4000000&AudioCodec=mp3&AudioBitrate=192000&
+[2026-07-21 09:16:49] url[2]: AudioSampleRate=48000&MaxAudioChannels=2&MaxFramerate=30&AllowVideoStreamCopy=false&AllowAudioStream
+[2026-07-21 09:16:49] url[3]: Copy=false&DeviceId=ps3-f46179daf4048a50&Static=false&MediaSourceId=a135c559926c4f9075fb7b99d3d7624a
+[2026-07-21 09:16:49] url[4]: &StartTimeTicks=0&AudioStreamIndex=1&PlaySessionId=18155bdc276841c88a5ae583a6f3002a
+[2026-07-21 09:16:49] show_player: vdec_open
+[2026-07-21 09:16:49] vdec_open: load VDEC base
+[2026-07-21 09:16:49] vdec_open: load VDEC_H264
+[2026-07-21 09:16:49] vdec_open: mod_ret base=0 h264=0
+[2026-07-21 09:16:49] vdec_open: queryAttr
+[2026-07-21 09:16:49] vdec_open: mem_size=33368829
+[2026-07-21 09:16:49] vdec_open: memalign vdec_mem
+[2026-07-21 09:16:49] vdec_open: vdec_mem reused
+[2026-07-21 09:16:49] vdec_open: memalign au_bufs
+[2026-07-21 09:16:49] cfg: addr=0x52900000 size=100663296(33368829) prio=500 stack=0x40000 spu_prio=250 spus=3
+[2026-07-21 09:16:49] vdec_cb_opd32: code=0x0005c7e8 toc=0x000c36e8 fn=0x10450384
+[2026-07-21 09:16:49] vdec_open: vdecOpen (free=12616KB)
+[2026-07-21 09:16:49] vdec_open: startSequence
+[2026-07-21 09:16:49] vdec_open: startSequence ret=0
+[2026-07-21 09:16:49] vdec_open: done
+[2026-07-21 09:16:49] show_player: vdec_open OK
+[2026-07-21 09:16:49] show_player: audio_open
+[2026-07-21 09:16:49] audio: sysAudioInit rc=0x0
+[2026-07-21 09:16:49] audio: sysAudioPortOpen rc=0x0 port=0
+[2026-07-21 09:16:49] audio_param: ch=2 blocks=8 attrib=0 level=1.0000
+[2026-07-21 09:16:49] audio: sysAudioGetPortConfig rc=0x0
+[2026-07-21 09:16:49] audio: cfg readIndex=0x40010010 status=0x1
+[2026-07-21 09:16:49] audio: cfg channelCount=2 numBlocks=8
+[2026-07-21 09:16:49] audio: cfg portSize=0x4000 portAddr=0x40020000
+[2026-07-21 09:16:49] audio: pre-filled 8 blocks start=0x40020000 ri_addr=0x40010010
+[2026-07-21 09:16:49] audio: audioSetNotifyEventQueue rc=0x0
+[2026-07-21 09:16:49] audio: sysAudioPortStart rc=0x0
+[2026-07-21 09:16:49] show_player: audio_open done
+[2026-07-21 09:16:49] show_player: stream_open
+[2026-07-21 09:16:51] stream_open: status=200 chunked=1
+[2026-07-21 09:16:51] show_player: stream_open OK
+[2026-07-21 09:16:51] jbuf: 12 slots 1280x720 ~3600 KB each
+[2026-07-21 09:16:51] jbuf_addr: slot=0 ptr=0x58a80200
+[2026-07-21 09:16:51] jbuf_addr: slot=1 ptr=0x58e04280
+[2026-07-21 09:16:51] jbuf_addr: slot=2 ptr=0x59188300
+[2026-07-21 09:16:51] jbuf_addr: slot=3 ptr=0x5950c380
+[2026-07-21 09:16:51] jbuf_addr: slot=4 ptr=0x59890400
+[2026-07-21 09:16:51] jbuf_addr: slot=5 ptr=0x59c14480
+[2026-07-21 09:16:51] jbuf_addr: slot=6 ptr=0x59f98500
+[2026-07-21 09:16:51] jbuf_addr: slot=7 ptr=0x5a31c580
+[2026-07-21 09:16:51] jbuf_addr: slot=8 ptr=0x5a6a0600
+[2026-07-21 09:16:51] jbuf_addr: slot=9 ptr=0x5aa24680
+[2026-07-21 09:16:51] jbuf_addr: slot=10 ptr=0x5ada8700
+[2026-07-21 09:16:51] jbuf_addr: slot=11 ptr=0x5b12c780
+[2026-07-21 09:16:51] vid_gpu: quad 1280x720 -> 1920x1080+0+0
+[2026-07-21 09:16:51] vid_gpu: init done
+[2026-07-21 09:16:51] hud: prewarm start
+[2026-07-21 09:16:51] hud: prewarm done
+[2026-07-21 09:16:51] jbuf: pre-fill start
+[2026-07-21 09:16:51] show_player: first pkt byte=0x47
+[2026-07-21 09:16:51] vdec_in_pts: n=1 pts=128072 (=0x000000000001f448)
+[2026-07-21 09:16:51] vdec_in_pts: n=2 pts=131826 (=0x00000000000202f2)
+[2026-07-21 09:16:51] vdec_in_pts: n=3 pts=135580 (=0x000000000002119c)
+[2026-07-21 09:16:51] vdec_in_pts: n=4 pts=139333 (=0x0000000000022045)
+[2026-07-21 09:16:51] vdec_in_pts: n=5 pts=143087 (=0x0000000000022eef)
+[2026-07-21 09:16:51] adec_pes: bytes=00 00 01 c0 len=2894
+[2026-07-21 09:16:51] vdec_in_pts: n=6 pts=146841 (=0x0000000000023d99)
+[2026-07-21 09:16:51] adec_frame: hz=48000 ch=2 samples=1152
+[2026-07-21 09:16:51] au_wait: 6ms inflight=4 au#6
+[2026-07-21 09:16:51] vdec_pts: n=1 raw_lo=0x0015b698 raw_hi=0x00000000 pts_us=1423000
+[2026-07-21 09:16:51] vdec: actual 1280x544 (alloc 1280x720)
+[2026-07-21 09:16:51] slot_write: slot=0 px=0xff000000
+[2026-07-21 09:16:51] timing: display=60000/1001 fps=24000/1001
+[2026-07-21 09:16:51] fps_detect: frc=1 -> 24000/1001
+[2026-07-21 09:16:51] vdec_in_pts: n=7 pts=150595 (=0x0000000000024c43)
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#7
+[2026-07-21 09:16:51] vdec_pts: n=2 raw_lo=0x001656c0 raw_hi=0x00000000 pts_us=1464000
+[2026-07-21 09:16:51] slot_write: slot=1 px=0xff000000
+[2026-07-21 09:16:51] vdec_in_pts: n=8 pts=154348 (=0x0000000000025aec)
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#8
+[2026-07-21 09:16:51] vdec_pts: n=3 raw_lo=0x0016fad0 raw_hi=0x00000000 pts_us=1506000
+[2026-07-21 09:16:51] slot_write: slot=2 px=0xff000000
+[2026-07-21 09:16:51] vdec_in_pts: n=9 pts=158102 (=0x0000000000026996)
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#9
+[2026-07-21 09:16:51] vdec_pts: n=4 raw_lo=0x00179ee0 raw_hi=0x00000000 pts_us=1548000
+[2026-07-21 09:16:51] slot_write: slot=3 px=0xff000000
+[2026-07-21 09:16:51] vdec_in_pts: n=10 pts=161856 (=0x0000000000027840)
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#10
+[2026-07-21 09:16:51] vdec_pts: n=5 raw_lo=0x00183f08 raw_hi=0x00000000 pts_us=1589000
+[2026-07-21 09:16:51] slot_write: slot=4 px=0xff000000
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#11
+[2026-07-21 09:16:51] vdec_pts: n=6 raw_lo=0x0018e318 raw_hi=0x00000000 pts_us=1631000
+[2026-07-21 09:16:51] slot_write: slot=5 px=0xff000000
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#12
+[2026-07-21 09:16:51] vdec_pts: n=7 raw_lo=0x00198728 raw_hi=0x00000000 pts_us=1673000
+[2026-07-21 09:16:51] slot_write: slot=6 px=0xff000000
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#13
+[2026-07-21 09:16:51] vdec_pts: n=8 raw_lo=0x001a2750 raw_hi=0x00000000 pts_us=1714000
+[2026-07-21 09:16:51] slot_write: slot=7 px=0xff000000
+[2026-07-21 09:16:51] vdec_pts: n=9 raw_lo=0x001acb60 raw_hi=0x00000000 pts_us=1756000
+[2026-07-21 09:16:51] slot_write: slot=8 px=0xff000000
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#15
+[2026-07-21 09:16:51] vdec_pts: n=10 raw_lo=0x001b6f70 raw_hi=0x00000000 pts_us=1798000
+[2026-07-21 09:16:51] slot_write: slot=9 px=0xff000000
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#16
+[2026-07-21 09:16:51] vdec_pts: n=11 raw_lo=0x001c1380 raw_hi=0x00000000 pts_us=1840000
+[2026-07-21 09:16:51] slot_write: slot=10 px=0xff000000
+[2026-07-21 09:16:51] au_wait: 1ms inflight=4 au#17
+[2026-07-21 09:16:51] vdec_pts: n=12 raw_lo=0x001cb3a8 raw_hi=0x00000000 pts_us=1881000
+[2026-07-21 09:16:51] slot_write: slot=11 px=0xff000000
+[2026-07-21 09:16:51] jbuf: pre-fill done — starting threads
+[2026-07-21 09:16:51] timing: vsync handler registered
+[2026-07-21 09:16:51] playstate: /Sessions/Playing http=204 pos=0s
+[2026-07-21 09:16:51] blend_init: tick=1 n=12 dur=41708us
+[2026-07-21 09:16:51] blend_init: tick=2 n=12 dur=25025us
+[2026-07-21 09:16:51] blend_init: tick=3 n=12 dur=25025us
+[2026-07-21 09:16:51] blend_init: tick=4 n=12 dur=8486us
+[2026-07-21 09:16:51] cf: t=103236657us delta=0us blend=0.512 fr=0 dur_a=8486
+[2026-07-21 09:16:51] disp_seq: fr=1 seq=2 window=0
+[2026-07-21 09:16:51] vid_gpu: quad 1280x544 -> 1920x816+0+132
+[2026-07-21 09:16:51] vdec_pts: n=13 raw_lo=0x001d57b8 raw_hi=0x00000000 pts_us=1923000
+[2026-07-21 09:16:51] slot_write: slot=0 px=0xff000000
+[2026-07-21 09:16:51] blend_init: tick=5 n=12 dur=33611us
+[2026-07-21 09:16:51] blend_init: tick=6 n=12 dur=16964us
+[2026-07-21 09:16:51] blend_init: tick=7 n=12 dur=317us
+[2026-07-21 09:16:51] cf: t=103286704us delta=50047us blend=0.019 fr=1 dur_a=317
+[2026-07-21 09:16:51] disp_seq: fr=2 seq=3 window=0
+[2026-07-21 09:16:51] vdec_pts: n=14 raw_lo=0x001dfbc8 raw_hi=0x00000000 pts_us=1965000
+[2026-07-21 09:16:51] slot_write: slot=1 px=0xff000000
+[2026-07-21 09:16:51] blend_init: tick=8 n=12 dur=25351us
+[2026-07-21 09:16:51] blend_init: tick=9 n=12 dur=8668us
+[2026-07-21 09:16:51] cf: t=103320062us delta=33358us blend=0.520 fr=2 dur_a=8668
+[2026-07-21 09:16:51] disp_seq: fr=3 seq=4 window=0
+[2026-07-21 09:16:51] vdec_pts: n=15 raw_lo=0x001e9bf0 raw_hi=0x00000000 pts_us=2006000
+[2026-07-21 09:16:51] slot_write: slot=2 px=0xff000000
+[2026-07-21 09:16:51] blend_init: tick=10 n=12 dur=33693us
+[2026-07-21 09:16:51] blend_init: tick=11 n=12 dur=17006us
+[2026-07-21 09:16:51] blend_init: tick=12 n=12 dur=322us
+[2026-07-21 09:16:51] cf: t=103370109us delta=50047us blend=0.019 fr=3 dur_a=322
+[2026-07-21 09:16:51] disp_seq: fr=4 seq=5 window=0
+[2026-07-21 09:16:51] vdec_pts: n=16 raw_lo=0x001f4000 raw_hi=0x00000000 pts_us=2048000
+[2026-07-21 09:16:52] slot_write: slot=3 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=13 n=12 dur=25338us
+[2026-07-21 09:16:52] blend_init: tick=14 n=12 dur=8619us
+[2026-07-21 09:16:52] cf: t=103403499us delta=33390us blend=0.516 fr=4 dur_a=8619
+[2026-07-21 09:16:52] disp_seq: fr=5 seq=6 window=0
+[2026-07-21 09:16:52] vdec_pts: n=17 raw_lo=0x001fe410 raw_hi=0x00000000 pts_us=2090000
+[2026-07-21 09:16:52] slot_write: slot=4 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=15 n=12 dur=33608us
+[2026-07-21 09:16:52] blend_init: tick=16 n=12 dur=16861us
+[2026-07-21 09:16:52] blend_init: tick=17 n=12 dur=129us
+[2026-07-21 09:16:52] cf: t=103453546us delta=50047us blend=0.008 fr=5 dur_a=129
+[2026-07-21 09:16:52] disp_seq: fr=6 seq=7 window=0
+[2026-07-21 09:16:52] vdec_pts: n=18 raw_lo=0x00208820 raw_hi=0x00000000 pts_us=2132000
+[2026-07-21 09:16:52] slot_write: slot=5 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=18 n=12 dur=25090us
+[2026-07-21 09:16:52] blend_init: tick=19 n=12 dur=8307us
+[2026-07-21 09:16:52] cf: t=103486911us delta=33365us blend=0.496 fr=6 dur_a=8307
+[2026-07-21 09:16:52] disp_seq: fr=7 seq=8 window=0
+[2026-07-21 09:16:52] vdec_pts: n=19 raw_lo=0x00212848 raw_hi=0x00000000 pts_us=2173000
+[2026-07-21 09:16:52] slot_write: slot=6 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=20 n=12 dur=33251us
+[2026-07-21 09:16:52] blend_init: tick=21 n=12 dur=16447us
+[2026-07-21 09:16:52] cf: t=103520296us delta=33385us blend=0.980 fr=7 dur_a=16447
+[2026-07-21 09:16:52] disp_seq: fr=8 seq=9 window=0
+[2026-07-21 09:16:52] vdec_pts: n=20 raw_lo=0x0021cc58 raw_hi=0x00000000 pts_us=2215000
+[2026-07-21 09:16:52] slot_write: slot=7 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=22 n=12 dur=41372us
+[2026-07-21 09:16:52] blend_init: tick=23 n=12 dur=24589us
+[2026-07-21 09:16:52] blend_init: tick=24 n=12 dur=7842us
+[2026-07-21 09:16:52] cf: t=103570328us delta=50032us blend=0.468 fr=8 dur_a=7842
+[2026-07-21 09:16:52] disp_seq: fr=9 seq=10 window=0
+[2026-07-21 09:16:52] vdec_pts: n=21 raw_lo=0x00227068 raw_hi=0x00000000 pts_us=2257000
+[2026-07-21 09:16:52] slot_write: slot=8 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=25 n=12 dur=32803us
+[2026-07-21 09:16:52] blend_init: tick=26 n=12 dur=16020us
+[2026-07-21 09:16:52] cf: t=103603868us delta=33540us blend=0.957 fr=9 dur_a=16020
+[2026-07-21 09:16:52] disp_seq: fr=10 seq=11 window=0
+[2026-07-21 09:16:52] vdec_pts: n=22 raw_lo=0x00231090 raw_hi=0x00000000 pts_us=2298000
+[2026-07-21 09:16:52] slot_write: slot=9 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=27 n=12 dur=40981us
+[2026-07-21 09:16:52] blend_init: tick=28 n=12 dur=24217us
+[2026-07-21 09:16:52] blend_init: tick=29 n=12 dur=7485us
+[2026-07-21 09:16:52] cf: t=103653758us delta=49890us blend=0.447 fr=10 dur_a=7485
+[2026-07-21 09:16:52] disp_seq: fr=11 seq=12 window=0
+[2026-07-21 09:16:52] vdec_pts: n=23 raw_lo=0x0023b4a0 raw_hi=0x00000000 pts_us=2340000
+[2026-07-21 09:16:52] slot_write: slot=10 px=0xff000000
+[2026-07-21 09:16:52] blend_init: tick=30 n=12 dur=32461us
+[2026-07-21 09:16:52] cf: t=103687110us delta=33352us blend=0.937 fr=11 dur_a=15697
+[2026-07-21 09:16:52] disp_seq: fr=12 seq=13 window=0
+[2026-07-21 09:16:52] vdec_pts: n=24 raw_lo=0x002458b0 raw_hi=0x00000000 pts_us=2382000
+[2026-07-21 09:16:52] slot_write: slot=11 px=0xff000000
+[2026-07-21 09:16:52] cf: t=103737201us delta=50091us blend=0.428 fr=12 dur_a=7162
+[2026-07-21 09:16:52] disp_seq: fr=13 seq=14 window=0
+[2026-07-21 09:16:52] vdec_pts: n=25 raw_lo=0x0024fcc0 raw_hi=0x00000000 pts_us=2424000
+[2026-07-21 09:16:52] slot_write: slot=0 px=0xff000000
+[2026-07-21 09:16:52] cf: t=103770529us delta=33328us blend=0.921 fr=13 dur_a=15404
+[2026-07-21 09:16:52] disp_seq: fr=14 seq=15 window=0
+[2026-07-21 09:16:52] vdec_pts: n=26 raw_lo=0x00259ce8 raw_hi=0x00000000 pts_us=2465000
+[2026-07-21 09:16:52] slot_write: slot=1 px=0xff000000
+[2026-07-21 09:16:52] cf: t=103820576us delta=50047us blend=0.412 fr=14 dur_a=6901
+[2026-07-21 09:16:52] disp_seq: fr=15 seq=16 window=0
+[2026-07-21 09:16:52] vdec_pts: n=27 raw_lo=0x002640f8 raw_hi=0x00000000 pts_us=2507000
+[2026-07-21 09:16:52] slot_write: slot=2 px=0xff000000
+[2026-07-21 09:16:52] cf: t=103853952us delta=33376us blend=0.904 fr=15 dur_a=15130
+[2026-07-21 09:16:52] disp_seq: fr=16 seq=17 window=0
+[2026-07-21 09:16:52] vdec_pts: n=28 raw_lo=0x0026e508 raw_hi=0x00000000 pts_us=2549000
+[2026-07-21 09:16:52] slot_write: slot=3 px=0xff000000
+[2026-07-21 09:16:52] cf: t=103904006us delta=50054us blend=0.397 fr=16 dur_a=6640
+[2026-07-21 09:16:52] disp_seq: fr=17 seq=18 window=0
+[2026-07-21 09:16:52] vdec_pts: n=29 raw_lo=0x00278530 raw_hi=0x00000000 pts_us=2590000
+[2026-07-21 09:16:52] slot_write: slot=4 px=0xff000000
+[2026-07-21 09:16:52] cf: t=103937406us delta=33400us blend=0.889 fr=17 dur_a=14882
+[2026-07-21 09:16:52] disp_seq: fr=18 seq=19 window=0
+[2026-07-21 09:16:52] vdec_pts: n=30 raw_lo=0x00282940 raw_hi=0x00000000 pts_us=2632000
+[2026-07-21 09:16:52] slot_write: slot=5 px=0xff0e0001
+[2026-07-21 09:16:52] cf: t=103987418us delta=50012us blend=0.382 fr=18 dur_a=6392
+[2026-07-21 09:16:52] disp_seq: fr=19 seq=20 window=0
+[2026-07-21 09:16:52] slot_write: slot=6 px=0xff1b0000
+[2026-07-21 09:16:52] cf: t=104020778us delta=33360us blend=0.876 fr=19 dur_a=14649
+[2026-07-21 09:16:52] disp_seq: fr=20 seq=21 window=0
+[2026-07-21 09:16:52] slot_write: slot=7 px=0xff330802
+[2026-07-21 09:16:52] cf: t=104070835us delta=50057us blend=0.368 fr=20 dur_a=6159
+[2026-07-21 09:16:52] disp_seq: fr=21 seq=22 window=0
+[2026-07-21 09:16:52] slot_write: slot=8 px=0xff481f04
+[2026-07-21 09:16:52] cf: t=104104215us delta=33380us blend=0.861 fr=21 dur_a=14401
+[2026-07-21 09:16:52] disp_seq: fr=22 seq=23 window=0
+[2026-07-21 09:16:52] slot_write: slot=9 px=0xff552805
+[2026-07-21 09:16:52] cf: t=104154261us delta=50046us blend=0.355 fr=22 dur_a=5937
+[2026-07-21 09:16:52] disp_seq: fr=23 seq=24 window=0
+[2026-07-21 09:16:52] slot_write: slot=10 px=0xff5f2c03
+[2026-07-21 09:16:52] cf: t=104187678us delta=33417us blend=0.847 fr=23 dur_a=14179
+[2026-07-21 09:16:52] disp_seq: fr=24 seq=25 window=0
+[2026-07-21 09:16:52] slot_write: slot=11 px=0xff612e06
+[2026-07-21 09:16:52] cf: t=104237680us delta=50002us blend=0.341 fr=24 dur_a=5704
+[2026-07-21 09:16:52] slot_write: slot=0 px=0xff663606
+[2026-07-21 09:16:52] cf: t=104271046us delta=33366us blend=0.835 fr=25 dur_a=13961
+[2026-07-21 09:16:52] slot_write: slot=1 px=0xff683606
+[2026-07-21 09:16:52] cf: t=104321107us delta=50061us blend=0.328 fr=26 dur_a=5484
+[2026-07-21 09:16:52] slot_write: slot=2 px=0xff6e4012
+[2026-07-21 09:16:52] cf: t=104354468us delta=33361us blend=0.820 fr=27 dur_a=13726
+[2026-07-21 09:16:52] slot_write: slot=3 px=0xff674015
+[2026-07-21 09:16:53] cf: t=104404543us delta=50075us blend=0.315 fr=28 dur_a=5262
+[2026-07-21 09:16:53] slot_write: slot=4 px=0xff6a4519
+[2026-07-21 09:16:53] cf: t=104437870us delta=33327us blend=0.807 fr=29 dur_a=13504
+[2026-07-21 09:16:53] slot_write: slot=5 px=0xff5e4219
+[2026-07-21 09:16:53] cf: t=104487934us delta=50064us blend=0.300 fr=30 dur_a=5014
+[2026-07-21 09:16:53] slot_write: slot=6 px=0xff61481e
+[2026-07-21 09:16:53] cf: t=104521300us delta=33366us blend=0.794 fr=31 dur_a=13271
+[2026-07-21 09:16:53] slot_write: slot=7 px=0xff58451c
+[2026-07-21 09:16:53] cf: t=104571344us delta=50044us blend=0.288 fr=32 dur_a=4809
+[2026-07-21 09:16:53] slot_write: slot=8 px=0xff5b481f
+[2026-07-21 09:16:53] cf: t=104604713us delta=33369us blend=0.780 fr=33 dur_a=13051
+[2026-07-21 09:16:53] slot_write: slot=9 px=0xff51401b
+[2026-07-21 09:16:53] cf: t=104654777us delta=50064us blend=0.273 fr=34 dur_a=4561
+[2026-07-21 09:16:53] slot_write: slot=10 px=0xff4c3c1b
+[2026-07-21 09:16:53] cf: t=104688143us delta=33366us blend=0.767 fr=35 dur_a=12829
+[2026-07-21 09:16:53] slot_write: slot=11 px=0xff4b3e1d
+[2026-07-21 09:16:53] cf: t=104738195us delta=50052us blend=0.260 fr=36 dur_a=4339
+[2026-07-21 09:16:53] slot_write: slot=0 px=0xff4a3f22
+[2026-07-21 09:16:53] cf: t=104771547us delta=33352us blend=0.753 fr=37 dur_a=12596
+[2026-07-21 09:16:53] slot_write: slot=1 px=0xff4a3f22
+[2026-07-21 09:16:53] cf: t=104821600us delta=50053us blend=0.248 fr=38 dur_a=4145
+[2026-07-21 09:16:53] slot_write: slot=2 px=0xff484024
+[2026-07-21 09:16:53] cf: t=104854973us delta=33373us blend=0.740 fr=39 dur_a=12387
+[2026-07-21 09:16:53] slot_write: slot=3 px=0xff443e24
+[2026-07-21 09:16:53] cf: t=104905197us delta=50224us blend=0.234 fr=40 dur_a=3912
+[2026-07-21 09:16:53] slot_write: slot=4 px=0xff413d25
+[2026-07-21 09:16:53] cf: t=104938436us delta=33239us blend=0.728 fr=41 dur_a=12180
+[2026-07-21 09:16:53] slot_write: slot=5 px=0xff413e28
+[2026-07-21 09:16:53] cf: t=104988435us delta=49999us blend=0.221 fr=42 dur_a=3690
+[2026-07-21 09:16:53] slot_write: slot=6 px=0xff3f3f2a
+[2026-07-21 09:16:53] cf: t=105021819us delta=33384us blend=0.713 fr=43 dur_a=11932
+[2026-07-21 09:16:53] slot_write: slot=7 px=0xff3d3c2a
+[2026-07-21 09:16:53] cf: t=105071890us delta=50071us blend=0.207 fr=44 dur_a=3457
+[2026-07-21 09:16:53] slot_write: slot=8 px=0xff363827
+[2026-07-21 09:16:53] cf: t=105105237us delta=33347us blend=0.699 fr=45 dur_a=11699
+[2026-07-21 09:16:53] slot_write: slot=9 px=0xff373427
+[2026-07-21 09:16:53] cf: t=105155275us delta=50038us blend=0.192 fr=46 dur_a=3209
+[2026-07-21 09:16:53] slot_write: slot=10 px=0xff2d3123
+[2026-07-21 09:16:53] cf: t=105188650us delta=33375us blend=0.685 fr=47 dur_a=11466
+[2026-07-21 09:16:53] slot_write: slot=11 px=0xff303327
+[2026-07-21 09:16:53] cf: t=105238699us delta=50049us blend=0.178 fr=48 dur_a=2976
+[2026-07-21 09:16:53] cf: t=105272071us delta=33372us blend=0.670 fr=49 dur_a=11218
+[2026-07-21 09:16:53] cf: t=105322150us delta=50079us blend=0.165 fr=50 dur_a=2754
+[2026-07-21 09:16:53] cf: t=105355490us delta=33340us blend=0.658 fr=51 dur_a=11011
+[2026-07-21 09:16:54] cf: t=105405546us delta=50056us blend=0.152 fr=52 dur_a=2536
+[2026-07-21 09:16:54] cf: t=105438901us delta=33355us blend=0.646 fr=53 dur_a=10793
+[2026-07-21 09:16:54] cf: t=105488966us delta=50065us blend=0.139 fr=54 dur_a=2331
+[2026-07-21 09:16:54] cf: t=105522344us delta=33378us blend=0.633 fr=55 dur_a=10588
+[2026-07-21 09:16:54] cf: t=105572384us delta=50040us blend=0.128 fr=56 dur_a=2137
+[2026-07-21 09:16:54] cf: t=105605747us delta=33363us blend=0.620 fr=57 dur_a=10379
+[2026-07-21 09:16:54] cf: t=105655790us delta=50043us blend=0.113 fr=58 dur_a=1889
+[2026-07-21 09:16:54] hb: fr=59 q=12 au=72 ab=471 stalls=0 max=0ms avg=0ms fps=23.6 aumax=4
+[2026-07-21 09:16:54] cf: t=105689262us delta=33472us blend=0.607 fr=59 dur_a=10146
+[2026-07-21 09:16:54] frame_interval: fr=60 gap1=50043us gap2=33472us audio=3901175us
+[2026-07-21 09:16:54] blend_dist: fr=60 pure=90 mid=60 spill_max=16618us
+[2026-07-21 09:16:54] avsync: smooth=-7906us locked=1 audio=3901175us video=3925000us bias=49us nom=16683us
+[2026-07-21 09:16:54] vb: t=105689353us fr=60 disp=0 dur_a=35135 do_pop=1 render_blend=1 blend=0.607 q=11
+[2026-07-21 09:16:54] cf: t=105739225us delta=49963us blend=0.101 fr=60 dur_a=1684
+[2026-07-21 09:16:54] vb: t=105739299us fr=61 disp=1 dur_a=26673 do_pop=1 render_blend=1 blend=0.101 q=11
+[2026-07-21 09:16:54] cf: t=105772596us delta=33371us blend=0.593 fr=61 dur_a=9926
+[2026-07-21 09:16:54] vb: t=105772672us fr=62 disp=1 dur_a=34902 do_pop=1 render_blend=1 blend=0.593 q=11
+[2026-07-21 09:16:54] audio_ratio: pcm=500 sil=0 total=500
+[2026-07-21 09:16:54] audio_clock: clk=4029167us blocks=500
+[2026-07-21 09:16:54] cf: t=105822665us delta=50069us blend=0.087 fr=62 dur_a=1451
+[2026-07-21 09:16:54] vb: t=105822738us fr=63 disp=0 dur_a=26451 do_pop=1 render_blend=1 blend=0.087 q=11
+[2026-07-21 09:16:54] cf: t=105856006us delta=33341us blend=0.580 fr=63 dur_a=9704
+[2026-07-21 09:16:54] vb: t=105856090us fr=64 disp=0 dur_a=34680 do_pop=1 render_blend=1 blend=0.580 q=11
+[2026-07-21 09:16:54] cf: t=105906074us delta=50068us blend=0.073 fr=64 dur_a=1214
+[2026-07-21 09:16:54] vb: t=105906148us fr=65 disp=1 dur_a=26203 do_pop=1 render_blend=1 blend=0.073 q=11
+[2026-07-21 09:16:54] cf: t=105939449us delta=33375us blend=0.566 fr=65 dur_a=9456
+[2026-07-21 09:16:54] vb: t=105939543us fr=66 disp=1 dur_a=34445 do_pop=1 render_blend=1 blend=0.566 q=11
+[2026-07-21 09:16:54] cf: t=105989504us delta=50055us blend=0.060 fr=66 dur_a=1005
+[2026-07-21 09:16:54] vb: t=105989580us fr=67 disp=0 dur_a=25994 do_pop=1 render_blend=1 blend=0.060 q=11
+[2026-07-21 09:16:54] cf: t=106022841us delta=33337us blend=0.553 fr=67 dur_a=9247
+[2026-07-21 09:16:54] vb: t=106022919us fr=68 disp=0 dur_a=34223 do_pop=1 render_blend=1 blend=0.553 q=11
+[2026-07-21 09:16:54] cf: t=106072883us delta=50042us blend=0.046 fr=68 dur_a=772
+[2026-07-21 09:16:54] vb: t=106072956us fr=69 disp=1 dur_a=25772 do_pop=1 render_blend=1 blend=0.046 q=11
+[2026-07-21 09:16:54] cf: t=106106277us delta=33394us blend=0.541 fr=69 dur_a=9040
+[2026-07-21 09:16:54] vb: t=106106351us fr=70 disp=1 dur_a=34029 do_pop=1 render_blend=1 blend=0.541 q=11
+[2026-07-21 09:16:54] cf: t=106156309us delta=50032us blend=0.035 fr=70 dur_a=578
+[2026-07-21 09:16:54] vb: t=106156384us fr=71 disp=0 dur_a=25567 do_pop=1 render_blend=1 blend=0.035 q=11
+[2026-07-21 09:16:54] cf: t=106189674us delta=33365us blend=0.528 fr=71 dur_a=8835
+[2026-07-21 09:16:54] vb: t=106189748us fr=72 disp=0 dur_a=33824 do_pop=1 render_blend=1 blend=0.528 q=11
+[2026-07-21 09:16:54] cf: t=106239740us delta=50066us blend=0.023 fr=72 dur_a=384
+[2026-07-21 09:16:54] vb: t=106239814us fr=73 disp=1 dur_a=25384 do_pop=1 render_blend=1 blend=0.023 q=11
+[2026-07-21 09:16:54] cf: t=106273142us delta=33402us blend=0.517 fr=73 dur_a=8652
+[2026-07-21 09:16:54] vb: t=106273220us fr=74 disp=1 dur_a=33641 do_pop=1 render_blend=1 blend=0.517 q=11
+[2026-07-21 09:16:54] cf: t=106323161us delta=50019us blend=0.012 fr=74 dur_a=201
+[2026-07-21 09:16:54] vb: t=106323248us fr=75 disp=0 dur_a=25201 do_pop=1 render_blend=1 blend=0.012 q=11
+[2026-07-21 09:16:54] cf: t=106356529us delta=33368us blend=0.507 fr=75 dur_a=8469
+[2026-07-21 09:16:54] vb: t=106356603us fr=76 disp=0 dur_a=33458 do_pop=1 render_blend=1 blend=0.507 q=11
+[2026-07-21 09:16:55] cf: t=106406565us delta=50036us blend=0.000 fr=76 dur_a=7
+[2026-07-21 09:16:55] vb: t=106406639us fr=77 disp=1 dur_a=24996 do_pop=1 render_blend=1 blend=0.000 q=11
+[2026-07-21 09:16:55] cf: t=106439934us delta=33369us blend=0.493 fr=77 dur_a=8249
+[2026-07-21 09:16:55] vb: t=106440026us fr=78 disp=1 dur_a=33225 do_pop=1 render_blend=1 blend=0.493 q=11
+[2026-07-21 09:16:55] cf: t=106473342us delta=33408us blend=0.987 fr=78 dur_a=16493
+[2026-07-21 09:16:55] vb: t=106473416us fr=79 disp=1 dur_a=41493 do_pop=1 render_blend=1 blend=0.987 q=11
+[2026-07-21 09:16:55] cf: t=106523361us delta=50019us blend=0.484 fr=79 dur_a=8082
+[2026-07-21 09:16:55] vb: t=106523435us fr=80 disp=0 dur_a=33098 do_pop=1 render_blend=1 blend=0.484 q=11
+[2026-07-21 09:16:55] cf: t=106556735us delta=33374us blend=0.982 fr=80 dur_a=16399
+[2026-07-21 09:16:55] vb: t=106556809us fr=81 disp=0 dur_a=41415 do_pop=1 render_blend=1 blend=0.982 q=11
+[2026-07-21 09:16:55] cf: t=106606796us delta=50061us blend=0.482 fr=81 dur_a=8039
+[2026-07-21 09:16:55] vb: t=106606870us fr=82 disp=1 dur_a=33064 do_pop=1 render_blend=1 blend=0.482 q=11
+[2026-07-21 09:16:55] cf: t=106640154us delta=33358us blend=0.982 fr=82 dur_a=16377
+[2026-07-21 09:16:55] vb: t=106640240us fr=83 disp=1 dur_a=41401 do_pop=1 render_blend=1 blend=0.982 q=11
+[2026-07-21 09:16:55] cf: t=106690206us delta=50052us blend=0.482 fr=83 dur_a=8034
+[2026-07-21 09:16:55] vb: t=106690280us fr=84 disp=0 dur_a=33059 do_pop=1 render_blend=1 blend=0.482 q=11
+[2026-07-21 09:16:55] cf: t=106723573us delta=33367us blend=0.982 fr=84 dur_a=16375
+[2026-07-21 09:16:55] vb: t=106723646us fr=85 disp=0 dur_a=41400 do_pop=1 render_blend=1 blend=0.982 q=11
+[2026-07-21 09:16:55] cf: t=106773620us delta=50047us blend=0.482 fr=85 dur_a=8035
+[2026-07-21 09:16:55] vb: t=106773693us fr=86 disp=1 dur_a=33061 do_pop=1 render_blend=1 blend=0.482 q=11
+[2026-07-21 09:16:55] cf: t=106806997us delta=33377us blend=0.982 fr=86 dur_a=16378
+[2026-07-21 09:16:55] vb: t=106807070us fr=87 disp=1 dur_a=41403 do_pop=1 render_blend=1 blend=0.982 q=11
+[2026-07-21 09:16:55] cf: t=106857086us delta=50089us blend=0.482 fr=87 dur_a=8038
+[2026-07-21 09:16:55] vb: t=106864168us fr=88 disp=0 dur_a=33064 do_pop=1 render_blend=1 blend=0.482 q=11
+[2026-07-21 09:16:55] cf: t=106890417us delta=33331us blend=0.982 fr=88 dur_a=16381
+[2026-07-21 09:16:55] vb: t=106890491us fr=89 disp=0 dur_a=41407 do_pop=1 render_blend=1 blend=0.982 q=11
+[2026-07-21 09:16:55] cf: t=106940459us delta=50042us blend=0.482 fr=89 dur_a=8042
+[2026-07-21 09:16:55] vb: t=106940534us fr=90 disp=1 dur_a=33068 do_pop=1 render_blend=1 blend=0.482 q=11
+[2026-07-21 09:16:55] cf: t=106973826us delta=33367us blend=0.982 fr=90 dur_a=16385
+[2026-07-21 09:16:55] vb: t=106973900us fr=91 disp=1 dur_a=41411 do_pop=1 render_blend=1 blend=0.982 q=11
+[2026-07-21 09:16:55] cf: t=107023875us delta=50049us blend=0.482 fr=91 dur_a=8049
+[2026-07-21 09:16:55] vb: t=107023955us fr=92 disp=0 dur_a=33075 do_pop=1 render_blend=1 blend=0.482 q=11
+[2026-07-21 09:16:55] cf: t=107057245us delta=33370us blend=0.983 fr=92 dur_a=16392
+[2026-07-21 09:16:55] vb: t=107057332us fr=93 disp=0 dur_a=41418 do_pop=1 render_blend=1 blend=0.983 q=11
+[2026-07-21 09:16:55] cf: t=107107286us delta=50041us blend=0.483 fr=93 dur_a=8056
+[2026-07-21 09:16:55] vb: t=107107360us fr=94 disp=1 dur_a=33085 do_pop=1 render_blend=1 blend=0.483 q=11
+[2026-07-21 09:16:55] cf: t=107140673us delta=33387us blend=0.983 fr=94 dur_a=16402
+[2026-07-21 09:16:55] vb: t=107140747us fr=95 disp=1 dur_a=41428 do_pop=1 render_blend=1 blend=0.983 q=11
+[2026-07-21 09:16:55] cf: t=107190718us delta=50045us blend=0.483 fr=95 dur_a=8063
+[2026-07-21 09:16:55] vb: t=107190792us fr=96 disp=0 dur_a=33089 do_pop=1 render_blend=1 blend=0.483 q=11
+[2026-07-21 09:16:55] cf: t=107224085us delta=33367us blend=0.983 fr=96 dur_a=16406
+[2026-07-21 09:16:55] vb: t=107224159us fr=97 disp=0 dur_a=41432 do_pop=1 render_blend=1 blend=0.983 q=11
+[2026-07-21 09:16:55] cf: t=107274165us delta=50080us blend=0.484 fr=97 dur_a=8070
+[2026-07-21 09:16:55] vb: t=107274244us fr=98 disp=1 dur_a=33099 do_pop=1 render_blend=1 blend=0.484 q=11
+[2026-07-21 09:16:55] cf: t=107307513us delta=33348us blend=0.984 fr=98 dur_a=16416
+[2026-07-21 09:16:55] vb: t=107307587us fr=99 disp=1 dur_a=41442 do_pop=1 render_blend=1 blend=0.984 q=11
+[2026-07-21 09:16:55] cf: t=107357565us delta=50052us blend=0.484 fr=99 dur_a=8080
+[2026-07-21 09:16:55] vb: t=107357649us fr=100 disp=0 dur_a=33109 do_pop=1 render_blend=1 blend=0.484 q=11
+[2026-07-21 09:16:56] cf: t=107390925us delta=33360us blend=0.985 fr=100 dur_a=16426
+[2026-07-21 09:16:56] vb: t=107390998us fr=101 disp=0 dur_a=41452 do_pop=1 render_blend=1 blend=0.985 q=11
+[2026-07-21 09:16:56] cf: t=107440982us delta=50057us blend=0.485 fr=101 dur_a=8090
+[2026-07-21 09:16:56] vb: t=107441074us fr=102 disp=1 dur_a=33119 do_pop=1 render_blend=1 blend=0.485 q=11
+[2026-07-21 09:16:56] cf: t=107474328us delta=33346us blend=0.985 fr=102 dur_a=16436
+[2026-07-21 09:16:56] vb: t=107474401us fr=103 disp=1 dur_a=41462 do_pop=1 render_blend=1 blend=0.985 q=11
+[2026-07-21 09:16:56] cf: t=107524405us delta=50077us blend=0.486 fr=103 dur_a=8100
+[2026-07-21 09:16:56] vb: t=107524479us fr=104 disp=0 dur_a=33129 do_pop=1 render_blend=1 blend=0.486 q=11
+[2026-07-21 09:16:56] cf: t=107557751us delta=33346us blend=0.986 fr=104 dur_a=16446
+[2026-07-21 09:16:56] vb: t=107557824us fr=105 disp=0 dur_a=41472 do_pop=1 render_blend=1 blend=0.986 q=11
+[2026-07-21 09:16:56] cf: t=107607802us delta=50051us blend=0.486 fr=105 dur_a=8110
+[2026-07-21 09:16:56] vb: t=107607874us fr=106 disp=1 dur_a=33139 do_pop=1 render_blend=1 blend=0.486 q=11
+[2026-07-21 09:16:56] cf: t=107641324us delta=33522us blend=0.986 fr=106 dur_a=16456
+[2026-07-21 09:16:56] vb: t=107641430us fr=107 disp=1 dur_a=41482 do_pop=1 render_blend=1 blend=0.986 q=11
+[2026-07-21 09:16:56] cf: t=107691228us delta=49904us blend=0.487 fr=107 dur_a=8120
+[2026-07-21 09:16:56] vb: t=107691301us fr=108 disp=0 dur_a=33149 do_pop=1 render_blend=1 blend=0.487 q=11
+[2026-07-21 09:16:56] cf: t=107724589us delta=33361us blend=0.987 fr=108 dur_a=16466
+[2026-07-21 09:16:56] vb: t=107724663us fr=109 disp=0 dur_a=41492 do_pop=1 render_blend=1 blend=0.987 q=11
+[2026-07-21 09:16:56] cf: t=107774693us delta=50104us blend=0.487 fr=109 dur_a=8130
+[2026-07-21 09:16:56] vb: t=107774771us fr=110 disp=1 dur_a=33159 do_pop=1 render_blend=1 blend=0.487 q=11
+[2026-07-21 09:16:56] cf: t=107808022us delta=33329us blend=0.988 fr=110 dur_a=16476
+[2026-07-21 09:16:56] vb: t=107808096us fr=111 disp=1 dur_a=41502 do_pop=1 render_blend=1 blend=0.988 q=11
+[2026-07-21 09:16:56] cf: t=107858065us delta=50043us blend=0.488 fr=111 dur_a=8140
+[2026-07-21 09:16:56] vb: t=107858140us fr=112 disp=0 dur_a=33169 do_pop=1 render_blend=1 blend=0.488 q=11
+[2026-07-21 09:16:56] cf: t=107891424us delta=33359us blend=0.988 fr=112 dur_a=16486
+[2026-07-21 09:16:56] vb: t=107891498us fr=113 disp=0 dur_a=41512 do_pop=1 render_blend=1 blend=0.988 q=11
+[2026-07-21 09:16:56] cf: t=107941509us delta=50085us blend=0.489 fr=113 dur_a=8150
+[2026-07-21 09:16:56] vb: t=107941582us fr=114 disp=1 dur_a=33179 do_pop=1 render_blend=1 blend=0.489 q=11
+[2026-07-21 09:16:56] cf: t=107974838us delta=33329us blend=0.989 fr=114 dur_a=16496
+[2026-07-21 09:16:56] vb: t=107974912us fr=115 disp=1 dur_a=41522 do_pop=1 render_blend=1 blend=0.989 q=11
+[2026-07-21 09:16:56] cf: t=108024912us delta=50074us blend=0.489 fr=115 dur_a=8160
+[2026-07-21 09:16:56] vb: t=108024986us fr=116 disp=0 dur_a=33189 do_pop=1 render_blend=1 blend=0.489 q=11
+[2026-07-21 09:16:56] cf: t=108058288us delta=33376us blend=0.989 fr=116 dur_a=16506
+[2026-07-21 09:16:56] vb: t=108058361us fr=117 disp=0 dur_a=41532 do_pop=1 render_blend=1 blend=0.989 q=11
+[2026-07-21 09:16:56] cf: t=108108319us delta=50031us blend=0.490 fr=117 dur_a=8170
+[2026-07-21 09:16:56] vb: t=108108395us fr=118 disp=1 dur_a=33199 do_pop=1 render_blend=1 blend=0.490 q=11
+[2026-07-21 09:16:56] cf: t=108141687us delta=33368us blend=0.990 fr=118 dur_a=16516
+[2026-07-21 09:16:56] vb: t=108141762us fr=119 disp=1 dur_a=41542 do_pop=1 render_blend=1 blend=0.990 q=11
+[2026-07-21 09:16:56] cf: t=108191744us delta=50057us blend=0.490 fr=119 dur_a=8180
+[2026-07-21 09:16:56] frame_interval: fr=120 gap1=33368us gap2=50056us audio=6402352us
+[2026-07-21 09:16:56] blend_dist: fr=120 pure=180 mid=120 spill_max=16712us
+[2026-07-21 09:16:56] avsync: smooth=661us locked=1 audio=6402352us video=6428000us bias=0us nom=16683us
+[2026-07-21 09:16:56] vb: t=108191845us fr=120 disp=0 dur_a=33209 do_pop=1 render_blend=1 blend=0.490 q=11
+[2026-07-21 09:16:56] hb: fr=120 q=12 au=133 ab=946 stalls=0 max=0ms avg=0ms fps=24.1 aumax=0
+[2026-07-21 09:16:56] cf: t=108225184us delta=33440us blend=0.991 fr=120 dur_a=16526
+[2026-07-21 09:16:56] vb: t=108225259us fr=121 disp=0 dur_a=41552 do_pop=1 render_blend=1 blend=0.991 q=11
+[2026-07-21 09:16:56] cf: t=108275156us delta=49972us blend=0.491 fr=121 dur_a=8190
+[2026-07-21 09:16:56] vb: t=108275230us fr=122 disp=1 dur_a=33219 do_pop=1 render_blend=1 blend=0.491 q=11
+[2026-07-21 09:16:56] cf: t=108308538us delta=33382us blend=0.991 fr=122 dur_a=16536
+[2026-07-21 09:16:56] vb: t=108308612us fr=123 disp=1 dur_a=41562 do_pop=1 render_blend=1 blend=0.991 q=11
+[2026-07-21 09:16:56] cf: t=108358586us delta=50048us blend=0.492 fr=123 dur_a=8200
+[2026-07-21 09:16:56] vb: t=108358661us fr=124 disp=0 dur_a=33229 do_pop=1 render_blend=1 blend=0.492 q=11
+[2026-07-21 09:16:57] cf: t=108391960us delta=33374us blend=0.992 fr=124 dur_a=16546
+[2026-07-21 09:16:57] vb: t=108392034us fr=125 disp=0 dur_a=41572 do_pop=1 render_blend=1 blend=0.992 q=11
+[2026-07-21 09:16:57] cf: t=108442009us delta=50049us blend=0.492 fr=125 dur_a=8210
+[2026-07-21 09:16:57] vb: t=108442082us fr=126 disp=1 dur_a=33239 do_pop=1 render_blend=1 blend=0.492 q=11
+[2026-07-21 09:16:57] cf: t=108475369us delta=33360us blend=0.992 fr=126 dur_a=16556
+[2026-07-21 09:16:57] vb: t=108475443us fr=127 disp=1 dur_a=41582 do_pop=1 render_blend=1 blend=0.992 q=11
+[2026-07-21 09:16:57] audio_ratio: pcm=500 sil=0 total=1000
+[2026-07-21 09:16:57] audio_clock: clk=6695667us blocks=1000
+[2026-07-21 09:16:57] cf: t=108525408us delta=50039us blend=0.493 fr=127 dur_a=8220
+[2026-07-21 09:16:57] vb: t=108525491us fr=128 disp=0 dur_a=33249 do_pop=1 render_blend=1 blend=0.493 q=11
+[2026-07-21 09:16:57] cf: t=108558815us delta=33407us blend=0.993 fr=128 dur_a=16566
+[2026-07-21 09:16:57] vb: t=108558889us fr=129 disp=0 dur_a=41592 do_pop=1 render_blend=1 blend=0.993 q=11
+[2026-07-21 09:16:57] cf: t=108608844us delta=50029us blend=0.493 fr=129 dur_a=8230
+[2026-07-21 09:16:57] vb: t=108608918us fr=130 disp=1 dur_a=33259 do_pop=1 render_blend=1 blend=0.493 q=11
+[2026-07-21 09:16:57] cf: t=108642197us delta=33353us blend=0.994 fr=130 dur_a=16576
+[2026-07-21 09:16:57] vb: t=108642285us fr=131 disp=1 dur_a=41602 do_pop=1 render_blend=1 blend=0.994 q=11
+[2026-07-21 09:16:57] cf: t=108692272us delta=50075us blend=0.494 fr=131 dur_a=8240
+[2026-07-21 09:16:57] vb: t=108692346us fr=132 disp=0 dur_a=33269 do_pop=1 render_blend=1 blend=0.494 q=11
+[2026-07-21 09:16:57] cf: t=108725622us delta=33350us blend=0.994 fr=132 dur_a=16586
+[2026-07-21 09:16:57] vb: t=108725696us fr=133 disp=0 dur_a=41612 do_pop=1 render_blend=1 blend=0.994 q=11
+[2026-07-21 09:16:57] cf: t=108775686us delta=50064us blend=0.495 fr=133 dur_a=8250
+[2026-07-21 09:16:57] vb: t=108775762us fr=134 disp=1 dur_a=33279 do_pop=1 render_blend=1 blend=0.495 q=11
+[2026-07-21 09:16:57] cf: t=108809063us delta=33377us blend=0.995 fr=134 dur_a=16596
+[2026-07-21 09:16:57] vb: t=108809160us fr=135 disp=1 dur_a=41622 do_pop=1 render_blend=1 blend=0.995 q=11
+[2026-07-21 09:16:57] cf: t=108859112us delta=50049us blend=0.495 fr=135 dur_a=8261
+[2026-07-21 09:16:57] vb: t=108859186us fr=136 disp=0 dur_a=33290 do_pop=1 render_blend=1 blend=0.495 q=11
+[2026-07-21 09:16:57] cf: t=108892462us delta=33350us blend=0.996 fr=136 dur_a=16607
+[2026-07-21 09:16:57] vb: t=108892540us fr=137 disp=0 dur_a=41633 do_pop=1 render_blend=1 blend=0.996 q=11
+[2026-07-21 09:16:57] cf: t=108942654us delta=50192us blend=0.496 fr=137 dur_a=8271
+[2026-07-21 09:16:57] vb: t=108942780us fr=138 disp=1 dur_a=33300 do_pop=1 render_blend=1 blend=0.496 q=11
+[2026-07-21 09:16:57] cf: t=108975888us delta=33234us blend=0.996 fr=138 dur_a=16617
+[2026-07-21 09:16:57] vb: t=108975962us fr=139 disp=1 dur_a=41643 do_pop=1 render_blend=1 blend=0.996 q=11
+[2026-07-21 09:16:57] cf: t=109025939us delta=50051us blend=0.496 fr=139 dur_a=8281
+[2026-07-21 09:16:57] vb: t=109026014us fr=140 disp=0 dur_a=33310 do_pop=1 render_blend=1 blend=0.496 q=11
+[2026-07-21 09:16:57] cf: t=109059296us delta=33357us blend=0.997 fr=140 dur_a=16627
+[2026-07-21 09:16:57] vb: t=109059369us fr=141 disp=0 dur_a=41653 do_pop=1 render_blend=1 blend=0.997 q=11
+[2026-07-21 09:16:57] cf: t=109109358us delta=50062us blend=0.497 fr=141 dur_a=8292
+[2026-07-21 09:16:57] vb: t=109109441us fr=142 disp=1 dur_a=33321 do_pop=1 render_blend=1 blend=0.497 q=11
+[2026-07-21 09:16:57] cf: t=109142732us delta=33374us blend=0.997 fr=142 dur_a=16638
+[2026-07-21 09:16:57] vb: t=109142805us fr=143 disp=1 dur_a=41664 do_pop=1 render_blend=1 blend=0.997 q=11
+[2026-07-21 09:16:57] cf: t=109192753us delta=50021us blend=0.498 fr=143 dur_a=8302
+[2026-07-21 09:16:57] vb: t=109192832us fr=144 disp=0 dur_a=33331 do_pop=1 render_blend=1 blend=0.498 q=11
+[2026-07-21 09:16:57] cf: t=109226150us delta=33397us blend=0.998 fr=144 dur_a=16648
+[2026-07-21 09:16:57] vb: t=109226224us fr=145 disp=0 dur_a=41674 do_pop=1 render_blend=1 blend=0.998 q=11
+[2026-07-21 09:16:57] cf: t=109276193us delta=50043us blend=0.498 fr=145 dur_a=8312
+[2026-07-21 09:16:57] vb: t=109276267us fr=146 disp=1 dur_a=33341 do_pop=1 render_blend=1 blend=0.498 q=11
+[2026-07-21 09:16:57] cf: t=109309581us delta=33388us blend=0.999 fr=146 dur_a=16658
+[2026-07-21 09:16:57] vb: t=109309655us fr=147 disp=1 dur_a=41684 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:57] cf: t=109359630us delta=50049us blend=0.499 fr=147 dur_a=8322
+[2026-07-21 09:16:57] vb: t=109359704us fr=148 disp=0 dur_a=33351 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:58] cf: t=109392985us delta=33355us blend=0.999 fr=148 dur_a=16668
+[2026-07-21 09:16:58] vb: t=109393062us fr=149 disp=0 dur_a=41694 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:58] cf: t=109443095us delta=50110us blend=0.500 fr=149 dur_a=8332
+[2026-07-21 09:16:58] vb: t=109443168us fr=150 disp=1 dur_a=33361 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:58] cf: t=109476400us delta=33305us blend=1.000 fr=150 dur_a=16678
+[2026-07-21 09:16:58] vb: t=109476473us fr=151 disp=1 dur_a=41707 do_pop=1 render_blend=1 blend=1.000 q=11
+[2026-07-21 09:16:58] cf: t=109526461us delta=50061us blend=0.500 fr=151 dur_a=8345
+[2026-07-21 09:16:58] vb: t=109526553us fr=152 disp=0 dur_a=33374 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:58] cf: t=109576507us delta=50046us blend=0.001 fr=152 dur_a=9
+[2026-07-21 09:16:58] vb: t=109576581us fr=153 disp=1 dur_a=25034 do_pop=1 render_blend=1 blend=0.001 q=11
+[2026-07-21 09:16:58] cf: t=109609877us delta=33370us blend=0.500 fr=153 dur_a=8350
+[2026-07-21 09:16:58] vb: t=109609952us fr=154 disp=1 dur_a=33374 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:58] cf: t=109659952us delta=50075us blend=0.000 fr=154 dur_a=3
+[2026-07-21 09:16:58] vb: t=109660026us fr=155 disp=0 dur_a=25024 do_pop=1 render_blend=1 blend=0.000 q=11
+[2026-07-21 09:16:58] cf: t=109693285us delta=33333us blend=0.499 fr=155 dur_a=8325
+[2026-07-21 09:16:58] vb: t=109693360us fr=156 disp=0 dur_a=33341 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:58] cf: t=109726784us delta=33499us blend=0.997 fr=156 dur_a=16642
+[2026-07-21 09:16:58] vb: t=109726858us fr=157 disp=0 dur_a=41658 do_pop=1 render_blend=1 blend=0.997 q=11
+[2026-07-21 09:16:58] cf: t=109776715us delta=49931us blend=0.496 fr=157 dur_a=8282
+[2026-07-21 09:16:58] vb: t=109776790us fr=158 disp=1 dur_a=33306 do_pop=1 render_blend=1 blend=0.496 q=11
+[2026-07-21 09:16:58] cf: t=109810067us delta=33352us blend=0.996 fr=158 dur_a=16619
+[2026-07-21 09:16:58] vb: t=109810153us fr=159 disp=1 dur_a=41643 do_pop=1 render_blend=1 blend=0.996 q=11
+[2026-07-21 09:16:58] cf: t=109860160us delta=50093us blend=0.496 fr=159 dur_a=8276
+[2026-07-21 09:16:58] vb: t=109860234us fr=160 disp=0 dur_a=33301 do_pop=1 render_blend=1 blend=0.496 q=11
+[2026-07-21 09:16:58] cf: t=109893493us delta=33333us blend=0.996 fr=160 dur_a=16617
+[2026-07-21 09:16:58] vb: t=109893567us fr=161 disp=0 dur_a=41642 do_pop=1 render_blend=1 blend=0.996 q=11
+[2026-07-21 09:16:58] cf: t=109943550us delta=50057us blend=0.496 fr=161 dur_a=8275
+[2026-07-21 09:16:58] vb: t=109943624us fr=162 disp=1 dur_a=33301 do_pop=1 render_blend=1 blend=0.496 q=11
+[2026-07-21 09:16:58] cf: t=109976908us delta=33358us blend=0.996 fr=162 dur_a=16618
+[2026-07-21 09:16:58] vb: t=109976982us fr=163 disp=1 dur_a=41643 do_pop=1 render_blend=1 blend=0.996 q=11
+[2026-07-21 09:16:58] cf: t=110026973us delta=50065us blend=0.496 fr=163 dur_a=8278
+[2026-07-21 09:16:58] vb: t=110027047us fr=164 disp=0 dur_a=33304 do_pop=1 render_blend=1 blend=0.496 q=11
+[2026-07-21 09:16:58] cf: t=110060334us delta=33361us blend=0.996 fr=164 dur_a=16621
+[2026-07-21 09:16:58] vb: t=110060432us fr=165 disp=0 dur_a=41646 do_pop=1 render_blend=1 blend=0.996 q=11
+[2026-07-21 09:16:58] cf: t=110110370us delta=50036us blend=0.497 fr=165 dur_a=8284
+[2026-07-21 09:16:58] vb: t=110110445us fr=166 disp=1 dur_a=33313 do_pop=1 render_blend=1 blend=0.497 q=11
+[2026-07-21 09:16:58] cf: t=110143761us delta=33391us blend=0.997 fr=166 dur_a=16630
+[2026-07-21 09:16:58] vb: t=110143835us fr=167 disp=1 dur_a=41656 do_pop=1 render_blend=1 blend=0.997 q=11
+[2026-07-21 09:16:58] cf: t=110193805us delta=50044us blend=0.497 fr=167 dur_a=8294
+[2026-07-21 09:16:58] vb: t=110193879us fr=168 disp=0 dur_a=33323 do_pop=1 render_blend=1 blend=0.497 q=11
+[2026-07-21 09:16:58] cf: t=110227182us delta=33377us blend=0.997 fr=168 dur_a=16640
+[2026-07-21 09:16:58] vb: t=110227269us fr=169 disp=0 dur_a=41666 do_pop=1 render_blend=1 blend=0.997 q=11
+[2026-07-21 09:16:58] cf: t=110277226us delta=50044us blend=0.498 fr=169 dur_a=8310
+[2026-07-21 09:16:58] vb: t=110277318us fr=170 disp=1 dur_a=33339 do_pop=1 render_blend=1 blend=0.498 q=11
+[2026-07-21 09:16:58] cf: t=110310639us delta=33413us blend=0.998 fr=170 dur_a=16656
+[2026-07-21 09:16:58] vb: t=110310714us fr=171 disp=1 dur_a=41682 do_pop=1 render_blend=1 blend=0.998 q=11
+[2026-07-21 09:16:58] cf: t=110360647us delta=50008us blend=0.499 fr=171 dur_a=8320
+[2026-07-21 09:16:58] vb: t=110360738us fr=172 disp=0 dur_a=33349 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:59] cf: t=110394008us delta=33361us blend=0.999 fr=172 dur_a=16667
+[2026-07-21 09:16:59] vb: t=110394083us fr=173 disp=0 dur_a=41693 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:59] cf: t=110444064us delta=50056us blend=0.499 fr=173 dur_a=8331
+[2026-07-21 09:16:59] vb: t=110444138us fr=174 disp=1 dur_a=33360 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:59] cf: t=110477417us delta=33353us blend=1.000 fr=174 dur_a=16677
+[2026-07-21 09:16:59] vb: t=110477490us fr=175 disp=1 dur_a=41703 do_pop=1 render_blend=1 blend=1.000 q=11
+[2026-07-21 09:16:59] cf: t=110527496us delta=50079us blend=0.500 fr=175 dur_a=8341
+[2026-07-21 09:16:59] vb: t=110527569us fr=176 disp=0 dur_a=33370 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:59] cf: t=110577537us delta=50041us blend=0.000 fr=176 dur_a=5
+[2026-07-21 09:16:59] vb: t=110577610us fr=177 disp=1 dur_a=25030 do_pop=1 render_blend=1 blend=0.000 q=11
+[2026-07-21 09:16:59] cf: t=110610902us delta=33365us blend=0.500 fr=177 dur_a=8346
+[2026-07-21 09:16:59] vb: t=110610976us fr=178 disp=1 dur_a=33370 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:59] cf: t=110644272us delta=33370us blend=1.000 fr=178 dur_a=16683
+[2026-07-21 09:16:59] vb: t=110644321us fr=179 disp=1 dur_a=41707 do_pop=1 render_blend=1 blend=1.000 q=11
+[2026-07-21 09:16:59] cf: t=110694321us delta=50049us blend=0.500 fr=179 dur_a=8340
+[2026-07-21 09:16:59] frame_interval: fr=180 gap1=33369us gap2=50049us audio=8903529us
+[2026-07-21 09:16:59] blend_dist: fr=180 pure=270 mid=180 spill_max=16712us
+[2026-07-21 09:16:59] avsync: smooth=-1498us locked=1 audio=8903529us video=8930000us bias=1us nom=16683us
+[2026-07-21 09:16:59] vb: t=110694407us fr=180 disp=0 dur_a=33365 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:59] hb: fr=180 q=12 au=193 ab=1416 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:16:59] cf: t=110727692us delta=33371us blend=1.000 fr=180 dur_a=16681
+[2026-07-21 09:16:59] vb: t=110727767us fr=181 disp=0 dur_a=41706 do_pop=1 render_blend=1 blend=1.000 q=11
+[2026-07-21 09:16:59] cf: t=110777746us delta=50054us blend=0.500 fr=181 dur_a=8341
+[2026-07-21 09:16:59] vb: t=110777820us fr=182 disp=1 dur_a=33367 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:59] cf: t=110827791us delta=50045us blend=0.000 fr=182 dur_a=1
+[2026-07-21 09:16:59] vb: t=110827925us fr=183 disp=0 dur_a=25026 do_pop=1 render_blend=1 blend=0.000 q=11
+[2026-07-21 09:16:59] cf: t=110861155us delta=33364us blend=0.500 fr=183 dur_a=8339
+[2026-07-21 09:16:59] vb: t=110861229us fr=184 disp=0 dur_a=33360 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:59] cf: t=110894672us delta=33517us blend=0.999 fr=184 dur_a=16668
+[2026-07-21 09:16:59] vb: t=110894757us fr=185 disp=0 dur_a=41692 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:59] cf: t=110944588us delta=49916us blend=0.499 fr=185 dur_a=8322
+[2026-07-21 09:16:59] vb: t=110944660us fr=186 disp=1 dur_a=33347 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:59] cf: t=110977957us delta=33369us blend=0.999 fr=186 dur_a=16663
+[2026-07-21 09:16:59] vb: t=110978031us fr=187 disp=1 dur_a=41688 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:59] cf: t=111028111us delta=50154us blend=0.499 fr=187 dur_a=8321
+[2026-07-21 09:16:59] vb: t=111028188us fr=188 disp=0 dur_a=33347 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:59] cf: t=111061364us delta=33253us blend=0.999 fr=188 dur_a=16664
+[2026-07-21 09:16:59] vb: t=111061439us fr=189 disp=0 dur_a=41689 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:59] cf: t=111111435us delta=50071us blend=0.499 fr=189 dur_a=8324
+[2026-07-21 09:16:59] vb: t=111111510us fr=190 disp=1 dur_a=33350 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:59] cf: t=111144792us delta=33357us blend=0.999 fr=190 dur_a=16667
+[2026-07-21 09:16:59] vb: t=111144867us fr=191 disp=1 dur_a=41692 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:59] audio_ratio: pcm=500 sil=0 total=1500
+[2026-07-21 09:16:59] audio_clock: clk=9362167us blocks=1500
+[2026-07-21 09:16:59] cf: t=111194844us delta=50052us blend=0.499 fr=191 dur_a=8327
+[2026-07-21 09:16:59] vb: t=111194918us fr=192 disp=0 dur_a=33353 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:16:59] cf: t=111228205us delta=33361us blend=0.999 fr=192 dur_a=16670
+[2026-07-21 09:16:59] vb: t=111228292us fr=193 disp=0 dur_a=41695 do_pop=1 render_blend=1 blend=0.999 q=11
+[2026-07-21 09:16:59] cf: t=111278241us delta=50036us blend=0.500 fr=193 dur_a=8333
+[2026-07-21 09:16:59] vb: t=111278314us fr=194 disp=1 dur_a=33362 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:16:59] cf: t=111311626us delta=33385us blend=1.000 fr=194 dur_a=16679
+[2026-07-21 09:16:59] vb: t=111311704us fr=195 disp=1 dur_a=41705 do_pop=1 render_blend=1 blend=1.000 q=11
+[2026-07-21 09:16:59] cf: t=111361679us delta=50053us blend=0.500 fr=195 dur_a=8343
+[2026-07-21 09:16:59] vb: t=111361754us fr=196 disp=0 dur_a=33372 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:17:00] adec_pts: read=9623486us write=9920000us delta=296514us
+[2026-07-21 09:17:00] cf: t=111411740us delta=50061us blend=0.000 fr=196 dur_a=7
+[2026-07-21 09:17:00] vb: t=111411815us fr=197 disp=1 dur_a=25032 do_pop=1 render_blend=1 blend=0.000 q=11
+[2026-07-21 09:17:00] cf: t=111445100us delta=33360us blend=0.500 fr=197 dur_a=8348
+[2026-07-21 09:17:00] vb: t=111445174us fr=198 disp=1 dur_a=33372 do_pop=1 render_blend=1 blend=0.500 q=11
+[2026-07-21 09:17:00] cf: t=111495152us delta=50052us blend=0.000 fr=198 dur_a=1
+[2026-07-21 09:17:00] vb: t=111495228us fr=199 disp=0 dur_a=25025 do_pop=1 render_blend=1 blend=0.000 q=11
+[2026-07-21 09:17:00] cf: t=111528516us delta=33364us blend=0.499 fr=199 dur_a=8326
+[2026-07-21 09:17:00] vb: t=111528591us fr=200 disp=0 dur_a=33342 do_pop=1 render_blend=1 blend=0.499 q=11
+[2026-07-21 09:17:00] vb: t=111561942us fr=201 disp=0 dur_a=41664 do_pop=1 render_blend=1 blend=0.997 q=11
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=201
+[2026-07-21 09:17:00] hud_ovl: compose#1 rows=1016..1080 up=0..1080
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=201
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=201
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] vb: t=111628647us fr=202 disp=1 dur_a=33294 do_pop=1 render_blend=1 blend=0.496 q=11
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=202
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=202
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] vb: t=111662032us fr=203 disp=1 dur_a=41564 do_pop=1 render_blend=1 blend=0.991 q=11
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=203
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=203
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=203
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] vb: t=111712102us fr=204 disp=0 dur_a=33061 do_pop=1 render_blend=1 blend=0.484 q=11
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=204
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=204
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] vb: t=111745456us fr=205 disp=0 dur_a=41203 do_pop=1 render_blend=1 blend=0.970 q=11
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=205
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] hud_gate: vis paused=0 fr=205
+[2026-07-21 09:17:00] hud_gate: draw returned
+[2026-07-21 09:17:00] vb: t=111795518us fr=206 disp=1 dur_a=32541 do_pop=1 render_blend=1 blend=0.454 q=11
+[2026-07-21 09:17:00] hud_ovl: compose#2 rows=1016..1080 up=1016..1080
+[2026-07-21 09:17:00] vb: t=111845576us fr=207 disp=1 dur_a=40570 do_pop=1 render_blend=1 blend=0.932 q=11
+[2026-07-21 09:17:00] vb: t=111895620us fr=208 disp=0 dur_a=31428 do_pop=1 render_blend=1 blend=0.394 q=11
+[2026-07-21 09:17:00] vb: t=111928974us fr=209 disp=0 dur_a=38970 do_pop=1 render_blend=1 blend=0.840 q=11
+[2026-07-21 09:17:00] vb: t=111979032us fr=210 disp=1 dur_a=29175 do_pop=1 render_blend=1 blend=0.272 q=11
+[2026-07-21 09:17:00] vb: t=112012411us fr=211 disp=1 dur_a=36267 do_pop=1 render_blend=1 blend=0.686 q=11
+[2026-07-21 09:17:00] hud_ovl: compose#3 rows=1016..1080 up=1016..1080
+[2026-07-21 09:17:00] vb: t=112062449us fr=212 disp=0 dur_a=26000 do_pop=1 render_blend=1 blend=0.092 q=11
+[2026-07-21 09:17:00] vb: t=112095820us fr=213 disp=0 dur_a=32884 do_pop=1 render_blend=1 blend=0.493 q=11
+[2026-07-21 09:17:00] vb: t=112129250us fr=214 disp=0 dur_a=39656 do_pop=1 render_blend=1 blend=0.882 q=11
+[2026-07-21 09:17:00] vb: t=112179246us fr=215 disp=1 dur_a=29281 do_pop=1 render_blend=1 blend=0.282 q=11
+[2026-07-21 09:17:00] vb: t=112212600us fr=216 disp=1 dur_a=36322 do_pop=1 render_blend=1 blend=0.689 q=11
+[2026-07-21 09:17:00] vb: t=112262723us fr=217 disp=0 dur_a=26153 do_pop=1 render_blend=1 blend=0.099 q=11
+[2026-07-21 09:17:00] vb: t=112296043us fr=218 disp=0 dur_a=33294 do_pop=1 render_blend=1 blend=0.512 q=11
+[2026-07-21 09:17:00] hud_ovl: compose#4 rows=1016..1080 up=1016..1080
+[2026-07-21 09:17:00] vb: t=112329599us fr=219 disp=0 dur_a=40482 do_pop=1 render_blend=1 blend=0.929 q=11
+[2026-07-21 09:17:01] vb: t=112379463us fr=220 disp=1 dur_a=30771 do_pop=1 render_blend=1 blend=0.360 q=11
+[2026-07-21 09:17:01] vb: t=112412826us fr=221 disp=1 dur_a=38272 do_pop=1 render_blend=1 blend=0.799 q=11
+[2026-07-21 09:17:01] vb: t=112462913us fr=222 disp=0 dur_a=28918 do_pop=1 render_blend=1 blend=0.246 q=11
+[2026-07-21 09:17:01] vb: t=112496237us fr=223 disp=0 dur_a=36575 do_pop=1 render_blend=1 blend=0.698 q=11
+[2026-07-21 09:17:01] hud_ovl: compose#5 rows=1016..1080 up=1016..1080
+[2026-07-21 09:17:01] vb: t=112546278us fr=224 disp=1 dur_a=27398 do_pop=1 render_blend=1 blend=0.155 q=11
+[2026-07-21 09:17:01] vb: t=112579642us fr=225 disp=1 dur_a=35195 do_pop=1 render_blend=1 blend=0.616 q=11
+[2026-07-21 09:17:01] vb: t=112629713us fr=226 disp=0 dur_a=26115 do_pop=1 render_blend=1 blend=0.078 q=11
+[2026-07-21 09:17:01] vb: t=112663061us fr=227 disp=0 dur_a=33912 do_pop=1 render_blend=1 blend=0.540 q=11
+[2026-07-21 09:17:01] vb: t=112713132us fr=228 disp=1 dur_a=24923 do_pop=1 render_blend=1 blend=0.006 q=11
+[2026-07-21 09:17:01] vb: t=112746507us fr=229 disp=1 dur_a=32784 do_pop=1 render_blend=1 blend=0.472 q=11
+[2026-07-21 09:17:01] vb: t=112779867us fr=230 disp=1 dur_a=40674 do_pop=1 render_blend=1 blend=0.939 q=11
+[2026-07-21 09:17:01] hud_ovl: compose#6 rows=1016..1080 up=1016..1080
+[2026-07-21 09:17:01] vb: t=112829911us fr=231 disp=0 dur_a=31872 do_pop=1 render_blend=1 blend=0.415 q=11
+[2026-07-21 09:17:01] vb: t=112863300us fr=232 disp=0 dur_a=39970 do_pop=1 render_blend=1 blend=0.896 q=11
+[2026-07-21 09:17:01] vb: t=112913368us fr=233 disp=1 dur_a=31346 do_pop=1 render_blend=1 blend=0.382 q=11
+[2026-07-21 09:17:01] vb: t=112946689us fr=234 disp=1 dur_a=39507 do_pop=1 render_blend=1 blend=0.869 q=11
+[2026-07-21 09:17:01] vb: t=112996770us fr=235 disp=0 dur_a=30987 do_pop=1 render_blend=1 blend=0.359 q=11
+[2026-07-21 09:17:01] vb: t=113030132us fr=236 disp=0 dur_a=39184 do_pop=1 render_blend=1 blend=0.849 q=11
+[2026-07-21 09:17:01] hud_ovl: compose#7 rows=686..1080 up=686..1080
+[2026-07-21 09:17:01] vb: t=113096844us fr=237 disp=1 dur_a=30617 do_pop=1 render_blend=1 blend=0.338 q=11
+[2026-07-21 09:17:01] vb: t=113130230us fr=238 disp=1 dur_a=38646 do_pop=1 render_blend=1 blend=0.818 q=11
+[2026-07-21 09:17:01] vb: t=113180264us fr=239 disp=0 dur_a=29659 do_pop=1 render_blend=1 blend=0.287 q=11
+[2026-07-21 09:17:01] frame_interval: fr=240 gap1=50031us gap2=33368us audio=11420705us
+[2026-07-21 09:17:01] blend_dist: fr=240 pure=358 mid=240 spill_max=16785us
+[2026-07-21 09:17:01] avsync: smooth=-18674us locked=1 audio=11420705us video=11433000us bias=324us nom=16683us
+[2026-07-21 09:17:01] vb: t=113213646us fr=240 disp=0 dur_a=37423 do_pop=1 render_blend=1 blend=0.748 q=11
+[2026-07-21 09:17:01] hb: fr=240 q=12 au=253 ab=1888 stalls=0 max=0ms avg=0ms fps=23.8 aumax=0
+[2026-07-21 09:17:01] playstate: /Sessions/Playing/Progress http=204 pos=11s
+[2026-07-21 09:17:01] disp_seq: fr=241 seq=242 window=1
+[2026-07-21 09:17:01] vb: t=113263696us fr=241 disp=1 dur_a=28180 do_pop=1 render_blend=1 blend=0.203 q=11
+[2026-07-21 09:17:01] disp_seq: fr=242 seq=243 window=1
+[2026-07-21 09:17:01] vb: t=113297063us fr=242 disp=1 dur_a=35761 do_pop=1 render_blend=1 blend=0.651 q=11
+[2026-07-21 09:17:01] disp_seq: fr=243 seq=244 window=1
+[2026-07-21 09:17:01] vb: t=113347111us fr=243 disp=0 dur_a=26257 do_pop=1 render_blend=1 blend=0.093 q=11
+[2026-07-21 09:17:02] disp_seq: fr=244 seq=245 window=1
+[2026-07-21 09:17:02] vb: t=113380479us fr=244 disp=0 dur_a=33758 do_pop=1 render_blend=1 blend=0.535 q=11
+[2026-07-21 09:17:02] disp_seq: fr=245 seq=246 window=1
+[2026-07-21 09:17:02] vb: t=113413862us fr=245 disp=0 dur_a=41259 do_pop=1 render_blend=1 blend=0.974 q=11
+[2026-07-21 09:17:02] disp_seq: fr=246 seq=247 window=1
+[2026-07-21 09:17:02] vb: t=113463912us fr=246 disp=1 dur_a=31870 do_pop=1 render_blend=1 blend=0.422 q=11
+[2026-07-21 09:17:02] disp_seq: fr=247 seq=248 window=1
+[2026-07-21 09:17:02] vb: t=113497461us fr=247 disp=1 dur_a=39562 do_pop=1 render_blend=1 blend=0.874 q=11
+[2026-07-21 09:17:02] disp_seq: fr=248 seq=249 window=1
+[2026-07-21 09:17:02] vb: t=113547328us fr=248 disp=0 dur_a=30385 do_pop=1 render_blend=1 blend=0.332 q=11
+[2026-07-21 09:17:02] disp_seq: fr=249 seq=250 window=1
+[2026-07-21 09:17:02] vb: t=113580687us fr=249 disp=0 dur_a=38147 do_pop=1 render_blend=1 blend=0.790 q=11
+[2026-07-21 09:17:02] disp_seq: fr=250 seq=251 window=1
+[2026-07-21 09:17:02] vb: t=113630895us fr=250 disp=1 dur_a=29067 do_pop=1 render_blend=1 blend=0.252 q=11
+[2026-07-21 09:17:02] disp_seq: fr=251 seq=252 window=1
+[2026-07-21 09:17:02] vb: t=113664102us fr=251 disp=1 dur_a=36864 do_pop=1 render_blend=1 blend=0.714 q=11
+[2026-07-21 09:17:02] disp_seq: fr=252 seq=253 window=1
+[2026-07-21 09:17:02] vb: t=113714170us fr=252 disp=0 dur_a=27817 do_pop=1 render_blend=1 blend=0.178 q=11
+[2026-07-21 09:17:02] disp_seq: fr=253 seq=254 window=1
+[2026-07-21 09:17:02] vb: t=113747536us fr=253 disp=0 dur_a=35678 do_pop=1 render_blend=1 blend=0.643 q=11
+[2026-07-21 09:17:02] hud_ovl: compose#8 rows=686..1080 up=686..1080
+[2026-07-21 09:17:02] disp_seq: fr=254 seq=255 window=1
+[2026-07-21 09:17:02] vb: t=113814265us fr=254 disp=1 dur_a=26689 do_pop=1 render_blend=1 blend=0.110 q=11
+[2026-07-21 09:17:02] audio_ratio: pcm=500 sil=0 total=2000
+[2026-07-21 09:17:02] audio_clock: clk=12028667us blocks=2000
+[2026-07-21 09:17:02] hud_ovl: compose#9 rows=686..1080 up=686..1080
+[2026-07-21 09:17:02] disp_seq: fr=255 seq=256 window=1
+[2026-07-21 09:17:02] vb: t=113864332us fr=255 disp=1 dur_a=34307 do_pop=1 render_blend=1 blend=0.567 q=11
+[2026-07-21 09:17:02] disp_seq: fr=256 seq=257 window=1
+[2026-07-21 09:17:02] vb: t=113897701us fr=256 disp=1 dur_a=41544 do_pop=1 render_blend=1 blend=0.990 q=11
+[2026-07-21 09:17:02] disp_seq: fr=257 seq=258 window=1
+[2026-07-21 09:17:02] vb: t=113947744us fr=257 disp=0 dur_a=31067 do_pop=1 render_blend=1 blend=0.391 q=11
+[2026-07-21 09:17:02] disp_seq: fr=258 seq=259 window=1
+[2026-07-21 09:17:02] vb: t=113981097us fr=258 disp=0 dur_a=37609 do_pop=1 render_blend=1 blend=0.767 q=11
+[2026-07-21 09:17:02] disp_seq: fr=259 seq=260 window=1
+[2026-07-21 09:17:02] vb: t=114031147us fr=259 disp=1 dur_a=26259 do_pop=1 render_blend=1 blend=0.128 q=11
+[2026-07-21 09:17:02] disp_seq: fr=260 seq=261 window=1
+[2026-07-21 09:17:02] disp_seq: fr=261 seq=262 window=1
+[2026-07-21 09:17:02] disp_seq: fr=262 seq=263 window=1
+[2026-07-21 09:17:02] disp_seq: fr=263 seq=264 window=1
+[2026-07-21 09:17:02] disp_seq: fr=264 seq=265 window=1
+[2026-07-21 09:17:03] hud: subs -> [2] English (SRT) - SUBRIP
+[2026-07-21 09:17:03] hud: seek +0 s (begin)
+[2026-07-21 09:17:03] seek_calc: base=0s clk=12s delta=0s -> target=12s ticks=128232840 total=6461s
+[2026-07-21 09:17:03] vdec_open: load VDEC base
+[2026-07-21 09:17:03] vdec_open: load VDEC_H264
+[2026-07-21 09:17:03] vdec_open: mod_ret base=0 h264=0
+[2026-07-21 09:17:03] vdec_open: queryAttr
+[2026-07-21 09:17:03] vdec_open: mem_size=33368829
+[2026-07-21 09:17:03] vdec_open: memalign vdec_mem
+[2026-07-21 09:17:03] vdec_open: vdec_mem reused
+[2026-07-21 09:17:03] vdec_open: memalign au_bufs
+[2026-07-21 09:17:03] cfg: addr=0x52900000 size=100663296(33368829) prio=500 stack=0x40000 spu_prio=250 spus=3
+[2026-07-21 09:17:03] vdec_cb_opd32: code=0x0005c7e8 toc=0x000c36e8 fn=0x10450384
+[2026-07-21 09:17:03] vdec_open: vdecOpen (free=12472KB)
+[2026-07-21 09:17:03] vdec_open: startSequence
+[2026-07-21 09:17:03] vdec_open: startSequence ret=0
+[2026-07-21 09:17:03] vdec_open: done
+[2026-07-21 09:17:03] stop_transcode: http 204 session=18155bdc276841c88a5ae583a6f3002a
+[2026-07-21 09:17:03] playbackinfo: session=25fbde43d22e476d8e2b433f3b92ed15
+[2026-07-21 09:17:03] seek: new session=25fbde43d22e476d8e2b433f3b92ed15
+[2026-07-21 09:17:03] surl[0]: http://192.168.1.2:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&Profile=ba
+[2026-07-21 09:17:03] surl[1]: seline&Level=31&MaxWidth=1280&MaxHeight=720&VideoBitrate=4000000&AudioCodec=mp3&AudioBitrate=192000&
+[2026-07-21 09:17:03] surl[2]: AudioSampleRate=48000&MaxAudioChannels=2&MaxFramerate=30&AllowVideoStreamCopy=false&AllowAudioStream
+[2026-07-21 09:17:03] surl[3]: Copy=false&DeviceId=ps3-f46179daf4048a50&Static=false&MediaSourceId=a135c559926c4f9075fb7b99d3d7624a
+[2026-07-21 09:17:03] surl[4]: &StartTimeTicks=128232840&AudioStreamIndex=1&SubtitleStreamIndex=2&SubtitleMethod=Encode&PlaySession
+[2026-07-21 09:17:03] surl[5]: Id=25fbde43d22e476d8e2b433f3b92ed15
+[2026-07-21 09:17:05] stream_open: status=200 chunked=1
+[2026-07-21 09:17:05] au_wait: 1ms inflight=4 au#13
+[2026-07-21 09:17:05] seek_post: jbuf=12 aud_pts=1362667us vid_pts=14464000us base=12s
+[2026-07-21 09:17:05] hud: seek done target=12s clk_was=12s
+[2026-07-21 09:17:05] avsync_vbase: absolute video pts, folding out label=12s (residual A/V content offset stays)
+[2026-07-21 09:17:05] hud_ovl: compose#10 rows=1016..1080 up=686..1080
+[2026-07-21 09:17:05] pts_stats: pushes=300 nonmono=0 dur=41708us
+[2026-07-21 09:17:05] seek_dbg: shown=14s (base=12s + clk=1s) jbuf=12 paused=0
+[2026-07-21 09:17:05] seek_dbg: shown=14s (base=12s + clk=1s) jbuf=12 paused=0
+[2026-07-21 09:17:06] seek_dbg: shown=14s (base=12s + clk=2s) jbuf=12 paused=0
+[2026-07-21 09:17:06] hud_ovl: compose#11 rows=1016..1080 up=1016..1080
+[2026-07-21 09:17:06] seek_dbg: shown=15s (base=12s + clk=2s) jbuf=12 paused=0
+[2026-07-21 09:17:06] adec_pts: read=2434602us write=3440000us delta=1005398us
+[2026-07-21 09:17:06] seek_dbg: shown=15s (base=12s + clk=2s) jbuf=12 paused=0
+[2026-07-21 09:17:06] frame_interval: fr=300 gap1=50014us gap2=33381us audio=2743914us
+[2026-07-21 09:17:06] blend_dist: fr=300 pure=462 mid=300 spill_max=16785us
+[2026-07-21 09:17:06] avsync: smooth=-9851us locked=1 audio=2743914us video=15590000us bias=81us nom=16683us
+[2026-07-21 09:17:06] seek_dbg: shown=15s (base=12s + clk=2s) jbuf=11 paused=0
+[2026-07-21 09:17:07] seek_dbg: shown=15s (base=12s + clk=3s) jbuf=11 paused=0
+[2026-07-21 09:17:07] hud_ovl: compose#12 rows=1016..1080 up=1016..1080
+[2026-07-21 09:17:07] audio_ratio: pcm=500 sil=0 total=2500
+[2026-07-21 09:17:07] audio_clock: clk=3229217us blocks=2500
+[2026-07-21 09:17:07] seek_dbg: shown=16s (base=12s + clk=3s) jbuf=11 paused=0
+[2026-07-21 09:17:07] hb: fr=328 q=12 au=68 ab=2630 stalls=0 max=0ms avg=0ms fps=128.8 aumax=4
+[2026-07-21 09:17:09] frame_interval: fr=360 gap1=33340us gap2=50049us audio=5245091us
+[2026-07-21 09:17:09] blend_dist: fr=360 pure=552 mid=360 spill_max=16785us
+[2026-07-21 09:17:09] avsync: smooth=-3589us locked=1 audio=5245091us video=18093000us bias=9us nom=16683us
+[2026-07-21 09:17:09] audio_ratio: pcm=500 sil=0 total=3000
+[2026-07-21 09:17:09] audio_clock: clk=5895717us blocks=3000
+[2026-07-21 09:17:10] hb: fr=388 q=12 au=128 ab=3099 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:10] seek: scrub begin
+[2026-07-21 09:17:11] playstate: /Sessions/Playing/Progress http=204 pos=19s
+[2026-07-21 09:17:13] adec_pts: read=6525013us write=7640000us delta=1114987us
+[2026-07-21 09:17:21] playstate: /Sessions/Playing/Progress http=204 pos=19s
+[2026-07-21 09:17:22] adec_pts: read=6525013us write=7640000us delta=1114987us
+[2026-07-21 09:17:22] seek: scrub end
+[2026-07-21 09:17:22] hud: seek +1250 s (begin)
+[2026-07-21 09:17:22] seek_calc: base=12s clk=6s delta=1250s -> target=1269s ticks=12693109640 total=6461s
+[2026-07-21 09:17:22] vdec_open: load VDEC base
+[2026-07-21 09:17:22] vdec_open: load VDEC_H264
+[2026-07-21 09:17:22] vdec_open: mod_ret base=0 h264=0
+[2026-07-21 09:17:22] vdec_open: queryAttr
+[2026-07-21 09:17:22] vdec_open: mem_size=33368829
+[2026-07-21 09:17:22] vdec_open: memalign vdec_mem
+[2026-07-21 09:17:22] vdec_open: vdec_mem reused
+[2026-07-21 09:17:22] vdec_open: memalign au_bufs
+[2026-07-21 09:17:22] cfg: addr=0x52900000 size=100663296(33368829) prio=500 stack=0x40000 spu_prio=250 spus=3
+[2026-07-21 09:17:22] vdec_cb_opd32: code=0x0005c7e8 toc=0x000c36e8 fn=0x10450384
+[2026-07-21 09:17:22] vdec_open: vdecOpen (free=12472KB)
+[2026-07-21 09:17:22] vdec_open: startSequence
+[2026-07-21 09:17:22] vdec_open: startSequence ret=0
+[2026-07-21 09:17:22] vdec_open: done
+[2026-07-21 09:17:23] stop_transcode: http 204 session=25fbde43d22e476d8e2b433f3b92ed15
+[2026-07-21 09:17:23] playbackinfo: session=3de62187372246f3a1c392e4cb73e8a5
+[2026-07-21 09:17:23] seek: new session=3de62187372246f3a1c392e4cb73e8a5
+[2026-07-21 09:17:23] surl[0]: http://192.168.1.2:8096/Videos/a135c559926c4f9075fb7b99d3d7624a/stream.ts?VideoCodec=h264&Profile=ba
+[2026-07-21 09:17:23] surl[1]: seline&Level=31&MaxWidth=1280&MaxHeight=720&VideoBitrate=4000000&AudioCodec=mp3&AudioBitrate=192000&
+[2026-07-21 09:17:23] surl[2]: AudioSampleRate=48000&MaxAudioChannels=2&MaxFramerate=30&AllowVideoStreamCopy=false&AllowAudioStream
+[2026-07-21 09:17:23] surl[3]: Copy=false&DeviceId=ps3-f46179daf4048a50&Static=false&MediaSourceId=a135c559926c4f9075fb7b99d3d7624a
+[2026-07-21 09:17:23] surl[4]: &StartTimeTicks=12693109640&AudioStreamIndex=1&SubtitleStreamIndex=2&SubtitleMethod=Encode&PlaySessi
+[2026-07-21 09:17:23] surl[5]: onId=3de62187372246f3a1c392e4cb73e8a5
+[2026-07-21 09:17:24] stream_open: status=200 chunked=1
+[2026-07-21 09:17:24] seek_post: jbuf=12 aud_pts=7602667us vid_pts=1270423000us base=1269s
+[2026-07-21 09:17:24] hud: seek done target=1269s clk_was=19s
+[2026-07-21 09:17:24] avsync_vbase: absolute video pts, folding out label=1269s (residual A/V content offset stays)
+[2026-07-21 09:17:24] seek_dbg: shown=1277s (base=1269s + clk=7s) jbuf=12 paused=0
+[2026-07-21 09:17:25] seek_dbg: shown=1277s (base=1269s + clk=8s) jbuf=12 paused=0
+[2026-07-21 09:17:25] seek_dbg: shown=1277s (base=1269s + clk=8s) jbuf=12 paused=0
+[2026-07-21 09:17:25] seek_dbg: shown=1277s (base=1269s + clk=8s) jbuf=12 paused=0
+[2026-07-21 09:17:25] seek_dbg: shown=1278s (base=1269s + clk=8s) jbuf=12 paused=0
+[2026-07-21 09:17:25] frame_interval: fr=420 gap1=50052us gap2=33368us audio=8903919us
+[2026-07-21 09:17:25] blend_dist: fr=420 pure=643 mid=420 spill_max=16785us
+[2026-07-21 09:17:25] avsync: smooth=-6534620us locked=0 audio=8903919us video=1271715000us bias=0us nom=16683us
+[2026-07-21 09:17:26] seek_dbg: shown=1278s (base=1269s + clk=9s) jbuf=12 paused=0
+[2026-07-21 09:17:26] seek_dbg: shown=1278s (base=1269s + clk=9s) jbuf=12 paused=0
+[2026-07-21 09:17:26] seek_dbg: shown=1278s (base=1269s + clk=9s) jbuf=12 paused=0
+[2026-07-21 09:17:26] audio_ratio: pcm=500 sil=0 total=3500
+[2026-07-21 09:17:26] audio_clock: clk=9677204us blocks=3500
+[2026-07-21 09:17:27] hb: fr=449 q=12 au=73 ab=3585 stalls=0 max=0ms avg=0ms fps=178.2 aumax=3
+[2026-07-21 09:17:28] frame_interval: fr=480 gap1=50059us gap2=33355us audio=11405096us
+[2026-07-21 09:17:28] blend_dist: fr=480 pure=733 mid=480 spill_max=16785us
+[2026-07-21 09:17:28] avsync: smooth=-6534183us locked=0 audio=11405096us video=1274218000us bias=0us nom=16683us
+[2026-07-21 09:17:28] disp_seq: fr=481 seq=506 window=2
+[2026-07-21 09:17:28] disp_seq: fr=482 seq=507 window=2
+[2026-07-21 09:17:28] disp_seq: fr=483 seq=508 window=2
+[2026-07-21 09:17:28] disp_seq: fr=484 seq=509 window=2
+[2026-07-21 09:17:28] disp_seq: fr=485 seq=510 window=2
+[2026-07-21 09:17:28] disp_seq: fr=486 seq=511 window=2
+[2026-07-21 09:17:28] disp_seq: fr=487 seq=512 window=2
+[2026-07-21 09:17:28] disp_seq: fr=488 seq=513 window=2
+[2026-07-21 09:17:28] disp_seq: fr=489 seq=514 window=2
+[2026-07-21 09:17:28] disp_seq: fr=490 seq=515 window=2
+[2026-07-21 09:17:28] disp_seq: fr=491 seq=516 window=2
+[2026-07-21 09:17:28] disp_seq: fr=492 seq=517 window=2
+[2026-07-21 09:17:28] disp_seq: fr=493 seq=518 window=2
+[2026-07-21 09:17:29] disp_seq: fr=494 seq=519 window=2
+[2026-07-21 09:17:29] disp_seq: fr=495 seq=520 window=2
+[2026-07-21 09:17:29] disp_seq: fr=496 seq=521 window=2
+[2026-07-21 09:17:29] disp_seq: fr=497 seq=522 window=2
+[2026-07-21 09:17:29] disp_seq: fr=498 seq=523 window=2
+[2026-07-21 09:17:29] disp_seq: fr=499 seq=524 window=2
+[2026-07-21 09:17:29] disp_seq: fr=500 seq=525 window=2
+[2026-07-21 09:17:29] disp_seq: fr=501 seq=526 window=2
+[2026-07-21 09:17:29] disp_seq: fr=502 seq=527 window=2
+[2026-07-21 09:17:29] audio_ratio: pcm=500 sil=0 total=4000
+[2026-07-21 09:17:29] audio_clock: clk=12343704us blocks=4000
+[2026-07-21 09:17:29] disp_seq: fr=503 seq=528 window=2
+[2026-07-21 09:17:29] disp_seq: fr=504 seq=529 window=2
+[2026-07-21 09:17:29] hb: fr=509 q=12 au=133 ab=4054 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:30] adec_pts: read=13282314us write=8000000us delta=-5282314us
+[2026-07-21 09:17:30] frame_interval: fr=540 gap1=50041us gap2=33364us audio=13911606us
+[2026-07-21 09:17:30] blend_dist: fr=540 pure=823 mid=540 spill_max=16785us
+[2026-07-21 09:17:30] avsync: smooth=-6534446us locked=0 audio=13911606us video=1276720000us bias=0us nom=16683us
+[2026-07-21 09:17:31] pts_stats: pushes=600 nonmono=0 dur=41708us
+[2026-07-21 09:17:31] playstate: /Sessions/Playing/Progress http=204 pos=1284s
+[2026-07-21 09:17:32] audio_ratio: pcm=500 sil=0 total=4500
+[2026-07-21 09:17:32] audio_clock: clk=15010204us blocks=4500
+[2026-07-21 09:17:32] hb: fr=569 q=12 au=193 ab=4523 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:33] frame_interval: fr=600 gap1=50056us gap2=33365us audio=16412783us
+[2026-07-21 09:17:33] blend_dist: fr=600 pure=913 mid=600 spill_max=16785us
+[2026-07-21 09:17:33] avsync: smooth=-6534244us locked=0 audio=16412783us video=1279223000us bias=0us nom=16683us
+[2026-07-21 09:17:34] hb: fr=629 q=12 au=253 ab=4992 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:34] audio_ratio: pcm=500 sil=0 total=5000
+[2026-07-21 09:17:34] audio_clock: clk=17676704us blocks=5000
+[2026-07-21 09:17:35] frame_interval: fr=660 gap1=50057us gap2=33360us audio=18913960us
+[2026-07-21 09:17:35] blend_dist: fr=660 pure=1003 mid=660 spill_max=16785us
+[2026-07-21 09:17:35] avsync: smooth=-6534176us locked=0 audio=18913960us video=1281725000us bias=0us nom=16683us
+[2026-07-21 09:17:37] hb: fr=689 q=12 au=313 ab=5462 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:37] audio_ratio: pcm=500 sil=0 total=5500
+[2026-07-21 09:17:37] audio_clock: clk=20343204us blocks=5500
+[2026-07-21 09:17:38] adec_pts: read=21452470us write=16160000us delta=-5292470us
+[2026-07-21 09:17:38] frame_interval: fr=720 gap1=50067us gap2=33364us audio=21415137us
+[2026-07-21 09:17:38] blend_dist: fr=720 pure=1093 mid=720 spill_max=16785us
+[2026-07-21 09:17:38] avsync: smooth=-6533756us locked=0 audio=21415137us video=1284228000us bias=0us nom=16683us
+[2026-07-21 09:17:38] disp_seq: fr=721 seq=746 window=3
+[2026-07-21 09:17:38] disp_seq: fr=722 seq=747 window=3
+[2026-07-21 09:17:38] disp_seq: fr=723 seq=748 window=3
+[2026-07-21 09:17:38] disp_seq: fr=724 seq=749 window=3
+[2026-07-21 09:17:38] disp_seq: fr=725 seq=750 window=3
+[2026-07-21 09:17:38] disp_seq: fr=726 seq=751 window=3
+[2026-07-21 09:17:38] disp_seq: fr=727 seq=752 window=3
+[2026-07-21 09:17:38] disp_seq: fr=728 seq=753 window=3
+[2026-07-21 09:17:38] disp_seq: fr=729 seq=754 window=3
+[2026-07-21 09:17:38] disp_seq: fr=730 seq=755 window=3
+[2026-07-21 09:17:38] disp_seq: fr=731 seq=756 window=3
+[2026-07-21 09:17:38] disp_seq: fr=732 seq=757 window=3
+[2026-07-21 09:17:38] disp_seq: fr=733 seq=758 window=3
+[2026-07-21 09:17:39] disp_seq: fr=734 seq=759 window=3
+[2026-07-21 09:17:39] disp_seq: fr=735 seq=760 window=3
+[2026-07-21 09:17:39] disp_seq: fr=736 seq=761 window=3
+[2026-07-21 09:17:39] disp_seq: fr=737 seq=762 window=3
+[2026-07-21 09:17:39] disp_seq: fr=738 seq=763 window=3
+[2026-07-21 09:17:39] disp_seq: fr=739 seq=764 window=3
+[2026-07-21 09:17:39] disp_seq: fr=740 seq=765 window=3
+[2026-07-21 09:17:39] disp_seq: fr=741 seq=766 window=3
+[2026-07-21 09:17:39] disp_seq: fr=742 seq=767 window=3
+[2026-07-21 09:17:39] disp_seq: fr=743 seq=768 window=3
+[2026-07-21 09:17:39] disp_seq: fr=744 seq=769 window=3
+[2026-07-21 09:17:39] hb: fr=749 q=12 au=373 ab=5931 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:40] audio_ratio: pcm=500 sil=0 total=6000
+[2026-07-21 09:17:40] audio_clock: clk=23009704us blocks=6000
+[2026-07-21 09:17:40] frame_interval: fr=780 gap1=50038us gap2=33503us audio=23921647us
+[2026-07-21 09:17:40] blend_dist: fr=780 pure=1183 mid=780 spill_max=16785us
+[2026-07-21 09:17:40] avsync: smooth=-6533604us locked=0 audio=23921647us video=1286730000us bias=0us nom=16683us
+[2026-07-21 09:17:41] playstate: /Sessions/Playing/Progress http=204 pos=1294s
+[2026-07-21 09:17:42] hb: fr=809 q=12 au=433 ab=6400 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:42] audio_ratio: pcm=500 sil=0 total=6500
+[2026-07-21 09:17:42] audio_clock: clk=25676204us blocks=6500
+[2026-07-21 09:17:43] frame_interval: fr=840 gap1=50035us gap2=33384us audio=26422824us
+[2026-07-21 09:17:43] blend_dist: fr=840 pure=1273 mid=840 spill_max=16785us
+[2026-07-21 09:17:43] avsync: smooth=-6533524us locked=0 audio=26422824us video=1289233000us bias=0us nom=16683us
+[2026-07-21 09:17:44] pts_stats: pushes=900 nonmono=0 dur=41708us
+[2026-07-21 09:17:44] hb: fr=869 q=12 au=493 ab=6870 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:45] audio_ratio: pcm=500 sil=0 total=7000
+[2026-07-21 09:17:45] audio_clock: clk=28342704us blocks=7000
+[2026-07-21 09:17:45] frame_interval: fr=900 gap1=50050us gap2=33356us audio=28924001us
+[2026-07-21 09:17:45] blend_dist: fr=900 pure=1363 mid=900 spill_max=16785us
+[2026-07-21 09:17:45] avsync: smooth=-6533596us locked=0 audio=28924001us video=1291735000us bias=0us nom=16683us
+[2026-07-21 09:17:46] adec_pts: read=29595961us write=24320000us delta=-5275961us
+[2026-07-21 09:17:47] hb: fr=929 q=12 au=553 ab=7339 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:48] audio_ratio: pcm=500 sil=0 total=7500
+[2026-07-21 09:17:48] audio_clock: clk=31009204us blocks=7500
+[2026-07-21 09:17:48] frame_interval: fr=960 gap1=50000us gap2=33320us audio=31425178us
+[2026-07-21 09:17:48] blend_dist: fr=960 pure=1453 mid=960 spill_max=16785us
+[2026-07-21 09:17:48] avsync: smooth=-6533275us locked=0 audio=31425178us video=1294238000us bias=0us nom=16683us
+[2026-07-21 09:17:48] disp_seq: fr=961 seq=986 window=4
+[2026-07-21 09:17:48] disp_seq: fr=962 seq=987 window=4
+[2026-07-21 09:17:48] disp_seq: fr=963 seq=988 window=4
+[2026-07-21 09:17:48] disp_seq: fr=964 seq=989 window=4
+[2026-07-21 09:17:48] disp_seq: fr=965 seq=990 window=4
+[2026-07-21 09:17:48] disp_seq: fr=966 seq=991 window=4
+[2026-07-21 09:17:48] disp_seq: fr=967 seq=992 window=4
+[2026-07-21 09:17:48] disp_seq: fr=968 seq=993 window=4
+[2026-07-21 09:17:48] disp_seq: fr=969 seq=994 window=4
+[2026-07-21 09:17:48] disp_seq: fr=970 seq=995 window=4
+[2026-07-21 09:17:48] disp_seq: fr=971 seq=996 window=4
+[2026-07-21 09:17:48] disp_seq: fr=972 seq=997 window=4
+[2026-07-21 09:17:48] disp_seq: fr=973 seq=998 window=4
+[2026-07-21 09:17:49] disp_seq: fr=974 seq=999 window=4
+[2026-07-21 09:17:49] disp_seq: fr=975 seq=1000 window=4
+[2026-07-21 09:17:49] disp_seq: fr=976 seq=1001 window=4
+[2026-07-21 09:17:49] disp_seq: fr=977 seq=1002 window=4
+[2026-07-21 09:17:49] disp_seq: fr=978 seq=1003 window=4
+[2026-07-21 09:17:49] disp_seq: fr=979 seq=1004 window=4
+[2026-07-21 09:17:49] disp_seq: fr=980 seq=1005 window=4
+[2026-07-21 09:17:49] disp_seq: fr=981 seq=1006 window=4
+[2026-07-21 09:17:49] disp_seq: fr=982 seq=1007 window=4
+[2026-07-21 09:17:49] disp_seq: fr=983 seq=1008 window=4
+[2026-07-21 09:17:49] disp_seq: fr=984 seq=1009 window=4
+[2026-07-21 09:17:49] hb: fr=989 q=12 au=613 ab=7808 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:50] audio_ratio: pcm=500 sil=0 total=8000
+[2026-07-21 09:17:50] audio_clock: clk=33675704us blocks=8000
+[2026-07-21 09:17:50] frame_interval: fr=1020 gap1=50047us gap2=33375us audio=33926355us
+[2026-07-21 09:17:50] blend_dist: fr=1020 pure=1543 mid=1020 spill_max=16785us
+[2026-07-21 09:17:50] avsync: smooth=-6532663us locked=0 audio=33926355us video=1296740000us bias=0us nom=16683us
+[2026-07-21 09:17:52] playstate: /Sessions/Playing/Progress http=204 pos=1304s
+[2026-07-21 09:17:52] hb: fr=1049 q=12 au=673 ab=8277 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:53] audio_ratio: pcm=500 sil=0 total=8500
+[2026-07-21 09:17:53] audio_clock: clk=36342204us blocks=8500
+[2026-07-21 09:17:53] frame_interval: fr=1080 gap1=50058us gap2=33360us audio=36432865us
+[2026-07-21 09:17:53] blend_dist: fr=1080 pure=1633 mid=1080 spill_max=16785us
+[2026-07-21 09:17:53] avsync: smooth=-6532720us locked=0 audio=36432865us video=1299243000us bias=0us nom=16683us
+[2026-07-21 09:17:54] hb: fr=1109 q=12 au=733 ab=8746 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:54] adec_pts: read=37771450us write=32480000us delta=-5291450us
+[2026-07-21 09:17:55] frame_interval: fr=1140 gap1=50070us gap2=33348us audio=38934042us
+[2026-07-21 09:17:55] blend_dist: fr=1140 pure=1723 mid=1140 spill_max=16785us
+[2026-07-21 09:17:55] avsync: smooth=-6532949us locked=0 audio=38934042us video=1301745000us bias=0us nom=16683us
+[2026-07-21 09:17:56] audio_ratio: pcm=500 sil=0 total=9000
+[2026-07-21 09:17:56] audio_clock: clk=39008704us blocks=9000
+[2026-07-21 09:17:56] rr_stats: polls=12 changes=0 cur=0x0001
+[2026-07-21 09:17:56] pts_stats: pushes=1200 nonmono=0 dur=41708us
+[2026-07-21 09:17:57] hb: fr=1169 q=12 au=793 ab=9216 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:17:58] frame_interval: fr=1200 gap1=50031us gap2=33352us audio=41435219us
+[2026-07-21 09:17:58] blend_dist: fr=1200 pure=1813 mid=1200 spill_max=16785us
+[2026-07-21 09:17:58] avsync: smooth=-6532886us locked=0 audio=41435219us video=1304248000us bias=0us nom=16683us
+[2026-07-21 09:17:58] disp_seq: fr=1201 seq=1226 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1202 seq=1227 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1203 seq=1228 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1204 seq=1229 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1205 seq=1230 window=5
+[2026-07-21 09:17:58] audio_ratio: pcm=500 sil=0 total=9500
+[2026-07-21 09:17:58] audio_clock: clk=41675204us blocks=9500
+[2026-07-21 09:17:58] disp_seq: fr=1206 seq=1231 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1207 seq=1232 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1208 seq=1233 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1209 seq=1234 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1210 seq=1235 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1211 seq=1236 window=5
+[2026-07-21 09:17:58] disp_seq: fr=1212 seq=1237 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1213 seq=1238 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1214 seq=1239 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1215 seq=1240 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1216 seq=1241 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1217 seq=1242 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1218 seq=1243 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1219 seq=1244 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1220 seq=1245 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1221 seq=1246 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1222 seq=1247 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1223 seq=1248 window=5
+[2026-07-21 09:17:59] disp_seq: fr=1224 seq=1249 window=5
+[2026-07-21 09:17:59] hb: fr=1229 q=12 au=853 ab=9685 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:18:00] frame_interval: fr=1260 gap1=50112us gap2=33310us audio=43936396us
+[2026-07-21 09:18:00] blend_dist: fr=1260 pure=1903 mid=1260 spill_max=16785us
+[2026-07-21 09:18:00] avsync: smooth=-6532205us locked=0 audio=43936396us video=1306750000us bias=0us nom=16683us
+[2026-07-21 09:18:01] audio_ratio: pcm=500 sil=0 total=10000
+[2026-07-21 09:18:01] audio_clock: clk=44341704us blocks=10000
+[2026-07-21 09:18:02] playstate: /Sessions/Playing/Progress http=204 pos=1314s
+[2026-07-21 09:18:02] hb: fr=1289 q=12 au=913 ab=10154 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:18:02] adec_pts: read=45941606us write=40640000us delta=-5301606us
+[2026-07-21 09:18:03] frame_interval: fr=1320 gap1=50038us gap2=33384us audio=46437573us
+[2026-07-21 09:18:03] blend_dist: fr=1320 pure=1993 mid=1320 spill_max=16785us
+[2026-07-21 09:18:03] avsync: smooth=-6531840us locked=0 audio=46437573us video=1309253000us bias=0us nom=16683us
+[2026-07-21 09:18:04] audio_ratio: pcm=500 sil=0 total=10500
+[2026-07-21 09:18:04] audio_clock: clk=47008204us blocks=10500
+[2026-07-21 09:18:04] hb: fr=1349 q=12 au=973 ab=10623 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:18:05] frame_interval: fr=1380 gap1=50046us gap2=33384us audio=48944083us
+[2026-07-21 09:18:05] blend_dist: fr=1380 pure=2083 mid=1380 spill_max=16785us
+[2026-07-21 09:18:05] avsync: smooth=-6532224us locked=0 audio=48944083us video=1311755000us bias=0us nom=16683us
+[2026-07-21 09:18:06] audio_ratio: pcm=500 sil=0 total=11000
+[2026-07-21 09:18:06] audio_clock: clk=49674704us blocks=11000
+[2026-07-21 09:18:07] hb: fr=1409 q=12 au=1033 ab=11092 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:18:08] frame_interval: fr=1440 gap1=50062us gap2=33340us audio=51445260us
+[2026-07-21 09:18:08] blend_dist: fr=1440 pure=2173 mid=1440 spill_max=16785us
+[2026-07-21 09:18:08] avsync: smooth=-6532302us locked=0 audio=51445260us video=1314258000us bias=0us nom=16683us
+[2026-07-21 09:18:08] disp_seq: fr=1441 seq=1466 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1442 seq=1467 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1443 seq=1468 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1444 seq=1469 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1445 seq=1470 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1446 seq=1471 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1447 seq=1472 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1448 seq=1473 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1449 seq=1474 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1450 seq=1475 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1451 seq=1476 window=6
+[2026-07-21 09:18:08] disp_seq: fr=1452 seq=1477 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1453 seq=1478 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1454 seq=1479 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1455 seq=1480 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1456 seq=1481 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1457 seq=1482 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1458 seq=1483 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1459 seq=1484 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1460 seq=1485 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1461 seq=1486 window=6
+[2026-07-21 09:18:09] audio_ratio: pcm=500 sil=0 total=11500
+[2026-07-21 09:18:09] audio_clock: clk=52341204us blocks=11500
+[2026-07-21 09:18:09] disp_seq: fr=1462 seq=1487 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1463 seq=1488 window=6
+[2026-07-21 09:18:09] disp_seq: fr=1464 seq=1489 window=6
+[2026-07-21 09:18:09] pts_stats: pushes=1500 nonmono=0 dur=41708us
+[2026-07-21 09:18:09] hb: fr=1469 q=12 au=1093 ab=11562 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:18:10] frame_interval: fr=1500 gap1=50009us gap2=33347us audio=53946437us
+[2026-07-21 09:18:10] blend_dist: fr=1500 pure=2263 mid=1500 spill_max=16785us
+[2026-07-21 09:18:10] avsync: smooth=-6531693us locked=0 audio=53946437us video=1316760000us bias=0us nom=16683us
+[2026-07-21 09:18:11] adec_pts: read=54101096us write=48800000us delta=-5301096us
+[2026-07-21 09:18:12] audio_ratio: pcm=500 sil=0 total=12000
+[2026-07-21 09:18:12] audio_clock: clk=55007704us blocks=12000
+[2026-07-21 09:18:12] playstate: /Sessions/Playing/Progress http=204 pos=1324s
+[2026-07-21 09:18:12] hb: fr=1529 q=12 au=1153 ab=12031 stalls=0 max=0ms avg=0ms fps=24.0 aumax=0
+[2026-07-21 09:18:12] hud: paused clk=55796988us tid=17825793 fr_dur=16639us
+[2026-07-21 09:18:13] playing=0 reason=user_stop
+[2026-07-21 09:18:13] audio_thread: exit
+[2026-07-21 09:18:13] show_player: loop exit running=1 playing=0 vdec_err=0 fr=1544
+[2026-07-21 09:18:13] timing: vsync handler unregistered
+[2026-07-21 09:18:13] show_player: decode thread joined
+[2026-07-21 09:18:13] show_player: audio thread joined
+[2026-07-21 09:18:13] show_player: upload thread joined
+[2026-07-21 09:18:13] playstate: /Sessions/Playing/Stopped http=204 pos=1325s
+[2026-07-21 09:18:13] show_player: done
+[2026-07-21 09:18:13] thumb: ready fa8156671b01aff3281c9ecc0ca7ab68 (230x345)
+[2026-07-21 09:18:13] thumb: ready a135c559926c4f9075fb7b99d3d7624a (230x345)
+[2026-07-21 09:18:13] thumb: ready 4a661c2247916a32188af669679f5b28 (230x345)
+[2026-07-21 09:18:13] thumb: ready b02fb3e2a684b9a1da7106540192b410 (230x345)
+[2026-07-21 09:18:13] thumb: ready 4ae231b49108db4410cf5744a0252267 (230x345)
+[2026-07-21 09:18:13] thumb: ready bd398365f68fb62190496923c5dd4256 (230x345)
+[2026-07-21 09:18:13] thumb: ready 210510918318d86fa4f268a13c01eb05 (230x345)
+[2026-07-21 09:18:13] thumb: ready 8c5a33ebe8320f97f18e4beffa92959a (259x345)
+[2026-07-21 09:18:13] thumb: ready 17c57a6210d58dd0d324e7d6842ef58b (230x345)
+[2026-07-21 09:18:13] thumb: ready fcd3e2339aefa6c7d362c4e084fac3f9 (230x345)
+[2026-07-21 09:18:13] thumb: ready 0c839f2dd0bfe3f9f0bed80914479b69 (230x345)
+[2026-07-21 09:18:13] thumb: ready 9cb128d61c65c29c54684af3c5587438 (230x345)
+[2026-07-21 09:18:14] thumb: ready cf61a6d7d8fb83b7d6f123b822f76cfc (230x345)
+[2026-07-21 09:18:14] thumb: ready c758bbe457ecde289be9a5b2738157fa (230x345)
+[2026-07-21 09:18:14] thumb: ready 2d836ad1c84b876a361a597e41d0d04f (230x345)
+[2026-07-21 09:18:14] thumb: ready 2438b2039980efedabf8cc9462807325 (230x345)
+[2026-07-21 09:18:14] thumb: ready fbf89f3b792752285827f343f61ff3c5 (230x345)
+[2026-07-21 09:18:14] thumb: ready 212f958b23a9e4584d4a518ac56739bd (230x346)
+[2026-07-21 09:18:14] thumb: ready 0ab40e86f8af150e1aec44db0470d6fe (230x345)
+[2026-07-21 09:18:14] thumb: ready d19a128a3e981952a38a989aedc87fbe (230x345)

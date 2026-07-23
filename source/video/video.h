@@ -3,10 +3,17 @@
 #include <sys/mutex.h>
 
 #define TS_PACKET_SIZE   188
-#define JBUF_SIZE         12   // max buffered decoded frames (~43 MB at 1280×720;
-                               // trimmed from 16 so the boot-time reservation
-                               // leaves room for the resident thumbnail cache)
+// ALL video decodes to planar YUV420P (1.5 bpp) buffered in the jitter ring;
+// the RSX converts to RGB at display via the BT.709/BT.601 fragment shaders
+// (Movian-style).  A 1280×720 slot is 1.32 MB (vs 3.52 MB for the old ARGB
+// path), a 1920×1088 slot is 3.13 MB — so the ring holds MORE frames in LESS
+// memory than the shipped 12-slot ARGB buffer ever did.
 #define JBUF_PREFILL      12   // frames to decode before display starts
+#define JBUF_1080_SLOTS   16   // ring slots on the 1080p (Alpha) path (~50 MB)
+#define JBUF_SD_SLOTS     24   // ring slots on the 720p path       (~32 MB)
+// The static ring arrays are sized for the LARGER of the two active counts;
+// jbuf_cap() picks how many are actually used per path.
+#define JBUF_MAX_SLOTS    24
 
 // ---- VDEC lifecycle ----
 bool vdec_open(void);
@@ -39,6 +46,11 @@ bool video_feed_ts(const u8 *pkt);
 
 // ---- Jitter buffer ----
 bool         jbuf_alloc(u32 fw, u32 fh);
+int          jbuf_cap(void);            // active ring capacity (<= JBUF_MAX_SLOTS)
+int          jbuf_prefill_target(void); // frames to prefill (<= capacity)
+// Bytes per decoded planar YUV420P frame (fw * pad16(fh) * 3/2).  All
+// slot/texture sizing uses this.
+u32          vid_frame_bytes(u32 fw, u32 fh);
 void         jbuf_free(void);
 void         jbuf_clear(void);     // drain all frames without freeing memory
 const u8    *jbuf_peek(void);

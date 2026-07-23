@@ -3,6 +3,7 @@
 #include "plog.h"
 #include "timing.h"
 #include "meminfo.h"
+#include "hd1080.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -70,7 +71,10 @@ bool vdec_open(void) {
 
     vdecType codec;
     codec.codec_type    = VDEC_CODEC_TYPE_H264;
-    codec.profile_level = 31;
+    // 1080p (Alpha) needs H.264 level 4.2 (1920×1080); the shipped 720p path
+    // uses level 3.1.  queryAttr sizes the SPU arena from this, so the level
+    // drives how much memory vdec_reserve_mem()/vdec_open() must grab.
+    codec.profile_level = hd1080_enabled() ? 42 : 31;
 
     crash_log("v4 queryAttr");
     plog("vdec_open: queryAttr");
@@ -83,7 +87,16 @@ bool vdec_open(void) {
     { char buf[64]; snprintf(buf, sizeof(buf), "vdec_open: mem_size=%u", attr.mem_size); plog(buf); }
 
     const u32 NUM_SPUS = 3; //was 4
-    u32 mem_size_aligned = ((attr.mem_size * NUM_SPUS) + (1024*1024-1))
+    // queryAttr already reports the FULL H.264 work-area for the level (33MB at
+    // L3.1, 55MB at L4.2).  The historical ×NUM_SPUS is a heap over-allocation
+    // that only ever fit at 720p — at L4.2 it demands 3×55MB = 172MB, which the
+    // ~209MB heap can't satisfy (this is what froze the 1080p Alpha: vdec_mem
+    // alloc FAILED -> error screen -> RSX dead-FIFO).  1080p therefore sizes the
+    // arena at exactly the queryAttr requirement; num_spus stays 3 for decode
+    // throughput (SPU count and work-area size are independent cellVdec params).
+    // Gated: the 720p ship path keeps the proven 3× arena unchanged.
+    const u32 arena_mult = hd1080_enabled() ? 1u : NUM_SPUS;
+    u32 mem_size_aligned = ((attr.mem_size * arena_mult) + (1024*1024-1))
                            & ~(u32)(1024*1024-1);
     // The arena is CACHED across vdec_close/vdec_open (seek reopens the
     // decoder): once the jitter buffer packs the heap tightly around a
@@ -98,7 +111,13 @@ bool vdec_open(void) {
     plog("vdec_open: memalign vdec_mem");
     if (!s_vdec_mem) {
         s_vdec_mem = (u8*)memalign(1024*1024, mem_size_aligned);
-        if (!s_vdec_mem) { plog("vdec_open: vdec_mem alloc FAILED (3x SPU size)"); return false; }
+        if (!s_vdec_mem) {
+            char b[64];
+            snprintf(b, sizeof(b), "vdec_open: vdec_mem alloc FAILED (%uMB)",
+                     mem_size_aligned / (1024*1024));
+            plog(b);
+            return false;
+        }
         s_vdec_mem_size = mem_size_aligned;
     } else {
         plog("vdec_open: vdec_mem reused");
@@ -196,12 +215,20 @@ void vdec_release_mem(void) {
 // (H.264 queryAttr mem_size 33368829 x 3 SPUs, 1MB-aligned); if a firmware
 // ever reports a bigger attr, vdec_open frees this and re-allocates.
 void vdec_reserve_mem(void) {
-    const u32 RESERVE = 96 * 1024 * 1024;
+    // 720p reserves the 3×-SPU arena it always used (~96MB).  1080p (Alpha)
+    // sizes the arena at the queryAttr requirement instead (L4.2 = ~55MB, 1×;
+    // see vdec_open), so 64MB is enough and leaves the heap for the bigger
+    // jitter-buffer slots.  Reserving up front keeps it off the UI-fragmented
+    // heap; vdec_open re-allocates if the real queryAttr comes back larger.
+    const u32 RESERVE = hd1080_enabled() ? 64u * 1024 * 1024
+                                         : 96u * 1024 * 1024;
     if (!s_vdec_mem) {
         s_vdec_mem = (u8*)memalign(1024*1024, RESERVE);
         if (s_vdec_mem) s_vdec_mem_size = RESERVE;
-        plog(s_vdec_mem ? "vdec_reserve: 96MB arena ok"
-                        : "vdec_reserve: 96MB arena FAILED");
+        char buf[48];
+        snprintf(buf, sizeof(buf), "vdec_reserve: %uMB arena %s",
+                 RESERVE / (1024*1024), s_vdec_mem ? "ok" : "FAILED");
+        plog(buf);
     }
     for (int i = 0; i < AU_BUF_COUNT; i++) {
         if (!s_au_bufs[i]) s_au_bufs[i] = (u8*)memalign(128, AU_BUF_SIZE);
@@ -430,15 +457,21 @@ bool vdec_pull_frame(void) {
         if (h->width > 0 && h->height > 0 &&
             (h->width != jbuf_fw() || h->height != jbuf_fh())) {
             char buf[80];
-            snprintf(buf, sizeof(buf), "vdec: actual %ux%u (alloc %ux%u)",
-                     h->width, h->height, jbuf_fw(), jbuf_fh());
+            snprintf(buf, sizeof(buf),
+                     "vdec: actual %ux%u (alloc %ux%u) picsize=%u",
+                     h->width, h->height, jbuf_fw(), jbuf_fh(),
+                     (unsigned)pic->picture_size);
             plog(buf);
             jbuf_set_dims(h->width, h->height);
         }
     }
 
+    // ALL video decodes to planar YUV420P (1.5 bpp) so frames stay YUV in RAM
+    // at ~⅜ the old ARGB size — the three planes are uploaded as three separate
+    // RSX textures and a BT.709/BT.601 fragment shader converts to RGB at
+    // display (exactly how Movian's yuv2rgb path works).
     vdecPictureFormat vfmt;
-    vfmt.format_type  = VDEC_PICFMT_ARGB32;
+    vfmt.format_type  = VDEC_PICFMT_YUV420P;
     vfmt.color_matrix = VDEC_COLOR_MATRIX_BT709;
     vfmt.alpha        = 0xFF;
     s32 gpret = vdecGetPicture(s_vdec, &vfmt, jbuf_write_ptr());

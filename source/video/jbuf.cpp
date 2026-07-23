@@ -1,6 +1,7 @@
 #include "video.h"
 #include "video_internal.h"
 #include "plog.h"
+#include "hd1080.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,10 +18,10 @@
 
 sys_mutex_t s_jbuf_mtx;
 
-static u8  *s_jbuf_data[JBUF_SIZE] = {};
-static u64  s_jbuf_pts[JBUF_SIZE]  = {};
-static s64  s_jbuf_dur[JBUF_SIZE]  = {};  // remaining display duration per slot (us)
-static u32  s_jbuf_seq[JBUF_SIZE]  = {};
+static u8  *s_jbuf_data[JBUF_MAX_SLOTS] = {};
+static u64  s_jbuf_pts[JBUF_MAX_SLOTS]  = {};
+static s64  s_jbuf_dur[JBUF_MAX_SLOTS]  = {};  // remaining display duration per slot (us)
+static u32  s_jbuf_seq[JBUF_MAX_SLOTS]  = {};
 static u32  s_seq_counter          = 0;
 static u32  s_jbuf_fw = 0, s_jbuf_fh = 0;
 static int  s_jb_wr = 0, s_jb_rd = 0;
@@ -32,25 +33,65 @@ static volatile int s_jb_n = 0;
 // with only a few MB of slack, so allocating them per-session made every
 // session a dice roll on whatever the UI had done to the heap layout.
 static u32 s_jbuf_slot_bytes = 0;     // capacity of each cached slot
+static int s_jb_cap = JBUF_SD_SLOTS;  // active ring capacity (set by jbuf_reserve)
+
+// Active ring capacity: fewer slots for 1080p (Alpha) so the big frames fit.
+// The ring modulus/full-checks below all use this, so slots >= s_jb_cap are
+// never touched even though the static arrays are always JBUF_MAX_SLOTS long.
+int jbuf_cap(void) { return hd1080_enabled() ? JBUF_1080_SLOTS : JBUF_SD_SLOTS; }
+
+// Prefill target must not exceed the capacity or the prefill loop can never
+// reach it (it would spin the whole guard budget forever at 1080p).
+int jbuf_prefill_target(void) {
+    int cap = jbuf_cap();
+    return JBUF_PREFILL < cap ? JBUF_PREFILL : cap;
+}
+
+// Planar YUV420P, 1.5 bpp — the universal frame format.  The decoder writes
+// tight planar YUV (picsize == fw*fh*3/2); round the height up to a macroblock
+// (16) for headroom.  This sizes the jitter-buffer slot that holds the whole
+// planar frame (Y|Cb|Cr); the RSX plane textures are sized separately.
+u32 vid_frame_bytes(u32 fw, u32 fh) {
+    u32 fh_pad = (fh + 15u) & ~15u;
+    return fw * fh_pad * 3u / 2u;
+}
 
 // Allocate the slot buffers if not already cached (or cached too small).
 // Returns false with NOTHING left allocated on failure (the old code leaked
 // the partial slots, so each failed attempt made the next one worse).
+//
+// Only the first jbuf_cap() slots are allocated — the 1080p path caches fewer,
+// larger slots.  When the capacity later grows back (1080p -> 720p) the extra
+// slots are (re)allocated here, and when it shrinks the surplus is freed, so
+// the producer never dereferences a NULL slot below the active capacity.
 bool jbuf_reserve(u32 fw, u32 fh) {
-    u32 need = fw * fh * 4;
-    if (s_jbuf_data[0] && s_jbuf_slot_bytes >= need) return true;
-    for (int i = 0; i < JBUF_SIZE; i++) {
+    u32 need = vid_frame_bytes(fw, fh);
+    int cap  = jbuf_cap();
+    s_jb_cap = cap;
+
+    // Drop any slots beyond the active capacity (saves RAM at 1080p).
+    for (int i = cap; i < JBUF_MAX_SLOTS; i++) {
         if (s_jbuf_data[i]) { free(s_jbuf_data[i]); s_jbuf_data[i] = NULL; }
     }
-    s_jbuf_slot_bytes = 0;
-    for (int i = 0; i < JBUF_SIZE; i++) {
+    // If the cached slots are too small for this frame size, they must all be
+    // re-grabbed at the new size.
+    if (s_jbuf_slot_bytes < need) {
+        for (int i = 0; i < JBUF_MAX_SLOTS; i++) {
+            if (s_jbuf_data[i]) { free(s_jbuf_data[i]); s_jbuf_data[i] = NULL; }
+        }
+        s_jbuf_slot_bytes = 0;
+    }
+    // Ensure every active slot is allocated (>= need bytes).
+    for (int i = 0; i < cap; i++) {
+        if (s_jbuf_data[i]) continue;
         s_jbuf_data[i] = (u8*)memalign(128, need);
         if (!s_jbuf_data[i]) {
             char buf[64];
             snprintf(buf, sizeof(buf), "jbuf_reserve: slot %d of %d FAILED (%u KB)",
-                     i, JBUF_SIZE, need / 1024);
+                     i, cap, need / 1024);
             plog(buf);
             for (int j = 0; j < i; j++) { free(s_jbuf_data[j]); s_jbuf_data[j] = NULL; }
+            s_jbuf_slot_bytes = 0;
             return false;
         }
     }
@@ -85,18 +126,18 @@ void jbuf_clear(void) {
 }
 
 const u8 *jbuf_peek(void)     { return (s_jb_n > 0) ? s_jbuf_data[s_jb_rd] : NULL; }
-void      jbuf_pop(void)      { s_jb_rd = (s_jb_rd + 1) % JBUF_SIZE; s_jb_n--; }
+void      jbuf_pop(void)      { s_jb_rd = (s_jb_rd + 1) % s_jb_cap; s_jb_n--; }
 u32       jbuf_fw(void)       { return s_jbuf_fw; }
 u32       jbuf_fh(void)       { return s_jbuf_fh; }
 int       jbuf_count(void)    { return s_jb_n; }
 int       jbuf_rd(void)       { return s_jb_rd; }
 u64       jbuf_peek_pts_us(void) { return (s_jb_n > 0) ? s_jbuf_pts[s_jb_rd] : 0; }
 u32       jbuf_peek_seq(void) { return (s_jb_n > 0) ? s_jbuf_seq[s_jb_rd] : 0; }
-const u8 *jbuf_slot_ptr(int i) { return (i >= 0 && i < JBUF_SIZE) ? s_jbuf_data[i] : NULL; }
+const u8 *jbuf_slot_ptr(int i) { return (i >= 0 && i < JBUF_MAX_SLOTS) ? s_jbuf_data[i] : NULL; }
 
 s64       jbuf_peek_dur(void)      { return (s_jb_n > 0) ? s_jbuf_dur[s_jb_rd] : 0; }
-s64       jbuf_peek_next_dur(void) { return (s_jb_n > 1) ? s_jbuf_dur[(s_jb_rd + 1) % JBUF_SIZE] : 0; }
-const u8 *jbuf_peek_next(void)     { return (s_jb_n > 1) ? s_jbuf_data[(s_jb_rd + 1) % JBUF_SIZE] : NULL; }
+s64       jbuf_peek_next_dur(void) { return (s_jb_n > 1) ? s_jbuf_dur[(s_jb_rd + 1) % s_jb_cap] : 0; }
+const u8 *jbuf_peek_next(void)     { return (s_jb_n > 1) ? s_jbuf_data[(s_jb_rd + 1) % s_jb_cap] : NULL; }
 
 void jbuf_consume_dur(s64 us) {
     if (s_jb_n > 0) s_jbuf_dur[s_jb_rd] -= us;
@@ -105,7 +146,7 @@ void jbuf_consume_dur(s64 us) {
 void jbuf_advance(void) {
     sysMutexLock(s_jbuf_mtx, 0);
     if (s_jb_n > 0 && s_jbuf_dur[s_jb_rd] <= 0) {
-        s_jb_rd = (s_jb_rd + 1) % JBUF_SIZE;
+        s_jb_rd = (s_jb_rd + 1) % s_jb_cap;
         s_jb_n--;
     }
     sysMutexUnlock(s_jbuf_mtx);
@@ -115,7 +156,7 @@ void jbuf_advance(void) {
 
 bool jbuf_full(void) {
     sysMutexLock(s_jbuf_mtx, 0);
-    bool full = (s_jb_n >= JBUF_SIZE);
+    bool full = (s_jb_n >= s_jb_cap);
     sysMutexUnlock(s_jbuf_mtx);
     return full;
 }
@@ -130,7 +171,7 @@ void jbuf_push(u64 pts_us, s64 dur_us) {
     s_jbuf_dur[s_jb_wr] = dur_us;
     s_jbuf_seq[s_jb_wr] = ++s_seq_counter;
     sysMutexLock(s_jbuf_mtx, 0);
-    s_jb_wr = (s_jb_wr + 1) % JBUF_SIZE;
+    s_jb_wr = (s_jb_wr + 1) % s_jb_cap;
     s_jb_n++;
     sysMutexUnlock(s_jbuf_mtx);
 }
