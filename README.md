@@ -66,9 +66,10 @@
 
 - A PS3 running **Evilnat CFW** or **HEN** (CEX)
 - A **Jellyfin server** the console can reach (a local network is easiest)
-- To build it yourself: the **PSL1GHT toolchain** (`ppu-gcc` under
-  `/usr/local/ps3dev/`) and `sfo.xml` at `~/ps3dev/ps3py/sfo.xml`, which the
-  `.pkg` target uses
+- To build it yourself: the **ps3dev toolchain** (`ppu-gcc`, typically installed
+  under `/usr/local/ps3dev/`) plus a **PSL1GHT** SDK checkout. Export `PSL1GHT`
+  to point at the checkout and `PS3DEV` to your toolchain prefix — the `.pkg`
+  target needs `sfo.xml` from `$PS3DEV/bin/sfo.xml`
 
 ---
 
@@ -81,6 +82,9 @@ launch it through webMAN or multiMAN.
 ## Build from source
 
 ```bash
+export PSL1GHT=/path/to/PSL1GHT
+export PS3DEV=/usr/local/ps3dev
+
 make clean && make      # SELF only
 make pkg                # installable PKG
 ```
