@@ -260,6 +260,19 @@ int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, int max,
     return n;
 }
 
+// "More Like This" for the detail page: GET /Items/{id}/Similar → up to `max`
+// recommended items, parsed like any library row (poster + name + meta).
+int xmb_fetch_similar(const char *item_id, XMBItem *arr, int max) {
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Items/%s/Similar?userId=%s&limit=%d"
+        "&Fields=Genres,RunTimeTicks,ProductionYear",
+        g_server, item_id, g_userid, max);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return 0;
+    return parse_xmb_items(responseBuffer, arr, max);
+}
+
 // -------------------------------------------------------
 // Sliding-window pagination helpers
 // -------------------------------------------------------

@@ -39,6 +39,14 @@ const char *jf_device_id(void);
 // the login screen instead of silently rendering an empty library.
 extern volatile bool g_auth_expired;
 
+// One credited person (cast/crew) for the detail page's Cast & Crew row.
+#define JF_MAX_PEOPLE 12
+typedef struct {
+    char id[64];      // person item id (for the headshot image)
+    char name[64];    // "Arnold Schwarzenegger"
+    char role[64];    // "as The Terminator" / "Director" (character or job)
+} JFPerson;
+
 // Full per-item detail (populated by jellyfin_fetch_item_detail)
 typedef struct {
     char overview[1024];       // Plot summary
@@ -50,6 +58,8 @@ typedef struct {
     char audio_info[128];      // "English EAC3 5.1"
     char genres[128];          // "Action, Crime, Thriller"
     char studios[256];         // "Universal Pictures, Original Film"
+    JFPerson people[JF_MAX_PEOPLE];  // top-billed cast + key crew
+    int      n_people;
 } XMBItemDetail;
 
 bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);

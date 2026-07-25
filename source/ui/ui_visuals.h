@@ -285,6 +285,12 @@ void xmb_draw_letter_tile(const char *seed, const char *name,
 // 1:1 blit of a cached thumb at exactly w x h; false while still loading.
 bool xmb_cpu_blit_thumb(const char *item_id, int x, int y, int w, int h);
 
+// Scaled blit of an item's Primary poster (requested at the Movies-tab card
+// size, so the 2:3 aspect is preserved) into an arbitrary w x h rect; draws a
+// dim placeholder while the fetch is still in flight.  Used by the search list
+// and the triangle detail overlay's poster.
+void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y, int w, int h);
+
 // Music sub-tab header row.  active = g_music_subtab; focused = the d-pad
 // is on the header (active label pops white instead of just underlined).
 void xmb_draw_music_subtabs(int x, int y, int active, bool focused);

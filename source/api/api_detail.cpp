@@ -109,6 +109,43 @@ static void json_array_obj_names_join(const char *json, const char *array_key,
     }
 }
 
+// Walk the "People" array and fill arr with up to `max` credits (id + name +
+// role/job).  Jellyfin returns cast first, so the first N are the top billing.
+static void parse_people(const char *json, JFPerson *arr, int max, int *count) {
+    *count = 0;
+    const char *p = strstr(json, "\"People\":");
+    if (!p) return;
+    p += sizeof("\"People\":") - 1;
+    while (*p == ' ') p++;
+    if (*p != '[') return;
+    p++;
+    while (*p && *p != ']' && *count < max) {
+        while (*p && *p != '{' && *p != ']') p++;
+        if (!*p || *p == ']') break;
+        const char *obj_start = p;
+        int depth = 0; bool in_str = false, esc = false;
+        while (*p) {
+            char c = *p;
+            if (esc) { esc = false; }
+            else if (in_str) { if (c=='\\') esc=true; else if (c=='"') in_str=false; }
+            else { if (c=='"') in_str=true; else if (c=='{') depth++; else if (c=='}') { if (!--depth) { p++; break; } } }
+            p++;
+        }
+        int olen = (int)(p - obj_start);
+        JFPerson *person = &arr[*count];
+        person->id[0] = person->name[0] = person->role[0] = '\0';
+        json_get_in_range(obj_start, olen, "Name", person->name, sizeof(person->name));
+        json_get_in_range(obj_start, olen, "Id",   person->id,   sizeof(person->id));
+        char role[64] = "", type[24] = "";
+        json_get_in_range(obj_start, olen, "Role", role, sizeof(role));
+        json_get_in_range(obj_start, olen, "Type", type, sizeof(type));
+        // Actors carry a character in Role; crew carry only a job in Type.
+        if (role[0])      snprintf(person->role, sizeof(person->role), "%s", role);
+        else if (type[0]) snprintf(person->role, sizeof(person->role), "%s", type);
+        if (person->name[0]) (*count)++;
+    }
+}
+
 static void parse_media_streams(const char *json,
                                   char *video_out, int vlen,
                                   char *audio_out, int alen) {
@@ -328,6 +365,7 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out) {
     json_array_first_string(resp,   "Taglines", out->tagline, sizeof(out->tagline));
     json_array_strings_join(resp,   "Genres",   out->genres,  sizeof(out->genres));
     json_array_obj_names_join(resp, "Studios",  out->studios, sizeof(out->studios));
+    parse_people(resp, out->people, JF_MAX_PEOPLE, &out->n_people);
 
     parse_media_streams(resp, out->video_info, sizeof(out->video_info),
                               out->audio_info, sizeof(out->audio_info));
