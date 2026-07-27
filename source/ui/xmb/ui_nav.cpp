@@ -13,6 +13,7 @@
 #include "plog.h"
 #include "timing.h"
 #include "hd1080.h"
+#include "statsovl.h"
 
 // -------------------------------------------------------
 // Tab switching
@@ -144,6 +145,10 @@ static bool xmb_input_settings(void) {
         }
         if (g_settings_sel == 3)                                        // 1080p (Alpha)
             hd1080_set_enabled(!hd1080_enabled());
+#if ENABLE_PLAYER_STATS
+        if (g_settings_sel == 4)                                        // Player Stats Overlay
+            statsovl_set_enabled(!statsovl_enabled());
+#endif
     }
     return false;
 }

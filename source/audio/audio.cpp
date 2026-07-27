@@ -2,6 +2,7 @@
 #include "adec.h"
 #include "plog.h"
 #include "jf_paths.h"
+#include "player_stats.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -19,6 +20,11 @@ bool                     s_audio_ok    = false;
 static u32               s_data_start  = 0;
 static u32               s_num_blocks  = 0;
 static u32               s_write_blk   = 0;  // next DMA block index to fill
+// EA of the hardware read index (audioPortConfig.readIndex): a u64 holding the
+// block the DMA engine is currently playing.  Retained purely so the stats
+// overlay can report how many blocks of runway sit ahead of the read cursor —
+// nothing in the playback path reads it.
+static u64               s_read_idx_ea = 0;
 
 // Total audio blocks consumed since port start.  Incremented once per
 // sysEventQueueReceive success in audio_write_pcm().  Each block = 256 samples
@@ -149,6 +155,7 @@ void audio_open(void) {
         s_data_start  = cfg.audioDataStart;
         s_num_blocks  = nb;
         s_write_blk   = 1;  // block 0 pre-filled with silence; hardware starts there
+        s_read_idx_ea = (u64)cfg.readIndex;
         // Zero the entire DMA ring.  Hardware reads zeros → digital silence.
         memset((void*)(uintptr_t)cfg.audioDataStart, 0,
                nb * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float));
@@ -197,7 +204,9 @@ bool audio_write_pcm(void) {
             usleep(1000);
             waited++;
         }
-        if (s_src_avail() >= AUDIO_BLOCK_SAMPLES) {
+        int  avail   = s_src_avail();
+        bool starved = (avail < AUDIO_BLOCK_SAMPLES);
+        if (!starved) {
             s_src_read(blk_buf, AUDIO_BLOCK_SAMPLES);
             apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES);
             s_pcm_blocks++;
@@ -208,6 +217,18 @@ bool audio_write_pcm(void) {
             plog("audio: decoder stall");
         }
         s_write_blk = (s_write_blk + 1) % s_num_blocks;
+
+        // Blocks of runway between the DMA read cursor and where we just
+        // wrote — the ring's actual safety margin.
+        {
+            int ahead = 0;
+            if (s_read_idx_ea && s_num_blocks) {
+                u32 rd = (u32)(*(volatile u64 *)(uintptr_t)s_read_idx_ea);
+                rd %= s_num_blocks;
+                ahead = (int)((s_write_blk + s_num_blocks - rd) % s_num_blocks);
+            }
+            player_stats_on_audio_write(avail, ahead, (int)s_num_blocks, starved);
+        }
     }
     u64 total = ++s_audio_blocks;
     if (total % 500 == 0) {
@@ -236,9 +257,10 @@ void audio_close(void) {
     sysEventQueueDestroy(s_audio_eq, 0);
     crash_log("ax4 sysAudioQuit");
     audioQuit();
-    s_audio_ok   = false;
-    s_data_start = 0;
-    s_num_blocks = 0;
-    s_write_blk  = 0;
+    s_audio_ok    = false;
+    s_data_start  = 0;
+    s_num_blocks  = 0;
+    s_write_blk   = 0;
+    s_read_idx_ea = 0;
     crash_log("ax5 audio_close done");
 }

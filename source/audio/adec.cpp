@@ -28,7 +28,8 @@ extern void crash_log(const char *msg);
 // (adec_thread_fn) — decoding the whole burst to float PCM would cost ~8 MB.
 // ~1.37s @ 48 kHz stereo float = 512 KB.
 #define PCM_RING_CAP        (1 << 16)
-#define PCM_RING_HIGHWATER  48000        // ~1.0s: decoder idles above this
+// PCM_RING_HIGHWATER (~1.0s: decoder idles above this) now lives in adec.h so
+// the stats overlay can scale its ring-fill readout against the same level.
 
 // PES queue: raw (compressed) PES packets queued by the demux/decode thread,
 // consumed by the adec thread.  This is where the sub-burn burst is HELD: with

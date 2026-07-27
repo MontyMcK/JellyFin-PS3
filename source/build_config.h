@@ -26,3 +26,25 @@
 // =========================================================================
 
 #define BUILD_FOR_RPCS3 0
+
+// =========================================================================
+//  PLAYER STATS INSTRUMENTATION
+// =========================================================================
+//  1 = compile the playback diagnostics module (player_stats.cpp) and the
+//      Settings row that toggles its overlay
+//  0 = strip it entirely — the metric hooks become inline no-ops, the ring
+//      buffer / histogram storage vanishes, and the Settings row disappears
+//
+//  This is SEPARATE from the runtime switch (Settings > Player Stats
+//  Overlay, stored by statsovl.cpp).  The runtime switch controls DISPLAY
+//  only: with it off the counters still update, so flipping it on mid-movie
+//  shows warm numbers immediately.  This flag controls whether the
+//  MEASUREMENT exists at all, so a release build can drop the code and its
+//  ~33 KB of sample storage without touching any call site.
+//
+//  Cost when 1 but the overlay is off: a handful of integer ops in the
+//  vblank handler and one per presented frame.  Nothing is drawn and no
+//  text layout runs — see player_stats_render_overlay().
+// =========================================================================
+
+#define ENABLE_PLAYER_STATS 1

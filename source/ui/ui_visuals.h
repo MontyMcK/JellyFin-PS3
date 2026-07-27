@@ -3,6 +3,7 @@
 #include "ui.h"
 #include "icons.h"
 #include "overscan.h"   // overscan_x()/overscan_y() feed the layout anchors below
+#include "../build_config.h"   // ENABLE_PLAYER_STATS gates a settings row
 
 // -------------------------------------------------------
 // XMB tab indices
@@ -231,7 +232,10 @@ extern int  g_jumpbar_sel;
 extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 
 // Settings tab state (defined in ui_xmb_state.cpp)
-#define XMB_SETTINGS_COUNT 4   // number of selectable settings entries
+// The "Player Stats Overlay" row only exists when the diagnostics module is
+// compiled in — a build with ENABLE_PLAYER_STATS 0 has nothing for it to
+// toggle, so the row goes away rather than sitting there doing nothing.
+#define XMB_SETTINGS_COUNT (4 + ENABLE_PLAYER_STATS)  // selectable settings entries
 extern int   g_settings_sel;       // highlighted settings entry
 extern bool  g_settings_confirm;   // true while the logout confirm prompt is up
 extern bool  g_overscan_calib;     // true while the overscan calibration screen is up

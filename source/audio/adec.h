@@ -18,6 +18,13 @@ void adec_flush(void);
 // payload, and pushes the resulting stereo PCM into the ring buffer.
 void adec_push_pes(const u8 *pes, int pes_len);
 
+// Decoder back-pressure threshold: the decode thread idles once the PCM ring
+// holds this many stereo pairs (~1.0s @ 48 kHz).  Exposed so the stats overlay
+// can express ring occupancy against the level the decoder actually targets —
+// 100% means a full second of runway, and a slide toward 0 is the starvation
+// that produces the choppy-audio dropouts.
+#define PCM_RING_HIGHWATER  48000
+
 // Stereo sample pairs currently available in the ring.
 int  adec_pcm_available(void);
 

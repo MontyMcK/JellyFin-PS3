@@ -23,6 +23,7 @@
 #include "player.h"
 #include "player_hud.h"
 #include "player_internal.h"
+#include "player_stats.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "jellyfin_api.h"
@@ -237,6 +238,10 @@ void show_player(const JFItem *item, u32 resume_secs) {
     // Claim the cached HUD overlay buffers before the big allocations so
     // they sit low in the heap once and forever (see player_hud.h).
     hud_overlay_alloc();
+    // Same reasoning for the stats panel — and it only allocates at all when
+    // the Settings toggle is on, so a normal build costs nothing.
+    player_stats_reset();
+    player_stats_overlay_alloc();
 
     crash_log("p2 vdec_open begin");
     plog("show_player: vdec_open");

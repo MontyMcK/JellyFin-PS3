@@ -10,20 +10,56 @@
 #include "update_check.h"
 #include "plog.h"
 #include "hd1080.h"
+#include "statsovl.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
-    { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)" };
+    { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)"
+#if ENABLE_PLAYER_STATS
+    , "Player Stats Overlay"
+#endif
+    };
+// ICON_BUG is reused for the stats row: it is the same diagnostics family as
+// Debug Logging, and the Tabler font here is a 20-glyph subset (see
+// ui/fonts/tabler_icons.h) — a new glyph would mean regenerating the subset.
 static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  =
-    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE };
+    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE
+#if ENABLE_PLAYER_STATS
+    , ICON_BUG
+#endif
+    };
 
 #define SET_PANEL_H 96
 #define SET_ROW_H   56
 
 static int settings_panel_y(void) { return XMB_CONTENT_Y + 16; }
 
+// Y of the first action row, below the account info card.
+static int settings_rows_top(void) {
+    return settings_panel_y() + SET_PANEL_H + 24;
+}
+
+// Vertical pitch between action rows.  Normally the natural SET_ROW_H + 10,
+// but the rows are top-anchored under a card whose own top moves down with
+// the overscan inset, so the list can run past the safe area once the entry
+// count grows: at the 8% maximum inset, five rows at the natural pitch put
+// the last one ~26px below the safe bottom edge, where a CRT clips it.
+// Compress only when that actually happens — at zero/low overscan the
+// arithmetic returns SET_ROW_H + 10 and the layout is untouched.
+static int settings_row_pitch(void) {
+    const int natural = SET_ROW_H + 10;
+    if (XMB_SETTINGS_COUNT < 2) return natural;
+    int avail  = (int)display_height - XMB_BOTTOM_PAD - settings_rows_top();
+    int needed = (XMB_SETTINGS_COUNT - 1) * natural + SET_ROW_H;
+    if (avail >= needed) return natural;
+    int pitch = (avail - SET_ROW_H) / (XMB_SETTINGS_COUNT - 1);
+    if (pitch > natural)       pitch = natural;
+    if (pitch < SET_ROW_H + 2) pitch = SET_ROW_H + 2;  // keep rows separated
+    return pitch;
+}
+
 // Y of the i-th action row, below the account info card.
 static int settings_row_y(int i) {
-    return settings_panel_y() + SET_PANEL_H + 24 + i * (SET_ROW_H + 10);
+    return settings_rows_top() + i * settings_row_pitch();
 }
 
 // Centered confirm dialog rect.
@@ -150,6 +186,15 @@ void xmb_draw_settings(void) {
                     (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
                     val, 18, hd1080_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
+#if ENABLE_PLAYER_STATS
+        if (i == 4) {   // Player Stats Overlay — right-aligned On/Off state
+            const char *val = statsovl_enabled() ? "On" : "Off";
+            int vw = ttf_text_width(val, 18, sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
+                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
+                    val, 18, statsovl_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
+#endif
     }
 
     // Version footer — skip it if a large overscan inset has squeezed the

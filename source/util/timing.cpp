@@ -1,6 +1,7 @@
 #include "timing.h"
 #include "audio.h"
 #include "plog.h"
+#include "player_stats.h"
 #include "../build_config.h"
 #include <stdio.h>
 #include <ppu-asm.h>
@@ -48,6 +49,9 @@ static volatile u64 s_flip_trigger_vc = 0;
 // hasn't consumed the previous trigger, don't stomp it.
 static void s_vblank_handler(const u32 head) {
     (void)head;
+    // Observe only — player_stats never feeds anything back into the gate
+    // below.  Integer-only and allocation-free, safe at interrupt priority.
+    player_stats_on_vblank();
     u64 vc = ++s_vsync_count;
     if (s_vsync_shown_once &&
         s_flip_trigger == 0 &&
