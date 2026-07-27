@@ -3,15 +3,39 @@
 
 #include "ui_internal.h"
 
+// Only the three fixed app screens are seeded here.  Every library tab from
+// XMB_TAB_LIB0 up is filled in by xmb_detect_tabs() once the server's Views
+// are known, so the count and the labels come from the user's own library
+// names rather than from this table.
 XMBTab g_tabs[XMB_TAB_COUNT] = {
-    {"Search",            "?",  "", true },
-    {"Home",              ">",  "", true },
-    {"Movies",            "#",  "", false},
-    {"TV Shows",          "=",  "", false},
-    {"Music",             "~",  "", true },
-    {"Collections",       "+",  "", false},
-    {"Settings",          "*",  "", true },
+    {"Search",   "?", "", TABKIND_SEARCH,   true},
+    {"Home",     ">", "", TABKIND_HOME,     true},
+    {"Settings", "*", "", TABKIND_SETTINGS, true},
 };
+
+XMBTabKind xmb_kind(int tab) {
+    if (tab < 0 || tab >= XMB_TAB_COUNT) return TABKIND_GENERIC;
+    return g_tabs[tab].kind;
+}
+
+int xmb_tab_of_kind(XMBTabKind k) {
+    for (int t = 0; t < XMB_TAB_COUNT; t++)
+        if (g_tabs[t].enabled && g_tabs[t].kind == k) return t;
+    return -1;
+}
+
+// Display order: Search, Home, the libraries in the order the server listed
+// them, then Settings.  Settings sits at index 2 for the benefit of the
+// compile-time constant but must render last, so it is appended, not indexed.
+int xmb_tab_order(int *order) {
+    int n = 0;
+    if (g_tabs[XMB_TAB_SEARCH].enabled) order[n++] = XMB_TAB_SEARCH;
+    if (g_tabs[XMB_TAB_HOME].enabled)   order[n++] = XMB_TAB_HOME;
+    for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
+        if (g_tabs[t].enabled) order[n++] = t;
+    if (g_tabs[XMB_TAB_SETTINGS].enabled) order[n++] = XMB_TAB_SETTINGS;
+    return n;
+}
 
 XMBItem g_items[XMB_TAB_COUNT][XMB_ITEMS_MAX];
 int     g_item_count[XMB_TAB_COUNT];

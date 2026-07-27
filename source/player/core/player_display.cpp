@@ -11,6 +11,7 @@
 #include "video.h"
 #include "timing.h"
 #include "plog.h"
+#include "player_stats.h"
 #include "rsxutil.h"
 
 // A/B test knob: define to disable the temporal crossfade entirely (every
@@ -151,6 +152,7 @@ void player_display_frame(PlayerState *ps) {
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = false;
         s_vid_disp_idx ^= 1;
+        player_stats_on_frame_shown();   // observe only
         {
             static u64 s_fi_last_us = 0;
             static u64 s_fi_gaps[2] = {0, 0};
@@ -205,6 +207,7 @@ void player_display_frame(PlayerState *ps) {
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = false;
         s_vid_disp_idx ^= 1;
+        player_stats_on_frame_shown();   // observe only
     } else if (ps->show_seek_frame && ps->paused && s_vid_frame_ready) {
         // Paused seek: display the target frame exactly once, staying paused.
         __asm__ volatile("sync" ::: "memory");
@@ -290,4 +293,10 @@ void player_display_frame(PlayerState *ps) {
         hud_draw(hud_elapsed, ps->paused);
         { static int s_hg2 = 0; if (s_hg2 < 12) { plog("hud_gate: draw returned"); s_hg2++; } }
     }
+
+    // Player stats overlay.  Same GPU-quad discipline as the HUD above — it
+    // must be queued after the video draw, and it costs nothing at all when
+    // the Settings toggle is off (returns before any compose or layout).
+    if (ps->frame_count > 0)
+        player_stats_render_overlay();
 }

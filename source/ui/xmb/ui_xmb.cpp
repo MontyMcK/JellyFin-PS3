@@ -49,7 +49,7 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
     if (tab == XMB_TAB_SEARCH || tab == XMB_TAB_SETTINGS)
         return false;
     xmb_grid_geom(tab, gg);
-    if (tab == XMB_TAB_TV && g_tv_depth > 0) {
+    if (g_tv_depth > 0) {
         *items = g_tv_sub_items;  *count = g_tv_sub_count;
         *sel   = g_tv_sub_sel;    *scroll = g_tv_sub_scroll;
         *y0    = XMB_GRID_Y0 + 26;
@@ -58,7 +58,7 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
         *abs_start = g_tv_sub_start;  *abs_total = g_tv_sub_total;
         return true;
     }
-    if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
+    if (g_col_depth > 0) {
         *items = g_col_sub_items; *count = g_col_sub_count;
         *sel   = g_col_sub_sel;   *scroll = g_col_sub_scroll;
         *y0    = XMB_GRID_Y0 + 26;
@@ -67,7 +67,7 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
         *abs_start = g_col_sub_start; *abs_total = g_col_sub_total;
         return true;
     }
-    if (tab == XMB_TAB_MUSIC && g_music_depth > 0) {
+    if (g_music_depth > 0) {
         *items = g_music_sub_items; *count = g_music_sub_count;
         *sel   = g_music_sub_sel;   *scroll = g_music_sub_scroll;
         *y0    = XMB_GRID_Y0 + 26;
@@ -78,7 +78,7 @@ static bool xmb_grid_view(int tab, GridGeom *gg, const XMBItem **items,
     *items = g_items[tab];  *count = g_item_count[tab];
     *sel   = g_sel;         *scroll = g_scroll_top;
     *y0    = XMB_GRID_Y0
-           + (tab == XMB_TAB_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
+           + (xmb_kind(tab) == TABKIND_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
     *more_below = g_scroll_top + gg->vis < g_item_count[tab] ||
                   g_tab_start[tab] + g_item_count[tab] < g_tab_total[tab];
     *abs_start = g_tab_start[tab]; *abs_total = g_tab_total[tab];
@@ -107,15 +107,17 @@ static void slog_menu_tick(void) {
                           &more, &a_start, &a_total)) {
             sel   = s;
             total = (a_total > count) ? a_total : count;   // paged vs. loaded
-            depth = (tab == XMB_TAB_TV)          ? g_tv_depth
-                  : (tab == XMB_TAB_COLLECTIONS) ? g_col_depth
-                  : (tab == XMB_TAB_MUSIC)       ? g_music_depth : 0;
+            // Whichever drill-down is open — it is no longer implied by the
+            // tab's kind, since any library can hold a Series or a BoxSet.
+            depth = g_tv_depth  ? g_tv_depth
+                  : g_col_depth ? g_col_depth
+                  : g_music_depth;
         }
         // else: Home — no grid; just track the tab (sel stays 0).
         else { sel = 0; total = 0; }
     }
 
-    bool header = (tab == XMB_TAB_MUSIC && g_music_header);
+    bool header = (xmb_kind(tab) == TABKIND_MUSIC && g_music_header);
 
     static int  s_tab = -1, s_sel = -2, s_total = -1, s_depth = -1;
     static bool s_header = false;
@@ -163,17 +165,22 @@ static void xmb_draw_text_phase(int tab) {
         xmb_home_text_phase();
     } else {
         // Card-grid tabs: breadcrumb (sub-screens), empty text, grid labels.
-        if (tab == XMB_TAB_MUSIC) {
+        if (xmb_kind(tab) == TABKIND_MUSIC && g_music_depth == 0) {
             GridGeom mg;
-            xmb_grid_geom(XMB_TAB_MUSIC, &mg);
-            if (g_music_depth == 0)
-                xmb_draw_music_subtabs(mg.x0, XMB_CONTENT_Y + 2,
-                                       g_music_subtab, g_music_header);
-            else
-                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
-                                    g_music_parent_name, "Albums", NULL);
+            xmb_grid_geom(tab, &mg);
+            xmb_draw_music_subtabs(mg.x0, XMB_CONTENT_Y + 2,
+                                   g_music_subtab, g_music_header);
+        } else if (g_music_depth > 0) {
+            // Reached from a music library OR a standalone Playlists one, so
+            // name what is actually listed: a playlist drills into its tracks,
+            // an artist/genre into its albums.
+            bool tracks = (g_music_sub_count > 0 &&
+                           strcmp(g_music_sub_items[0].type, "Audio") == 0);
+            xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+                                g_music_parent_name,
+                                tracks ? "Tracks" : "Albums", NULL);
         }
-        if (tab == XMB_TAB_TV && g_tv_depth > 0) {
+        if (g_tv_depth > 0) {
             if (g_tv_depth == 1)
                 xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
                                     g_tv_series_name, "Seasons", NULL);
@@ -181,7 +188,7 @@ static void xmb_draw_text_phase(int tab) {
                 xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
                                     g_tv_series_name, g_tv_season_name,
                                     "Episodes");
-        } else if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) {
+        } else if (g_col_depth > 0) {
             xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
                                 g_col_name, "Movies", NULL);
         }
@@ -190,9 +197,9 @@ static void xmb_draw_text_phase(int tab) {
         int count, sel, scroll, y0, a_start, a_total; bool more;
         if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0,
                           &more, &a_start, &a_total)) {
-            bool sub = (tab == XMB_TAB_TV && g_tv_depth > 0) ||
-                       (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) ||
-                       (tab == XMB_TAB_MUSIC && g_music_depth > 0);
+            bool sub = (g_tv_depth > 0) ||
+                       (g_col_depth > 0) ||
+                       (g_music_depth > 0);
             if (count == 0) {
                 bool loaded = sub || g_items_loaded[tab];
                 if (loaded)
@@ -213,8 +220,8 @@ static void xmb_draw_text_phase(int tab) {
 
 // Contextual hints bar for the current tab / mode.
 static void xmb_draw_hints(int tab) {
-    bool in_tv_sub  = (tab == XMB_TAB_TV          && g_tv_depth  > 0);
-    bool in_col_sub = (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0);
+    bool in_tv_sub  = (g_tv_depth > 0);
+    bool in_col_sub = (g_col_depth > 0);
 
     if (tab == XMB_TAB_SETTINGS) {
         if (g_settings_confirm) {
@@ -232,11 +239,11 @@ static void xmb_draw_hints(int tab) {
             static const Hint h[] = {{'X',"Type"},{'C',"Clear"}};
             draw_hints_bar(h, 2);
         }
-    } else if (tab == XMB_TAB_MUSIC && g_music_header) {
+    } else if (xmb_kind(tab) == TABKIND_MUSIC && g_music_header) {
         static const Hint h[] = {{'D',"Switch"},{'X',"Select"}};
         draw_hints_bar(h, 2);
     } else if (in_tv_sub || in_col_sub ||
-               (tab == XMB_TAB_MUSIC && g_music_depth > 0)) {
+               (g_music_depth > 0)) {
         static const Hint h[] = {{'X',"Select"},{'C',"Back"}};
         draw_hints_bar(h, 2);
     } else if (g_jumpbar_active) {

@@ -178,12 +178,14 @@ void rsx_draw_frame(bool render_blend, float blend_factor, u32 fw, u32 fh) {
     }
 }
 
-// HUD overlay pass — one full-screen quad sampling the pre-composed overlay
-// texture, alpha-blended over the video.  Vertices go inline into the FIFO
+// Overlay pass — one quad sampling a pre-composed overlay texture,
+// alpha-blended over the video, positioned in normalised device coords
+// (-1..1, +y up).  Vertices go inline into the FIFO
 // (rsxDrawVertexBegin/End): no vertex-array fetch, so no stale-binding wedge.
 // The video FP passes the sampled alpha through (MOV result.color, col), so
 // untouched overlay pixels (alpha 0) leave the video unchanged.
-void rsx_draw_hud_overlay(u32 tex_off, u32 tw, u32 th) {
+static void draw_overlay_ndc(u32 tex_off, u32 tw, u32 th,
+                             float x0, float y0, float x1, float y1) {
     rsxVertexProgram   *vid_vpo = (rsxVertexProgram*)  video_vp_data;
     rsxFragmentProgram *vid_fpo = (rsxFragmentProgram*) video_fp_data;
     void *vp_ucode; u32 vp_size;
@@ -204,10 +206,10 @@ void rsx_draw_hud_overlay(u32 tex_off, u32 tw, u32 th) {
 
     // Push TEX0 before POS per vertex; the POS write latches the vertex
     // (same ordering trick as the hud_dim inline quad).
-    const float uv_tl[4] = { 0.f, 0.f, 0.f, 1.f }, p_tl[4] = { -1.f,  1.f, 0.f, 1.f };
-    const float uv_tr[4] = { 1.f, 0.f, 0.f, 1.f }, p_tr[4] = {  1.f,  1.f, 0.f, 1.f };
-    const float uv_bl[4] = { 0.f, 1.f, 0.f, 1.f }, p_bl[4] = { -1.f, -1.f, 0.f, 1.f };
-    const float uv_br[4] = { 1.f, 1.f, 0.f, 1.f }, p_br[4] = {  1.f, -1.f, 0.f, 1.f };
+    const float uv_tl[4] = { 0.f, 0.f, 0.f, 1.f }, p_tl[4] = { x0, y0, 0.f, 1.f };
+    const float uv_tr[4] = { 1.f, 0.f, 0.f, 1.f }, p_tr[4] = { x1, y0, 0.f, 1.f };
+    const float uv_bl[4] = { 0.f, 1.f, 0.f, 1.f }, p_bl[4] = { x0, y1, 0.f, 1.f };
+    const float uv_br[4] = { 1.f, 1.f, 0.f, 1.f }, p_br[4] = { x1, y1, 0.f, 1.f };
 
     rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
     rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_TEX0, uv_tl);
@@ -221,4 +223,22 @@ void rsx_draw_hud_overlay(u32 tex_off, u32 tw, u32 th) {
     rsxDrawVertexEnd(context);
 
     rsxSetBlendEnable(context, GCM_FALSE);
+}
+
+// Full-screen overlay (the HUD): the whole NDC box.
+void rsx_draw_hud_overlay(u32 tex_off, u32 tw, u32 th) {
+    draw_overlay_ndc(tex_off, tw, th, -1.f, 1.f, 1.f, -1.f);
+}
+
+// Overlay placed at a pixel rect, top-left origin — used by the player stats
+// panel, which composes a small texture rather than a display-sized one.
+void rsx_draw_overlay_quad(u32 tex_off, u32 tw, u32 th,
+                           int px, int py, int pw, int ph) {
+    float dw = (float)display_width, dh = (float)display_height;
+    if (dw <= 0.f || dh <= 0.f) return;
+    float x0 = 2.f * (float)px / dw - 1.f;
+    float x1 = 2.f * (float)(px + pw) / dw - 1.f;
+    float y0 = 1.f - 2.f * (float)py / dh;
+    float y1 = 1.f - 2.f * (float)(py + ph) / dh;
+    draw_overlay_ndc(tex_off, tw, th, x0, y0, x1, y1);
 }

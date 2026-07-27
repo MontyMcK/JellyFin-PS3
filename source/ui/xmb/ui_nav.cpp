@@ -13,6 +13,7 @@
 #include "plog.h"
 #include "timing.h"
 #include "hd1080.h"
+#include "statsovl.h"
 
 // -------------------------------------------------------
 // Tab switching
@@ -39,7 +40,7 @@ void xmb_switch_tab(int new_tab) {
     g_col_depth = 0; g_col_sub_sel = 0; g_col_sub_scroll = 0; g_col_sub_start = 0; g_col_sub_total = 0;
     // Music keeps its sub-tab across visits and lands with the header
     // focused, so Albums/Artists/Playlists/... is one LEFT/RIGHT away.
-    g_music_depth = 0; g_music_header = (new_tab == XMB_TAB_MUSIC);
+    g_music_depth = 0; g_music_header = (xmb_kind(new_tab) == TABKIND_MUSIC);
     g_music_sub_sel = 0; g_music_sub_scroll = 0;
     g_music_sub_count = 0; g_music_sub_total = 0;
     if (new_tab == XMB_TAB_SEARCH) {
@@ -54,13 +55,25 @@ void xmb_switch_tab(int new_tab) {
         xmb_home_on_enter();
 }
 
+// Step one tab in DISPLAY order.  Must go through xmb_tab_order(), not raw
+// array indices: Settings holds a low index but renders last, and library
+// tabs are appended in server order.
+//
+// This also wraps, which the old index walk did not — it bailed at the array
+// end, so R1 could never get past the last tab round to Search (the reported
+// "r1 stops at Settings" behaviour).  A tab bar is a ring; treat it as one.
 int xmb_next_enabled(int start, int dir) {
-    int t = start + dir;
-    while (t >= 0 && t < XMB_TAB_COUNT) {
-        if (g_tabs[t].enabled) return t;
-        t += dir;
-    }
-    return start;
+    int order[XMB_TAB_COUNT];
+    int n = xmb_tab_order(order);
+    if (n <= 1) return start;
+
+    int pos = -1;
+    for (int i = 0; i < n; i++)
+        if (order[i] == start) { pos = i; break; }
+    if (pos < 0) return order[0];
+
+    int next = (pos + (dir > 0 ? 1 : -1) + n) % n;
+    return order[next];
 }
 
 // Launch the player for one list item, mapping XMBItem -> JFItem.
@@ -144,6 +157,10 @@ static bool xmb_input_settings(void) {
         }
         if (g_settings_sel == 3)                                        // 1080p (Alpha)
             hd1080_set_enabled(!hd1080_enabled());
+#if ENABLE_PLAYER_STATS
+        if (g_settings_sel == 4)                                        // Player Stats Overlay
+            statsovl_set_enabled(!statsovl_enabled());
+#endif
     }
     return false;
 }
@@ -151,7 +168,7 @@ static bool xmb_input_settings(void) {
 // TV sub-screen (Series -> Seasons -> Episodes) — card grid.
 static void xmb_input_tv_sub(void) {
     GridGeom gg;
-    xmb_grid_geom(XMB_TAB_TV, &gg);
+    xmb_grid_geom(g_active_tab, &gg);
     const int C   = gg.cols;
     const int VIS = gg.vis;
     if (BTN_PRESSED(circle)) {
@@ -225,7 +242,7 @@ static void xmb_input_tv_sub(void) {
 // Collections sub-screen (Collection -> Movies) — card grid.
 static void xmb_input_col_sub(void) {
     GridGeom gg;
-    xmb_grid_geom(XMB_TAB_COLLECTIONS, &gg);
+    xmb_grid_geom(g_active_tab, &gg);
     const int C   = gg.cols;
     const int VIS = gg.vis;
     if (BTN_PRESSED(circle)) {
@@ -293,11 +310,14 @@ static void music_set_subtab(int st) {
     if (st >= MUSIC_ST_COUNT) st = MUSIC_ST_COUNT - 1;
     if (st == g_music_subtab) return;
     g_music_subtab = st;
-    g_tab_name_filter[XMB_TAB_MUSIC][0] = '\0';
-    g_items_loaded[XMB_TAB_MUSIC] = false;
-    g_item_count[XMB_TAB_MUSIC]   = 0;
-    g_tab_start[XMB_TAB_MUSIC]    = 0;
-    g_tab_total[XMB_TAB_MUSIC]    = 0;
+    // Reset the ACTIVE tab's paging state, not a fixed music slot — with
+    // several music libraries each one is its own tab and keeps its own.
+    const int mt = g_active_tab;
+    g_tab_name_filter[mt][0] = '\0';
+    g_items_loaded[mt] = false;
+    g_item_count[mt]   = 0;
+    g_tab_start[mt]    = 0;
+    g_tab_total[mt]    = 0;
     g_sel        = 0;
     g_scroll_top = 0;
 }
@@ -316,7 +336,7 @@ static void xmb_input_music_header(void) {
 // a 50-album discography is already an outlier).
 static void xmb_input_music_sub(void) {
     GridGeom gg;
-    xmb_grid_geom(XMB_TAB_MUSIC, &gg);
+    xmb_grid_geom(g_active_tab, &gg);
     const int C   = gg.cols;
     const int VIS = gg.vis;
     if (BTN_PRESSED(circle)) {
@@ -350,8 +370,14 @@ static void xmb_input_music_sub(void) {
     }
     if (BTN_PRESSED(cross) && g_music_sub_count > 0 &&
         g_music_sub_sel < g_music_sub_count) {
-        music_screen_open_album(&g_music_sub_items[g_music_sub_sel],
-                                g_music_parent_name);
+        // Sub-items are albums when drilling an artist/genre, but TRACKS when
+        // drilling a playlist — open whichever this actually is.
+        if (strcmp(g_music_sub_items[g_music_sub_sel].type, "Audio") == 0)
+            music_screen_open_songs(g_music_sub_items, g_music_sub_count,
+                                    g_music_sub_sel);
+        else
+            music_screen_open_album(&g_music_sub_items[g_music_sub_sel],
+                                    g_music_parent_name);
         init_btns();
     }
 }
@@ -395,14 +421,21 @@ bool xmb_handle_input_browse(void) {
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
 
-    if (tab == XMB_TAB_TV && g_tv_depth > 0)           { xmb_input_tv_sub();  return false; }
-    if (tab == XMB_TAB_COLLECTIONS && g_col_depth > 0) { xmb_input_col_sub(); return false; }
-    if (tab == XMB_TAB_MUSIC && g_music_depth > 0)     { xmb_input_music_sub();    return false; }
-    if (tab == XMB_TAB_MUSIC && g_music_header)        { xmb_input_music_header(); return false; }
+    // Route on DEPTH alone.  Now that a Series/BoxSet/Playlist can be opened
+    // from any library — including a user-made "Anime" folder — the matching
+    // sub-screen handler has to run regardless of the tab's kind, or the
+    // drill-down would render with no input handler behind it.  Only one
+    // depth is ever non-zero: xmb_switch_tab() clears all three.
+    if (g_tv_depth > 0)    { xmb_input_tv_sub();    return false; }
+    if (g_col_depth > 0)   { xmb_input_col_sub();   return false; }
+    if (g_music_depth > 0) { xmb_input_music_sub(); return false; }
+    // The Albums/Artists/Playlists/... header belongs to a real music library
+    // only; a Playlists library has no sub-tabs to move between.
+    if (xmb_kind(tab) == TABKIND_MUSIC && g_music_header)        { xmb_input_music_header(); return false; }
 
+    // Alphabetical jump bar on every library tab, custom folders included.
     bool jbar_mode = g_jumpbar_active &&
-        (tab == XMB_TAB_MOVIES || tab == XMB_TAB_TV ||
-         tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS);
+        xmb_kind(tab) >= TABKIND_MOVIES && xmb_kind(tab) <= TABKIND_GENERIC;
     if (jbar_mode) { xmb_input_jumpbar(tab); return false; }
 
     // Normal browse — 3-column card grid.
@@ -427,7 +460,7 @@ bool xmb_handle_input_browse(void) {
                 if (g_sel < 0) g_sel = 0;
                 g_scroll_top = (g_sel / C) * C;
             }
-        } else if (tab == XMB_TAB_MUSIC) {
+        } else if (xmb_kind(tab) == TABKIND_MUSIC) {
             // Top row: move d-pad focus up onto the sub-tab header.
             g_music_header = true;
             return false;
@@ -455,8 +488,8 @@ bool xmb_handle_input_browse(void) {
     if (BTN_REPEAT(left) && (g_sel % C) > 0) {
         g_sel--;
     } else if (BTN_PRESSED(left) && (g_sel % C) == 0 &&
-               (tab == XMB_TAB_MOVIES || tab == XMB_TAB_TV ||
-                tab == XMB_TAB_MUSIC  || tab == XMB_TAB_COLLECTIONS)) {
+               (xmb_kind(tab) == TABKIND_MOVIES || xmb_kind(tab) == TABKIND_TV ||
+                xmb_kind(tab) == TABKIND_MUSIC  || xmb_kind(tab) == TABKIND_BOXSETS)) {
         // Left at the first column opens the letter jump bar.
         const char *filt = g_tab_name_filter[tab];
         if (filt[0] == '#') {
@@ -478,21 +511,33 @@ bool xmb_handle_input_browse(void) {
 
     if (BTN_PRESSED(cross) && count > 0 && g_sel < count) {
         const XMBItem *it = &g_items[tab][g_sel];
-        if (tab == XMB_TAB_TV && strcmp(it->type, "Series") == 0) {
+        const char *ty = it->type;
+        // Dispatch on the ITEM's type, not the tab's KIND.  A library the
+        // user made themselves — "Anime", or any folder Jellyfin types as
+        // mixed/untyped — holds exactly the same item types as a purpose-built
+        // one, so it has to browse the same way: a Series opens the
+        // Seasons -> Episodes browser no matter which tab it was found in.
+        // Keying this off the tab meant only a "tvshows" library could drill
+        // in, and everywhere else X fell through to the video player.
+        if (strcmp(ty, "Series") == 0) {
             strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
             strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
             g_tv_sub_start = 0; g_tv_sub_total = 0;
             g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items, XMB_ITEMS_MAX,
                                                 0, &g_tv_sub_total);
             g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
-        } else if (tab == XMB_TAB_COLLECTIONS) {
+        } else if (strcmp(ty, "BoxSet") == 0) {
             strncpy(g_col_id,   it->id,   sizeof(g_col_id)-1);
             strncpy(g_col_name, it->name, sizeof(g_col_name)-1);
             g_col_sub_start = 0; g_col_sub_total = 0;
             g_col_sub_count = xmb_fetch_collection_items(g_col_id, g_col_sub_items, XMB_ITEMS_MAX,
                                                           0, &g_col_sub_total);
             g_col_depth = 1; g_col_sub_sel = 0; g_col_sub_scroll = 0;
-        } else if (tab == XMB_TAB_MUSIC) {
+        } else if (strcmp(ty, "MusicAlbum")  == 0 ||
+                   strcmp(ty, "Audio")       == 0 ||
+                   strcmp(ty, "Playlist")    == 0 ||
+                   strcmp(ty, "MusicArtist") == 0 ||
+                   strcmp(ty, "MusicGenre")  == 0) {
             if (strcmp(it->type, "MusicAlbum") == 0) {
                 // Album → Now Playing (blocks until the user backs out).
                 music_screen_open_album(it, "Albums");
@@ -506,10 +551,18 @@ bool xmb_handle_input_browse(void) {
                 init_btns();
                 return false;
             } else if (strcmp(it->type, "Playlist") == 0) {
-                music_screen_open_playlist(it);
-                s_movie_just_exited = true;
-                init_btns();
-                return false;
+                // Drill into the playlist's TRACKS in the browser, the same
+                // way an artist or genre opens its albums — not straight
+                // into the player.  X on a track there starts playback with
+                // the rest of the playlist queued behind it.
+                strncpy(g_music_parent_id,   it->id,   sizeof(g_music_parent_id)-1);
+                strncpy(g_music_parent_name, it->name, sizeof(g_music_parent_name)-1);
+                g_music_sub_total = 0;
+                g_music_sub_count = xmb_fetch_playlist_items(
+                    it->id, g_music_sub_items, XMB_ITEMS_MAX,
+                    &g_music_sub_total);
+                g_music_depth = 1;
+                g_music_sub_sel = 0; g_music_sub_scroll = 0;
             } else if (strcmp(it->type, "MusicArtist") == 0 ||
                        strcmp(it->type, "MusicGenre")  == 0) {
                 // Drill into the artist's / genre's albums.

@@ -18,15 +18,32 @@
 // Tab icon codepoints (Tabler Icons)
 // -------------------------------------------------------
 
-static const int TAB_CODEPOINTS[XMB_TAB_COUNT] = {
-    ICON_SEARCH,       // XMB_TAB_SEARCH
-    ICON_HOME,         // XMB_TAB_HOME
-    ICON_MOVIE,        // XMB_TAB_MOVIES
-    ICON_TV,           // XMB_TAB_TV
-    ICON_MUSIC,        // XMB_TAB_MUSIC
-    ICON_COLLECTIONS,  // XMB_TAB_COLLECTIONS
-    ICON_SETTINGS,     // XMB_TAB_SETTINGS
-};
+// Icon per tab KIND, not per tab index — several tabs can share a kind now
+// that every library gets its own.  A library with an unrecognised
+// CollectionType falls back to the generic collections glyph.
+static int tab_icon(int tab) {
+    switch (xmb_kind(tab)) {
+    case TABKIND_SEARCH:   return ICON_SEARCH;
+    case TABKIND_HOME:     return ICON_HOME;
+    case TABKIND_MOVIES:   return ICON_MOVIE;
+    case TABKIND_TV:       return ICON_TV;
+    case TABKIND_MUSIC:    return ICON_MUSIC;
+    case TABKIND_PLAYLISTS:return ICON_MUSIC;
+    case TABKIND_BOXSETS:  return ICON_COLLECTIONS;
+    case TABKIND_SETTINGS: return ICON_SETTINGS;
+    // Every custom / untyped library shares ONE icon, so they read as a
+    // family rather than masquerading as a Collections library.
+    //
+    // ICON_PHOTO is the only sensible glyph left: the bundled Tabler font is
+    // a 20-glyph SUBSET (ui/fonts/tabler_icons.h) and all 20 are already
+    // spoken for, so nothing is truly free.  This one at least never appears
+    // in the tab bar — its only other use is a list placeholder in
+    // ui_lists.cpp — so it collides with nothing the user sees up here.
+    // A dedicated folder glyph means regenerating the subset (fontTools on
+    // tabler-icons.ttf with the ICON_* codepoints, per that file's header).
+    default:               return ICON_PHOTO;
+    }
+}
 
 // -------------------------------------------------------
 // Top bar: brand on the left, clock on the right (XMB style)
@@ -76,20 +93,28 @@ void xmb_draw_divider(void) {
 // -------------------------------------------------------
 
 void xmb_draw_tabs(void) {
-    const int TAB_SPACING = 72;
-    const int oy          = XMB_OY;                          // overscan shift
-    const int icon_cy     = oy + XMB_TOPBAR_H + UIS_H(30);   // icon centerline
+    const int oy      = XMB_OY;                          // overscan shift
+    const int icon_cy = oy + XMB_TOPBAR_H + UIS_H(30);   // icon centerline
 
-    // Pack only the enabled tabs and center *that* group.  Centering on the
-    // full XMB_TAB_COUNT span would leave a gap (and shove the row off to the
-    // left) whenever a library is missing — e.g. no Collections boxsets.
+    // Display order (Search, Home, libraries, Settings) — NOT array order,
+    // since Settings keeps a low index but renders last.
     int enabled[XMB_TAB_COUNT];
-    int n = 0;
-    for (int t = 0; t < XMB_TAB_COUNT; t++)
-        if (g_tabs[t].enabled) enabled[n++] = t;
+    int n = xmb_tab_order(enabled);
     if (n == 0) return;
 
-    const int group_w      = (n - 1) * TAB_SPACING;
+    // Spacing has to adapt now that the tab count follows the server's
+    // library count instead of being fixed at 7.  The authored 72px is kept
+    // whenever the row fits; past that it shrinks to whatever divides the
+    // usable width, floored so icons never overlap.  A 720px SD framebuffer
+    // fits 7 tabs at full spacing and ~11 at the floor.
+    const int avail = (int)display_width - 2 * XMB_ITEM_PAD;
+    int spacing = 72;
+    if (n > 1 && (n - 1) * spacing > avail) {
+        spacing = avail / (n - 1);
+        if (spacing < 34) spacing = 34;   // icon width + breathing room
+    }
+
+    const int group_w      = (n - 1) * spacing;
     const int tab_group_x0 = (int)display_width / 2 - group_w / 2;
 
     // Uniform icon row; the active tab is white with its label and a short
@@ -97,18 +122,27 @@ void xmb_draw_tabs(void) {
     // still switch tabs, the hints bar can advertise that where relevant).
     for (int i = 0; i < n; i++) {
         int  t      = enabled[i];
-        int  cx     = tab_group_x0 + i * TAB_SPACING;
+        int  cx     = tab_group_x0 + i * spacing;
         bool active = (t == g_active_tab);
         int icon_px = active ? 30 : 26;
         int icon_x  = cx - icon_px / 2;
         int icon_y  = icon_cy - icon_px / 2;
 
-        drawIcon((u32)icon_x, (u32)icon_y, TAB_CODEPOINTS[t], (float)icon_px,
+        drawIcon((u32)icon_x, (u32)icon_y, tab_icon(t), (float)icon_px,
                  active ? XMB_WHITE : XMB_ICON_IDLE);
 
         if (active) {
+            // Labels are server library names now, so they can be long and
+            // the active tab can sit at either end of the row.  Centre under
+            // the icon, then clamp into the safe area so a wide name is never
+            // pushed off-screen.
             int lw = ttf_text_width(g_tabs[t].label, 14);
-            drawTTF((u32)(cx - lw / 2), (u32)(oy + XMB_TOPBAR_H + UIS_H(52)),
+            int lx = cx - lw / 2;
+            int lo = XMB_ITEM_PAD;
+            int hi = (int)display_width - XMB_ITEM_PAD - lw;
+            if (lx < lo) lx = lo;
+            if (hi >= lo && lx > hi) lx = hi;
+            drawTTF((u32)lx, (u32)(oy + XMB_TOPBAR_H + UIS_H(52)),
                     g_tabs[t].label, 14, XMB_TEXT);
             drawRect((u32)(cx - 13), (u32)(oy + XMB_TOPBAR_H + UIS_H(74)), 26, 3,
                      XMB_ACCENT);
@@ -123,7 +157,7 @@ void xmb_draw_jumpbar(int tab) {
     GridGeom gg;
     xmb_grid_geom(tab, &gg);
     int bar_top = XMB_GRID_Y0
-                + (tab == XMB_TAB_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
+                + (xmb_kind(tab) == TABKIND_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
     int bar_bot = bar_top + XMB_GRID_ROWS * gg.stride - XMB_CARD_TEXT_H;
     int bar_h   = bar_bot - bar_top;
     int jbar_x  = gg.x0 - JBAR_GAP * 3 - JBAR_W;
@@ -366,7 +400,7 @@ void xmb_draw_empty_state(int tab, const char *msg) {
     int cy = (XMB_CONTENT_Y + (int)display_height - XMB_BOTTOM_PAD) / 2 - 30;
     const float icon_px = 48.0f;
     drawIcon((u32)(cx - (int)icon_px / 2), (u32)(cy - (int)icon_px),
-             TAB_CODEPOINTS[tab], icon_px, 0x002E3458UL);
+             tab_icon(tab), icon_px, 0x002E3458UL);
     int tw = ttf_text_width(msg, 17);
     drawTTF((u32)(cx - tw / 2), (u32)(cy + 8), msg, 17, XMB_TEXT_FAINT);
 }

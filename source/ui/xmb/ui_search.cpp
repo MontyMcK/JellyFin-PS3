@@ -162,8 +162,14 @@ bool xmb_handle_input_search(void) {
         if (BTN_REPEAT(down)) {
             if (g_search_sel < g_search_results_count - 1) {
                 g_search_sel++;
-                if (g_search_sel >= g_search_scroll + 6)
-                    g_search_scroll = g_search_sel - 5;
+                // Scroll against the rows that ACTUALLY fit.  This was a
+                // hardcoded 6 while the renderer measured the screen and drew
+                // as few as one, so the selection walked off the visible area
+                // without ever scrolling.
+                int vis = xmb_search_vis_rows();
+                if (vis < 1) vis = 1;
+                if (g_search_sel >= g_search_scroll + vis)
+                    g_search_scroll = g_search_sel - vis + 1;
             }
         }
         if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {

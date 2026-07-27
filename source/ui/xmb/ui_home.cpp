@@ -121,7 +121,11 @@ static void home_fetch_row(int r) {
             "%s/Shows/NextUp?userId=%s&Limit=%d&Fields=%s",
             g_server, g_userid, HOME_ROW_MAX, fields);
     } else if (r == HR_MUSIC) {
-        const char *lib = g_tabs[XMB_TAB_MUSIC].library_id;
+        // Home samples the FIRST music library; the others are still reachable
+        // as their own tabs.
+        int mt = xmb_tab_of_kind(TABKIND_MUSIC);
+        if (mt < 0) { row->count = 0; row->loaded = true; return; }
+        const char *lib = g_tabs[mt].library_id;
         if (!lib[0]) { row->count = 0; row->loaded = true; return; }
         snprintf(url, sizeof(url),
             "%s/Users/%s/Items?ParentId=%s&IncludeItemTypes=MusicAlbum"
@@ -129,7 +133,8 @@ static void home_fetch_row(int r) {
             "&Limit=%d&Fields=%s",
             g_server, g_userid, lib, HOME_ROW_MAX, fields);
     } else if (r == HR_MOVIES || r == HR_SHOWS) {
-        int   tab  = (r == HR_MOVIES) ? XMB_TAB_MOVIES : XMB_TAB_TV;
+        int tab = xmb_tab_of_kind((r == HR_MOVIES) ? TABKIND_MOVIES : TABKIND_TV);
+        if (tab < 0) { row->count = 0; row->loaded = true; return; }
         const char *lib  = g_tabs[tab].library_id;
         const char *type = (r == HR_MOVIES) ? "Movie" : "Series";
         if (!lib[0]) { row->count = 0; row->loaded = true; return; }
@@ -333,8 +338,9 @@ static void home_activate(void) {
 
     // A show opens the existing TV Series -> Seasons -> Episodes sub-screen.
     if (s_focus_row == HR_SHOWS && strcmp(it->type, "Series") == 0) {
-        if (!g_tabs[XMB_TAB_TV].enabled) return;
-        g_active_tab = XMB_TAB_TV;
+        int tvt = xmb_tab_of_kind(TABKIND_TV);
+        if (tvt < 0) return;
+        g_active_tab = tvt;
         strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
         strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
         g_tv_sub_start = 0; g_tv_sub_total = 0;
