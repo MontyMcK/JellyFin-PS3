@@ -324,8 +324,8 @@ void thumb_cache_init(void) {
     // Every slot is sized for the biggest card of either orientation; the
     // actual bitmap dimensions are set per request.
     GridGeom gp, gl;
-    xmb_grid_geom(XMB_TAB_MOVIES, &gp);   // portrait posters
-    xmb_grid_geom(XMB_TAB_RESUME, &gl);   // landscape stills
+    xmb_grid_geom_portrait(&gp);          // portrait posters
+    xmb_grid_geom(XMB_TAB_RESUME, &gl);   // landscape stills (Home shelf)
     size_t pp = (size_t)gp.card_w * gp.card_h;
     size_t pl = (size_t)gl.card_w * gl.card_h;
     s_max_px  = (pp > pl) ? pp : pl;

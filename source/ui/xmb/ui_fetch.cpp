@@ -6,12 +6,21 @@
 
 #include "ui_internal.h"
 #include "jellyfin_api.h"
+#include "plog.h"
+#include "../../build_config.h"   // SHOW_PLAYLISTS_TAB
 
 // -------------------------------------------------------
 // API fetch helpers
 // -------------------------------------------------------
 
+// Build one tab per Jellyfin library.  Re-runnable: every library slot is
+// cleared first so a re-login or a server-side library change cannot leave a
+// stale tab pointing at a library that no longer exists.
 void xmb_detect_tabs(void) {
+    for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
+        memset(&g_tabs[t], 0, sizeof(g_tabs[t]));
+    int next = XMB_TAB_LIB0;
+
     char url[512];
     snprintf(url, sizeof(url), "%s/Users/%s/Views", g_server, g_userid);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
@@ -35,15 +44,69 @@ void xmb_detect_tabs(void) {
         }
         int olen = (int)(p - obj);
 
-        char ct[32] = "", id[64] = "";
-        xmb_json_str_range(obj, olen, "CollectionType", ct, sizeof(ct));
-        xmb_json_str_range(obj, olen, "Id",             id, sizeof(id));
+        char ct[32] = "", id[64] = "", name[40] = "";
+        xmb_json_str_range(obj, olen, "CollectionType", ct,   sizeof(ct));
+        xmb_json_str_range(obj, olen, "Id",             id,   sizeof(id));
+        xmb_json_str_range(obj, olen, "Name",           name, sizeof(name));
+        if (!id[0]) continue;
 
-        if      (strcmp(ct, "movies")   == 0) { g_tabs[XMB_TAB_MOVIES].enabled=true;      strncpy(g_tabs[XMB_TAB_MOVIES].library_id,      id, 63); }
-        else if (strcmp(ct, "tvshows")  == 0) { g_tabs[XMB_TAB_TV].enabled=true;           strncpy(g_tabs[XMB_TAB_TV].library_id,          id, 63); }
-        else if (strcmp(ct, "music")    == 0) { g_tabs[XMB_TAB_MUSIC].enabled=true;        strncpy(g_tabs[XMB_TAB_MUSIC].library_id,       id, 63); }
-        else if (strcmp(ct, "boxsets")  == 0) { g_tabs[XMB_TAB_COLLECTIONS].enabled=true;  strncpy(g_tabs[XMB_TAB_COLLECTIONS].library_id, id, 63); }
+        if (next >= XMB_TAB_COUNT) {
+            // More libraries than the tab bar can hold.  Say so rather than
+            // dropping them silently — silent dropping is the bug this whole
+            // change exists to fix.
+            char b[96];
+            snprintf(b, sizeof(b), "detect_tabs: OVER %d libraries, skipping '%s'",
+                     XMB_LIB_MAX, name);
+            plog(b);
+            break;
+        }
+
+        // Kind drives every per-type behaviour (grid geometry, drill-down,
+        // music sub-tabs).  An unrecognised or absent CollectionType is NOT a
+        // reason to drop the library — it browses as a plain item list.
+        XMBTabKind kind;
+        if      (strcmp(ct, "movies")    == 0) kind = TABKIND_MOVIES;
+        else if (strcmp(ct, "tvshows")   == 0) kind = TABKIND_TV;
+        else if (strcmp(ct, "music")     == 0) kind = TABKIND_MUSIC;
+        else if (strcmp(ct, "boxsets")   == 0) kind = TABKIND_BOXSETS;
+        // Jellyfin auto-creates a "Playlists" view for any user who has
+        // playlists.  It needs its own kind: as GENERIC the tab listed the
+        // playlists but X fell through to xmb_play_item(), which tries to
+        // hand a Playlist to the video player, so nothing opened.
+        else if (strcmp(ct, "playlists") == 0) kind = TABKIND_PLAYLISTS;
+        else                                   kind = TABKIND_GENERIC;
+
+        // The Music tab already reaches these through its Playlists sub-tab,
+        // so a tab of its own would just duplicate them.  Classified above
+        // regardless, so flipping SHOW_PLAYLISTS_TAB on gives a tab that
+        // browses properly rather than one treated as a custom folder.
+        if (kind == TABKIND_PLAYLISTS && !SHOW_PLAYLISTS_TAB) {
+            char b[96];
+            snprintf(b, sizeof(b), "detect_tabs: skipping '%s' (in Music tab)",
+                     name);
+            plog(b);
+            continue;
+        }
+
+        XMBTab *tb = &g_tabs[next];
+        memset(tb, 0, sizeof(*tb));
+        snprintf(tb->label, sizeof(tb->label), "%s",
+                 name[0] ? name : "Library");
+        strncpy(tb->library_id, id, sizeof(tb->library_id) - 1);
+        tb->kind    = kind;
+        tb->icon    = "#";
+        tb->enabled = true;
+
+        { char b[128];
+          snprintf(b, sizeof(b), "detect_tabs: tab%d '%s' type=%s kind=%d",
+                   next, tb->label, ct[0] ? ct : "(none)", (int)kind);
+          plog(b); }
+        next++;
     }
+
+    { char b[64];
+      snprintf(b, sizeof(b), "detect_tabs: %d libraries", next - XMB_TAB_LIB0);
+      plog(b); }
 }
 
 static void xmb_build_items_url(char *url, int url_size, int tab,
@@ -63,7 +126,7 @@ static void xmb_build_items_url(char *url, int url_size, int tab,
     // typed item queries (the library nests them under artist folders);
     // Artists and Genres have dedicated endpoints; Playlists live in their
     // own library, so that query runs from the root with no ParentId.
-    if (tab == XMB_TAB_MUSIC) {
+    if (xmb_kind(tab) == TABKIND_MUSIC) {
         switch (g_music_subtab) {
         case MUSIC_ST_ARTISTS:
             snprintf(url, url_size,
@@ -104,6 +167,20 @@ static void xmb_build_items_url(char *url, int url_size, int tab,
                 g_server, g_userid, lid, start_index, limit, name_filt);
             return;
         }
+    }
+
+    // Playlists library: same typed query the music tab's Playlists sub-tab
+    // uses.  Playlists sit in their own library and are addressed by type
+    // from the root rather than by ParentId, so this is the query already
+    // proven to return them.
+    if (xmb_kind(tab) == TABKIND_PLAYLISTS) {
+        snprintf(url, url_size,
+            "%s/Users/%s/Items?IncludeItemTypes=Playlist&Recursive=true"
+            "&StartIndex=%d&Limit=%d"
+            "&SortBy=SortName&SortOrder=Ascending%s"
+            "&Fields=ChildCount",
+            g_server, g_userid, start_index, limit, name_filt);
+        return;
     }
 
     snprintf(url, url_size,
@@ -233,6 +310,25 @@ int xmb_fetch_music_children(const char *id_param, const char *parent_id,
         "&SortBy=ProductionYear,SortName&SortOrder=Ascending"
         "&Fields=Genres,ProductionYear,ChildCount",
         g_server, g_userid, id_param, parent_id, max);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    if (status != 200) return 0;
+    int n = parse_xmb_items(responseBuffer, arr, max);
+    if (out_total)
+        *out_total = xmb_json_int_range(responseBuffer,
+            (int)strlen(responseBuffer), "TotalRecordCount", n);
+    return n;
+}
+
+// Tracks of one playlist, in PLAYLIST ORDER.  Uses /Playlists/{id}/Items
+// rather than a ParentId item query — that endpoint is what preserves the
+// user's ordering, which is the whole point of a playlist.
+int xmb_fetch_playlist_items(const char *playlist_id, XMBItem *arr, int max,
+                             int *out_total) {
+    char url[512];
+    snprintf(url, sizeof(url),
+        "%s/Playlists/%s/Items?userId=%s&StartIndex=0&Limit=%d"
+        "&Fields=Genres,RunTimeTicks,ProductionYear",
+        g_server, playlist_id, g_userid, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;
     int n = parse_xmb_items(responseBuffer, arr, max);

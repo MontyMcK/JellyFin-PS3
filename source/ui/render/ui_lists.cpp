@@ -56,7 +56,7 @@ static void cpu_blit_bitmap_scaled(const Bitmap *bm, int dx, int dy,
 void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y,
                                int w, int h) {
     GridGeom gg;
-    xmb_grid_geom(XMB_TAB_MOVIES, &gg);
+    xmb_grid_geom_portrait(&gg);
     thumb_request(item_id, gg.card_w, gg.card_h);
     const Bitmap *bm = thumb_get(item_id, gg.card_w, gg.card_h);
     if (bm)
@@ -134,17 +134,29 @@ static void draw_ttf_clipped(u32 x, u32 y, const char *text, float px,
 // cards; Continue Watching and episode lists get landscape stills.
 bool xmb_tab_uses_portrait(int tab) {
     if (tab == XMB_TAB_RESUME) return false;
-    if (tab == XMB_TAB_TV && g_tv_depth == 2) return false;   // episodes
+    if (xmb_kind(tab) == TABKIND_TV && g_tv_depth == 2) return false;   // episodes
     return true;
 }
 
-void xmb_grid_geom(int tab, GridGeom *gg) {
-    // Music: square album covers under the sub-tab header, with a taller
-    // text band for the title + artist (+ meta on the selected card).
-    if (tab == XMB_TAB_MUSIC) {
+// Core geometry, keyed on what the tab IS rather than which tab it is, so
+// callers that just want "a poster grid" (the search list, the thumbnail
+// prefetcher) can ask for it without naming a library that may not exist.
+static void grid_geom_core(XMBTabKind kind, bool portrait, GridGeom *gg) {
+    // Music AND playlist art is square (album covers, playlist art), so both
+    // get square cards with a taller text band for title + artist (+ meta on
+    // the selected card).  A Playlists library was previously falling through
+    // to the 2:3 portrait branch below, which stretched square covers into
+    // poster-shaped boxes.
+    //
+    // Only a real music library reserves height for the
+    // Albums/Artists/Playlists/... sub-tab header above the grid — a
+    // Playlists library has no sub-tabs, so subtracting that there would
+    // shrink the cards to make room for a header that never draws.
+    if (kind == TABKIND_MUSIC || kind == TABKIND_PLAYLISTS) {
+        const int header = (kind == TABKIND_MUSIC) ? XMB_MUSIC_SUBTAB_H : 0;
         gg->portrait = false;
         gg->cols     = XMB_MUSIC_COLS;
-        int card = (XMB_GRID_AVAIL_H - XMB_MUSIC_SUBTAB_H) / XMB_GRID_ROWS
+        int card = (XMB_GRID_AVAIL_H - header) / XMB_GRID_ROWS
                    - XMB_MUSIC_TEXT_H - 6;
         gg->card_w = gg->card_h = card;
         gg->vis    = gg->cols * XMB_GRID_ROWS;
@@ -154,7 +166,7 @@ void xmb_grid_geom(int tab, GridGeom *gg) {
         return;
     }
 
-    gg->portrait = xmb_tab_uses_portrait(tab);
+    gg->portrait = portrait;
     int card_h = XMB_CARD_H_FIT;
     if (gg->portrait) {
         gg->cols   = XMB_PORTRAIT_COLS;
@@ -171,6 +183,17 @@ void xmb_grid_geom(int tab, GridGeom *gg) {
     gg->stride = gg->card_h + XMB_CARD_TEXT_H + 6;
     gg->grid_w = gg->cols * gg->card_w + (gg->cols - 1) * XMB_CARD_GAP_X;
     gg->x0     = ((int)display_width - gg->grid_w) / 2;
+}
+
+void xmb_grid_geom(int tab, GridGeom *gg) {
+    grid_geom_core(xmb_kind(tab), xmb_tab_uses_portrait(tab), gg);
+}
+
+// Poster-grid geometry with no tab behind it.  TABKIND_GENERIC keeps it off
+// the music branch; portrait=true gives the same card size the Movies-style
+// grids use, so a thumb cached while browsing is reused by the search list.
+void xmb_grid_geom_portrait(GridGeom *gg) {
+    grid_geom_core(TABKIND_GENERIC, true, gg);
 }
 
 static void grid_cell_pos(const GridGeom *gg, int vis_idx, int y0,

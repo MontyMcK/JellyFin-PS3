@@ -8,14 +8,25 @@
 // -------------------------------------------------------
 // XMB tab indices
 // -------------------------------------------------------
+// Search, Home and Settings are FIXED slots — they are app screens, not
+// libraries, so their indices never move.  Everything from XMB_TAB_LIB0 up is
+// built at runtime, ONE TAB PER JELLYFIN LIBRARY (see xmb_detect_tabs).
+//
+// The old layout hardcoded one slot each for Movies/TV/Music/Collections and
+// mapped libraries onto them by CollectionType.  That silently lost content
+// two ways: a second library of the same type overwrote the first, and any
+// library with another type (homevideos, musicvideos, books, photos, mixed,
+// or no CollectionType at all) matched nothing and was dropped entirely.
+//
+// ARRAY INDEX IS NOT DISPLAY POSITION.  Settings keeps index 2 so it stays a
+// compile-time constant, but it renders LAST; xmb_tab_order() defines what
+// the user actually sees, and both the tab bar and L1/R1 follow it.
 #define XMB_TAB_SEARCH      0
 #define XMB_TAB_RESUME      1   // now the Home shelf (Continue Watching is one row of it)
-#define XMB_TAB_MOVIES      2
-#define XMB_TAB_TV          3
-#define XMB_TAB_MUSIC       4
-#define XMB_TAB_COLLECTIONS 5
-#define XMB_TAB_SETTINGS    6
-#define XMB_TAB_COUNT       7
+#define XMB_TAB_SETTINGS    2
+#define XMB_TAB_LIB0        3   // first runtime library tab
+#define XMB_TAB_COUNT       16  // array ceiling, NOT the live tab count
+#define XMB_LIB_MAX         (XMB_TAB_COUNT - XMB_TAB_LIB0)
 
 // The Continue Watching tab slot is repurposed as the Home shelf screen.
 #define XMB_TAB_HOME        XMB_TAB_RESUME
@@ -23,12 +34,42 @@
 #define XMB_ITEMS_MAX 50
 #define XMB_PAGE_SIZE 25
 
+// What a tab BEHAVES like.  Several tabs can share a kind when the server has
+// several libraries of the same collection type, so all the per-type logic
+// keys off this rather than off a tab index.
+typedef enum {
+    TABKIND_SEARCH = 0,
+    TABKIND_HOME,
+    TABKIND_MOVIES,
+    TABKIND_TV,
+    TABKIND_MUSIC,
+    TABKIND_BOXSETS,
+    TABKIND_PLAYLISTS,  // Jellyfin's "playlists" view — its own library
+    TABKIND_GENERIC,    // homevideos / musicvideos / mixed / untyped
+    TABKIND_SETTINGS,
+} XMBTabKind;
+
 typedef struct {
-    const char *label;
+    char label[40];         // server library name ("Kids Movies"), or app screen
     const char *icon;
     char library_id[64];
+    XMBTabKind kind;
     bool enabled;
 } XMBTab;
+
+// Kind of a tab index (TABKIND_GENERIC if out of range).
+XMBTabKind xmb_kind(int tab);
+
+// First ENABLED tab with the given kind, or -1 when the server has no such
+// library.  Use for "jump to the music library" style lookups that used to be
+// a bare XMB_TAB_MUSIC.  With several libraries of a kind this returns the
+// first; callers wanting a specific one already hold its tab index.
+int xmb_tab_of_kind(XMBTabKind k);
+
+// Fill order[] with enabled tab indices in DISPLAY order — Search, Home,
+// libraries in server order, then Settings.  Returns how many were written;
+// order[] must hold at least XMB_TAB_COUNT entries.
+int xmb_tab_order(int *order);
 
 // -------------------------------------------------------
 // OSK constants
@@ -147,6 +188,8 @@ typedef struct {
 
 bool xmb_tab_uses_portrait(int tab);
 void xmb_grid_geom(int tab, GridGeom *gg);
+// Poster-grid geometry not tied to any tab (search list, thumb prefetch).
+void xmb_grid_geom_portrait(GridGeom *gg);
 
 // Jump bar (narrow letter column to the left of the item list)
 #define JBAR_ENTRIES 27
@@ -171,6 +214,14 @@ void xmb_grid_geom(int tab, GridGeom *gg);
 // -------------------------------------------------------
 extern const char *OSK_LETTERS[OSK_ROWS_N];
 extern const char *OSK_SYMBOLS[OSK_ROWS_N];
+
+// Search layout (ui_osk_draw.cpp).  The keyboard collapses to just the search
+// field once the results are focused, so the list gets the full content area
+// instead of the nothing it was left with below 1080p.  Both the renderer and
+// the scroll arithmetic must agree on the row count — use these, not a
+// hardcoded guess.
+int xmb_search_results_y(void);
+int xmb_search_vis_rows(void);
 
 // -------------------------------------------------------
 // Navigation/UI state defined in ui.cpp, read by ui_visuals.cpp

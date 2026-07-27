@@ -48,3 +48,23 @@
 // =========================================================================
 
 #define ENABLE_PLAYER_STATS 1
+
+// =========================================================================
+//  STANDALONE PLAYLISTS TAB
+// =========================================================================
+//  0 = don't give Jellyfin's "playlists" library a tab of its own (default)
+//  1 = show it alongside the other libraries
+//
+//  Jellyfin auto-creates a "Playlists" view for any user who has playlists,
+//  so once every library got its own tab it started appearing in the bar —
+//  duplicating content the Music tab already reaches through its
+//  Albums/Artists/Playlists/Genres/Songs sub-tabs.
+//
+//  This suppresses the TAB only.  Detection still classifies the library as
+//  TABKIND_PLAYLISTS rather than letting it fall through to a custom folder,
+//  so if it is switched back on it browses correctly (drills into a
+//  playlist's tracks, square cards) instead of being mistaken for a generic
+//  library and handed to the video player.
+// =========================================================================
+
+#define SHOW_PLAYLISTS_TAB 0

@@ -37,6 +37,9 @@ int  xmb_fetch_collection_items(const char *collection_id, XMBItem *arr,
 int  xmb_fetch_similar(const char *item_id, XMBItem *arr, int max);
 int  xmb_fetch_music_children(const char *id_param, const char *parent_id,
                               XMBItem *arr, int max, int *out_total);
+// Tracks of one playlist, in playlist order (see ui_fetch.cpp).
+int  xmb_fetch_playlist_items(const char *playlist_id, XMBItem *arr, int max,
+                              int *out_total);
 bool xmb_fetch_next_episode(const char *episode_id, XMBItem *out);
 
 // Sliding-window pagination: drop the first page, fetch the next one.
