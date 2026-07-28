@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>   // usleep between detection retries
 
 #include "ui_internal.h"
 #include "jellyfin_api.h"
@@ -13,10 +14,21 @@
 // API fetch helpers
 // -------------------------------------------------------
 
-// Build one tab per Jellyfin library.  Re-runnable: every library slot is
-// cleared first so a re-login or a server-side library change cannot leave a
-// stale tab pointing at a library that no longer exists.
-void xmb_detect_tabs(void) {
+// How many times to ask the server for the library list before giving up,
+// and how long to wait between tries.  Detection runs ONCE at startup and
+// there is no way back into it, so a single dropped request used to cost
+// every library tab for the whole session — the console hit exactly that
+// while the emulator, on the same server, was fine.  The PS3 resolver and
+// connect are not reliably bounded by the socket timeouts (see the note in
+// net/http.cpp), so a transient miss here is expected rather than exotic.
+// Only hard failures retry; the delay gives the network stack a moment.
+#define DETECT_TABS_TRIES     3
+#define DETECT_TABS_RETRY_US  750000
+
+// One attempt at fetching and parsing /Users/{id}/Views.  Returns false only
+// when the request or the parse failed outright — a reply that parses to
+// zero libraries is a real answer, not a miss, so it does not retry.
+static bool detect_tabs_once(void) {
     for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
         memset(&g_tabs[t], 0, sizeof(g_tabs[t]));
     int next = XMB_TAB_LIB0;
@@ -33,20 +45,19 @@ void xmb_detect_tabs(void) {
     if (status != 200) {
         char b[112];
         snprintf(b, sizeof(b),
-                 "detect_tabs: FAILED http=%d for /Users/*/Views - no library tabs",
-                 status);
+                 "detect_tabs: http=%d for /Users/*/Views", status);
         plog(b);
-        return;
+        return false;
     }
 
     const char *p = strstr(responseBuffer, "\"Items\":[");
     if (!p) {
         char b[192];
         snprintf(b, sizeof(b),
-                 "detect_tabs: FAILED no Items[] in %d-byte reply, head=[%.90s]",
+                 "detect_tabs: no Items[] in %d-byte reply, head=[%.90s]",
                  (int)strlen(responseBuffer), responseBuffer);
         plog(b);
-        return;
+        return false;
     }
     p += 9;
 
@@ -126,6 +137,38 @@ void xmb_detect_tabs(void) {
 
     { char b[64];
       snprintf(b, sizeof(b), "detect_tabs: %d libraries", next - XMB_TAB_LIB0);
+      plog(b); }
+    return true;
+}
+
+// Build one tab per Jellyfin library, retrying a dropped request rather than
+// leaving the user with no library tabs for the rest of the session.
+// Re-runnable: each attempt clears every library slot first, so a re-login or
+// a server-side change cannot leave a stale tab behind.
+void xmb_detect_tabs(void) {
+    for (int try_n = 1; try_n <= DETECT_TABS_TRIES; try_n++) {
+        if (detect_tabs_once()) {
+            if (try_n > 1) {
+                char b[64];
+                snprintf(b, sizeof(b), "detect_tabs: recovered on try %d", try_n);
+                plog(b);
+            }
+            return;
+        }
+        if (try_n < DETECT_TABS_TRIES) {
+            char b[64];
+            snprintf(b, sizeof(b), "detect_tabs: try %d/%d failed, retrying",
+                     try_n, DETECT_TABS_TRIES);
+            plog(b);
+            usleep(DETECT_TABS_RETRY_US);
+        }
+    }
+    // Out of tries.  The library slots are already cleared by the last
+    // attempt, so the bar falls back to Search/Home/Settings — but now it
+    // says so instead of looking like a server with nothing on it.
+    { char b[80];
+      snprintf(b, sizeof(b), "detect_tabs: GAVE UP after %d tries - no library tabs",
+               DETECT_TABS_TRIES);
       plog(b); }
 }
 
