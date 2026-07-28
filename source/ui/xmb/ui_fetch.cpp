@@ -24,10 +24,30 @@ void xmb_detect_tabs(void) {
     char url[512];
     snprintf(url, sizeof(url), "%s/Users/%s/Views", g_server, g_userid);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
-    if (status != 200) return;
+
+    // Both exits below used to return silently, so a failure here looked
+    // identical to a server with no libraries: no tabs, no explanation.  That
+    // is precisely the state a real console landed in while the emulator was
+    // fine, with nothing in the log to separate "the request failed" from
+    // "the reply didn't parse".  Say which.
+    if (status != 200) {
+        char b[112];
+        snprintf(b, sizeof(b),
+                 "detect_tabs: FAILED http=%d for /Users/*/Views - no library tabs",
+                 status);
+        plog(b);
+        return;
+    }
 
     const char *p = strstr(responseBuffer, "\"Items\":[");
-    if (!p) return;
+    if (!p) {
+        char b[192];
+        snprintf(b, sizeof(b),
+                 "detect_tabs: FAILED no Items[] in %d-byte reply, head=[%.90s]",
+                 (int)strlen(responseBuffer), responseBuffer);
+        plog(b);
+        return;
+    }
     p += 9;
 
     while (*p) {
