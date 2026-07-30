@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 
@@ -10,6 +11,7 @@
 
 #include "ui_visuals.h"
 #include "bitmap.h"
+#include "plog.h"
 #include "font8x8.xpm"
 #include "opensans_regular.h"
 #include "opensans_bold.h"
@@ -58,6 +60,213 @@ static void gamma_init(void) {
 // Composite one foreground channel over a background channel at coverage a.
 static inline u8 aa_blend(u8 a, u8 fg, u8 bg) {
     return s_l2g[(a * s_g2l[fg] + (255 - a) * s_g2l[bg]) / 255];
+}
+
+// -------------------------------------------------------
+// Glyph cache
+// -------------------------------------------------------
+// Every drawTTF/drawIcon call used to re-parse the glyph outline and rasterize
+// it from scratch — for every character, on every frame — and stb_truetype's
+// default allocator ran several malloc/free pairs per glyph while doing it.  On
+// a text-heavy screen (the A-Z jump bar, Settings, the item-info overlay) that
+// was hundreds of heap round-trips per frame before a single pixel was blitted.
+//
+// Coverage bitmaps are cached here keyed by (font, pixel size, codepoint), so a
+// warm screen rasterizes nothing and allocates nothing.  Glyphs are rendered
+// straight into the arena with stbtt_MakeCodepointBitmap, which takes caller
+// storage — so even a cache miss skips stb's output malloc.
+//
+// The arena is a bump allocator: when it fills, the whole cache is flushed
+// rather than evicting entries individually.  That keeps it O(1) and
+// fragmentation-free, and the UI's working set is small enough that a warm
+// screen never refills it.  If the arena can't be allocated at boot the cache
+// disables itself and every draw falls back to the original rasterize path, so
+// low memory degrades speed but never correctness.
+
+// Sizing: a flush costs one frame of rasterization (i.e. what every frame used
+// to cost), so flushing when the user changes screen is harmless.  What must
+// not happen is a single screen's glyphs overflowing the arena, which would
+// flush mid-frame and thrash.  One dense screen is on the order of 300 distinct
+// glyphs (~100 KB); 384 KB leaves roughly 3x headroom over that.  Watch for
+// repeated "glyph cache flushed" lines in the log if this ever needs raising.
+#define GC_ARENA_BYTES  (384 * 1024)   // ~1% of free heap; ~1100 glyphs
+#define GC_SLOTS        2048           // power of two, open-addressed
+#define GC_FONT_REG     0
+#define GC_FONT_BOLD    1
+#define GC_FONT_ICONS   2
+
+typedef struct {
+    float px;
+    int   cp;
+    u32   pix;            // byte offset into s_gc_arena (valid when w && h)
+    s16   w, h, xoff, yoff;
+    u8    font;
+    bool  used;
+} GlyphSlot;
+
+static GlyphSlot  s_gc[GC_SLOTS];
+static u8        *s_gc_arena   = NULL;
+static u32        s_gc_used    = 0;
+static u32        s_gc_count   = 0;
+static u32        s_gc_flushes = 0;
+static bool       s_gc_on      = false;
+
+// Per-font ascent (size-independent) and per-(font,ASCII) unscaled advance.
+// Both were re-read from the font tables on every call; neither ever changes.
+static int  s_ascent[3];
+static int  s_adv[3][128];
+static bool s_adv_ok[3][128];
+
+static inline int font_id_of(const stbtt_fontinfo *fi) {
+    if (fi == &s_font_bold) return GC_FONT_BOLD;
+    if (fi == &s_icons)     return GC_FONT_ICONS;
+    return GC_FONT_REG;
+}
+
+// Unscaled horizontal advance, cached for ASCII (multiply by the pixel scale).
+static inline int glyph_advance(const stbtt_fontinfo *fi, int id, int cp) {
+    if (cp < 0 || cp >= 128) {
+        int a;
+        stbtt_GetCodepointHMetrics(fi, cp, &a, NULL);
+        return a;
+    }
+    if (!s_adv_ok[id][cp]) {
+        stbtt_GetCodepointHMetrics(fi, cp, &s_adv[id][cp], NULL);
+        s_adv_ok[id][cp] = true;
+    }
+    return s_adv[id][cp];
+}
+
+static inline u32 gc_hash(u8 font, float px, int cp) {
+    u32 h = (u32)cp * 2654435761u;
+    h ^= (u32)(px * 4.0f + 0.5f) * 40503u;   // quarter-pixel key resolution
+    h ^= (u32)font * 2246822519u;
+    h ^= h >> 15;
+    return h;
+}
+
+static void gc_flush(void) {
+    memset(s_gc, 0, sizeof(s_gc));
+    s_gc_used  = 0;
+    s_gc_count = 0;
+    s_gc_flushes++;
+    plog("ttf: glyph cache flushed (arena full)");
+}
+
+// Look up a glyph, rasterizing and caching it on miss.  Returns NULL when the
+// cache is unavailable or the glyph is too large to cache — callers fall back
+// to rasterizing directly.  px is compared exactly (call sites pass the same
+// constants every frame); the hash only quantizes it to pick a bucket.
+static const GlyphSlot *gc_glyph(const stbtt_fontinfo *fi, u8 font, float px,
+                                 float scale, int cp) {
+    if (!s_gc_on) return NULL;
+
+    const u32 mask = GC_SLOTS - 1;
+    u32 i = gc_hash(font, px, cp) & mask;
+
+    for (u32 p = 0; p < GC_SLOTS; p++, i = (i + 1) & mask) {
+        GlyphSlot *s = &s_gc[i];
+        if (s->used) {
+            if (s->cp == cp && s->font == font && s->px == px) return s;
+            continue;   // collision: keep probing
+        }
+
+        // Miss.  Measure first so the arena cost is known before committing.
+        int x0, y0, x1, y1;
+        stbtt_GetCodepointBitmapBox(fi, cp, scale, scale, &x0, &y0, &x1, &y1);
+        int gw = x1 - x0, gh = y1 - y0;
+        if (gw < 0) gw = 0;
+        if (gh < 0) gh = 0;
+        u32 need = (u32)gw * (u32)gh;
+
+        if (need > GC_ARENA_BYTES) return NULL;   // absurdly large: don't cache
+
+        // Out of arena, or the table is getting dense enough to hurt probing.
+        if (s_gc_used + need > GC_ARENA_BYTES ||
+            (s_gc_count + 1) * 10 > GC_SLOTS * 7) {
+            gc_flush();
+            i = gc_hash(font, px, cp) & mask;   // table is empty: this slot is free
+            s = &s_gc[i];
+        }
+
+        if (need) {
+            stbtt_MakeCodepointBitmap(fi, s_gc_arena + s_gc_used,
+                                      gw, gh, gw, scale, scale, cp);
+            s->pix = s_gc_used;
+            s_gc_used += need;
+        } else {
+            s->pix = 0;                          // space and friends: no pixels
+        }
+        s->px   = px;   s->cp   = cp;    s->font = font;
+        s->w    = (s16)gw;  s->h    = (s16)gh;
+        s->xoff = (s16)x0;  s->yoff = (s16)y0;
+        s->used = true;
+        s_gc_count++;
+        return s;
+    }
+    return NULL;   // table full even after a flush — cannot happen in practice
+}
+
+// Composite one coverage bitmap at (x0, y0).
+//
+// gamma_aa picks the blend: text has always used the gamma-correct path (see
+// the LUTs above), icons the plain 8-bit one.  Both are kept exactly as they
+// were so nothing changes on screen.
+static void blit_coverage(const unsigned char *bm, int w, int h,
+                          int x0, int y0, u32 color, bool gamma_aa) {
+    u32  r_fg = (color >> 16) & 0xFF;
+    u32  g_fg = (color >>  8) & 0xFF;
+    u32  b_fg =  color        & 0xFF;
+    bool rt   = cpu_rt_on();
+    u32  tw_  = cpu_draw_w();
+
+    for (int gy = 0; gy < h; gy++) {
+        int sy = y0 + gy;
+        if (cpu_row_clipped(sy)) continue;
+        u32                 *row = cpu_draw_row((u32)sy);
+        const unsigned char *src = bm + (size_t)gy * (size_t)w;
+        for (int gx = 0; gx < w; gx++) {
+            int sx = x0 + gx;
+            if (sx < 0 || (u32)sx >= tw_) continue;
+            u32 a = src[gx];
+            if (a == 0) continue;
+            if (rt) { row[sx] = argb_over(row[sx], color, a); continue; }
+            if (a == 255) { row[sx] = color; continue; }
+            u32 bg = row[sx];
+            if (gamma_aa) {
+                row[sx] = ((u32)aa_blend(a, r_fg, (bg >> 16) & 0xFF) << 16) |
+                          ((u32)aa_blend(a, g_fg, (bg >>  8) & 0xFF) <<  8) |
+                           (u32)aa_blend(a, b_fg,  bg        & 0xFF);
+            } else {
+                u32 r_bg = (bg >> 16) & 0xFF;
+                u32 g_bg = (bg >>  8) & 0xFF;
+                u32 b_bg =  bg        & 0xFF;
+                row[sx] = (((a * r_fg + (255 - a) * r_bg) / 255) << 16) |
+                          (((a * g_fg + (255 - a) * g_bg) / 255) <<  8) |
+                           ((a * b_fg + (255 - a) * b_bg) / 255);
+            }
+        }
+    }
+}
+
+// Draw one glyph through the cache, falling back to a direct rasterize when
+// the cache is unavailable.  Returns the glyph's cached box via *out when the
+// caller needs its metrics (drawTTF_vcentered), else pass NULL.
+static void draw_glyph(const stbtt_fontinfo *fi, u8 font, float px, float scale,
+                       int cp, int pen_x, int pen_y, u32 color, bool gamma_aa) {
+    const GlyphSlot *g = gc_glyph(fi, font, px, scale, cp);
+    if (g) {
+        if (g->w > 0 && g->h > 0)
+            blit_coverage(s_gc_arena + g->pix, g->w, g->h,
+                          pen_x + g->xoff, pen_y + g->yoff, color, gamma_aa);
+        return;
+    }
+    int w, h, xoff, yoff;
+    unsigned char *bm = stbtt_GetCodepointBitmap(fi, scale, scale, cp,
+                                                 &w, &h, &xoff, &yoff);
+    if (!bm) return;
+    blit_coverage(bm, w, h, pen_x + xoff, pen_y + yoff, color, gamma_aa);
+    stbtt_FreeBitmap(bm, NULL);
 }
 
 // -------------------------------------------------------
@@ -169,15 +378,14 @@ void drawTextScaled(u32 x, u32 y, const char *text, int px) {
 int ttf_text_width(const char *text, float px, bool bold) {
     if (!s_ttf_ok) return (int)(strlen(text) * px);
     stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
+    int   id    = font_id_of(fi);
     float scale = stbtt_ScaleForPixelHeight(fi, px);
     float xf = 0.0f;
     int prev_cp = 0;
     while (*text) {
         int cp = (unsigned char)*text;
         if (prev_cp) xf += stbtt_GetCodepointKernAdvance(fi, prev_cp, cp) * scale;
-        int advance;
-        stbtt_GetCodepointHMetrics(fi, cp, &advance, NULL);
-        xf += (float)advance * scale;
+        xf += (float)glyph_advance(fi, id, cp) * scale;
         prev_cp = cp;
         text++;
     }
@@ -192,16 +400,11 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
 
     stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
 
-    float scale = stbtt_ScaleForPixelHeight(fi, px);
-    int ascent;
-    stbtt_GetFontVMetrics(fi, &ascent, NULL, NULL);
-    int baseline = (int)((float)ascent * scale);
+    int   id       = font_id_of(fi);
+    float scale    = stbtt_ScaleForPixelHeight(fi, px);
+    int   baseline = (int)((float)s_ascent[id] * scale);
 
-    u32 r_fg = (color >> 16) & 0xFF;
-    u32 g_fg = (color >>  8) & 0xFF;
-    u32 b_fg =  color        & 0xFF;
-
-    float xf     = (float)x;
+    float xf      = (float)x;
     int   prev_cp = 0;
 
     while (*text) {
@@ -210,41 +413,10 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
         if (prev_cp)
             xf += stbtt_GetCodepointKernAdvance(fi, prev_cp, cp) * scale;
 
-        int w, h, xoff, yoff;
-        unsigned char *bm = stbtt_GetCodepointBitmap(
-            fi, scale, scale, cp, &w, &h, &xoff, &yoff);
+        draw_glyph(fi, (u8)id, px, scale, cp,
+                   (int)xf, (int)y + baseline, color, true);
 
-        if (bm) {
-            int draw_x0 = (int)xf + xoff;
-            int draw_y0 = (int)y + baseline + yoff;
-
-            bool rt = cpu_rt_on();
-            u32  tw_ = cpu_draw_w();
-            for (int gy = 0; gy < h; gy++) {
-                int sy = draw_y0 + gy;
-                if (cpu_row_clipped(sy)) continue;
-                u32 *row = cpu_draw_row((u32)sy);
-                for (int gx = 0; gx < w; gx++) {
-                    int sx = draw_x0 + gx;
-                    if (sx < 0 || (u32)sx >= tw_) continue;
-                    u32 a = bm[gy * w + gx];
-                    if (a == 0) continue;
-                    if (rt) { row[sx] = argb_over(row[sx], color, a); continue; }
-                    if (a == 255) { row[sx] = color; continue; }
-                    u32 bg   = row[sx];
-                    u32 r_out = aa_blend(a, r_fg, (bg >> 16) & 0xFF);
-                    u32 g_out = aa_blend(a, g_fg, (bg >>  8) & 0xFF);
-                    u32 b_out = aa_blend(a, b_fg,  bg        & 0xFF);
-                    row[sx] = (r_out << 16) | (g_out << 8) | b_out;
-                }
-            }
-            stbtt_FreeBitmap(bm, NULL);
-        }
-
-        int advance;
-        stbtt_GetCodepointHMetrics(fi, cp, &advance, NULL);
-        xf += (float)advance * scale;
-
+        xf += (float)glyph_advance(fi, id, cp) * scale;
         prev_cp = cp;
         text++;
     }
@@ -254,19 +426,29 @@ void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
                        bool bold) {
     if (!s_ttf_ok) { drawTTF(x, (u32)(cy - (int)(px * 0.5f)), text, px, color, bold); return; }
     stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
-    float scale = stbtt_ScaleForPixelHeight(fi, px);
-    int ascent;
-    stbtt_GetFontVMetrics(fi, &ascent, NULL, NULL);
-    int baseline = (int)((float)ascent * scale);
+    int   id       = font_id_of(fi);
+    float scale    = stbtt_ScaleForPixelHeight(fi, px);
+    int   baseline = (int)((float)s_ascent[id] * scale);
 
     // Union of every glyph's bitmap box (baseline-relative) = the ink extent.
+    // Measuring through the cache also warms it for the drawTTF below, so a
+    // centred string rasterizes at most once instead of once per frame.
     int y0min = 0, y1max = 0;
     bool any = false;
     for (const char *p = text; *p; p++) {
-        int gx0, gy0, gx1, gy1;
-        stbtt_GetCodepointBitmapBox(fi, (unsigned char)*p, scale, scale,
-                                    &gx0, &gy0, &gx1, &gy1);
-        if (gx1 <= gx0 && gy1 <= gy0) continue;   // space etc.
+        int cp = (unsigned char)*p;
+        int gy0, gy1;
+        const GlyphSlot *g = gc_glyph(fi, (u8)id, px, scale, cp);
+        if (g) {
+            if (g->w <= 0 && g->h <= 0) continue;   // space etc.
+            gy0 = g->yoff;
+            gy1 = g->yoff + g->h;
+        } else {
+            int gx0, gx1;
+            stbtt_GetCodepointBitmapBox(fi, cp, scale, scale,
+                                        &gx0, &gy0, &gx1, &gy1);
+            if (gx1 <= gx0 && gy1 <= gy0) continue;
+        }
         if (!any || gy0 < y0min) y0min = gy0;
         if (!any || gy1 > y1max) y1max = gy1;
         any = true;
@@ -281,43 +463,11 @@ void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
 
 void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color) {
     if (!s_icons_ok) return;
-    float scale = stbtt_ScaleForPixelHeight(&s_icons, px);
-    int ascent;
-    stbtt_GetFontVMetrics(&s_icons, &ascent, NULL, NULL);
-    int baseline = (int)((float)ascent * scale);
-    int w, h, xoff, yoff;
-    unsigned char *bm = stbtt_GetCodepointBitmap(
-        &s_icons, scale, scale, codepoint, &w, &h, &xoff, &yoff);
-    if (!bm) return;
-    u32 r_fg = (color >> 16) & 0xFF;
-    u32 g_fg = (color >>  8) & 0xFF;
-    u32 b_fg =  color        & 0xFF;
-    int draw_x0 = (int)x + xoff;
-    int draw_y0 = (int)y + baseline + yoff;
-    bool rt = cpu_rt_on();
-    u32  tw_ = cpu_draw_w();
-    for (int gy = 0; gy < h; gy++) {
-        int sy = draw_y0 + gy;
-        if (cpu_row_clipped(sy)) continue;
-        u32 *row = cpu_draw_row((u32)sy);
-        for (int gx = 0; gx < w; gx++) {
-            int sx = draw_x0 + gx;
-            if (sx < 0 || (u32)sx >= tw_) continue;
-            u32 a = bm[gy * w + gx];
-            if (a == 0) continue;
-            if (rt) { row[sx] = argb_over(row[sx], color, a); continue; }
-            if (a == 255) { row[sx] = color; continue; }
-            u32 bg   = row[sx];
-            u32 r_bg = (bg >> 16) & 0xFF;
-            u32 g_bg = (bg >>  8) & 0xFF;
-            u32 b_bg =  bg        & 0xFF;
-            u32 r_out = (a * r_fg + (255 - a) * r_bg) / 255;
-            u32 g_out = (a * g_fg + (255 - a) * g_bg) / 255;
-            u32 b_out = (a * b_fg + (255 - a) * b_bg) / 255;
-            row[sx] = (r_out << 16) | (g_out << 8) | b_out;
-        }
-    }
-    stbtt_FreeBitmap(bm, NULL);
+    float scale    = stbtt_ScaleForPixelHeight(&s_icons, px);
+    int   baseline = (int)((float)s_ascent[GC_FONT_ICONS] * scale);
+    // Icons keep the plain 8-bit blend (gamma_aa = false) they have always used.
+    draw_glyph(&s_icons, GC_FONT_ICONS, px, scale, codepoint,
+               (int)x, (int)y + baseline, color, false);
 }
 
 // -------------------------------------------------------
@@ -334,11 +484,39 @@ void ttf_init(void) {
         s_ttf_bold_ok = true;
     if (stbtt_InitFont(&s_icons, (unsigned char*)TablerIcons_ttf, 0))
         s_icons_ok = true;
+
+    // Ascent is size-independent — read it once here instead of on every call.
+    if (s_ttf_ok)
+        stbtt_GetFontVMetrics(&s_font,      &s_ascent[GC_FONT_REG],   NULL, NULL);
+    if (s_ttf_bold_ok)
+        stbtt_GetFontVMetrics(&s_font_bold, &s_ascent[GC_FONT_BOLD],  NULL, NULL);
+    if (s_icons_ok)
+        stbtt_GetFontVMetrics(&s_icons,     &s_ascent[GC_FONT_ICONS], NULL, NULL);
+
+    // Glyph cache.  A failed allocation is non-fatal: every draw then falls
+    // back to rasterizing directly, exactly as it did before the cache existed.
+    s_gc_arena = (u8*)malloc(GC_ARENA_BYTES);
+    s_gc_on    = (s_gc_arena != NULL);
+    plog(s_gc_on ? "ttf: glyph cache ready (256K)"
+                 : "ttf: glyph cache alloc FAILED - using direct rasterize");
 }
 
-// Warm the malloc pool and stbtt i-cache for every glyph the HUD will ever draw.
-// Must be called before the first hud_draw() call — no pixel writes, just
-// alloc+rasterize+free for each codepoint at each size used by player_hud.cpp.
+// Rasterize one glyph purely to populate the cache.  If the cache is
+// unavailable this still does the old alloc/rasterize/free, which warms the
+// malloc pool and stbtt's i-cache the way this routine always used to.
+static void prewarm_glyph(const stbtt_fontinfo *fi, u8 font, float px,
+                          float scale, int cp) {
+    if (gc_glyph(fi, font, px, scale, cp)) return;
+    int w, h, xo, yo;
+    unsigned char *bm = stbtt_GetCodepointBitmap(fi, scale, scale, cp,
+                                                 &w, &h, &xo, &yo);
+    if (bm) stbtt_FreeBitmap(bm, NULL);
+}
+
+// Pre-rasterize every glyph the HUD will ever draw, at each size
+// player_hud.cpp uses.  Must be called before the first hud_draw().  These now
+// land in the glyph cache and stay there, so the HUD's text costs nothing to
+// re-draw; before the cache existed this could only warm the allocator.
 void ttf_prewarm_hud(void) {
     // OpenSans Regular: seek-increment (13px), time labels + audio track label (18px).
     // Full printable ASCII at 18px covers all possible track name characters.
@@ -353,31 +531,22 @@ void ttf_prewarm_hud(void) {
         };
         for (int s = 0; s < 2; s++) {
             float sc = stbtt_ScaleForPixelHeight(&s_font, reg[s].px);
-            for (const char *cp = reg[s].chars; *cp; cp++) {
-                int w, h, xo, yo;
-                unsigned char *bm = stbtt_GetCodepointBitmap(
-                    &s_font, sc, sc, (unsigned char)*cp, &w, &h, &xo, &yo);
-                if (bm) stbtt_FreeBitmap(bm, NULL);
-            }
+            for (const char *cp = reg[s].chars; *cp; cp++)
+                prewarm_glyph(&s_font, GC_FONT_REG, reg[s].px, sc,
+                              (unsigned char)*cp);
         }
     }
     // OpenSans Bold: "CC" label (20px).
     if (s_ttf_bold_ok) {
         float sc = stbtt_ScaleForPixelHeight(&s_font_bold, 20.0f);
-        for (const char *cp = "C"; *cp; cp++) {
-            int w, h, xo, yo;
-            unsigned char *bm = stbtt_GetCodepointBitmap(
-                &s_font_bold, sc, sc, (unsigned char)*cp, &w, &h, &xo, &yo);
-            if (bm) stbtt_FreeBitmap(bm, NULL);
-        }
+        for (const char *cp = "C"; *cp; cp++)
+            prewarm_glyph(&s_font_bold, GC_FONT_BOLD, 20.0f, sc,
+                          (unsigned char)*cp);
     }
     // Material Icons: music note codepoint (24px).
     if (s_icons_ok) {
         float sc = stbtt_ScaleForPixelHeight(&s_icons, 24.0f);
-        int w, h, xo, yo;
-        unsigned char *bm = stbtt_GetCodepointBitmap(
-            &s_icons, sc, sc, ICON_MUSIC, &w, &h, &xo, &yo);
-        if (bm) stbtt_FreeBitmap(bm, NULL);
+        prewarm_glyph(&s_icons, GC_FONT_ICONS, 24.0f, sc, ICON_MUSIC);
     }
 }
 
