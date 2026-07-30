@@ -2,6 +2,7 @@
 // Helpers shared between the render/ source files only.
 
 #include "ui_visuals.h"
+#include "thumbnail_cache.h"
 
 // CPU-blit one cached thumbnail scaled to w x h at (x, y); dim placeholder
 // while the cache fills.  Call after rsxSync (ui_lists.cpp).
@@ -12,6 +13,9 @@ void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y, int w, int h);
 // Shared by the grid (ui_lists.cpp) and the Home shelf (ui_home.cpp).
 // tile_name != NULL swaps the loading placeholder for a colored letter
 // tile (music cards, per the album-grid design).
+// img selects which Jellyfin image to draw — landscape cards pass
+// THUMB_IMG_THUMB for items that have wide art (see ui_home.cpp).
 void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
                    u8 progress_pct, bool selected,
-                   const char *tile_name = NULL);
+                   const char *tile_name = NULL,
+                   ThumbImg img = THUMB_IMG_PRIMARY);

@@ -112,6 +112,14 @@ int parse_xmb_items(const char *json, XMBItem *arr, int max) {
         xmb_json_str_range(obj, olen, "Type", it.type, sizeof(it.type));
         if (!it.id[0]) continue;
 
+        // ImageTags carries a "Thumb" only when the item really has wide banner
+        // art (movies usually do, episodes usually don't).  Landscape cards use
+        // it instead of the portrait Primary poster; see ui_home.cpp.  The key
+        // search is for the quoted "Thumb", so "ParentThumbItemId" can't match.
+        char thumb_tag[8];
+        it.has_thumb = xmb_json_str_range(obj, olen, "Thumb",
+                                          thumb_tag, sizeof(thumb_tag)) ? 1 : 0;
+
         bool is_album = strcmp(it.type, "MusicAlbum") == 0 ||
                         strcmp(it.type, "Playlist")   == 0;
         bool is_audio = strcmp(it.type, "Audio")      == 0;

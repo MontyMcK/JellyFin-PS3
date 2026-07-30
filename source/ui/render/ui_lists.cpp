@@ -238,9 +238,10 @@ void xmb_draw_letter_tile(const char *seed, const char *name,
 // loads), the watched-progress strip, and — when selected — a thin white
 // frame with a soft 1px halo.  Shared by the grid and the Home shelf.
 void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
-                   u8 progress_pct, bool selected, const char *tile_name) {
-    thumb_request(item_id, card_w, card_h);
-    const Bitmap *bm = thumb_get(item_id, card_w, card_h);
+                   u8 progress_pct, bool selected, const char *tile_name,
+                   ThumbImg img) {
+    thumb_request(item_id, card_w, card_h, img);
+    const Bitmap *bm = thumb_get(item_id, card_w, card_h, img);
     if (bm) {
         cpu_blit_bitmap(bm, cx, cy);
     } else if (tile_name) {

@@ -259,9 +259,15 @@ void xmb_home_cpu_phase(void) {
         for (int c = row->scroll; c < row->scroll + vis && c < row->count; c++) {
             int cx = x0 + (c - row->scroll) * (cw + HOME_CARD_GAP);
             bool sel = (r == s_focus_row && c == s_focus_col);
+            // Landscape rows want wide art.  An item's Primary is a portrait
+            // poster for movies (which looked badly cropped in these 16:9
+            // cards) but an already-16:9 still for episodes — so prefer the
+            // Thumb only where the server actually published one.
+            ThumbImg img = (row->kind == HROW_LANDSCAPE && row->items[c].has_thumb)
+                         ? THUMB_IMG_THUMB : THUMB_IMG_PRIMARY;
             xmb_draw_card(row->items[c].id, cx, card_y, cw, ch,
                           row->items[c].progress_pct, sel,
-                          r == HR_MUSIC ? row->items[c].name : NULL);
+                          r == HR_MUSIC ? row->items[c].name : NULL, img);
         }
     }
 

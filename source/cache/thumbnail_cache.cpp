@@ -69,7 +69,13 @@ typedef struct {
     Bitmap    bmp;            // width/height = the size this slot was requested at
     SlotState state;
     u32       last_touch;     // s_frame when something on screen last wanted it
+    u8        img;            // ThumbImg — part of the identity, not just the URL
 } ThumbSlot;
+
+// Path segment for each ThumbImg.
+static const char *img_name(u8 img) {
+    return (img == THUMB_IMG_THUMB) ? "Thumb" : "Primary";
+}
 
 static ThumbSlot        s_slots[THUMB_CACHE_SIZE];
 static u32              s_frame      = 0;   // advanced by thumb_cache_tick()
@@ -88,32 +94,37 @@ static void lock_release(void) { __sync_bool_compare_and_swap(&s_lock, 1, 0); }
 // Accessed under s_lock (noted on the fetch thread, checked on request).
 #define FAIL_BACKOFF_US 10000000ULL
 #define FAIL_LIST_N     16
-static struct { char id[64]; u64 until_us; } s_fail[FAIL_LIST_N];
+// Keyed on (id, img): a missing Thumb must not also suppress the item's
+// Primary, which is a different image and usually exists.
+static struct { char id[64]; u8 img; u64 until_us; } s_fail[FAIL_LIST_N];
 static int s_fail_next = 0;
 
-static bool fail_listed(const char *id) {
+static bool fail_listed(const char *id, u8 img) {
     u64 now = timing_get_us();
     for (int i = 0; i < FAIL_LIST_N; i++) {
         if (s_fail[i].id[0] && now < s_fail[i].until_us &&
+            s_fail[i].img == img &&
             strncmp(s_fail[i].id, id, 64) == 0)
             return true;
     }
     return false;
 }
 
-static void fail_note(const char *id) {
+static void fail_note(const char *id, u8 img) {
     strncpy(s_fail[s_fail_next].id, id, 63);
     s_fail[s_fail_next].id[63] = '\0';
+    s_fail[s_fail_next].img      = img;
     s_fail[s_fail_next].until_us = timing_get_us() + FAIL_BACKOFF_US;
     s_fail_next = (s_fail_next + 1) % FAIL_LIST_N;
 }
 
 // An item can be cached at several sizes (e.g. portrait in Movies and
 // landscape in Continue Watching), so a slot matches on id AND size.
-static int find_slot(const char *id, u32 w, u32 h) {
+static int find_slot(const char *id, u32 w, u32 h, u8 img) {
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         if (s_slots[i].state != SLOT_EMPTY &&
             s_slots[i].bmp.width == w && s_slots[i].bmp.height == h &&
+            s_slots[i].img == img &&
             strncmp(s_slots[i].item_id, id, 64) == 0)
             return i;
     }
@@ -185,11 +196,13 @@ static void fetch_thread_fn(void *arg) {
         }
         bool got = (si >= 0);
         int tw = 0, th = 0;
+        u8  img = THUMB_IMG_PRIMARY;
         if (got) {
             strncpy(item_id, s_slots[si].item_id, 63);
             item_id[63] = '\0';
-            tw = (int)s_slots[si].bmp.width;
-            th = (int)s_slots[si].bmp.height;
+            tw  = (int)s_slots[si].bmp.width;
+            th  = (int)s_slots[si].bmp.height;
+            img = s_slots[si].img;
         }
         lock_release();
 
@@ -200,9 +213,9 @@ static void fetch_thread_fn(void *arg) {
         // format=Jpeg keeps PNG originals from arriving huge and slow.
         char url[512];
         snprintf(url, sizeof(url),
-            "%s/Items/%s/Images/Primary?fillWidth=%d&fillHeight=%d"
+            "%s/Items/%s/Images/%s?fillWidth=%d&fillHeight=%d"
             "&quality=75&format=Jpeg",
-            g_server, item_id, tw, th);
+            g_server, item_id, img_name(img), tw, th);
 
         glogf("fetch START %s %dx%d", item_id, tw, th);
         int bytes = http_fetch_binary(url, g_token, s_fetch_buf, FETCH_BUF_SIZE);
@@ -213,7 +226,7 @@ static void fetch_thread_fn(void *arg) {
             d_fetch_fail++;
             glogf("fetch FAIL %s bytes=%d url=%.120s", item_id, bytes, url);
             lock_acquire();
-            fail_note(item_id);
+            fail_note(item_id, img);
             if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
@@ -247,7 +260,7 @@ static void fetch_thread_fn(void *arg) {
             if (probe) free(probe);
             img_arena_end();
             lock_acquire();
-            fail_note(item_id);
+            fail_note(item_id, img);
             if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
@@ -258,6 +271,7 @@ static void fetch_thread_fn(void *arg) {
         // drop the result instead of scribbling stale art into it.
         lock_acquire();
         bool still_ours = (strncmp(s_slots[si].item_id, item_id, 64) == 0 &&
+                           s_slots[si].img == img &&
                            s_slots[si].state == SLOT_QUEUED);
         lock_release();
         if (!still_ours) {
@@ -287,7 +301,8 @@ static void fetch_thread_fn(void *arg) {
         img_arena_end();
 
         lock_acquire();
-        bool published = (strncmp(s_slots[si].item_id, item_id, 64) == 0);
+        bool published = (strncmp(s_slots[si].item_id, item_id, 64) == 0 &&
+                          s_slots[si].img == img);
         if (published) s_slots[si].state = SLOT_READY;
         lock_release();
 
@@ -391,7 +406,7 @@ void thumb_cache_shutdown(void) {
     }
 }
 
-void thumb_request(const char *item_id, int w, int h) {
+void thumb_request(const char *item_id, int w, int h, ThumbImg img) {
     if (!item_id || !item_id[0] || w <= 0 || h <= 0) return;
     d_req++;
     if ((size_t)w * (size_t)h > s_max_px) {
@@ -399,8 +414,8 @@ void thumb_request(const char *item_id, int w, int h) {
         return;
     }
     lock_acquire();
-    if (fail_listed(item_id)) { d_fail_drop++; lock_release(); return; }
-    int have = find_slot(item_id, (u32)w, (u32)h);
+    if (fail_listed(item_id, (u8)img)) { d_fail_drop++; lock_release(); return; }
+    int have = find_slot(item_id, (u32)w, (u32)h, (u8)img);
     if (have >= 0) { s_slots[have].last_touch = s_frame; lock_release(); return; }
     int si = claim_slot();
     if (si < 0) { d_claim_fail++; lock_release(); return; }
@@ -408,6 +423,7 @@ void thumb_request(const char *item_id, int w, int h) {
     s_slots[si].item_id[63] = '\0';
     s_slots[si].bmp.width  = (u32)w;
     s_slots[si].bmp.height = (u32)h;
+    s_slots[si].img        = (u8)img;
     s_slots[si].state      = SLOT_QUEUED;
     s_slots[si].last_touch = s_frame;
     d_claim_ok++;
@@ -421,11 +437,12 @@ int thumb_max_square(void) {
     return e;
 }
 
-const Bitmap *thumb_get(const char *item_id, int w, int h) {
+const Bitmap *thumb_get(const char *item_id, int w, int h, ThumbImg img) {
     if (!item_id || !item_id[0]) return NULL;
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         if (s_slots[i].state == SLOT_READY &&
             s_slots[i].bmp.width == (u32)w && s_slots[i].bmp.height == (u32)h &&
+            s_slots[i].img == (u8)img &&
             strncmp(s_slots[i].item_id, item_id, 64) == 0) {
             s_slots[i].last_touch = s_frame;
             d_get_hit++;
