@@ -17,6 +17,7 @@
 #include "opensans_bold.h"
 #include "tabler_icons.h"
 #include "icons.h"
+#include "../build_config.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #ifdef __GNUC__
@@ -51,9 +52,20 @@ static u8   s_g2l[256];   // sRGB byte -> linear (gamma 2.0)
 static u8   s_l2g[256];   // linear    -> sRGB byte
 
 static void gamma_init(void) {
+    // CRT phosphors have a gamma of ~2.4; LCD/sRGB is ~2.2.  The 2.0
+    // default was a compromise that erred dark (muddy-grey AA fringes on
+    // LCD).  CRT builds bump to 2.2 so the blend better matches what the
+    // tube actually emits — white text stays bright and AA edges don't
+    // darken as much as they do under a straight sRGB decode.
+#if CRT_DISPLAY
+    const float g = 2.2f;
+#else
+    const float g = 2.0f;
+#endif
     for (int i = 0; i < 256; i++) {
-        s_g2l[i] = (u8)((i * i) / 255);
-        s_l2g[i] = (u8)(sqrtf((float)i / 255.0f) * 255.0f + 0.5f);
+        float t = (float)i / 255.0f;
+        s_g2l[i] = (u8)(powf(t, g) * 255.0f + 0.5f);
+        s_l2g[i] = (u8)(powf(t, 1.0f / g) * 255.0f + 0.5f);
     }
 }
 
@@ -376,6 +388,9 @@ void drawTextScaled(u32 x, u32 y, const char *text, int px) {
 // -------------------------------------------------------
 
 int ttf_text_width(const char *text, float px, bool bold) {
+#if CRT_DISPLAY
+    if (px <= 15.5f) bold = true;
+#endif
     if (!s_ttf_ok) return (int)(strlen(text) * px);
     stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
     int   id    = font_id_of(fi);
@@ -393,6 +408,11 @@ int ttf_text_width(const char *text, float px, bool bold) {
 }
 
 void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
+    // CRT interlaced displays flicker on thin stems — force bold below
+    // 16 px so every stroke occupies at least two scanlines per field.
+#if CRT_DISPLAY
+    if (px <= 15.5f) bold = true;
+#endif
     if (!s_ttf_ok) {
         drawTextScaled(x, y, text, (int)px);
         return;
@@ -424,6 +444,9 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
 
 void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
                        bool bold) {
+#if CRT_DISPLAY
+    if (px <= 15.5f) bold = true;
+#endif
     if (!s_ttf_ok) { drawTTF(x, (u32)(cy - (int)(px * 0.5f)), text, px, color, bold); return; }
     stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
     int   id       = font_id_of(fi);

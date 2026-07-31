@@ -100,13 +100,27 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     }
     if (!g_hud.visible) return HUD_ACTION_NONE;
 
-    // Volume slider modal: while open, up/down change the level and X/O close
-    // it (d-pad left/right are swallowed so focus stays on the speaker).
-    if (g_hud.vol_active) {
-        if (BTN_REPEAT(up))        audio_set_volume(audio_get_volume() + VOL_STEP);
-        else if (BTN_REPEAT(down)) audio_set_volume(audio_get_volume() - VOL_STEP);
-        else if (BTN_PRESSED(cross) || BTN_PRESSED(circle)) g_hud.vol_active = false;
-        return HUD_ACTION_NONE;
+    // Volume: d-pad up/down directly change the level and pop the slider open
+    // (no need to first click the speaker control).  The slider auto-closes
+    // after HUD_SHOW_US unless the user keeps adjusting.
+    if (!g_hud.menu_visible) {
+        if (BTN_REPEAT(up)) {
+            if (!g_hud.vol_active) hud_show();
+            g_hud.vol_active = true;
+            audio_set_volume(audio_get_volume() + VOL_STEP);
+            return HUD_ACTION_NONE;
+        } else if (BTN_REPEAT(down)) {
+            if (!g_hud.vol_active) hud_show();
+            g_hud.vol_active = true;
+            audio_set_volume(audio_get_volume() - VOL_STEP);
+            return HUD_ACTION_NONE;
+        }
+    }
+
+    // Volume slider auto-close after timeout while not adjusting.
+    if (g_hud.vol_active && !BTN_REPEAT(up) && !BTN_REPEAT(down) &&
+        (timing_get_us() - g_hud.show_us) >= HUD_SHOW_US) {
+        g_hud.vol_active = false;
     }
 
     // While a popup menu is open it owns the input: up/down move the cursor,
