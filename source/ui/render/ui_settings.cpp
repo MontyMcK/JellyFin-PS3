@@ -10,10 +10,12 @@
 #include "update_check.h"
 #include "plog.h"
 #include "hd1080.h"
+#include "surround.h"
 #include "statsovl.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
-    { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)"
+    { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)",
+      "Surround 5.1 (Alpha)"
 #if ENABLE_PLAYER_STATS
     , "Player Stats Overlay"
 #endif
@@ -21,8 +23,9 @@ static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
 // ICON_BUG is reused for the stats row: it is the same diagnostics family as
 // Debug Logging, and the Tabler font here is a 20-glyph subset (see
 // ui/fonts/tabler_icons.h) — a new glyph would mean regenerating the subset.
+// ICON_MUSIC (already in the subset) marks the surround audio row.
 static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  =
-    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE
+    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE, ICON_MUSIC
 #if ENABLE_PLAYER_STATS
     , ICON_BUG
 #endif
@@ -186,8 +189,15 @@ void xmb_draw_settings(void) {
                     (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
                     val, 18, hd1080_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
+        if (i == 4) {   // Surround 5.1 (Alpha) — right-aligned On/Off state
+            const char *val = surround_enabled() ? "On" : "Off";
+            int vw = ttf_text_width(val, 18, sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
+                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
+                    val, 18, surround_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
 #if ENABLE_PLAYER_STATS
-        if (i == 4) {   // Player Stats Overlay — right-aligned On/Off state
+        if (i == 5) {   // Player Stats Overlay — right-aligned On/Off state
             const char *val = statsovl_enabled() ? "On" : "Off";
             int vw = ttf_text_width(val, 18, sel);
             drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
