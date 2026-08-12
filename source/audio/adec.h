@@ -25,13 +25,17 @@ void adec_push_pes(const u8 *pes, int pes_len);
 // that produces the choppy-audio dropouts.
 #define PCM_RING_HIGHWATER  48000
 
-// Stereo sample pairs currently available in the ring.
+// PCM frames currently available in the ring.
 int  adec_pcm_available(void);
 
-// Copy up to n_pairs stereo float32 pairs into buf[] (interleaved L/R).
-// Returns the number of pairs written — may be less than n_pairs if the
-// ring is empty.
-int  adec_read_pcm(float *buf, int n_pairs);
+// Copy up to n_frames interleaved float32 frames into buf[].  Each frame is
+// adec_output_channels() floats wide.  Returns the number of frames written —
+// may be less than n_frames if the ring is empty.
+int  adec_read_pcm(float *buf, int n_frames);
+
+// Interleave width of the frames adec_read_pcm() returns: 2 (stereo MP3, the
+// shipped path).  The AC-3 decoder raises this to 6 when it owns the ring.
+int  adec_output_channels(void);
 
 // PTS (stream microseconds) of the next sample adec_read_pcm() would return.
 // Returns 0 until the first PES with a PTS has been decoded.

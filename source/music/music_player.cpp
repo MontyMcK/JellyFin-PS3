@@ -99,6 +99,10 @@ static void mring_push(const float *lr, int n_pairs) {
 
 static int music_pcm_avail(void) { return s_n; }
 
+// Music is stereo by design — the pluggable source contract reports frames
+// of this fixed width (see audio_set_source in audio.h).
+static int music_channels(void) { return 2; }
+
 static int music_read_pcm(float *buf, int n_pairs) {
     sysMutexLock(s_pcm_mtx, 0);
     int got = 0;
@@ -428,8 +432,8 @@ bool music_start(const MusicTrack *tracks, int count, int start_idx) {
     mring_flush();
     music_viz_reset();
 
-    audio_set_source(music_pcm_avail, music_read_pcm);
-    audio_open();
+    audio_set_source(music_pcm_avail, music_read_pcm, music_channels);
+    audio_open(2);   // music path is stereo by design
 
     s_run     = true;
     s_active  = true;
@@ -451,7 +455,7 @@ void music_stop(void) {
     sysThreadJoin(s_pump_tid, &retval);
     g_stream_cancel = false;
     audio_close();
-    audio_set_source(NULL, NULL);   // hand the port back to the video path
+    audio_set_source(NULL, NULL, NULL);   // hand the port back to the video path
     s_started = false;
     s_active  = false;
     plog("music: stopped");

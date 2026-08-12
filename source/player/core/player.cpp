@@ -15,6 +15,7 @@
 
 #include "plog.h"
 #include "hd1080.h"
+#include "surround.h"
 #include "stream.h"
 #include "audio.h"
 #include "adec.h"
@@ -258,7 +259,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
 
     crash_log("p4 audio_open begin");
     plog("show_player: audio_open");
-    audio_open();
+    audio_open(surround_enabled() ? 8 : 2);
     adec_init();
     adec_start();
     plog("show_player: audio_open done");
