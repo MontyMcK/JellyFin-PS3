@@ -36,6 +36,12 @@ CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
 CXXFLAGS    := $(CFLAGS)
 LDFLAGS     := $(MACHDEP) -Wl,-Map,$(notdir $@).map
 
+# Vendored liba52 (source/audio/a52): upstream imdct.c passes `roots128 - 32`
+# as a deliberate table base and GCC's -Warray-bounds flags every use.  The
+# file is untouched upstream source (see a52/PROVENANCE.md); silence that one
+# warning for that one object instead of editing the vendored code.
+imdct.o: CFLAGS += -Wno-array-bounds
+
 LIBS        := -lvdec -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm \
                -lnet -lsysmodule -lssl -lhttp -lhttputil
 

@@ -10,6 +10,30 @@
 #define TS_STREAM_H264   0x1B
 #define TS_STREAM_MP3    0x03   // MPEG-1 audio (Layer 1/2/3)
 #define TS_STREAM_MP3_2  0x04   // MPEG-2 audio
+#define TS_STREAM_AC3    0x81   // ATSC AC-3 (what ffmpeg's mpegts muxer writes)
+#define TS_STREAM_PRIV   0x06   // private data — DVB carries AC-3 here with
+                                // an AC-3 descriptor in the ES info loop
+#define TS_STREAM_EAC3   0x87   // ATSC E-AC-3 — NOT decodable here (liba52
+                                // is AC-3 only); recognised only to log it
+#define TS_DESC_REG      0x05   // registration descriptor ('AC-3' format id)
+#define TS_DESC_DVB_AC3  0x6A   // DVB AC-3 descriptor (ETSI EN 300 468 D.3)
+
+// True if the ES descriptor loop marks this PID as AC-3: either a DVB AC-3
+// descriptor (0x6A) or a registration descriptor with format 'AC-3'.
+static bool es_info_has_ac3(const u8 *desc, int len) {
+    int pos = 0;
+    while (pos + 2 <= len) {
+        u8 tag  = desc[pos];
+        u8 dlen = desc[pos + 1];
+        if (pos + 2 + dlen > len) break;
+        if (tag == TS_DESC_DVB_AC3) return true;
+        if (tag == TS_DESC_REG && dlen >= 4 &&
+            desc[pos+2] == 'A' && desc[pos+3] == 'C' &&
+            desc[pos+4] == '-' && desc[pos+5] == '3') return true;
+        pos += 2 + dlen;
+    }
+    return false;
+}
 
 static void ts_parse_pat(TSState *ts, const u8 *data, int len) {
     if (len < 12 || data[0] != 0x00) return;
@@ -38,8 +62,32 @@ static void ts_parse_pmt(TSState *ts, const u8 *data, int len) {
         u16 esinfo = ((u16)(data[pos+3] & 0x0F) << 8) | data[pos+4];
         if (stype == TS_STREAM_H264 && !ts->video_pid)
             ts->video_pid = epid;
-        if ((stype == TS_STREAM_MP3 || stype == TS_STREAM_MP3_2) && !ts->audio_pid)
-            ts->audio_pid = epid;
+        if (!ts->audio_pid) {
+            // Log every candidate audio stream type so a server/profile
+            // mismatch shows up in player_log.txt instead of as silence.
+            if (stype == TS_STREAM_MP3 || stype == TS_STREAM_MP3_2 ||
+                stype == TS_STREAM_AC3 || stype == TS_STREAM_PRIV ||
+                stype == TS_STREAM_EAC3) {
+                char b[64];
+                snprintf(b, sizeof(b), "pmt_audio: stype=0x%02x pid=0x%x",
+                         stype, epid);
+                plog(b);
+            }
+            if (stype == TS_STREAM_MP3 || stype == TS_STREAM_MP3_2) {
+                ts->audio_pid   = epid;
+                ts->audio_codec = TS_AUDIO_MP3;
+            } else if (stype == TS_STREAM_AC3) {
+                ts->audio_pid   = epid;
+                ts->audio_codec = TS_AUDIO_AC3;
+            } else if (stype == TS_STREAM_PRIV && pos + 5 + esinfo <= end &&
+                       es_info_has_ac3(data + pos + 5, esinfo)) {
+                ts->audio_pid   = epid;
+                ts->audio_codec = TS_AUDIO_AC3;
+            }
+            // E-AC-3 (0x87) is deliberately NOT selected: liba52 cannot
+            // decode it and the device profile never requests it.  The log
+            // line above still records it if a server sends one anyway.
+        }
         pos += 5 + esinfo;
     }
 }

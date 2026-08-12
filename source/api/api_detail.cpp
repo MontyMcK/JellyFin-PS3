@@ -8,6 +8,7 @@
 #include "jellyfin_api.h"
 #include "plog.h"
 #include "hd1080.h"
+#include "surround.h"
 
 // Defined in jellyfin_api.cpp
 int json_get_in_range(const char *start, int len,
@@ -400,6 +401,10 @@ bool jellyfin_get_play_session_id(const char *item_id,
     // baseline regardless of the stream URL.  Gated — OFF sends the exact
     // shipped 720p profile below.
     const bool hd = hd1080_enabled();
+    // Surround 5.1 (Alpha): same story for audio — the profile must advertise
+    // AC-3 and 6 channels or the server silently downgrades to stereo MP3.
+    // Gated — OFF sends the exact shipped stereo blobs.
+    const bool surround = surround_enabled();
 
     char url[768];
     snprintf(url, sizeof(url),
@@ -522,7 +527,136 @@ bool jellyfin_get_play_session_id(const char *item_id,
           "]"
         "}}";
 
-    const char *body = hd ? body_hd : body_sd;
+    // Surround 5.1 (Alpha) blobs: byte-identical to body_sd/body_hd except
+    // the audio negotiation — "AudioCodec":"ac3,mp3" (AC-3 preferred, server
+    // may still fall back to MP3), MaxAudioChannels 6, and a VideoAudio
+    // CodecProfile for ac3 (<= 6 ch) added ahead of the shipped mp3 entry.
+    static const char body_sd_51[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":8000000,"
+          "\"MaxStaticBitrate\":8000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"6\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"31\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1280\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"720\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"4000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    static const char body_hd_51[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":10000000,"
+          "\"MaxStaticBitrate\":10000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"6\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"high|main|baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"42\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1920\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"1080\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"10000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    const char *body = surround ? (hd ? body_hd_51 : body_sd_51)
+                                : (hd ? body_hd    : body_sd);
 
     int status = http_request(1, url, body, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) {
