@@ -1,6 +1,8 @@
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3.h"
 #include "adec.h"
+#include "adec_ac3.h"
+#include "audio.h"             // audio_output_channels() — port width drives ring width
 #include "plog.h"
 #include "../build_config.h"   // relative: source/ is not on the -I path
 
@@ -43,9 +45,15 @@ extern void crash_log(const char *msg);
 #define PES_QUEUE_SLOTS 256
 #define PES_SLOT_BYTES  8192
 
-// ---- MP3 decoder + PCM ring ----
+// ---- Decoders + PCM ring ----
 static mp3dec_t         s_dec;
-static float            s_ring[PCM_RING_CAP * 2];  // interleaved L/R float32
+// Ring width follows the selected codec: 2 floats/frame for MP3 (the shipped
+// layout, byte-identical indexing), 6 for AC-3 5.1.  Storage is sized for the
+// widest case: 65536 frames * 6 ch * 4 B = 1.5 MB static (was 512 KB — the
+// +1 MB is the price of 5.1 PCM at the same 1.37 s ring depth).
+static float            s_ring[PCM_RING_CAP * 6];  // interleaved float32 frames
+static int              s_ring_ch = 2;             // 2 (MP3) or 6 (AC-3 5.1)
+static adec_codec_t     s_codec   = ADEC_CODEC_MP3;
 static int              s_wr = 0;
 static int              s_rd = 0;
 static volatile int     s_n  = 0;
@@ -98,6 +106,9 @@ void adec_init(void) {
     sysMutexCreate(&s_pcm_mtx, &mattr);
 }
 
+// MP3 path only — writes stereo frames.  The hardcoded 2-wide indexing is
+// deliberate: with s_ring_ch == 2 (always true for MP3) it is byte-identical
+// to the shipped stereo code.
 static void push_samples(const short *pcm, int n, int channels) {
     sysMutexLock(s_pcm_mtx, 0);
     for (int i = 0; i < n; i++) {
@@ -129,6 +140,34 @@ static void push_samples(const short *pcm, int n, int channels) {
     sysMutexUnlock(s_pcm_mtx);
 }
 
+// AC-3 path — s_ring_ch-wide float frames, already in PS3 channel order
+// (adec_ac3.cpp/ac3_map.c).  Same overflow policy and PTS advance as
+// push_samples(); the two differ only in sample format and width.
+void adec_push_frames(const float *frames, int n) {
+    sysMutexLock(s_pcm_mtx, 0);
+    int ch = s_ring_ch;
+    for (int i = 0; i < n; i++) {
+        if (s_n >= PCM_RING_CAP) {
+#if BUILD_FOR_RPCS3
+            static u64 s_drop_frames = 0;
+            if ((s_drop_frames++ % 48000) == 0) {
+                char b[64];
+                snprintf(b, sizeof(b), "adec_drop: ring full, dropped ~%llus of audio",
+                         (unsigned long long)(s_drop_frames / 48000));
+                plog(b);
+            }
+#endif
+            break;
+        }
+        for (int c = 0; c < ch; c++)
+            s_ring[s_wr * ch + c] = frames[i * ch + c];
+        s_wr = (s_wr + 1) & (PCM_RING_CAP - 1);
+        s_n++;
+    }
+    s_next_pcm_pts_us += ((u64)n * 1000000ULL) / 48000ULL;
+    sysMutexUnlock(s_pcm_mtx);
+}
+
 static void adec_decode_pes(const u8 *pes, int pes_len) {
     // Seed the write PTS from this packet's header.  On the very first valid PTS,
     // also initialise the read cursor so both cursors start from a coherent origin.
@@ -154,6 +193,10 @@ static void adec_decode_pes(const u8 *pes, int pes_len) {
     if (hdr >= pes_len) return;
     const u8 *es   = pes + hdr;
     int       left = pes_len - hdr;
+    if (s_codec == ADEC_CODEC_AC3) {
+        adec_ac3_decode_payload(es, left);
+        return;
+    }
     while (left > 0) {
         mp3dec_frame_info_t info;
         short pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
@@ -281,6 +324,7 @@ void adec_flush(void) {
     sysMutexUnlock(s_pes_mtx);
     sysMutexLock(s_pcm_mtx, 0);
     mp3dec_init(&s_dec);
+    adec_ac3_reset();   // drop the partial-frame carry; codec choice survives
     s_wr = s_rd = s_n = 0;
     s_next_pcm_pts_us = s_read_pts_us = 0;
     s_pts_valid = false;
@@ -301,19 +345,68 @@ void adec_stop(void) {
     sysCondDestroy(s_pes_cond);
     sysMutexDestroy(s_pes_mtx);
     sysMutexDestroy(s_pcm_mtx);
+    // Session over: free the liba52 state and return to the shipped stereo
+    // defaults so the next owner of the port (music player, next movie with
+    // surround off) starts from the exact shipped configuration.
+    adec_ac3_close();
+    s_codec   = ADEC_CODEC_MP3;
+    s_ring_ch = 2;
     crash_log("adx5 adec_stop done");
 }
 
 int adec_pcm_available(void) { return s_n; }
 
-int adec_output_channels(void) { return 2; }
+int adec_output_channels(void) { return s_ring_ch; }
 
-int adec_read_pcm(float *buf, int n_pairs) {
+adec_codec_t adec_get_codec(void) { return s_codec; }
+
+void adec_set_codec(adec_codec_t codec) {
+    // Ring width for AC-3 follows the port that is actually open: a 5.1
+    // stream feeding a stereo port (8ch open failed) is downmixed by liba52
+    // at decode time, so the ring stays 2-wide there.
+    int want_ch = 2;
+    if (codec == ADEC_CODEC_AC3)
+        want_ch = (audio_output_channels() == 6) ? 6 : 2;
+
+    if (codec == s_codec && want_ch == s_ring_ch) return;
+
+    if (codec == ADEC_CODEC_AC3) {
+        if (!adec_ac3_open(want_ch)) {
+            // liba52 unavailable — stay on MP3 so a wrong PMT degrades to
+            // silence-on-AC3-PES rather than noise; loudly logged.
+            plog("adec_set_codec: AC-3 open failed, staying on MP3");
+            codec   = ADEC_CODEC_MP3;
+            want_ch = 2;
+        }
+    } else {
+        adec_ac3_close();
+    }
+
+    // Width/codec change invalidates whatever PCM is queued: drop it and
+    // restart PTS tracking from the next PES (the demux switches codec at
+    // stream (re)open, when the ring is empty anyway).
     sysMutexLock(s_pcm_mtx, 0);
+    s_codec   = codec;
+    s_ring_ch = want_ch;
+    mp3dec_init(&s_dec);
+    s_wr = s_rd = s_n = 0;
+    s_next_pcm_pts_us = s_read_pts_us = 0;
+    s_pts_valid = false;
+    sysMutexUnlock(s_pcm_mtx);
+
+    char b[64];
+    snprintf(b, sizeof(b), "adec_set_codec: codec=%s ch=%d",
+             codec == ADEC_CODEC_AC3 ? "ac3" : "mp3", want_ch);
+    plog(b);
+}
+
+int adec_read_pcm(float *buf, int n_frames) {
+    sysMutexLock(s_pcm_mtx, 0);
+    int ch  = s_ring_ch;   // 2 on the shipped path — identical copy pattern
     int got = 0;
-    while (got < n_pairs && s_n > 0) {
-        buf[got * 2    ] = s_ring[s_rd * 2    ];
-        buf[got * 2 + 1] = s_ring[s_rd * 2 + 1];
+    while (got < n_frames && s_n > 0) {
+        for (int c = 0; c < ch; c++)
+            buf[got * ch + c] = s_ring[s_rd * ch + c];
         s_rd = (s_rd + 1) & (PCM_RING_CAP - 1);
         s_n--;
         got++;
