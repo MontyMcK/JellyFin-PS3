@@ -1,6 +1,7 @@
 # 5.1 Surround Output — Design (Alpha)
 
-Status: **design for review — no implementation yet**. Feature default **OFF**;
+Status: **implemented on branch `surround-5.1`** (design approved 2026-08-12;
+see §11 for implementation/verification results). Feature default **OFF**;
 with it off, every code path is the shipped stereo path.
 
 ## 1. Summary
@@ -246,12 +247,82 @@ is comfortable, but the number is logged and reported in the PR.
 
 ## 10. Facts still to verify from source (tracked)
 
-1. ffmpeg mpegts AC-3 PES batching → `adec_pes_hwm` telemetry (§6).
-2. Real-server PMT stream type for AC-3 (`0x81` expected) — dumped from an
-   actual Jellyfin `stream.ts` (§5).
+1. ffmpeg mpegts AC-3 PES batching → `adec_pes_hwm` telemetry (§6) — needs
+   a hardware/emulator run with the sub-burn case; the PES queue slots are
+   8 KB and the largest AC-3 syncframe is 3840 B, so headroom is >2x even
+   if ffmpeg packs two syncframes per PES.
+2. ~~Real-server PMT stream type for AC-3~~ — **verified** against a real
+   Jellyfin 10.11.11 `stream.ts`: `0x81` + 'AC-3' registration descriptor
+   (§11.3).
 3. Whether XMB "Dolby Digital 5.1" S/PDIF users get OS-side encoding from an
    8-ch LPCM port without `audioOutConfigure` — not verifiable from source;
    listed as a limitation instead of assumed.
 
 (The liba52 output channel order, originally on this list, was verified from
 source — see §3.2.)
+
+## 11. Implementation & verification results (2026-08-13)
+
+Implemented as designed, one commit per phase on `surround-5.1`:
+
+| Commit | Phase |
+|---|---|
+| `aa797c5` | 1 — output stage parameterised for 2ch/8ch ports, surround gate |
+| `dd3095e` | 2 — vendored liba52, adec_ac3, channel map + host tests |
+| `51ac58c` | 3 — PMT AC-3 recognition, DeviceProfile + stream URL negotiation |
+| `def8f9e` | 5 — Settings row, stats overlay readout, README, v2.4-beta |
+
+Deviations from the design: none in behaviour. Additions found necessary
+during implementation: an 8 KB carry buffer in adec_ac3 (AC-3 syncframes
+straddle PES boundaries), and `-Wno-array-bounds` scoped to the vendored
+`imdct.o` only (upstream's `roots128 - 32` table-base idiom).
+
+### Verified
+
+1. **Channel map, from source**: liba52's plane order was re-derived from
+   `parse.c:761-763`/`822-828` and `downmix.c:545-583`, then confirmed
+   against a52dec's own reference consumer `libao/float2s16.c:158-167`
+   (same plane meanings, different target interleave).
+2. **Channel map + decode, empirically**: `tests/test_ac3_map.c` (every
+   granted config) and `tests/test_ac3_decode.c` — the same liba52 + map
+   sources compiled on x86 decode an ffmpeg-encoded 6-tone 5.1 file with
+   every PS3 slot dominated by its own tone (>= 93 dB margin), matching
+   ffmpeg's own decoder channel-for-channel. Note: the first version of the
+   tone generator was itself wrong (ffmpeg `join` maps mono inputs
+   semantically, rotating the fronts) and the harness caught it — decoded
+   output disagreed with the labels but agreed exactly with ffmpeg's decode
+   of the same file. `join` needs an explicit `map=`.
+3. **Server negotiation, against a real Jellyfin server** (10.11.11 on
+   Ubuntu/WSL, DTS 5.1 source movie forcing an audio transcode):
+   - `PlaybackInfo` POSTed with the app's **verbatim** `body_sd_51`
+     DeviceProfile → the server's `TranscodingUrl` selects
+     `AudioCodec=ac3,mp3`; no silent downgrade.
+   - `stream.ts` fetched with the app's **verbatim** `build_stream_url`
+     query → ffprobe: `codec_name=ac3, channels=6,
+     channel_layout=5.1(side), sample_rate=48000, bit_rate=640000`
+     alongside `h264` Constrained Baseline.
+   - PMT of that same server stream: `stream_type=0x81 pid=0x101
+     desc=050441432d33` ('AC-3' registration descriptor) — exactly the
+     form ts_demux.cpp selects. Full outputs in
+     `outputs/ffprobe-stream-ts.txt` and `outputs/playbackinfo.json`.
+   Session-management note for the client: Jellyfin 10.11 invalidates an
+   access token when the same DeviceId authenticates again — harmless for
+   the app (one login per session) but it bit the verification harness.
+4. **Builds**: baseline `main` (0fa3aa5) builds clean with the ps3dev
+   toolchain (prebuilt, PSL1GHT f649a08) before any change; the branch
+   builds with zero new warnings; `make pkg` emits
+   `JellyFin---PS3.pkg` / `.gnpdrm.pkg` / `.self` (sha256 in outputs/).
+5. **Stereo-path preservation, statically**: shipped DeviceProfile blobs
+   are byte-identical strings; the surround-off stream URL format produces
+   the identical query; stereo DMA path still reads straight into the
+   block with the same sizes/blocks (8) and the MP3 ring indexing is
+   unchanged (2-wide into the same array).
+
+### Not verified here (hardware/emulator required)
+
+- Real-PS3 (or RPCS3) playback of the branch: A/V sync over >= 10 min,
+  seek x5, the SubtitleMethod=Encode burst (`adec_pes_hwm` for AC-3-sized
+  PES), music-player port handoff, and physical speaker routing. RPCS3 is
+  not present in this build environment; the hardware listening checklist
+  and per-channel tone clip are in `outputs/INSTALL.md`.
+- XMB "Dolby Digital 5.1" S/PDIF encoder behaviour (§9/§10 — unchanged).
