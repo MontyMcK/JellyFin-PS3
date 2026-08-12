@@ -306,6 +306,8 @@ void adec_stop(void) {
 
 int adec_pcm_available(void) { return s_n; }
 
+int adec_output_channels(void) { return 2; }
+
 int adec_read_pcm(float *buf, int n_pairs) {
     sysMutexLock(s_pcm_mtx, 0);
     int got = 0;

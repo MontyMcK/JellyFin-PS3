@@ -20,6 +20,12 @@ bool                     s_audio_ok    = false;
 static u32               s_data_start  = 0;
 static u32               s_num_blocks  = 0;
 static u32               s_write_blk   = 0;  // next DMA block index to fill
+// CellAudio port width (2 or 8 — PSL1GHT audio/audio.h defines only
+// AUDIO_PORT_2CH and AUDIO_PORT_8CH) and the meaningful program channels
+// carried in it (2 or 6).  A 5.1 program rides an 8-wide port with the two
+// rear slots zeroed every block.
+static int               s_port_channels   = 2;
+static int               s_output_channels = 2;
 // EA of the hardware read index (audioPortConfig.readIndex): a u64 holding the
 // block the DMA engine is currently playing.  Retained purely so the stats
 // overlay can report how many blocks of runway sit ahead of the read cursor —
@@ -36,13 +42,18 @@ static u32          s_sil_blocks   = 0;
 u64 audio_block_count(void) { return s_audio_blocks; }
 
 // ---- PCM source (defaults to the video pipeline's decoder) ----
-static audio_avail_fn s_src_avail = adec_pcm_available;
-static audio_read_fn  s_src_read  = adec_read_pcm;
+static audio_avail_fn    s_src_avail    = adec_pcm_available;
+static audio_read_fn     s_src_read     = adec_read_pcm;
+static audio_channels_fn s_src_channels = adec_output_channels;
 
-void audio_set_source(audio_avail_fn avail, audio_read_fn read) {
-    s_src_avail = avail ? avail : adec_pcm_available;
-    s_src_read  = read  ? read  : adec_read_pcm;
+void audio_set_source(audio_avail_fn avail, audio_read_fn read,
+                      audio_channels_fn channels) {
+    s_src_avail    = avail    ? avail    : adec_pcm_available;
+    s_src_read     = read     ? read     : adec_read_pcm;
+    s_src_channels = channels ? channels : adec_output_channels;
 }
+
+int audio_output_channels(void) { return s_output_channels; }
 
 // ---- Master volume (0..100 %) ----
 // Applied as a linear gain to the float PCM block just before it is DMA'd to
@@ -75,12 +86,12 @@ void audio_volume_load(void) {
     fclose(f);
 }
 
-// Scale one interleaved-stereo float block in place by the master volume.
-static void apply_volume(float *buf, int n_pairs) {
+// Scale one interleaved float block in place by the master volume.
+static void apply_volume(float *buf, int frames, int channels) {
     int pct = s_volume_pct;
     if (pct >= 100) return;              // unity: leave the block untouched
     float g = (float)pct / 100.0f;
-    int n = n_pairs * 2;                 // L/R interleaved
+    int n = frames * channels;
     for (int i = 0; i < n; i++) buf[i] *= g;
 }
 
@@ -101,7 +112,7 @@ bool audio_clock_valid(void) {
     return adec_get_read_pts_us() != 0;
 }
 
-void audio_open(void) {
+void audio_open(int channels) {
     crash_log("a1 audio_open enter");
     int rc;
     char buf[128];
@@ -112,16 +123,36 @@ void audio_open(void) {
     plog(buf);
     if (rc != 0) return;
 
+    // 8-wide surround port gets 16 blocks: Movian's ps3_audio.c uses 16, and
+    // 8 blocks is only ~42 ms of runway — thin once the decoder is doing real
+    // 5.1 work.  The stereo path keeps the shipped 8 blocks untouched.
+    bool surround = (channels == 8);
     audioPortParam p;
-    p.numChannels = AUDIO_PORT_2CH;
-    p.numBlocks   = AUDIO_BLOCK_8;
+    p.numChannels = surround ? AUDIO_PORT_8CH : AUDIO_PORT_2CH;
+    p.numBlocks   = surround ? AUDIO_BLOCK_16 : AUDIO_BLOCK_8;
     p.attrib      = 0;
     p.level       = 1.0f;
     crash_log("a3 sysAudioPortOpen");
     rc = audioPortOpen(&p, &s_audio_port);
+    if (rc != 0 && surround) {
+        // 8ch open rejected — fall back to the shipped stereo port rather
+        // than failing playback outright.
+        snprintf(buf, sizeof(buf),
+                 "audio: 8ch port open failed rc=0x%x, falling back to 2ch", rc);
+        plog(buf);
+        surround      = false;
+        p.numChannels = AUDIO_PORT_2CH;
+        p.numBlocks   = AUDIO_BLOCK_8;
+        rc = audioPortOpen(&p, &s_audio_port);
+    }
+    s_port_channels   = surround ? 8 : 2;
+    s_output_channels = surround ? 6 : 2;
     snprintf(buf, sizeof(buf), "audio: sysAudioPortOpen rc=0x%x port=%u", rc, s_audio_port);
     plog(buf);
     if (rc != 0) { audioQuit(); return; }
+    snprintf(buf, sizeof(buf), "audio_open: ch=%d blocks=%d",
+             s_port_channels, (int)p.numBlocks);
+    plog(buf);
     snprintf(buf, sizeof(buf),
              "audio_param: ch=%llu blocks=%llu attrib=%llu level=%.4f",
              (unsigned long long)p.numChannels, (unsigned long long)p.numBlocks,
@@ -158,7 +189,7 @@ void audio_open(void) {
         s_read_idx_ea = (u64)cfg.readIndex;
         // Zero the entire DMA ring.  Hardware reads zeros → digital silence.
         memset((void*)(uintptr_t)cfg.audioDataStart, 0,
-               nb * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float));
+               nb * s_port_channels * AUDIO_BLOCK_SAMPLES * sizeof(float));
         snprintf(buf, sizeof(buf),
                  "audio: pre-filled %u blocks start=0x%x ri_addr=0x%x",
                  nb, cfg.audioDataStart, cfg.readIndex);
@@ -196,7 +227,12 @@ bool audio_write_pcm(void) {
     sys_event_t ev;
     if (sysEventQueueReceive(s_audio_eq, &ev, 0) != 0) return false;
     if (s_data_start) {
-        u32   addr    = s_data_start + s_write_blk * 2 * AUDIO_BLOCK_SAMPLES * sizeof(float);
+        // PSL1GHT audio/audio.h: block address = audioDataStart +
+        // blk * numChannels * AUDIO_BLOCK_SAMPLES * sizeof(float).
+        // numChannels is the PORT width (8 for surround), and a block is
+        // always 256 sample FRAMES regardless of width.
+        u32   addr    = s_data_start + s_write_blk * s_port_channels
+                        * AUDIO_BLOCK_SAMPLES * sizeof(float);
         float *blk_buf = (float *)(uintptr_t)addr;
         // Block until the decoder fills a complete block or the timeout fires.
         int waited = 0;
@@ -207,12 +243,41 @@ bool audio_write_pcm(void) {
         int  avail   = s_src_avail();
         bool starved = (avail < AUDIO_BLOCK_SAMPLES);
         if (!starved) {
-            s_src_read(blk_buf, AUDIO_BLOCK_SAMPLES);
-            apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES);
+            int src_ch = s_src_channels();
+            if (s_port_channels == 2 && src_ch == 2) {
+                // Shipped stereo path — source reads straight into the block.
+                s_src_read(blk_buf, AUDIO_BLOCK_SAMPLES);
+                apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES, 2);
+            } else {
+                // Source width != port width: stage the source frames, then
+                // place each one inside the wider port frame.  Static — this
+                // is the audio thread's hot path, no malloc and no big stack
+                // (thread stacks here are small; see hard constraints).
+                static float stage[AUDIO_BLOCK_SAMPLES * 6];
+                if (src_ch < 1 || src_ch > 6) src_ch = 2;   // defensive clamp
+                s_src_read(stage, AUDIO_BLOCK_SAMPLES);
+                apply_volume(stage, AUDIO_BLOCK_SAMPLES, src_ch);
+                for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
+                    float       *d = blk_buf + i * s_port_channels;
+                    const float *s = stage   + i * src_ch;
+                    // A 6ch source is already in PS3 order (FL FR FC LFE SL
+                    // SR — see channel map derivation in adec_ac3.cpp), so it
+                    // maps 1:1 onto the first six port slots.  A 2ch source
+                    // in an 8-wide port fills FL/FR only.  A source wider
+                    // than the port should not happen (the decoder downmixes
+                    // when the port is stereo); take FL/FR as a last resort.
+                    int copy = (src_ch <= s_port_channels) ? src_ch : 2;
+                    int c = 0;
+                    for (; c < copy; c++)            d[c] = s[c];
+                    // Zero every unused slot INCLUDING rears 6/7 each block —
+                    // stale data in port memory is audible on those speakers.
+                    for (; c < s_port_channels; c++) d[c] = 0.0f;
+                }
+            }
             s_pcm_blocks++;
         } else {
             // Decoder stall — write silence to keep DMA ring alive
-            memset(blk_buf, 0, 2 * AUDIO_BLOCK_SAMPLES * sizeof(float));
+            memset(blk_buf, 0, s_port_channels * AUDIO_BLOCK_SAMPLES * sizeof(float));
             s_sil_blocks++;
             plog("audio: decoder stall");
         }
@@ -262,5 +327,7 @@ void audio_close(void) {
     s_num_blocks  = 0;
     s_write_blk   = 0;
     s_read_idx_ea = 0;
+    s_port_channels   = 2;
+    s_output_channels = 2;
     crash_log("ax5 audio_close done");
 }
