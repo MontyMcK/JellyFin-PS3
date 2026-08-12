@@ -62,6 +62,34 @@
 
 ---
 
+## Surround 5.1 (Alpha)
+
+Movies can play with **5.1 surround sound**: the server transcodes the audio to
+AC-3 (Dolby Digital), the app decodes it on the PS3 and plays it as 6-channel
+LPCM through an 8-channel audio port. It is **off by default** — flip
+**Settings → Surround 5.1 (Alpha)** to try it.
+
+For actual surround output you must also tell the PS3 your setup can take it:
+
+> **XMB → Settings → Sound Settings → Audio Output Settings** — select your
+> connector (HDMI/optical) and tick **Linear PCM 5.1 Ch. 44.1/48 kHz** (or your
+> receiver's equivalent). Without this the PS3 silently mixes the 8-channel port
+> down to stereo — the app cannot tell the difference, so check this first if
+> everything plays but nothing comes out of the rears.
+
+Notes and limitations:
+
+- The audio stream is AC-3 at 640 kbps. If the server refuses AC-3 (old ffmpeg,
+  transcode settings), playback falls back to the shipped stereo MP3 path.
+- Stereo-only sources still play in stereo (front speakers), as they should.
+- E-AC-3, DTS and TrueHD sources work fine — the server transcodes them to
+  AC-3 5.1. There is no bitstream passthrough on this hardware path, by design.
+- Music playback is stereo by design and ignores this switch.
+- The **Player Stats Overlay** shows the negotiated result while playing:
+  `ac3 6/6` means true 5.1 end-to-end; `mp3 2/2` means the server fell back.
+
+---
+
 ## Requirements
 
 - A PS3 running **Evilnat CFW** or **HEN** (CEX)

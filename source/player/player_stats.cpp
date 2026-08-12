@@ -16,7 +16,8 @@
 #include <rsx/rsx.h>
 #include <rsx/gcm_sys.h>
 
-#include "adec.h"        // PCM_RING_HIGHWATER
+#include "adec.h"        // PCM_RING_HIGHWATER, adec_get_codec/adec_output_channels
+#include "audio.h"       // audio_output_channels — negotiated program width
 #include "meminfo.h"     // meminfo_get
 #include "player_rsx.h"  // rsx_draw_overlay_quad
 #include "rsxutil.h"     // display_width / display_height
@@ -493,7 +494,14 @@ static void stats_compose(const PlayerStats *s) {
     y += ST_LINE;
 
     // ---- audio ----
-    snprintf(v, sizeof(v), "pcm %.0f%%  dma %.0f%%",
+    // Codec + channels prefix is the surround 5.1 (Alpha) diagnostic: what
+    // the PMT actually selected (ac3/mp3, 6ch/2ch) vs the port that opened
+    // (6 = 5.1 program in an 8ch port).  "ac3 6/6" is the fully working 5.1
+    // path; "ac3 2/2" is liba52's stereo downmix (8ch port unavailable);
+    // "mp3 2/2" with surround ON means the server refused AC-3.
+    snprintf(v, sizeof(v), "%s %d/%d  pcm %.0f%%  dma %.0f%%",
+             adec_get_codec() == ADEC_CODEC_AC3 ? "ac3" : "mp3",
+             adec_output_channels(), audio_output_channels(),
              (double)s->pcm_ring_pct, (double)s->dma_ring_pct);
     stat_line(y, "aud buf", v,
               (s->pcm_ring_pct < 25.0f) ? XMB_ACCENT : XMB_TEXT_DIM);
