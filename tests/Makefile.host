@@ -1,0 +1,44 @@
+# Host-side (x86) tests for the AC-3 channel map and decode path.
+# Builds the SAME vendored liba52 and ac3_map.c the PS3 build compiles.
+#
+#   make -f Makefile.host          # build both tests
+#   make -f Makefile.host check    # build + generate tones with ffmpeg + run
+#
+# Requires: cc, and ffmpeg for the decode test's input file.
+
+CC      ?= cc
+CFLAGS  ?= -O2 -Wall
+CFLAGS  += -I../source/audio -I../source/audio/a52
+
+A52_DIR  = ../source/audio/a52
+A52_SRCS = $(A52_DIR)/parse.c $(A52_DIR)/bit_allocate.c $(A52_DIR)/bitstream.c \
+           $(A52_DIR)/downmix.c $(A52_DIR)/imdct.c
+MAP_SRC  = ../source/audio/ac3_map.c
+
+all: test_ac3_map test_ac3_decode
+
+test_ac3_map: test_ac3_map.c $(MAP_SRC)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test_ac3_decode: test_ac3_decode.c $(MAP_SRC) $(A52_SRCS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+tones51.ac3:
+	ffmpeg -y -loglevel error \
+	  -f lavfi -i "sine=frequency=300:duration=2" \
+	  -f lavfi -i "sine=frequency=500:duration=2" \
+	  -f lavfi -i "sine=frequency=700:duration=2" \
+	  -f lavfi -i "sine=frequency=60:duration=2" \
+	  -f lavfi -i "sine=frequency=900:duration=2" \
+	  -f lavfi -i "sine=frequency=1100:duration=2" \
+	  -filter_complex "join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR[a]" \
+	  -map "[a]" -c:a ac3 -b:a 640k -ar 48000 $@
+
+check: all tones51.ac3
+	./test_ac3_map
+	./test_ac3_decode tones51.ac3
+
+clean:
+	rm -f test_ac3_map test_ac3_decode tones51.ac3
+
+.PHONY: all check clean

@@ -14,7 +14,7 @@ include $(PSL1GHT)/ppu_rules
 #---------------------------------------------------------------------------
 TARGET      := $(notdir $(CURDIR))
 BUILD       := obj
-SOURCES     := source source/audio source/gfx source/net source/api \
+SOURCES     := source source/audio source/audio/a52 source/gfx source/net source/api \
                source/player source/player/core source/player/hud source/player/gpu \
                source/player/threads source/player/stream \
                source/ui source/ui/input source/ui/osk source/ui/xmb source/ui/render \
