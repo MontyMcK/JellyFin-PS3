@@ -12,6 +12,7 @@
 #include "video.h"
 #include "plog.h"
 #include "hd1080.h"
+#include "surround.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "rsxutil.h"
@@ -91,6 +92,14 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     const char *profile  = hd ? "high" : "baseline";
     const char *level    = hd ? "42"   : "31";
     unsigned    vbitrate = hd ? 10000000u : 4000000u;
+    // Surround 5.1 (Alpha): request an AC-3 5.1 transcode at the standard DVD
+    // rate.  Gated — OFF reproduces the exact stereo MP3 query the ship path
+    // sends.  This builder is reused by every seek (player_seek.cpp), so the
+    // codec choice is stable across seeks by construction.
+    const bool  surround = surround_enabled();
+    const char *acodec   = surround ? "ac3"    : "mp3";
+    unsigned    abitrate = surround ? 640000u  : 192000u;
+    int         achans   = surround ? 6        : 2;
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
@@ -98,14 +107,15 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
         "&Level=%s"
         "&MaxWidth=%u&MaxHeight=%u"
         "&VideoBitrate=%u"
-        "&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000"
-        "&MaxAudioChannels=2"
+        "&AudioCodec=%s&AudioBitrate=%u&AudioSampleRate=48000"
+        "&MaxAudioChannels=%d"
         "&MaxFramerate=30"
         "&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false"
         "&DeviceId=%s&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",
         g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vbitrate,
+        acodec, abitrate, achans,
         jf_device_id(), ps->item->id, (unsigned long long)start_ticks);
     if (audio_idx >= 0 && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);

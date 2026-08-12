@@ -3,15 +3,23 @@
 #include "video.h"   // TS_PACKET_SIZE
 
 // MPEG-TS demuxer: PAT/PMT discovery plus PES reassembly for one H.264
-// video stream and one MPEG audio (Layer 1/2/3) stream.
+// video stream and one audio stream (MPEG Layer 1/2/3 or AC-3).
 
 #define TS_VPES_BUF_SIZE (512 * 1024)
-#define TS_APES_BUF_SIZE (32 * 1024)   // MP3 frames are small; 32 KB is ample
+// Audio PES: MP3 frames are small; AC-3 syncframes are <=3840 bytes and
+// ffmpeg's mpegts muxer PES-packs a handful at a time — 32 KB remains ample.
+#define TS_APES_BUF_SIZE (32 * 1024)
+
+// What the PMT said the selected audio stream is (TSState.audio_codec).
+#define TS_AUDIO_NONE 0
+#define TS_AUDIO_MP3  1
+#define TS_AUDIO_AC3  2
 
 typedef struct {
     u16  pmt_pid;
     u16  video_pid;
     u16  audio_pid;
+    u8   audio_codec;   // TS_AUDIO_* — valid once audio_pid != 0
     // Video PES reassembly
     u8   pes_buf[TS_VPES_BUF_SIZE];
     int  pes_len;
