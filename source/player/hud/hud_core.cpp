@@ -38,6 +38,7 @@ void hud_init(u32 total_secs, const char *audio_label) {
     g_hud.menu_visible = false;
     g_hud.menu_n       = 0;
     g_hud.menu_choice  = -1;
+    g_hud.menu_epoch   = 0;
     g_hud.title[0]     = '\0';
     hud_gpu_init();
 }
@@ -70,6 +71,7 @@ void hud_open_menu(const char *title, const char *const *items,
     g_hud.menu_cur = (current >= 0 && current < n_items) ? current : 0;
     g_hud.menu_sel = g_hud.menu_cur;
     g_hud.menu_visible = (n_items > 0);
+    g_hud.menu_epoch++;
     hud_show();
 }
 

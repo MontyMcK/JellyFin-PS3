@@ -89,6 +89,7 @@ struct HudState {
     int         menu_sel;      // cursor row
     int         menu_cur;      // active entry (accent dot)
     int         menu_choice;   // last X-selected row
+    u32         menu_epoch;    // forces recompose when a different menu opens
 };
 
 extern HudState g_hud;
