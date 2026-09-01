@@ -79,12 +79,13 @@ int xmb_next_enabled(int start, int dir) {
 
 // Launch the player for one list item, mapping XMBItem -> JFItem.
 // resume_secs > 0 starts playback at that position (Continue Watching).
-void xmb_play_item(const XMBItem *it, u32 resume_secs) {
+void xmb_play_item(const XMBItem *it, u32 resume_secs,
+                   const char *media_source_id) {
     JFItem jf; memset(&jf, 0, sizeof(jf));
     strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
     strncpy(jf.name, it->name, sizeof(jf.name)-1);
     strncpy(jf.type, it->type, sizeof(jf.type)-1);
-    show_player(&jf, resume_secs);
+    show_player(&jf, resume_secs, media_source_id);
 }
 
 // Play items[idx] and keep advancing through the list while the user
@@ -105,7 +106,8 @@ static void xmb_play_list_with_next(const XMBItem *items, int count, int idx,
 // (or the end-of-episode countdown fires).  The follower is resolved from
 // the server before each playback, so this works no matter where the episode
 // was launched from and keeps going across season boundaries.
-void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs) {
+void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs,
+                                const char *media_source_id) {
     XMBItem cur = *first;
     u32 resume = resume_secs;
     for (;;) {
@@ -113,10 +115,13 @@ void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs) {
         bool have = xmb_fetch_next_episode(cur.id, &next);
         if (have)
             player_arm_next("NEXT EPISODE", "Press SELECT for next episode");
-        xmb_play_item(&cur, resume);
+        // A source chosen from the info screen applies to this title only.
+        // Auto-advanced followers negotiate their own default source.
+        xmb_play_item(&cur, resume, media_source_id);
         if (!have || !player_take_next_request()) break;
         cur    = next;
         resume = 0;
+        media_source_id = NULL;
     }
 }
 

@@ -66,12 +66,14 @@ bool xmb_handle_input_home(void);
 
 // Launch the player for one list item (xmb/ui_nav.cpp).  resume_secs > 0
 // starts playback at that saved position.
-void xmb_play_item(const XMBItem *it, u32 resume_secs);
+void xmb_play_item(const XMBItem *it, u32 resume_secs,
+                   const char *media_source_id = NULL);
 
 // Play an episode with the end-of-item NEXT prompt / auto-advance, resolving
 // each follower from the server so it works from any launch point (Home rows,
 // Continue Watching, search, season lists) and across season boundaries.
-void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs);
+void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs,
+                                const char *media_source_id = NULL);
 
 // Triangle detail overlay (xmb/ui_info.cpp)
 void xmb_show_item_info(const XMBItem *it);
