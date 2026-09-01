@@ -377,9 +377,11 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out) {
 void jellyfin_stop_transcode(const char *session_id) {
     if (!g_server[0] || !session_id || !session_id[0]) return;
     char url[512];
+    char device_id[192];
+    url_encode_query(jf_device_id(), device_id, sizeof(device_id));
     snprintf(url, sizeof(url),
-        "%s/Videos/ActiveEncodings?deviceId=ps3&playSessionId=%s",
-        g_server, session_id);
+        "%s/Videos/ActiveEncodings?deviceId=%s&playSessionId=%s",
+        g_server, device_id, session_id);
     int status = http_request(HTTP_DELETE, url, NULL, g_token,
                               responseBuffer, RESPONSE_SIZE);
     char buf[80];
@@ -387,10 +389,16 @@ void jellyfin_stop_transcode(const char *session_id) {
     plog(buf);
 }
 
-bool jellyfin_get_play_session_id(const char *item_id,
-                                   char *out_session_id, int out_len,
-                                   unsigned *out_total_secs) {
+bool jellyfin_get_playback_info(const char *item_id,
+                                const char *media_source_id,
+                                char *out_session_id, int out_len,
+                                unsigned *out_total_secs,
+                                JFMediaSources *out_sources,
+                                JFMediaSource *out_selected,
+                                bool auto_open_live_stream) {
     if (out_total_secs) *out_total_secs = 0;
+    if (out_sources) memset(out_sources, 0, sizeof(*out_sources));
+    if (out_selected) memset(out_selected, 0, sizeof(*out_selected));
     if (!g_server[0] || !g_userid[0] || !g_token[0]) {
         plog("playbackinfo: missing server/user/token");
         return false;
@@ -406,14 +414,24 @@ bool jellyfin_get_play_session_id(const char *item_id,
     // Gated — OFF sends the exact shipped stereo blobs.
     const bool surround = surround_enabled();
 
-    char url[768];
+    char source_param[320] = "";
+    if (media_source_id && media_source_id[0]) {
+        char encoded[288];
+        url_encode_query(media_source_id, encoded, sizeof(encoded));
+        snprintf(source_param, sizeof(source_param), "&MediaSourceId=%s", encoded);
+    }
+
+    char url[1024];
     snprintf(url, sizeof(url),
         "%s/Items/%s/PlaybackInfo"
         "?UserId=%s"
         "&MaxStreamingBitrate=%u"
         "&StartTimeTicks=0"
-        "&AutoOpenLiveStream=true",
-        g_server, item_id, g_userid, hd ? 10000000u : 8000000u);
+        "&AutoOpenLiveStream=%s"
+        "%s",
+        g_server, item_id, g_userid, hd ? 10000000u : 8000000u,
+        auto_open_live_stream ? "true" : "false",
+        source_param);
 
     // Stored in read-only data — avoids putting ~700 bytes on the stack.
     static const char body_sd[] =
@@ -670,9 +688,23 @@ bool jellyfin_get_play_session_id(const char *item_id,
     }
 
     // Media duration (RunTimeTicks is in 100-ns units → 10,000,000 ticks/sec).
+    if (out_sources)
+        jellyfin_parse_media_sources(responseBuffer, out_sources);
+
+    JFMediaSource selected;
+    bool have_selected = jellyfin_parse_selected_media_source(
+        responseBuffer, media_source_id, &selected);
+    if (out_selected && have_selected) *out_selected = selected;
+
     if (out_total_secs) {
-        double ticks = json_get_double(responseBuffer, "RunTimeTicks", 0.0);
-        if (ticks > 0.0) *out_total_secs = (unsigned)(ticks / 10000000.0);
+        // A top-level search sees the first source's RunTimeTicks.  Prefer the
+        // requested/opened source so switching versions also switches runtime.
+        if (have_selected && selected.runtime_secs > 0)
+            *out_total_secs = selected.runtime_secs;
+        else {
+            double ticks = json_get_double(responseBuffer, "RunTimeTicks", 0.0);
+            if (ticks > 0.0) *out_total_secs = (unsigned)(ticks / 10000000.0);
+        }
         char buf[64];
         snprintf(buf, sizeof(buf), "playbackinfo: runtime=%us", *out_total_secs);
         plog(buf);
@@ -687,4 +719,45 @@ bool jellyfin_get_play_session_id(const char *item_id,
     snprintf(buf, sizeof(buf), "playbackinfo: session=%s", out_session_id);
     plog(buf);
     return true;
+}
+
+bool jellyfin_get_play_session_id(const char *item_id,
+                                   char *out_session_id, int out_len,
+                                   unsigned *out_total_secs) {
+    return jellyfin_get_playback_info(item_id, NULL,
+                                      out_session_id, out_len,
+                                      out_total_secs, NULL, NULL, true);
+}
+
+bool jellyfin_fetch_media_sources(const char *item_id, JFMediaSources *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    if (!g_server[0] || !g_userid[0] || !g_token[0]) return false;
+
+    char url[768];
+    snprintf(url, sizeof(url),
+             "%s/Users/%s/Items/%s?Fields=MediaSources,MediaStreams",
+             g_server, g_userid, item_id);
+    int status = http_request(HTTP_GET, url, NULL, g_token,
+                              responseBuffer, RESPONSE_SIZE);
+    if (status == 200 && jellyfin_parse_media_sources(responseBuffer, out) > 0) {
+        char b[72];
+        snprintf(b, sizeof(b), "media_sources: item dto count=%d",
+                 out->n_sources);
+        plog(b);
+        return true;
+    }
+
+    // Some older servers omit MediaSources from BaseItemDto even when asked.
+    // Listing does not need to resolve/open a remote source, so keep auto-open
+    // false and avoid holding a plugin stream while the user reads the page.
+    char session[64] = "";
+    bool ok = jellyfin_get_playback_info(item_id, NULL, session,
+                                         sizeof(session), NULL, out, NULL,
+                                         false);
+    char b[80];
+    snprintf(b, sizeof(b), "media_sources: playback fallback count=%d ok=%d",
+             out->n_sources, ok ? 1 : 0);
+    plog(b);
+    return ok && out->n_sources > 0;
 }
