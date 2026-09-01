@@ -12,3 +12,10 @@ build/
 *.map
 obj/
 tools/ui_preview/preview
+
+# Host-side test artifacts (tests/Makefile.host)
+tests/test_ac3_map
+tests/test_ac3_decode
+tests/test_media_sources
+tests/tones51.ac3
+tests/decoded.f32

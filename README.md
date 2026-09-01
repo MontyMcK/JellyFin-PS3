@@ -52,6 +52,8 @@
   Continue Watching everywhere else. The next episode auto-advances, too.
 - **An in-player HUD** with a seek bar, transport controls, and audio/subtitle
   track menus. Subtitles are burned in on the server side.
+- **Pre-play version selection** on the Triangle item-info screen for local
+  multi-version files and MediaSources supplied by Gelato/AIOStreams.
 - **Seek, skip and scrub.** Tap to jump 10 seconds, or hold to scrub the bar.
 - **A full music player.** Albums, Artists, Playlists, Genres and Songs, a play
   queue with shuffle, and a Now Playing screen whose 28-band spectrum visualizer
@@ -159,7 +161,7 @@ and `△` to toggle caps.
 | Button          | Action                                                            |
 |-----------------|-------------------------------------------------------------------|
 | Start           | Stop / exit player                                                |
-| Left / Right    | Move focus across the control row (Rew · Play/Pause · FF · AUDIO · CC) |
+| Left / Right    | Move focus across the control row (Rew · Play/Pause · FF · AUDIO · Volume · CC) |
 | X               | Activate the focused control                                      |
 | R2 / L2 (tap)   | Skip +10 s / -10 s (taps within 1 s batch into one seek)          |
 | R2 / L2 (hold)  | Pause and scrub the seek bar; seek fires once on release          |
@@ -303,6 +305,16 @@ front-loads several seconds of audio while the subtitle-burning encoder warms up
 256-slot PES queue holds that burst compressed and the decoder back-pressures on the
 PCM highwater, so nothing gets dropped and playback stays in sync. It used to skip
 about 10 seconds ahead on real hardware before this fix.
+
+### Version / MediaSource selection
+
+Press Triangle on a playable title before starting it. When Jellyfin exposes
+more than one source, the info page shows a **Version** row beneath Play. Focus
+that row and press X for a scrollable list (up to 32 entries), or cycle it with
+Left/Right. The chosen `MediaSourceId` is negotiated when Play is pressed, along
+with that source's own audio/subtitle tracks. The version list is not retained
+by the player and cannot be switched mid-stream. This covers normal Jellyfin
+multi-version movies and plugin-provided alternatives such as Gelato/AIOStreams.
 
 ### Threading model
 
