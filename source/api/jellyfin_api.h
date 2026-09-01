@@ -68,6 +68,7 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
 // Selectable media streams (audio tracks + subtitles)
 // -------------------------------------------------------
 #define JF_MAX_STREAMS 8
+#define JF_MAX_SOURCES 32
 
 typedef struct {
     int  index;       // Jellyfin MediaStream Index (for AudioStreamIndex= etc.)
@@ -81,6 +82,34 @@ typedef struct {
     JFStream subs[JF_MAX_STREAMS];
     int      n_subs;
 } JFTracks;
+
+// One playable version from PlaybackInfo.MediaSources.  Jellyfin plugins such
+// as Gelato/AIOStreams expose their alternatives this way, just like local
+// multi-version movies do.  Tracks belong to the source: stream indices are
+// not stable across versions.
+typedef struct {
+    char     id[96];             // MediaSourceId used by stream.ts
+    char     live_stream_id[96]; // populated after opening remote/live sources
+    char     label[128];         // MediaSource.Name (HUD display text)
+    unsigned runtime_secs;
+    JFTracks tracks;
+} JFMediaSource;
+
+typedef struct {
+    JFMediaSource source[JF_MAX_SOURCES];
+    int           n_sources;
+} JFMediaSources;
+
+// Pure JSON parsers (also exercised by the host-side tests).
+int  jellyfin_parse_media_sources(const char *json, JFMediaSources *out);
+bool jellyfin_parse_selected_media_source(const char *json,
+                                           const char *requested_id,
+                                           JFMediaSource *out);
+
+// Fetch the complete version list for an item's info screen.  The item DTO's
+// MediaSources field is preferred (it is what Jellyfin's details UI uses);
+// PlaybackInfo is retained as a compatibility fallback.
+bool jellyfin_fetch_media_sources(const char *item_id, JFMediaSources *out);
 
 // GET the item's MediaStreams and fill out with every audio and subtitle
 // stream (index + display label).  Returns true if the fetch succeeded
@@ -96,6 +125,18 @@ bool jellyfin_fetch_tracks(const char *item_id, JFTracks *out);
 bool jellyfin_get_play_session_id(const char *item_id,
                                    char *out_session_id, int out_len,
                                    unsigned *out_total_secs);
+
+// Source-aware PlaybackInfo request.  media_source_id may be NULL/empty for
+// the server default.  out_sources is used on the initial request to collect
+// the version menu; out_selected receives the opened/resolved source (notably
+// its LiveStreamId) and may be NULL.  Either output may be omitted.
+bool jellyfin_get_playback_info(const char *item_id,
+                                const char *media_source_id,
+                                char *out_session_id, int out_len,
+                                unsigned *out_total_secs,
+                                JFMediaSources *out_sources,
+                                JFMediaSource *out_selected,
+                                bool auto_open_live_stream = true);
 
 // Stop the active transcoding job for this play session
 // (DELETE /Videos/ActiveEncodings).  Must be called before re-requesting the

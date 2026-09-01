@@ -7,21 +7,27 @@
 # Requires: cc, and ffmpeg for the decode test's input file.
 
 CC      ?= cc
+CXX     ?= c++
 CFLAGS  ?= -O2 -Wall
 CFLAGS  += -I../source/audio -I../source/audio/a52
+CXXFLAGS ?= -O2 -Wall
+CXXFLAGS += -I../source/api -I../source/net
 
 A52_DIR  = ../source/audio/a52
 A52_SRCS = $(A52_DIR)/parse.c $(A52_DIR)/bit_allocate.c $(A52_DIR)/bitstream.c \
            $(A52_DIR)/downmix.c $(A52_DIR)/imdct.c
 MAP_SRC  = ../source/audio/ac3_map.c
 
-all: test_ac3_map test_ac3_decode
+all: test_ac3_map test_ac3_decode test_media_sources
 
 test_ac3_map: test_ac3_map.c $(MAP_SRC)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
 test_ac3_decode: test_ac3_decode.c $(MAP_SRC) $(A52_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test_media_sources: test_media_sources.cpp ../source/api/media_sources.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^
 
 tones51.ac3:
 	ffmpeg -y -loglevel error \
@@ -37,8 +43,9 @@ tones51.ac3:
 check: all tones51.ac3
 	./test_ac3_map
 	./test_ac3_decode tones51.ac3
+	./test_media_sources
 
 clean:
-	rm -f test_ac3_map test_ac3_decode tones51.ac3
+	rm -f test_ac3_map test_ac3_decode test_media_sources tones51.ac3
 
 .PHONY: all check clean
