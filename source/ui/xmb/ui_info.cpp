@@ -77,6 +77,89 @@ static void info_blit(const Bitmap *bm, int dx, int dy) {
     }
 }
 
+// Modal version picker used by the info page.  The full source list lives only
+// here, before playback starts; the player receives one selected MediaSourceId.
+static int info_choose_version(const char *title,
+                               const JFMediaSources *sources, int current) {
+    if (!sources || sources->n_sources <= 0) return -1;
+    int sel = (current >= 0 && current < sources->n_sources) ? current : 0;
+    bool armed = false;
+    rsxSync();
+    flip();
+    init_btns();
+
+    while (running) {
+        waitflip();
+        sysUtilCheckCallback();
+        poll_buttons();
+
+        if (!armed) {
+            if (!btn_cur.cross && !btn_cur.circle) armed = true;
+        } else {
+            if (BTN_PRESSED(circle)) { init_btns(); return -1; }
+            if (BTN_REPEAT(up) && sel > 0) sel--;
+            if (BTN_REPEAT(down) && sel < sources->n_sources - 1) sel++;
+            if (BTN_PRESSED(cross)) { init_btns(); return sel; }
+        }
+
+        clearScreen(XMB_BG);
+        wave_draw();
+        rsxSync();
+
+        const int max_rows = 8;
+        int shown = sources->n_sources < max_rows
+                      ? sources->n_sources : max_rows;
+        int first = sel - shown / 2;
+        if (first < 0) first = 0;
+        if (first > sources->n_sources - shown)
+            first = sources->n_sources - shown;
+
+        int pw = UIS_W(760);
+        int row_h = UIS_H(48);
+        int ph = UIS_H(104) + shown * row_h;
+        int px = ((int)display_width - pw) / 2;
+        int py = ((int)display_height - ph) / 2;
+        drawRect((u32)px, (u32)py, (u32)pw, (u32)ph, XMB_PANEL);
+        drawRect((u32)px, (u32)py, (u32)pw, 1, XMB_HAIRLINE);
+        drawRect((u32)px, (u32)(py + ph - 1), (u32)pw, 1, XMB_HAIRLINE);
+        drawRect((u32)px, (u32)py, 1, (u32)ph, XMB_HAIRLINE);
+        drawRect((u32)(px + pw - 1), (u32)py, 1, (u32)ph, XMB_HAIRLINE);
+
+        int cx = px + UIS_W(30);
+        info_clip_text(cx, py + UIS_H(22), title, 24, XMB_WHITE,
+                       pw - UIS_W(160), true);
+        char count[24];
+        snprintf(count, sizeof(count), "%d / %d", sel + 1,
+                 sources->n_sources);
+        int cw = ttf_text_width(count, 17);
+        drawTTF((u32)(px + pw - UIS_W(30) - cw),
+                (u32)(py + UIS_H(27)), count, 17, XMB_TEXT_DIM);
+
+        int y0 = py + UIS_H(72);
+        for (int row = 0; row < shown; row++) {
+            int idx = first + row;
+            int ry = y0 + row * row_h;
+            if (idx == sel) {
+                drawRect((u32)cx, (u32)ry,
+                         (u32)(pw - UIS_W(60)), (u32)(row_h - UIS_H(4)),
+                         XMB_PANEL_HI);
+                drawRect((u32)(cx - UIS_W(4)), (u32)ry, UIS_W(3),
+                         (u32)(row_h - UIS_H(4)), XMB_ACCENT);
+            }
+            info_clip_text(cx + UIS_W(16), ry + UIS_H(12),
+                           sources->source[idx].label, 19,
+                           idx == sel ? XMB_TEXT : XMB_TEXT_DIM,
+                           pw - UIS_W(100), idx == sel);
+        }
+
+        { static const Hint h[] = {{'X', "Select"}, {'C', "Back"}};
+          draw_hints_bar(h, 2); }
+        flip();
+    }
+    init_btns();
+    return -1;
+}
+
 void xmb_show_item_info(const XMBItem *root) {
     {
         char dbg[260];
@@ -124,6 +207,10 @@ void xmb_show_item_info(const XMBItem *root) {
     memset(&hero_poster, 0, sizeof(hero_poster));
     XMBItem similar[INFO_SIMILAR_MAX];
     int  n_similar = 0;
+    // Static keeps the up-to-32-source table out of the PPU stack.  It is
+    // discarded/reused whenever this page navigates to another title.
+    static JFMediaSources versions;
+    int version_sel = 0;
     bool reload    = true;
 
     // The page is taller than the screen; d-pad up/down jumps to top/bottom.
@@ -132,7 +219,7 @@ void xmb_show_item_info(const XMBItem *root) {
     // Focus moves between the Play button and the More Like This row, which is
     // what Cross acts on.  (Gating this on "is the row visible" made Cross mean
     // Open even at the top of the page, so Play could never be pressed.)
-    enum { FOCUS_PLAY = 0, FOCUS_SIM = 1 };
+    enum { FOCUS_PLAY = 0, FOCUS_VERSION = 1, FOCUS_SIM = 2 };
     int focus = FOCUS_PLAY;
     int sim_sel = 0, sim_row_scroll = 0;
 
@@ -146,6 +233,12 @@ void xmb_show_item_info(const XMBItem *root) {
             detail_media_free(&hero_poster);
             memset(&detail, 0, sizeof(detail));
             jellyfin_fetch_item_detail(cur->id, &detail);
+            memset(&versions, 0, sizeof(versions));
+            if (strcmp(cur->type, "Movie") == 0 ||
+                strcmp(cur->type, "Episode") == 0 ||
+                strcmp(cur->type, "Video") == 0)
+                jellyfin_fetch_media_sources(cur->id, &versions);
+            version_sel = 0;
             // Hi-res poster: the grid thumbnail cache only holds card-sized art,
             // so a poster blown up from it looks pixelated.  On failure the draw
             // loop falls back to the cached card thumb.
@@ -182,16 +275,29 @@ void xmb_show_item_info(const XMBItem *root) {
             // button to the recommendations at the bottom, up returns to Play
             // at the top — one press each way.
             if (BTN_PRESSED(down)) {
-                if (focus == FOCUS_PLAY && n_similar > 0) focus = FOCUS_SIM;
-                scroll_y = max_scroll;
+                if (focus == FOCUS_PLAY && versions.n_sources > 1) {
+                    focus = FOCUS_VERSION;
+                    scroll_y = 0;
+                } else if ((focus == FOCUS_PLAY || focus == FOCUS_VERSION) &&
+                           n_similar > 0) {
+                    focus = FOCUS_SIM;
+                    scroll_y = max_scroll;
+                }
             }
             if (BTN_PRESSED(up)) {
-                if (focus == FOCUS_SIM) focus = FOCUS_PLAY;
+                if (focus == FOCUS_SIM && versions.n_sources > 1)
+                    focus = FOCUS_VERSION;
+                else if (focus == FOCUS_SIM || focus == FOCUS_VERSION)
+                    focus = FOCUS_PLAY;
                 scroll_y = 0;
             }
             if (focus == FOCUS_SIM) {
                 if (BTN_REPEAT(left)  && sim_sel > 0)             sim_sel--;
                 if (BTN_REPEAT(right) && sim_sel < n_similar - 1) sim_sel++;
+            } else if (focus == FOCUS_VERSION && versions.n_sources > 1) {
+                if (BTN_REPEAT(left) && version_sel > 0) version_sel--;
+                if (BTN_REPEAT(right) && version_sel < versions.n_sources - 1)
+                    version_sel++;
             }
             if (BTN_PRESSED(cross)) {
                 if (focus == FOCUS_SIM) {
@@ -202,14 +308,25 @@ void xmb_show_item_info(const XMBItem *root) {
                     reload = true;
                     info_skip_frame();
                     continue;
+                } else if (focus == FOCUS_VERSION) {
+                    int chosen = info_choose_version(it->name, &versions,
+                                                     version_sel);
+                    if (chosen >= 0) version_sel = chosen;
+                    exit_armed = false;
+                    init_btns();
+                    info_skip_frame();
+                    continue;
                 } else {
                     // Play — same launch flow as the grid (resume prompt first).
                     int resume = xmb_resume_choice(it);
                     if (resume >= 0) {
+                        const char *source_id = versions.n_sources > 0
+                            ? versions.source[version_sel].id : NULL;
                         if (strcmp(it->type, "Episode") == 0)
-                            xmb_play_episode_with_next(it, (u32)resume);
+                            xmb_play_episode_with_next(it, (u32)resume,
+                                                       source_id);
                         else
-                            xmb_play_item(it, (u32)resume);
+                            xmb_play_item(it, (u32)resume, source_id);
                     }
                     exit_armed = false;
                     init_btns();
@@ -318,6 +435,36 @@ void xmb_show_item_info(const XMBItem *root) {
                          22.0f, fg);
                 drawTTF((u32)(tx + 46), (u32)(Y + (bh - 20) / 2 + 1), "Play",
                         20, fg, true);
+                Y += bh + 18;
+            }
+
+            // Version selector is shown only when it has a real choice.  X
+            // opens the full scrollable list; Left/Right also step through it.
+            if (versions.n_sources > 1) {
+                const int bh = 44;
+                const int bw = max_w > 680 ? 680 : max_w;
+                const bool vf = (focus == FOCUS_VERSION);
+                drawRect((u32)tx, (u32)Y, (u32)bw, (u32)bh,
+                         vf ? XMB_PANEL_HI : XMB_PANEL);
+                if (vf) {
+                    drawRect((u32)(tx - 4), (u32)Y, 3, (u32)bh, XMB_ACCENT);
+                    drawRect((u32)(tx - 1), (u32)(Y - 1), (u32)(bw + 2), 1,
+                             XMB_HAIRLINE);
+                    drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + 2), 1,
+                             XMB_HAIRLINE);
+                }
+                drawTTF_vcentered((u32)(tx + 16), Y + bh / 2, "Version", 16,
+                                  vf ? XMB_ACCENT : XMB_TEXT_FAINT, true);
+                info_clip_text(tx + 118, Y + 11,
+                               versions.source[version_sel].label, 18,
+                               vf ? XMB_WHITE : XMB_TEXT,
+                               bw - 166, vf);
+                char pos[20];
+                snprintf(pos, sizeof(pos), "%d/%d", version_sel + 1,
+                         versions.n_sources);
+                int pw = ttf_text_width(pos, 15);
+                drawTTF_vcentered((u32)(tx + bw - pw - 14), Y + bh / 2,
+                                  pos, 15, XMB_TEXT_DIM);
                 Y += bh + 18;
             }
 
@@ -457,7 +604,9 @@ void xmb_show_item_info(const XMBItem *root) {
             h[nh].glyph = 'C'; h[nh].label = "Back";  nh++;
             if (max_scroll > 0) { h[nh].glyph = 'D'; h[nh].label = "Scroll"; nh++; }
             h[nh].glyph = 'X';
-            h[nh].label = (focus == FOCUS_SIM) ? "Open" : "Play"; nh++;
+            h[nh].label = (focus == FOCUS_SIM) ? "Open" :
+                          (focus == FOCUS_VERSION) ? "Choose version" : "Play";
+            nh++;
             draw_hints_bar(h, nh);
         }
         flip();
