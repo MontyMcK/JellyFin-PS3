@@ -71,6 +71,10 @@ int player_sub_stream_idx(const PlayerState *ps) {
     return (ps->cur_sub >= 0) ? ps->tracks.subs[ps->cur_sub].index : -1;
 }
 
+const JFMediaSource *player_current_source(const PlayerState *ps) {
+    return ps->source.id[0] ? &ps->source : NULL;
+}
+
 // -------------------------------------------------------
 // Stream URL builder — used for the initial open and for every seek.
 // start_ticks is in Jellyfin's 100-ns units (seconds * 10,000,000).
@@ -100,6 +104,10 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     const char *acodec   = surround ? "ac3"    : "mp3";
     unsigned    abitrate = surround ? 640000u  : 192000u;
     int         achans   = surround ? 6        : 2;
+    const JFMediaSource *source = player_current_source(ps);
+    const char *source_id = (source && source->id[0]) ? source->id : ps->item->id;
+    char encoded_source[288];
+    url_encode_query(source_id, encoded_source, sizeof(encoded_source));
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
@@ -116,7 +124,12 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
         "&StartTimeTicks=%llu",
         g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vbitrate,
         acodec, abitrate, achans,
-        jf_device_id(), ps->item->id, (unsigned long long)start_ticks);
+        jf_device_id(), encoded_source, (unsigned long long)start_ticks);
+    if (source && source->live_stream_id[0] && n > 0 && n < url_sz) {
+        char encoded_live[288];
+        url_encode_query(source->live_stream_id, encoded_live, sizeof(encoded_live));
+        n += snprintf(url + n, url_sz - n, "&LiveStreamId=%s", encoded_live);
+    }
     if (audio_idx >= 0 && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
     if (sub_idx >= 0 && n > 0 && n < url_sz)

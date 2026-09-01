@@ -73,6 +73,10 @@ struct PlayerState {
     int      cur_sub;
     int      menu_kind;          // PLAYER_MENU_*
 
+    // The version chosen before playback.  Only the active source is retained;
+    // the full list belongs to the info screen and never enters the player.
+    JFMediaSource source;
+
     int      sock;
     volatile bool playing;
     volatile bool paused;
@@ -111,6 +115,7 @@ void plog_url(const char *tag, const char *url);
 // Jellyfin MediaStream index of the current audio/subtitle selection (-1 = none).
 int  player_audio_stream_idx(const PlayerState *ps);
 int  player_sub_stream_idx(const PlayerState *ps);
+const JFMediaSource *player_current_source(const PlayerState *ps);
 
 // Build the transcode stream URL — used for the initial open and every seek.
 // start_ticks is in Jellyfin's 100-ns units (seconds * 10,000,000).

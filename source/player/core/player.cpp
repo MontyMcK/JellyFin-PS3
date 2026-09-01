@@ -136,7 +136,8 @@ static void player_draw_next_popup(int auto_secs) {
             XMB_TEXT_DIM);
 }
 
-void show_player(const JFItem *item, u32 resume_secs) {
+void show_player(const JFItem *item, u32 resume_secs,
+                 const char *media_source_id) {
     crash_log("p1 enter");
     plog("show_player: enter");
     plog("show_player: BUILD=seek-diag-1");
@@ -201,14 +202,29 @@ void show_player(const JFItem *item, u32 resume_secs) {
         ps.req_h = display_height < 720  ? display_height : 720;
     }
 
-    if (!jellyfin_get_play_session_id(item->id, ps.session_id,
-                                      sizeof(ps.session_id), &ps.total_secs)) {
+    if (!jellyfin_get_playback_info(item->id, media_source_id, ps.session_id,
+                                    sizeof(ps.session_id), &ps.total_secs,
+                                    NULL, &ps.source, true)) {
         plog("show_player: PlaybackInfo failed, streaming without PlaySessionId");
         ps.session_id[0] = '\0';
     }
 
-    // Selectable audio/subtitle tracks (HUD AUDIO + CC buttons cycle these).
-    ps.have_tracks = jellyfin_fetch_tracks(item->id, &ps.tracks);
+    // Only the version chosen on the info screen enters the player.  Its own
+    // tracks come from the same source-aware PlaybackInfo response.
+    if (ps.source.id[0]) {
+        ps.tracks      = ps.source.tracks;
+        ps.have_tracks = true;
+        if (ps.source.runtime_secs > 0)
+            ps.total_secs = ps.source.runtime_secs;
+    } else {
+        snprintf(ps.source.id, sizeof(ps.source.id), "%s",
+                 (media_source_id && media_source_id[0])
+                    ? media_source_id : item->id);
+        snprintf(ps.source.label, sizeof(ps.source.label), "Default");
+        ps.have_tracks = jellyfin_fetch_tracks(item->id, &ps.tracks);
+        ps.source.tracks = ps.tracks;
+        ps.source.runtime_secs = ps.total_secs;
+    }
     if (ps.have_tracks && ps.tracks.n_audio > 0)
         ps.cur_audio = ps.tracks.default_audio;
 
