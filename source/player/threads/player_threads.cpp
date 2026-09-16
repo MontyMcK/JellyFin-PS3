@@ -25,8 +25,49 @@ extern u32 running;
 // Decode-thread spawn — initial open and post-seek respawn
 // -------------------------------------------------------
 
+// -------------------------------------------------------
+// Video hold-back ring
+// -------------------------------------------------------
+// The decode thread used to stop reading the socket entirely whenever the
+// jitter buffer was full:
+//
+//     if (jbuf_count() >= jbuf_cap()) { usleep(1000); continue; }
+//
+// Audio arrives interleaved in that same transport stream, so this capped the
+// audio read-ahead at whatever was interleaved among the buffered video
+// frames — about half a second — no matter how much room the PCM ring had.
+// Measured on hardware: the PCM ring sat at 1% of its one-second target for
+// the whole run and the audio thread starved 175-359 times, on BOTH DTS and
+// TrueHD, i.e. the decoder was never behind on CPU, it was simply never given
+// the bytes.  HD audio made it worse for the obvious reason: a stream-copied
+// TrueHD track is several Mbps rather than AC-3's 640 kbps, so the same
+// half-second of runway carries far more data and any dip empties it.
+//
+// The fix keeps reading while the audio still wants data, feeds the audio
+// half immediately, and PARKS the video packets here in arrival order until
+// the jitter buffer drains.  Nothing reaches VDEC while the jitter buffer is
+// full — no submits, no pulls — so the decoder cannot back up; the only cost
+// is this buffer.  ~1 MB is roughly 0.8 s of 10 Mbps video, and reading stops
+// again once either it fills or the PCM ring reaches its high-water mark, so
+// the read-ahead stays bounded in both directions.
+#define VHOLD_PKTS 5576                      // * 188 B = ~1.0 MB
+
+static u8  s_vhold[VHOLD_PKTS][TS_PACKET_SIZE];
+static int s_vhold_rd = 0, s_vhold_wr = 0, s_vhold_n = 0;
+
+static void vhold_reset(void) { s_vhold_rd = s_vhold_wr = s_vhold_n = 0; }
+
+static void vhold_push(const u8 *pkt) {
+    memcpy(s_vhold[s_vhold_wr], pkt, TS_PACKET_SIZE);
+    s_vhold_wr = (s_vhold_wr + 1) % VHOLD_PKTS;
+    s_vhold_n++;
+}
+
 bool player_spawn_decode(PlayerState *ps) {
     if (!ps->playing) return false;
+    // A seek respawns this thread with a flushed demux, so anything still
+    // parked belongs to the old position and must not be fed.
+    vhold_reset();
     ps->dec_ctx.playing     = &ps->playing;
     ps->dec_ctx.frame_count = &ps->frame_count;
     ps->dec_ctx.sock        = ps->sock;
@@ -65,12 +106,32 @@ void decode_thread_fn(void *arg) {
     int  hb_fr_last            = 0;
 
     while (running && *playing && *ctx->dec_run && !s_vdec_error) {
-        if (jbuf_count() >= jbuf_cap()) {
+        // Parked video first, in arrival order, while there is room for it.
+        while (s_vhold_n > 0 && jbuf_count() < jbuf_cap()) {
+            video_feed_ts(s_vhold[s_vhold_rd]);
+            s_vhold_rd = (s_vhold_rd + 1) % VHOLD_PKTS;
+            s_vhold_n--;
+        }
+
+        // Read ahead past a full jitter buffer only while the audio ring is
+        // still below the level the decoder targets, and only while there is
+        // somewhere to park the video that comes with it.  When neither holds,
+        // this is the original "stop reading" behaviour.
+        const bool jbuf_full  = jbuf_count() >= jbuf_cap();
+        const bool audio_wants = adec_pcm_available() < PCM_RING_HIGHWATER;
+        if (jbuf_full && (!audio_wants || s_vhold_n >= VHOLD_PKTS)) {
             usleep(1000);
             continue;
         }
 
-        for (int batch = 0; batch < 128 && jbuf_count() < jbuf_cap(); batch++) {
+        for (int batch = 0; batch < 128; batch++) {
+            // Stop the batch when neither the jitter buffer nor the hold ring
+            // can take any more.
+            if (jbuf_count() >= jbuf_cap() &&
+                (s_vhold_n >= VHOLD_PKTS ||
+                 adec_pcm_available() >= PCM_RING_HIGHWATER))
+                break;
+
             int rd = stream_read(ctx->sock, ts_pkt, TS_PACKET_SIZE);
             if (rd < 0) {
                 plog("playing=0 reason=stream_eof");
@@ -87,7 +148,14 @@ void decode_thread_fn(void *arg) {
                 stall_ep_count++;
             }
 
-            video_feed_ts(ts_pkt);
+            if (jbuf_count() < jbuf_cap()) {
+                video_feed_ts(ts_pkt);          // normal path, unchanged
+            } else if (!video_feed_ts_audio_only(ts_pkt)) {
+                // A video packet with nowhere to go yet: park it.  Checked
+                // above, but the jitter buffer can fill mid-batch.
+                if (s_vhold_n < VHOLD_PKTS) vhold_push(ts_pkt);
+                else                        break;
+            }
         }
 
         // Drain all decoded frames from VDEC into the jitter buffer
@@ -114,11 +182,11 @@ void decode_thread_fn(void *arg) {
             char buf[160];
             long avg_ms = stall_ep_count ? stall_ep_dur_total_us / stall_ep_count / 1000 : 0;
             snprintf(buf, sizeof(buf),
-                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d",
+                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d vhold=%d pcm=%d",
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
-                display_fps, s_au_inflight_max);
+                display_fps, s_au_inflight_max, s_vhold_n, adec_pcm_available());
             plog(buf);
             s_au_inflight_max = 0;
             stall_ep_count = stall_ep_dur_max_us = stall_ep_dur_total_us = 0;
