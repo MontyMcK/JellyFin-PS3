@@ -19,7 +19,13 @@
 // So: wait until typing PAUSES, then send one query, and never send a term
 // too short to mean anything.  The pause is checked in the per-frame input
 // handler, which is already called every frame.
-#define SEARCH_DEBOUNCE_US 450000   // typing pause before the query fires
+// The wait is measured from the last PAD ACTIVITY, not the last letter.
+// Timing it from the letter is why it still fired mid-word: picking the next
+// key on an on-screen keyboard takes several d-pad presses, and none of those
+// pushed the deadline back, so the query went out — and froze the UI — while
+// the user was still walking to the next letter.  Any button activity now
+// counts as "still typing".
+#define SEARCH_DEBOUNCE_US 900000   // idle pause before the query fires
 #define SEARCH_MIN_CHARS   2        // shorter terms are noise, not a search
 
 static u64  s_search_edit_us = 0;   // when the term last changed
@@ -243,6 +249,15 @@ bool xmb_handle_input_search(void) {
             g_search_focus_results = false;
         }
     }
+
+    // Still working the keyboard — moving between keys, holding a direction,
+    // deleting — so push the query back.  Held buttons count, which is what
+    // keeps a long d-pad run from being read as a pause.
+    if (s_search_pending &&
+        (btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right ||
+         btn_cur.cross || btn_cur.circle || btn_cur.square ||
+         btn_cur.triangle || btn_cur.l1 || btn_cur.r1))
+        s_search_edit_us = timing_get_us();
 
     if (s_search_pending &&
         timing_get_us() - s_search_edit_us >= SEARCH_DEBOUNCE_US) {
