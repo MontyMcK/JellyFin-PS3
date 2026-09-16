@@ -148,11 +148,25 @@ void decode_thread_fn(void *arg) {
                 stall_ep_count++;
             }
 
-            if (jbuf_count() < jbuf_cap()) {
+            // Keep the parked video moving as soon as room appears.  This has
+            // to happen inside the batch, not just once per outer iteration:
+            // the jitter buffer can drain mid-batch.
+            while (s_vhold_n > 0 && jbuf_count() < jbuf_cap()) {
+                video_feed_ts(s_vhold[s_vhold_rd]);
+                s_vhold_rd = (s_vhold_rd + 1) % VHOLD_PKTS;
+                s_vhold_n--;
+            }
+
+            // A freshly read video packet may go straight through ONLY when
+            // nothing is parked.  Feeding one while earlier packets still sit
+            // in the ring hands the demuxer packet N+50 before packet N, and
+            // a reordered video PID means every PES reassembles wrong — which
+            // looks like constant macroblock artifacts, not like a bug in the
+            // buffering.  While the ring has anything in it, everything video
+            // goes through the ring.
+            if (s_vhold_n == 0 && jbuf_count() < jbuf_cap()) {
                 video_feed_ts(ts_pkt);          // normal path, unchanged
             } else if (!video_feed_ts_audio_only(ts_pkt)) {
-                // A video packet with nowhere to go yet: park it.  Checked
-                // above, but the jitter buffer can fill mid-batch.
                 if (s_vhold_n < VHOLD_PKTS) vhold_push(ts_pkt);
                 else                        break;
             }

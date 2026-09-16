@@ -223,6 +223,17 @@ static void xmb_input_tv_sub(void) {
     if (BTN_REPEAT(left)) {
         if ((g_tv_sub_sel % C) > 0) g_tv_sub_sel--;
     }
+    // Triangle opens the info screen for an EPISODE, the same as it does for a
+    // movie in the library grid — which is where the Version and Quality rows
+    // live, so without this an episode could not be played from a chosen
+    // source at all.  Seasons (depth 1) have nothing playable behind them and
+    // are left alone.
+    if (BTN_PRESSED(triangle) && g_tv_depth == 2 && g_tv_sub_count > 0 &&
+        g_tv_sub_sel < g_tv_sub_count &&
+        timing_get_us() >= g_info_cooldown_until) {
+        xmb_show_item_info(&g_tv_sub_items[g_tv_sub_sel]);
+        return;
+    }
     if (BTN_PRESSED(cross) && g_tv_sub_count > 0 && g_tv_sub_sel < g_tv_sub_count) {
         const XMBItem *it = &g_tv_sub_items[g_tv_sub_sel];
         if (g_tv_depth == 1) {
@@ -296,6 +307,14 @@ static void xmb_input_col_sub(void) {
     }
     if (BTN_REPEAT(left)) {
         if ((g_col_sub_sel % C) > 0) g_col_sub_sel--;
+    }
+    // Same as the TV episode grid: Triangle reaches the info screen, and with
+    // it the Version and Quality rows.
+    if (BTN_PRESSED(triangle) && g_col_sub_count > 0 &&
+        g_col_sub_sel < g_col_sub_count &&
+        timing_get_us() >= g_info_cooldown_until) {
+        xmb_show_item_info(&g_col_sub_items[g_col_sub_sel]);
+        return;
     }
     if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
         xmb_play_list_with_next(g_col_sub_items, g_col_sub_count,
