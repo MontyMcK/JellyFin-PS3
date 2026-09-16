@@ -189,8 +189,8 @@ void xmb_draw_settings(void) {
                     (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
                     val, 18, hd1080_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
-        if (i == 4) {   // Surround 5.1 (Alpha) — right-aligned On/Off state
-            const char *val = surround_enabled() ? "On" : "Off";
+        if (i == 4) {   // Surround 5.1 (Alpha) — right-aligned Off/AC-3/DTS state
+            const char *val = surround_mode_label();
             int vw = ttf_text_width(val, 18, sel);
             drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
                     (u32)(iy + (SET_ROW_H - 18) / 2 - 2),

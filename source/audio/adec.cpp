@@ -2,7 +2,9 @@
 #include "minimp3.h"
 #include "adec.h"
 #include "adec_ac3.h"
-#include "audio.h"             // audio_output_channels() — port width drives ring width
+#include "adec_dts.h"
+#include "adec_truehd.h"
+#include "audio.h"           // audio_output_channels() — port width drives ring width
 #include "plog.h"
 #include "../build_config.h"   // relative: source/ is not on the -I path
 
@@ -42,17 +44,22 @@ extern void crash_log(const char *msg);
 // 2894 bytes (see adec_pes_hwm telemetry).  256 slots gives >3x depth margin
 // (~30s of burst) and 8192-byte slots >2.5x the largest PES; 256*8192 = 2 MB,
 // vs the ~8 MB a PCM-side buffer of the same duration would cost.
+// A PES that does NOT fit a slot (only DTS gets near it — a stream-copied
+// DTS-HD MA frame at Blu-ray bitrates) is split across consecutive slots by
+// adec_push_pes() rather than dropped, so the slot size stays a memory
+// decision instead of a correctness one.
 #define PES_QUEUE_SLOTS 256
 #define PES_SLOT_BYTES  8192
 
 // ---- Decoders + PCM ring ----
 static mp3dec_t         s_dec;
 // Ring width follows the selected codec: 2 floats/frame for MP3 (the shipped
-// layout, byte-identical indexing), 6 for AC-3 5.1.  Storage is sized for the
-// widest case: 65536 frames * 6 ch * 4 B = 1.5 MB static (was 512 KB — the
-// +1 MB is the price of 5.1 PCM at the same 1.37 s ring depth).
-static float            s_ring[PCM_RING_CAP * 6];  // interleaved float32 frames
-static int              s_ring_ch = 2;             // 2 (MP3) or 6 (AC-3 5.1)
+// layout, byte-identical indexing), 6 for AC-3 or DTS 5.1, 8 for TrueHD 7.1.
+// Storage is sized for the widest case: 65536 frames * 8 ch * 4 B = 2 MB
+// static (was 512 KB stereo, then 1.5 MB for 5.1 — the last +512 KB is what
+// carrying a 7.1 program at the same 1.37 s ring depth costs).
+static float            s_ring[PCM_RING_CAP * 8];  // interleaved float32 frames
+static int              s_ring_ch = 2;             // 2, 6 (5.1) or 8 (7.1)
 static adec_codec_t     s_codec   = ADEC_CODEC_MP3;
 static int              s_wr = 0;
 static int              s_rd = 0;
@@ -71,6 +78,11 @@ static bool s_pts_valid       = false;
 // ---- PES queue ----
 static u8               s_pes_q[PES_QUEUE_SLOTS][PES_SLOT_BYTES];
 static int              s_pes_q_len[PES_QUEUE_SLOTS] = {};
+// 1 = this slot is a CONTINUATION chunk: raw elementary-stream bytes with no
+// PES header of their own, carrying the tail of the PES in the preceding
+// slot(s).  A PES larger than one slot is split across slots rather than
+// dropped — see adec_push_pes().
+static u8               s_pes_q_cont[PES_QUEUE_SLOTS] = {};
 static int              s_pes_q_rd  = 0;
 static int              s_pes_q_wr  = 0;
 static volatile int     s_pes_q_n   = 0;
@@ -140,9 +152,10 @@ static void push_samples(const short *pcm, int n, int channels) {
     sysMutexUnlock(s_pcm_mtx);
 }
 
-// AC-3 path — s_ring_ch-wide float frames, already in PS3 channel order
-// (adec_ac3.cpp/ac3_map.c).  Same overflow policy and PTS advance as
-// push_samples(); the two differ only in sample format and width.
+// Surround path (AC-3, DTS) — s_ring_ch-wide float frames, already in PS3
+// channel order (adec_ac3.cpp/ac3_map.c, adec_dts.cpp/dts_map.c).  Same
+// overflow policy and PTS advance as push_samples(); the two differ only in
+// sample format and width.
 void adec_push_frames(const float *frames, int n) {
     sysMutexLock(s_pcm_mtx, 0);
     int ch = s_ring_ch;
@@ -168,7 +181,43 @@ void adec_push_frames(const float *frames, int n) {
     sysMutexUnlock(s_pcm_mtx);
 }
 
-static void adec_decode_pes(const u8 *pes, int pes_len) {
+// Hand elementary-stream bytes to whichever decoder currently owns the ring.
+static void adec_decode_es(const u8 *es, int len) {
+    if (len <= 0) return;
+    if (s_codec == ADEC_CODEC_AC3) { adec_ac3_decode_payload(es, len); return; }
+    if (s_codec == ADEC_CODEC_DTS) { adec_dts_decode_payload(es, len); return; }
+    if (s_codec == ADEC_CODEC_TRUEHD) {
+        adec_truehd_decode_payload(es, len);
+        return;
+    }
+    while (len > 0) {
+        mp3dec_frame_info_t info;
+        short pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
+        int samples = mp3dec_decode_frame(&s_dec, es, len, pcm, &info);
+        if (info.frame_bytes <= 0) break;
+        if (samples > 0) {
+            static bool s_logged_frame = false;
+            if (!s_logged_frame) {
+                s_logged_frame = true;
+                char fbuf[64];
+                snprintf(fbuf, sizeof(fbuf), "adec_frame: hz=%d ch=%d samples=%d",
+                         info.hz, info.channels, samples);
+                plog(fbuf);
+            }
+            push_samples(pcm, samples, info.channels);
+        }
+        es  += info.frame_bytes;
+        len -= info.frame_bytes;
+    }
+}
+
+// cont = this buffer is a continuation chunk of the previous PES: raw ES
+// bytes, no header to strip and no PTS to read (adec_push_pes).
+static void adec_decode_pes(const u8 *pes, int pes_len, bool cont) {
+    if (cont) {
+        adec_decode_es(pes, pes_len);
+        return;
+    }
     // Seed the write PTS from this packet's header.  On the very first valid PTS,
     // also initialise the read cursor so both cursors start from a coherent origin.
     u64 pes_pts_us;
@@ -191,36 +240,11 @@ static void adec_decode_pes(const u8 *pes, int pes_len) {
     if (pes[0] || pes[1] || pes[2] != 0x01) return;
     int hdr  = 9 + pes[8];
     if (hdr >= pes_len) return;
-    const u8 *es   = pes + hdr;
-    int       left = pes_len - hdr;
-    if (s_codec == ADEC_CODEC_AC3) {
-        adec_ac3_decode_payload(es, left);
-        return;
-    }
-    while (left > 0) {
-        mp3dec_frame_info_t info;
-        short pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
-        int samples = mp3dec_decode_frame(&s_dec, es, left, pcm, &info);
-        if (info.frame_bytes <= 0) break;
-        if (samples > 0) {
-            static bool s_logged_frame = false;
-            if (!s_logged_frame) {
-                s_logged_frame = true;
-                char fbuf[64];
-                snprintf(fbuf, sizeof(fbuf), "adec_frame: hz=%d ch=%d samples=%d",
-                         info.hz, info.channels, samples);
-                plog(fbuf);
-            }
-            push_samples(pcm, samples, info.channels);
-        }
-        es   += info.frame_bytes;
-        left -= info.frame_bytes;
-    }
+    adec_decode_es(pes + hdr, pes_len - hdr);
 }
 
-void adec_push_pes(const u8 *pes, int pes_len) {
-    if (pes_len <= 0 || pes_len > PES_SLOT_BYTES) return;
-    sysMutexLock(s_pes_mtx, 0);
+// Enqueue one chunk.  Caller holds s_pes_mtx.
+static void pes_enqueue(const u8 *buf, int len, bool cont) {
     if (s_pes_q_n >= PES_QUEUE_SLOTS) {
         // queue full — drop oldest to avoid back-pressuring the demux thread
         s_pes_q_rd = (s_pes_q_rd + 1) % PES_QUEUE_SLOTS;
@@ -236,8 +260,9 @@ void adec_push_pes(const u8 *pes, int pes_len) {
         }
 #endif
     }
-    memcpy(s_pes_q[s_pes_q_wr], pes, pes_len);
-    s_pes_q_len[s_pes_q_wr] = pes_len;
+    memcpy(s_pes_q[s_pes_q_wr], buf, len);
+    s_pes_q_len[s_pes_q_wr]  = len;
+    s_pes_q_cont[s_pes_q_wr] = cont ? 1 : 0;
     s_pes_q_wr = (s_pes_q_wr + 1) % PES_QUEUE_SLOTS;
     s_pes_q_n++;
 #if BUILD_FOR_RPCS3
@@ -245,7 +270,7 @@ void adec_push_pes(const u8 *pes, int pes_len) {
     // queue depth (-> PES_QUEUE_SLOTS) so the buffers are sized to the real burst.
     { static int s_max_len = 0, s_max_depth = 0;
       bool chg = false;
-      if (pes_len > s_max_len)   { s_max_len = pes_len;     chg = true; }
+      if (len > s_max_len)       { s_max_len = len;         chg = true; }
       if (s_pes_q_n > s_max_depth){ s_max_depth = s_pes_q_n; chg = true; }
       if (chg) {
         char b[80];
@@ -255,13 +280,36 @@ void adec_push_pes(const u8 *pes, int pes_len) {
       } }
 #endif
     sysCondSignal(s_pes_cond);
+}
+
+void adec_push_pes(const u8 *pes, int pes_len) {
+    if (pes_len <= 0) return;
+    // A PES bigger than one queue slot is SPLIT, not dropped.  MP3 and AC-3
+    // PES never reach 8 KB, so this loop runs exactly once for them and the
+    // shipped path is byte-identical.  A stream-copied DTS-HD MA / DTS:X
+    // track is the case that needs it: its PES carry a core frame plus the
+    // extension substream and can exceed the slot at Blu-ray bitrates, and
+    // the old `pes_len > PES_SLOT_BYTES → return` silently dropped exactly
+    // those packets, i.e. all of the audio.  Splitting here rather than
+    // enlarging the slots keeps the queue at 2 MB instead of 8 MB.
+    // The whole PES is enqueued under one lock so its chunks stay adjacent.
+    sysMutexLock(s_pes_mtx, 0);
+    bool cont = false;
+    while (pes_len > 0) {
+        int take = (pes_len < PES_SLOT_BYTES) ? pes_len : PES_SLOT_BYTES;
+        pes_enqueue(pes, take, cont);
+        pes     += take;
+        pes_len -= take;
+        cont     = true;
+    }
     sysMutexUnlock(s_pes_mtx);
 }
 
 static void adec_thread_fn(void *arg) {
     (void)arg;
-    u8  local_pes[PES_SLOT_BYTES];
-    int local_len;
+    u8   local_pes[PES_SLOT_BYTES];
+    int  local_len;
+    bool local_cont;
     while (s_adec_run) {
         sysMutexLock(s_pes_mtx, 0);
         while (s_adec_run && s_pes_q_n == 0) {
@@ -272,7 +320,8 @@ static void adec_thread_fn(void *arg) {
             break;
         }
         memcpy(local_pes, s_pes_q[s_pes_q_rd], s_pes_q_len[s_pes_q_rd]);
-        local_len = s_pes_q_len[s_pes_q_rd];
+        local_len  = s_pes_q_len[s_pes_q_rd];
+        local_cont = s_pes_q_cont[s_pes_q_rd] != 0;
         s_pes_q_rd = (s_pes_q_rd + 1) % PES_QUEUE_SLOTS;
         s_pes_q_n--;
         sysMutexUnlock(s_pes_mtx);
@@ -284,7 +333,7 @@ static void adec_thread_fn(void *arg) {
         while (s_adec_run && s_n >= PCM_RING_HIGHWATER)
             usleep(2000);
 
-        adec_decode_pes(local_pes, local_len);
+        adec_decode_pes(local_pes, local_len, local_cont);
     }
 #if BUILD_FOR_RPCS3
     // Exit freeze fix: this thread otherwise just falls off the end and returns.
@@ -311,6 +360,7 @@ void adec_start(void) {
     sysCondAttrInitialize(cattr);
     sysCondCreate(&s_pes_cond, s_pes_mtx, &cattr);
     s_pes_q_rd = s_pes_q_wr = s_pes_q_n = 0;
+    memset(s_pes_q_cont, 0, sizeof(s_pes_q_cont));
     s_adec_run = true;
     crash_log("ad3 sysThreadCreate");
     sysThreadCreate(&s_adec_thread, adec_thread_fn, NULL,
@@ -321,10 +371,15 @@ void adec_start(void) {
 void adec_flush(void) {
     sysMutexLock(s_pes_mtx, 0);
     s_pes_q_rd = s_pes_q_wr = s_pes_q_n = 0;
+    // Dropping the queue can strand a continuation chunk whose head is gone;
+    // clearing the flags means nothing left behind is ever read as one.
+    memset(s_pes_q_cont, 0, sizeof(s_pes_q_cont));
     sysMutexUnlock(s_pes_mtx);
     sysMutexLock(s_pcm_mtx, 0);
     mp3dec_init(&s_dec);
     adec_ac3_reset();   // drop the partial-frame carry; codec choice survives
+    adec_dts_reset();   // ditto for DTS (also clears a pending ext-substream skip)
+    adec_truehd_reset();// ditto for TrueHD (also drops the major-sync lock)
     s_wr = s_rd = s_n = 0;
     s_next_pcm_pts_us = s_read_pts_us = 0;
     s_pts_valid = false;
@@ -345,10 +400,12 @@ void adec_stop(void) {
     sysCondDestroy(s_pes_cond);
     sysMutexDestroy(s_pes_mtx);
     sysMutexDestroy(s_pcm_mtx);
-    // Session over: free the liba52 state and return to the shipped stereo
+    // Session over: free the liba52/libdca state and return to the shipped stereo
     // defaults so the next owner of the port (music player, next movie with
     // surround off) starts from the exact shipped configuration.
     adec_ac3_close();
+    adec_dts_close();
+    adec_truehd_close();
     s_codec   = ADEC_CODEC_MP3;
     s_ring_ch = 2;
     crash_log("adx5 adec_stop done");
@@ -360,15 +417,36 @@ int adec_output_channels(void) { return s_ring_ch; }
 
 adec_codec_t adec_get_codec(void) { return s_codec; }
 
+static const char *adec_codec_name(adec_codec_t c) {
+    switch (c) {
+    case ADEC_CODEC_AC3: return "ac3";
+    case ADEC_CODEC_DTS:    return "dts";
+    case ADEC_CODEC_TRUEHD: return "truehd";
+    default:                return "mp3";
+    }
+}
+
 void adec_set_codec(adec_codec_t codec) {
-    // Ring width for AC-3 follows the port that is actually open: a 5.1
-    // stream feeding a stereo port (8ch open failed) is downmixed by liba52
-    // at decode time, so the ring stays 2-wide there.
+    // Ring width for the surround codecs follows the port that is actually
+    // open: a surround stream feeding a stereo port (8ch open failed) is
+    // downmixed at decode time, so the ring stays 2-wide there.  TrueHD is
+    // the one codec that can fill all eight slots (7.1); AC-3 and DTS top
+    // out at a 5.1 program.
+    const bool wide_port = audio_output_channels() >= 6;
     int want_ch = 2;
-    if (codec == ADEC_CODEC_AC3)
-        want_ch = (audio_output_channels() == 6) ? 6 : 2;
+    if (codec == ADEC_CODEC_AC3 || codec == ADEC_CODEC_DTS)
+        want_ch = wide_port ? 6 : 2;
+    else if (codec == ADEC_CODEC_TRUEHD)
+        want_ch = wide_port ? 8 : 2;
 
     if (codec == s_codec && want_ch == s_ring_ch) return;
+
+    // Only one surround decoder is ever open: close the other one before
+    // opening this one, so a PMT that changes codec mid-session (or a track
+    // change between a DTS and an AC-3 track) cannot leave both allocated.
+    if (codec != ADEC_CODEC_AC3)    adec_ac3_close();
+    if (codec != ADEC_CODEC_DTS)    adec_dts_close();
+    if (codec != ADEC_CODEC_TRUEHD) adec_truehd_close();
 
     if (codec == ADEC_CODEC_AC3) {
         if (!adec_ac3_open(want_ch)) {
@@ -378,8 +456,18 @@ void adec_set_codec(adec_codec_t codec) {
             codec   = ADEC_CODEC_MP3;
             want_ch = 2;
         }
-    } else {
-        adec_ac3_close();
+    } else if (codec == ADEC_CODEC_DTS) {
+        if (!adec_dts_open(want_ch)) {
+            plog("adec_set_codec: DTS open failed, staying on MP3");
+            codec   = ADEC_CODEC_MP3;
+            want_ch = 2;
+        }
+    } else if (codec == ADEC_CODEC_TRUEHD) {
+        if (!adec_truehd_open(want_ch)) {
+            plog("adec_set_codec: TrueHD open failed, staying on MP3");
+            codec   = ADEC_CODEC_MP3;
+            want_ch = 2;
+        }
     }
 
     // Width/codec change invalidates whatever PCM is queued: drop it and
@@ -396,7 +484,7 @@ void adec_set_codec(adec_codec_t codec) {
 
     char b[64];
     snprintf(b, sizeof(b), "adec_set_codec: codec=%s ch=%d",
-             codec == ADEC_CODEC_AC3 ? "ac3" : "mp3", want_ch);
+             adec_codec_name(codec), want_ch);
     plog(b);
 }
 

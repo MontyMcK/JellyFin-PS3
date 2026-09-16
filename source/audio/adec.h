@@ -5,12 +5,18 @@
 void adec_init(void);
 
 // Which decoder consumes the PES queue.  Selected at runtime from the PMT
-// stream type by the TS demux (0x03/0x04 → MP3, 0x81/0x06+desc → AC-3) —
-// never from a compile flag, because the server can refuse AC-3 and send
-// MP3 anyway, and that must degrade to working stereo, not noise.
+// stream type by the TS demux (0x03/0x04 → MP3, 0x81/0x06+desc → AC-3,
+// 0x82/0x85/0x86/0x8A/0x06+desc → DTS, 0x83 → TrueHD) — never from a compile
+// flag, because the server can refuse the surround codec and send MP3 anyway,
+// and that must degrade to working stereo, not noise.
 typedef enum {
     ADEC_CODEC_MP3 = 0,   // minimp3, stereo — the shipped path and default
     ADEC_CODEC_AC3 = 1,   // liba52, up to 5.1 (see adec_ac3.h)
+    ADEC_CODEC_DTS = 2,   // libdca, up to 5.1 — DTS core, including the core
+                          // of a DTS-HD MA / DTS:X track (see adec_dts.h)
+    ADEC_CODEC_TRUEHD = 3,// vendored FFmpeg MLP decoder, up to 7.1, LOSSLESS —
+                          // TrueHD, including the bed of a Dolby Atmos track
+                          // (see adec_truehd.h)
 } adec_codec_t;
 
 // Switch decoder.  Call from the demux when the PMT selects the audio
@@ -50,11 +56,13 @@ int  adec_pcm_available(void);
 int  adec_read_pcm(float *buf, int n_frames);
 
 // Interleave width of the frames adec_read_pcm() returns: 2 (stereo MP3, the
-// shipped path).  The AC-3 decoder raises this to 6 when it owns the ring.
+// shipped path).  The AC-3 and DTS decoders raise this to 6 when they own
+// the ring.
 int  adec_output_channels(void);
 
-// INTERNAL (adec_ac3.cpp → adec.cpp): push n interleaved float frames of
-// adec_output_channels() width into the PCM ring and advance the write PTS.
+// INTERNAL (adec_ac3.cpp / adec_dts.cpp → adec.cpp): push n interleaved float
+// frames of adec_output_channels() width into the PCM ring and advance the
+// write PTS.
 // Runs on the adec thread.  Not for use outside the decoder modules.
 void adec_push_frames(const float *frames, int n);
 

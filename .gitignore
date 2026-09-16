@@ -19,3 +19,13 @@ tests/test_ac3_decode
 tests/test_media_sources
 tests/tones51.ac3
 tests/decoded.f32
+tests/test_dts_map
+tests/test_dts_decode
+tests/test_dts_stream
+tests/test_dts_exss
+tests/test_track_codec
+tests/tones51.dts
+tests/test_truehd_map
+tests/test_truehd_decode
+tests/tones51.thd
+tests/tones51.thd.ref

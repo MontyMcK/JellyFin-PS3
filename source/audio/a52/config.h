@@ -24,8 +24,13 @@
 #undef LIBA52_DJBFFT
 
 /* Both newlib (PS3) and glibc (host tests) provide memalign; parse.c
- * supplies its own prototype, so no header dependency either way. */
+ * supplies its own prototype, so no header dependency either way.
+ * MinGW's CRT does not have it, and the host tests do get built there, so
+ * leave it undefined in that case: parse.c then falls back to plain malloc,
+ * whose 16-byte alignment on x86-64 already satisfies the one call site. */
+#if !defined(__MINGW32__)
 #define HAVE_MEMALIGN 1
+#endif
 
 /* gcc alignment attributes work on both targets */
 #define ATTRIBUTE_ALIGNED_MAX 64

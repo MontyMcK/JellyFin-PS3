@@ -146,7 +146,7 @@ void audio_open(int channels) {
         rc = audioPortOpen(&p, &s_audio_port);
     }
     s_port_channels   = surround ? 8 : 2;
-    s_output_channels = surround ? 6 : 2;
+    s_output_channels = surround ? 8 : 2;   // program capacity, not a fixed 5.1
     snprintf(buf, sizeof(buf), "audio: sysAudioPortOpen rc=0x%x port=%u", rc, s_audio_port);
     plog(buf);
     if (rc != 0) { audioQuit(); return; }
@@ -253,8 +253,8 @@ bool audio_write_pcm(void) {
                 // place each one inside the wider port frame.  Static — this
                 // is the audio thread's hot path, no malloc and no big stack
                 // (thread stacks here are small; see hard constraints).
-                static float stage[AUDIO_BLOCK_SAMPLES * 6];
-                if (src_ch < 1 || src_ch > 6) src_ch = 2;   // defensive clamp
+                static float stage[AUDIO_BLOCK_SAMPLES * 8];
+                if (src_ch < 1 || src_ch > 8) src_ch = 2;   // defensive clamp
                 s_src_read(stage, AUDIO_BLOCK_SAMPLES);
                 apply_volume(stage, AUDIO_BLOCK_SAMPLES, src_ch);
                 for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
@@ -262,7 +262,9 @@ bool audio_write_pcm(void) {
                     const float *s = stage   + i * src_ch;
                     // A 6ch source is already in PS3 order (FL FR FC LFE SL
                     // SR — see channel map derivation in adec_ac3.cpp), so it
-                    // maps 1:1 onto the first six port slots.  A 2ch source
+                    // maps 1:1 onto the first six port slots; an 8ch source
+                    // (TrueHD 7.1, truehd_map.c) fills all eight the same
+                    // way.  A 2ch source
                     // in an 8-wide port fills FL/FR only.  A source wider
                     // than the port should not happen (the decoder downmixes
                     // when the port is stereo); take FL/FR as a last resort.

@@ -66,10 +66,16 @@
 
 ## Surround 5.1 (Alpha)
 
-Movies can play with **5.1 surround sound**: the server transcodes the audio to
-AC-3 (Dolby Digital), the app decodes it on the PS3 and plays it as 6-channel
-LPCM through an 8-channel audio port. It is **off by default** — flip
-**Settings → Surround 5.1 (Alpha)** to try it.
+Movies can play with **5.1 surround sound**: the app decodes the audio on the
+PS3 and plays it as 6-channel LPCM through an 8-channel audio port. It is
+**off by default** — **Settings → Surround 5.1 (Alpha)** cycles through three
+states:
+
+| Setting | What it asks the server for |
+|---|---|
+| **Off**   | Stereo MP3 — the shipped path, untouched. |
+| **AC-3**  | Transcode the audio to AC-3 (Dolby Digital) 5.1 at 640 kbps. Works with any source. |
+| **HD**    | Send the source's own HD audio track untouched (no audio transcode) and decode it on the PS3: **TrueHD / Dolby Atmos** plays **losslessly** in 5.1 or **7.1**; **DTS, DTS-HD MA, DTS-HD HRA, DTS-ES, DTS:X** play from their 5.1 core at up to 1509 kbps. Any other track — including Dolby Digital Plus — falls back to the AC-3 request, so HD never plays worse than AC-3. |
 
 For actual surround output you must also tell the PS3 your setup can take it:
 
@@ -81,14 +87,33 @@ For actual surround output you must also tell the PS3 your setup can take it:
 
 Notes and limitations:
 
-- The audio stream is AC-3 at 640 kbps. If the server refuses AC-3 (old ffmpeg,
-  transcode settings), playback falls back to the shipped stereo MP3 path.
+- In AC-3 mode the audio stream is AC-3 at 640 kbps. If the server refuses AC-3
+  (old ffmpeg, transcode settings), playback falls back to the shipped stereo
+  MP3 path.
 - Stereo-only sources still play in stereo (front speakers), as they should.
-- E-AC-3, DTS and TrueHD sources work fine — the server transcodes them to
-  AC-3 5.1. There is no bitstream passthrough on this hardware path, by design.
+- There is **no bitstream passthrough** on this platform — nothing in PSL1GHT
+  can hand a receiver an encoded stream — so everything is decoded on the PS3
+  and sent out as LPCM. That sets what each format can be:
+  - **TrueHD / Dolby Atmos: lossless.** The full 5.1 or 7.1 bed plays, bit for
+    bit. Atmos *objects* are not rendered (no free renderer exists, and the
+    app cannot know your speaker layout), so an Atmos track plays as its bed.
+    See [docs/dolby-truehd.md](docs/dolby-truehd.md).
+  - **DTS-HD MA and DTS:X: core quality — 5.1, lossy.** No GPL-compatible
+    decoder exists for the lossless DTS extension or the DTS:X objects, so
+    what plays is the backward-compatible core every such track carries.
+    See [docs/dts-hd.md](docs/dts-hd.md).
+  - **Dolby Digital Plus (E-AC-3), including DD+ Atmos: unchanged.** Nothing
+    here decodes it; the server transcodes it to AC-3 5.1 as before.
+- HD mode streams the original audio track over your network instead of a
+  640 kbps transcode — a TrueHD or DTS-HD MA track can be several Mbps on top
+  of the video. That is fine on a LAN and a bad idea over the internet.
+- 7.1 output needs **Linear PCM 7.1 Ch.** ticked in the PS3's Sound Settings,
+  the same way 5.1 does.
 - Music playback is stereo by design and ignores this switch.
 - The **Player Stats Overlay** shows the negotiated result while playing:
-  `ac3 6/6` means true 5.1 end-to-end; `mp3 2/2` means the server fell back.
+  `truehd 8/8` is a lossless 7.1 bed, `truehd 6/8` a lossless 5.1 one,
+  `ac3 6/8` is a working AC-3 5.1 transcode, `dts-hd 6/8` a DTS-HD/DTS:X track
+  playing from its core, and `mp3 2/2` means the server fell back to stereo.
 
 ---
 

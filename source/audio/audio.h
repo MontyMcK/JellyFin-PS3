@@ -11,9 +11,11 @@ void audio_open(int channels);
 bool audio_write_pcm(void);  // returns true if a DMA event was consumed
 void audio_close(void);
 
-// Program channels of the port that is actually open: 2 (stereo) or 6 (5.1).
-// A 5.1 program is carried in an 8-channel CellAudio port with the two rear
-// slots zeroed; this reports the six meaningful channels, not the port width.
+// Widest program the port that is actually open can carry: 2 (stereo) or 8.
+// A 5.1 program uses six of those eight slots and the output stage zeroes the
+// two rear ones every block; a TrueHD 7.1 program uses all eight.  The
+// decoder asks this to decide how wide to make the PCM ring, so it reports
+// capacity, not what is currently playing (adec_output_channels() is that).
 int  audio_output_channels(void);
 
 // Pluggable PCM source for audio_write_pcm().  Defaults to the video
