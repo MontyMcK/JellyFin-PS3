@@ -44,6 +44,14 @@ void video_reset_demux(void);
 // Returns true if a frame was added to the jitter buffer.
 bool video_feed_ts(const u8 *pkt);
 
+// Feed only the audio/PSI packets of the stream, leaving video untouched.
+// Returns false when the packet was a video one (the caller must hold it and
+// feed it through video_feed_ts() later, in order).  Never submits to VDEC
+// and never touches the jitter buffer, so it is safe to call precisely when
+// the jitter buffer is full — which is the point: see the hold-back ring in
+// player_threads.cpp.
+bool video_feed_ts_audio_only(const u8 *pkt);
+
 // ---- Jitter buffer ----
 bool         jbuf_alloc(u32 fw, u32 fh);
 int          jbuf_cap(void);            // active ring capacity (<= JBUF_MAX_SLOTS)

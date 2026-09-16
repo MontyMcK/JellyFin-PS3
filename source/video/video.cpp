@@ -34,16 +34,9 @@ void video_reset_demux(void) {
     s_codec_applied = TS_AUDIO_NONE;
 }
 
-bool video_feed_ts(const u8 *pkt) {
-    int vlen = 0, alen = 0;
-    int ready = ts_process(&s_ts, pkt,
-                           s_pes_out,       &vlen,
-                           s_audio_pes_out, &alen);
-    if (ready & 1) {
-        const u8 *h264; int h264_len; u64 pts;
-        if (pes_payload(s_pes_out, vlen, &h264, &h264_len, &pts))
-            vdec_submit(h264, h264_len, pts);
-    }
+// Apply the PMT's audio codec choice and push any completed audio PES.
+// Shared by the full feed and the audio-only one below.
+static void video_route_audio(int ready, int alen) {
     // Route the PES queue to the decoder the PMT selected, BEFORE the first
     // audio PES is pushed.  The selection is runtime data, not a compile
     // flag: a server that refuses DTS or AC-3 and sends MP3 lands here with
@@ -69,6 +62,48 @@ bool video_feed_ts(const u8 *pkt) {
         }
         adec_push_pes(s_audio_pes_out, alen);
     }
+}
+
+// Feed ONLY the audio and PSI packets of a TS stream; tell the caller when a
+// packet was not one of those and so was left untouched.
+//
+// This exists for the decode thread's hold-back path (player_threads.cpp):
+// when the jitter buffer is full it must stop handing video to VDEC, but the
+// audio in the same stream still needs to flow or the PCM ring runs dry.
+// Nothing here can reach VDEC or the jitter buffer — no vdec_submit, no
+// vdec_pull_frame — so a full jitter buffer cannot be made worse by calling
+// it.  Reordering is safe because ts_process keeps one reassembly state per
+// PID: audio read ahead of the video packets around it still reassembles
+// correctly, and each stream keeps its own PTS.
+bool video_feed_ts_audio_only(const u8 *pkt) {
+    if (pkt[0] != 0x47) return false;          // TS sync byte
+    u16 pid = ((u16)(pkt[1] & 0x1F) << 8) | pkt[2];
+    bool psi = (pid == 0x0000) || (s_ts.pmt_pid && pid == s_ts.pmt_pid);
+    bool aud = (s_ts.audio_pid && pid == s_ts.audio_pid);
+    if (!psi && !aud) return false;            // video (or an unknown PID)
+
+    int vlen = 0, alen = 0;
+    int ready = ts_process(&s_ts, pkt,
+                           s_pes_out,       &vlen,
+                           s_audio_pes_out, &alen);
+    // ready&1 cannot be set: a video PES only completes on a video PID, and
+    // those never reach here.
+    video_route_audio(ready, alen);
+    return true;
+}
+
+bool video_feed_ts(const u8 *pkt) {
+    int vlen = 0, alen = 0;
+    int ready = ts_process(&s_ts, pkt,
+                           s_pes_out,       &vlen,
+                           s_audio_pes_out, &alen);
+    if (ready & 1) {
+        const u8 *h264; int h264_len; u64 pts;
+        if (pes_payload(s_pes_out, vlen, &h264, &h264_len, &pts))
+            vdec_submit(h264, h264_len, pts);
+    }
+
+    video_route_audio(ready, alen);
 
     if (s_frames_ready > 0)
         return vdec_pull_frame();
