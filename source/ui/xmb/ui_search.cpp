@@ -195,6 +195,14 @@ bool xmb_handle_input_search(void) {
                     g_search_scroll = g_search_sel - vis + 1;
             }
         }
+        // Triangle opens the info screen for a search hit, the same as it does
+        // in the library grid — so a title found by search can be played from
+        // a chosen version and quality instead of only the server's default.
+        if (BTN_PRESSED(triangle) && g_search_sel < g_search_results_count &&
+            timing_get_us() >= g_info_cooldown_until) {
+            xmb_show_item_info(&g_search_results[g_search_sel]);
+            return false;
+        }
         if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {
             const XMBItem *it = &g_search_results[g_search_sel];
             if (strcmp(it->type, "Episode") == 0)
