@@ -185,6 +185,73 @@ static void parse_tracks(const char *source, const char *source_end,
     }
 }
 
+// Case-insensitive substring search (the labels come from whatever named the
+// file, so "1080P" and "1080p" both turn up).
+static bool contains_ci(const char *hay, const char *needle) {
+    if (!hay || !needle || !needle[0]) return false;
+    for (const char *h = hay; *h; h++) {
+        const char *a = h, *b = needle;
+        while (*a && *b) {
+            char ca = (*a >= 'A' && *a <= 'Z') ? (char)(*a - 'A' + 'a') : *a;
+            char cb = (*b >= 'A' && *b <= 'Z') ? (char)(*b - 'A' + 'a') : *b;
+            if (ca != cb) break;
+            a++; b++;
+        }
+        if (!*b) return true;
+    }
+    return false;
+}
+
+// Append `tag` to a label unless it is already in there.
+static void label_append(char *label, int cap, const char *tag) {
+    if (contains_ci(label, tag)) return;
+    int len = (int)strlen(label);
+    if (len + 4 + (int)strlen(tag) < cap)
+        snprintf(label + len, (size_t)(cap - len), " \xB7 %s", tag);
+}
+
+// Make the resolution and video codec visible in a version's label.
+//
+// A source plugin names its entries after the release ("Show.S01E01.WEB-DL
+// .DDP5.1.H.264-GROUP") and most such names carry the resolution, but not all
+// do — and with a long list the choice that matters is which resolution and
+// which codec, because both decide how much work the SERVER has to do.  The
+// PS3 itself is unaffected: video is always transcoded to H.264 for it
+// (AllowVideoStreamCopy=false), so a 4K HEVC source plays — it just makes the
+// server re-encode 4K HEVC in real time, which is where "stream connection
+// failed" after a long wait comes from.  Picking a 1080p H.264 source is
+// dramatically cheaper, so it is worth being able to see which is which.
+//
+// Never invents: anything the video stream does not report is not added.
+static void source_tag_video(char *label, int cap, const char *video) {
+    if (!label || !video || !video[0]) return;
+
+    static const char *kRes[] = { "2160p", "4K", "1440p", "1080p", "720p",
+                                  "576p", "480p", "360p" };
+    for (unsigned i = 0; i < sizeof(kRes) / sizeof(kRes[0]); i++) {
+        if (!contains_ci(video, kRes[i])) continue;
+        // "4K" and "2160p" mean the same thing to a reader; do not add one
+        // when the other is already present.
+        if (i <= 1 && (contains_ci(label, "2160p") || contains_ci(label, "4K")))
+            break;
+        label_append(label, cap, kRes[i]);
+        break;
+    }
+
+    // Codec: HEVC/H.265 is the expensive one to transcode.  H.264 sources are
+    // often named "x264"/"H.264"/"AVC" — all the same codec — so treat any of
+    // those spellings as already said.
+    if (contains_ci(video, "HEVC") || contains_ci(video, "H265") ||
+        contains_ci(video, "H.265") || contains_ci(video, "X265")) {
+        if (!contains_ci(label, "265") && !contains_ci(label, "HEVC"))
+            label_append(label, cap, "HEVC");
+    } else if (contains_ci(video, "H264") || contains_ci(video, "H.264") ||
+               contains_ci(video, "AVC")) {
+        if (!contains_ci(label, "264") && !contains_ci(label, "AVC"))
+            label_append(label, cap, "H.264");
+    }
+}
+
 static bool parse_source(const char *obj, const char *end, JFMediaSource *out) {
     memset(out, 0, sizeof(*out));
     const char *v = find_top_value(obj, end, "Id");
@@ -203,6 +270,8 @@ static bool parse_source(const char *obj, const char *end, JFMediaSource *out) {
     if (!out->label[0])
         snprintf(out->label, sizeof(out->label), "%s",
                  video[0] ? video : "Version");
+    else
+        source_tag_video(out->label, sizeof(out->label), video);
     return out->id[0] != '\0';
 }
 

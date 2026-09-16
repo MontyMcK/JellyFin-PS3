@@ -3,6 +3,8 @@
 #include <string.h>
 #include <ctype.h>
 
+#include "plog.h"   // truncated-body warning
+
 #include <ppu-types.h>
 #include <net/net.h>
 #include <net/socket.h>
@@ -304,7 +306,17 @@ int http_request(int method, const char *url, const char *body,
     if (status == 401 && token && token[0]) g_auth_expired = true;
 
     memset(out, 0, out_size);
-    if (body_len > out_size - 1) body_len = out_size - 1;
+    if (body_len > out_size - 1) {
+        // Truncating JSON produces a parse that "works" and quietly returns
+        // fewer items — the version list losing everything past the cut is
+        // exactly that bug.  Say so.
+        char b[96];
+        snprintf(b, sizeof(b),
+                 "http: body TRUNCATED %d -> %d bytes (raise RESPONSE_SIZE)",
+                 body_len, out_size - 1);
+        plog(b);
+        body_len = out_size - 1;
+    }
     if (body_len > 0) memcpy(out, s_raw_buf + body_off, body_len);
     out[body_len > 0 ? body_len : 0] = '\0';
 

@@ -297,7 +297,7 @@ void show_player(const JFItem *item, u32 resume_secs,
         audio_close();
         vdec_close();
         thumb_cache_init();
-        show_error("Stream connection failed.", url);
+        show_error(stream_last_error(), url);
         ui_restore_rsx_state();
         return;
     }
