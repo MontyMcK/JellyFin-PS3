@@ -205,6 +205,30 @@ bool xmb_handle_input_search(void) {
         }
         if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {
             const XMBItem *it = &g_search_results[g_search_sel];
+            // A SERIES is not playable — it is a folder.  X used to hand it
+            // to the video player anyway, which is why picking a show from
+            // search dropped straight into something instead of letting you
+            // choose.  Open the Seasons -> Episodes browser the TV tab and
+            // the Home rows already use.
+            if (strcmp(it->type, "Series") == 0) {
+                int tvt = xmb_tab_of_kind(TABKIND_TV);
+                if (tvt >= 0) {
+                    g_active_tab = tvt;
+                    strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
+                    strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
+                    g_tv_series_id[sizeof(g_tv_series_id)-1]     = '\0';
+                    g_tv_series_name[sizeof(g_tv_series_name)-1] = '\0';
+                    g_tv_sub_start = 0; g_tv_sub_total = 0;
+                    g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id,
+                                                       g_tv_sub_items,
+                                                       XMB_ITEMS_MAX, 0,
+                                                       &g_tv_sub_total);
+                    g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+                    g_search_focus_results = false;
+                    init_btns();
+                }
+                return false;
+            }
             if (strcmp(it->type, "Episode") == 0)
                 xmb_play_episode_with_next(it, 0);
             else
