@@ -16,17 +16,21 @@
  * this wrong decodes garbage on every frame. */
 #if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
 #define HAVE_BIGENDIAN    1
-#define AV_HAVE_BIGENDIAN 1
 #else
 #define HAVE_BIGENDIAN    0
-#define AV_HAVE_BIGENDIAN 0
 #endif
 
 /* The PPU traps on unaligned 4/8-byte loads through its scalar unit in the
  * cases ffmpeg's "fast unaligned" paths assume are free, and the host build
  * gains nothing measurable here, so take the portable path on both. */
 #define HAVE_FAST_UNALIGNED 0
-#define AV_HAVE_FAST_UNALIGNED 0
+
+/* AV_HAVE_BIGENDIAN / AV_HAVE_FAST_UNALIGNED are the *public* spellings and
+ * belong to libavutil/avconfig.h, which is included independently of this
+ * header.  Defining them here as well produced a redefinition warning on the
+ * PPU build; worse, it invited the two headers to disagree about byte order,
+ * which would decode noise rather than fail loudly.  avconfig.h derives them
+ * from the same compiler macro this file uses. */
 
 /* Both targets are 64-bit; neither has a fast count-leading-zeros intrinsic
  * wired up in this cut-down tree. */
