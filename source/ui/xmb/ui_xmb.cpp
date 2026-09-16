@@ -11,6 +11,8 @@
 #include "ui_wave.h"
 #include "thumbnail_cache.h"
 #include "slog.h"
+#include "plog.h"
+#include "jellyfin_api.h"   // g_auth_expired — the XMB leaves when it is set
 
 extern void crash_log(const char *msg);
 
@@ -283,6 +285,15 @@ void ui_run_xmb(void) {
     // doesn't grow unbounded once the UI is actually running.
     bool first_iter = true;
     while (running) {
+        // The server revoked this device's token (http.cpp saw a 401 on a
+        // request that carried it).  Every fetch from here on returns nothing,
+        // so the XMB would just sit there looking like an empty library —
+        // leave, and let main() send the user back to the login screen.
+        if (g_auth_expired) {
+            crash_log("13.x auth expired, leaving XMB");
+            plog("xmb: session revoked by server, returning to login");
+            return;
+        }
         if (first_iter) crash_log("13.5a waitflip");
         waitflip();
         if (first_iter) crash_log("13.5b syscb");

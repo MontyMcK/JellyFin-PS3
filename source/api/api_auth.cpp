@@ -61,7 +61,12 @@ int load_config(void) {
 void jellyfin_logout(void) {
     // Best-effort: tell the server to invalidate this access token.  Ignore the
     // result — we clear local state regardless so the user is always logged out.
-    if (g_server[0] && g_token[0]) {
+    //
+    // Skipped when the token is ALREADY known dead (g_auth_expired): the server
+    // has revoked it, so the call can only fail, and logging out is exactly the
+    // moment the user is least able to wait for a network round trip that
+    // cannot succeed.
+    if (g_server[0] && g_token[0] && !g_auth_expired) {
         char url[512];
         snprintf(url, sizeof(url), "%s/Sessions/Logout", g_server);
         http_request(1, url, "{}", g_token, responseBuffer, RESPONSE_SIZE);
@@ -75,6 +80,46 @@ void jellyfin_logout(void) {
 
     // Remove the saved config so a restart does not auto-login.
     remove(jf_data_path("jellyfin_config.txt"));
+
+    // The dead-token flag belongs to the session that just ended; leaving it
+    // set would send the NEXT login straight back to the login screen.
+    g_auth_expired = false;
+}
+
+// The saved session is dead server-side (a 401 came back on a request that
+// carried our token — http.cpp sets g_auth_expired).  Jellyfin revokes a
+// device's token whenever the same DeviceId authenticates again, so this
+// happens for ordinary reasons: signing in from another client that reuses
+// the id, a server restore, an admin revoking sessions.
+//
+// Until now nothing consumed that flag, and the symptom was silent and
+// baffling: every API call 401s, so the library comes back EMPTY while the
+// same account on a PC shows everything, and no amount of navigating helps
+// because the app never re-authenticates.  Treat it as what it is — a logged
+// out session — and send the user back to the login screen.
+void jellyfin_session_expired(void) {
+    g_auth_expired = false;
+    g_token[0]  = '\0';
+    g_userid[0] = '\0';
+    remove(jf_data_path("jellyfin_config.txt"));
+
+    drawHeader();
+    drawTTF(40, 96,  "Session expired", 20, XMB_TEXT);
+    drawTTF(40, 128,
+            "The server rejected this device's saved login, so the library "
+            "could not be read.", 14, XMB_TEXT_DIM);
+    drawTTF(40, 152,
+            "This usually means another client signed in and took over the "
+            "session.", 14, XMB_TEXT_DIM);
+    drawTTF(40, 188, "X: sign in again", 16, XMB_ACCENT);
+    flip();
+
+    init_btns();
+    while (running) {
+        sysUtilCheckCallback();
+        poll_buttons();
+        if (BTN_PRESSED(cross) || BTN_PRESSED(circle)) return;
+    }
 }
 
 static void trim(char *s) {
