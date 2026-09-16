@@ -238,15 +238,24 @@ static void source_tag_video(char *label, int cap, const char *video) {
         break;
     }
 
-    // Codec: HEVC/H.265 is the expensive one to transcode.  H.264 sources are
-    // often named "x264"/"H.264"/"AVC" — all the same codec — so treat any of
-    // those spellings as already said.
-    if (contains_ci(video, "HEVC") || contains_ci(video, "H265") ||
-        contains_ci(video, "H.265") || contains_ci(video, "X265")) {
+    // Codec.  The PS3's own decoder handles H.264/AVC (the two names are the
+    // same codec) and nothing newer — no HEVC, no AV1.  That is not what
+    // decides whether a source plays here, because the server always
+    // transcodes video to H.264 for this client, but it decides how HARD the
+    // server has to work: re-encoding 4K HEVC or AV1 in real time is what
+    // produces stalls and the two-minute "connection failed".  So name the
+    // codec when the release name does not.
+    //
+    // H.264 sources are named "x264", "H.264" or "AVC" interchangeably; any
+    // of those counts as already said.
+    if (contains_ci(video, "AV1")) {
+        if (!contains_ci(label, "AV1")) label_append(label, cap, "AV1");
+    } else if (contains_ci(video, "HEVC") || contains_ci(video, "H265") ||
+               contains_ci(video, "H.265") || contains_ci(video, "X265")) {
         if (!contains_ci(label, "265") && !contains_ci(label, "HEVC"))
             label_append(label, cap, "HEVC");
     } else if (contains_ci(video, "H264") || contains_ci(video, "H.264") ||
-               contains_ci(video, "AVC")) {
+               contains_ci(video, "AVC") || contains_ci(video, "X264")) {
         if (!contains_ci(label, "264") && !contains_ci(label, "AVC"))
             label_append(label, cap, "H.264");
     }
