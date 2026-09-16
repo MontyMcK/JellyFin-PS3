@@ -14,13 +14,15 @@ include $(PSL1GHT)/ppu_rules
 #---------------------------------------------------------------------------
 TARGET      := $(notdir $(CURDIR))
 BUILD       := obj
-SOURCES     := source source/audio source/audio/a52 source/gfx source/net source/api \
+SOURCES     := source source/audio source/audio/a52 source/audio/dca \
+               source/gfx source/net source/api \
                source/player source/player/core source/player/hud source/player/gpu \
                source/player/threads source/player/stream \
                source/ui source/ui/input source/ui/osk source/ui/xmb source/ui/render \
                source/util source/cache source/video source/music
 DATA        := data
-INCLUDES    := source/audio source/gfx source/net source/api \
+INCLUDES    := source/audio source/audio/mlp/ff source/audio/mlp/ff/libavcodec \
+               source/gfx source/net source/api \
                source/player source/player/hud source/player/gpu source/player/stream \
                source/ui source/ui/render source/ui/fonts \
                source/util source/cache source/video source/music
@@ -41,6 +43,15 @@ LDFLAGS     := $(MACHDEP) -Wl,-Map,$(notdir $@).map
 # file is untouched upstream source (see a52/PROVENANCE.md); silence that one
 # warning for that one object instead of editing the vendored code.
 imdct.o: CFLAGS += -Wno-array-bounds
+
+# Vendored FFmpeg MLP/TrueHD decoder (source/audio/mlp): mlp_api.c compiles the
+# whole upstream decoder as one translation unit (see mlp/PROVENANCE.md), and
+# upstream mlpdec.c has an `if` without braces that GCC flags.  Untouched
+# upstream source, so silence that one warning for that one object rather than
+# editing the vendored code — same treatment as liba52's imdct.c above.
+# The vendored directory is NOT in SOURCES; only its headers are on the
+# include path, which is why it needs no -I of its own here.
+mlp_api.o: CFLAGS += -Wno-dangling-else
 
 LIBS        := -lvdec -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm \
                -lnet -lsysmodule -lssl -lhttp -lhttputil

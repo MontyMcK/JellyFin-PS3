@@ -19,6 +19,8 @@
 #include "stream.h"
 #include "audio.h"
 #include "adec.h"
+#include "adec_dts.h"
+#include "adec_truehd.h"
 #include "video.h"
 #include "timing.h"
 #include "player.h"
@@ -275,6 +277,9 @@ void show_player(const JFItem *item, u32 resume_secs,
 
     crash_log("p4 audio_open begin");
     plog("show_player: audio_open");
+    // A new title gets a fresh shot at DTS: any session veto from the
+    // previous one (a coreless track, below) does not carry over.
+    surround_hd_session_reset();
     audio_open(surround_enabled() ? 8 : 2);
     adec_init();
     adec_start();
@@ -493,6 +498,25 @@ void show_player(const JFItem *item, u32 resume_secs,
         // AUDIO / CC popup menus; a track change comes back as a 0-delta
         // HUD_ACTION_SEEK — the reopen applies the new track.
         act = player_handle_menu_action(&ps, act);
+
+        // HD mode, undecodable copied track: either a DTS-HD MA / DTS:X track
+        // with no backward-compatible core (legal, and nothing on this
+        // platform decodes the extension substreams), or a TrueHD track the
+        // decoder cannot make sense of at all.  Either way no audio is coming
+        // out.  Veto the copy path for the rest of the session and reopen at
+        // the current position — the same 0-delta reopen a track change uses
+        // — which re-negotiates the stream as an AC-3 5.1 transcode.  Silence
+        // is not an acceptable resting state.
+        if (act == HUD_ACTION_NONE && surround_hd_preferred() &&
+            (adec_dts_no_core() || adec_truehd_no_audio())) {
+            const bool dts = adec_dts_no_core();
+            plog(dts ? "dts: no core substream in this track, falling back to AC-3"
+                     : "truehd: no decodable audio in this track, falling back to AC-3");
+            slog_state("HD_UNDECODABLE codec=%s fallback=ac3",
+                       dts ? "dts" : "truehd");
+            surround_hd_session_disable();
+            act = HUD_ACTION_SEEK;      // 0-delta reopen applies the fallback
+        }
 
         // R2/L2 tap/hold machine + commit gate.
         act = player_seek_input_update(&ps, act);

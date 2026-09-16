@@ -13,6 +13,7 @@
 #include "plog.h"
 #include "hd1080.h"
 #include "surround.h"
+#include "track_codec.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "rsxutil.h"
@@ -104,6 +105,54 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     const char *acodec   = surround ? "ac3"    : "mp3";
     unsigned    abitrate = surround ? 640000u  : 192000u;
     int         achans   = surround ? 6        : 2;
+    // Surround "HD" mode: ask the server to STREAM-COPY the source's own HD
+    // audio track instead of transcoding it.  Copy is the only way either of
+    // these formats ever arrives — Jellyfin will not transcode TO them
+    // (ffmpeg's dca encoder is experimental and its truehd encoder tops out
+    // at 5.1) — and it is also the whole point:
+    //   * a DTS-HD MA / DTS:X track copied intact still carries the 5.1 core
+    //     this app decodes, at up to 1509 kbps;
+    //   * a TrueHD / Atmos track copied intact decodes here LOSSLESSLY, to
+    //     5.1 or 7.1.
+    // Either way there is no audio transcode on the server at all.
+    //
+    // Only asked for when the SELECTED track really is one of those (its
+    // label says so).  On any other track — including Dolby Digital Plus,
+    // which nothing here decodes — the request is the plain AC-3 one, which
+    // is why HD mode never plays worse than AC-3 mode.  Four knobs differ
+    // from the AC-3 request and all of them matter:
+    //   * AllowAudioStreamCopy=true — without it the server transcodes and
+    //     the "dts"/"truehd" preference lands on an encoder we do not want.
+    //   * no AudioBitrate — Jellyfin checks the requested audio bitrate
+    //     before allowing a copy, and a 1509 kbps DTS core (let alone a
+    //     multi-Mbps TrueHD stream) fails a 640 kbps ceiling, silently
+    //     demoting us to a transcode.
+    //   * MaxAudioChannels=8, not 6 — DTS-HD MA, DTS:X and TrueHD tracks are
+    //     routinely 7.1, and a 6-channel ceiling would refuse to copy them.
+    //     Copying them is right: TrueHD then plays as a real 7.1 program, and
+    //     what this app decodes out of a DTS-HD track is its 5.1 core either
+    //     way.
+    //   * ac3 is listed FIRST even though the HD codec is the one being asked
+    //     for.  Copy eligibility only asks whether the source codec appears
+    //     in the list; the order decides what an actual transcode would
+    //     encode to, and that must be ac3.
+    const char *hd_codec = NULL;
+    if (surround && surround_hd_preferred() && ps->cur_audio >= 0) {
+        const char *label = ps->tracks.audio[ps->cur_audio].label;
+        if      (track_label_is_dts(label))    hd_codec = "dts";
+        else if (track_label_is_truehd(label)) hd_codec = "truehd";
+    }
+    char aparams[128];
+    if (hd_codec) {
+        snprintf(aparams, sizeof(aparams),
+                 "&AudioCodec=ac3,%s,mp3&AudioSampleRate=48000"
+                 "&MaxAudioChannels=8", hd_codec);
+    } else {
+        snprintf(aparams, sizeof(aparams),
+                 "&AudioCodec=%s&AudioBitrate=%u&AudioSampleRate=48000"
+                 "&MaxAudioChannels=%d", acodec, abitrate, achans);
+    }
+    const char *copy_audio = hd_codec ? "true" : "false";
     const JFMediaSource *source = player_current_source(ps);
     const char *source_id = (source && source->id[0]) ? source->id : ps->item->id;
     char encoded_source[288];
@@ -115,15 +164,14 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
         "&Level=%s"
         "&MaxWidth=%u&MaxHeight=%u"
         "&VideoBitrate=%u"
-        "&AudioCodec=%s&AudioBitrate=%u&AudioSampleRate=48000"
-        "&MaxAudioChannels=%d"
+        "%s"
         "&MaxFramerate=30"
-        "&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false"
+        "&AllowVideoStreamCopy=false&AllowAudioStreamCopy=%s"
         "&DeviceId=%s&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",
         g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vbitrate,
-        acodec, abitrate, achans,
+        aparams, copy_audio,
         jf_device_id(), encoded_source, (unsigned long long)start_ticks);
     if (source && source->live_stream_id[0] && n > 0 && n < url_sz) {
         char encoded_live[288];

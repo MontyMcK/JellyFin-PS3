@@ -17,6 +17,7 @@
 #include <rsx/gcm_sys.h>
 
 #include "adec.h"        // PCM_RING_HIGHWATER, adec_get_codec/adec_output_channels
+#include "adec_dts.h"    // adec_dts_saw_extension() — "dts" vs "dts-hd" tag
 #include "audio.h"       // audio_output_channels — negotiated program width
 #include "meminfo.h"     // meminfo_get
 #include "player_rsx.h"  // rsx_draw_overlay_quad
@@ -494,13 +495,22 @@ static void stats_compose(const PlayerStats *s) {
     y += ST_LINE;
 
     // ---- audio ----
-    // Codec + channels prefix is the surround 5.1 (Alpha) diagnostic: what
-    // the PMT actually selected (ac3/mp3, 6ch/2ch) vs the port that opened
-    // (6 = 5.1 program in an 8ch port).  "ac3 6/6" is the fully working 5.1
-    // path; "ac3 2/2" is liba52's stereo downmix (8ch port unavailable);
-    // "mp3 2/2" with surround ON means the server refused AC-3.
+    // Codec + channels prefix is the surround diagnostic: what the PMT
+    // actually selected (ac3/dts/truehd/mp3) and how wide the decoder is
+    // running, against the port's capacity (8 for the surround port).
+    // "ac3 6/8" is the fully working 5.1 path; "ac3 2/2" is liba52's stereo
+    // downmix (8ch port unavailable); "mp3 2/2" with surround ON means the
+    // server refused the surround codec.  "dts-hd 6/8" means a DTS-HD MA /
+    // DTS:X track played from its core (extension substreams present and
+    // skipped); plain "dts 6/8" is a core-only DTS track.  "truehd 8/8" is a
+    // lossless 7.1 TrueHD/Atmos bed, "truehd 6/8" a 5.1 one.
+    const char *codec_tag = "mp3";
+    if (adec_get_codec() == ADEC_CODEC_AC3)      codec_tag = "ac3";
+    else if (adec_get_codec() == ADEC_CODEC_DTS) codec_tag = adec_dts_saw_extension()
+                                                            ? "dts-hd" : "dts";
+    else if (adec_get_codec() == ADEC_CODEC_TRUEHD) codec_tag = "truehd";
     snprintf(v, sizeof(v), "%s %d/%d  pcm %.0f%%  dma %.0f%%",
-             adec_get_codec() == ADEC_CODEC_AC3 ? "ac3" : "mp3",
+             codec_tag,
              adec_output_channels(), audio_output_channels(),
              (double)s->pcm_ring_pct, (double)s->dma_ring_pct);
     stat_line(y, "aud buf", v,

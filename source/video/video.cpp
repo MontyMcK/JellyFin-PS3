@@ -46,11 +46,14 @@ bool video_feed_ts(const u8 *pkt) {
     }
     // Route the PES queue to the decoder the PMT selected, BEFORE the first
     // audio PES is pushed.  The selection is runtime data, not a compile
-    // flag: a server that refuses AC-3 and sends MP3 lands here with
+    // flag: a server that refuses DTS or AC-3 and sends MP3 lands here with
     // TS_AUDIO_MP3 and plays stereo exactly as shipped.
     if (s_ts.audio_pid && s_codec_applied != s_ts.audio_codec) {
-        adec_set_codec(s_ts.audio_codec == TS_AUDIO_AC3 ? ADEC_CODEC_AC3
-                                                        : ADEC_CODEC_MP3);
+        adec_codec_t want = ADEC_CODEC_MP3;
+        if (s_ts.audio_codec == TS_AUDIO_AC3)         want = ADEC_CODEC_AC3;
+        else if (s_ts.audio_codec == TS_AUDIO_DTS)    want = ADEC_CODEC_DTS;
+        else if (s_ts.audio_codec == TS_AUDIO_TRUEHD) want = ADEC_CODEC_TRUEHD;
+        adec_set_codec(want);
         s_codec_applied = s_ts.audio_codec;
     }
 

@@ -4,6 +4,13 @@ Status: **implemented on branch `surround-5.1`** (design approved 2026-08-12;
 see §11 for implementation/verification results). Feature default **OFF**;
 with it off, every code path is the shipped stereo path.
 
+Extended since by [dts-hd.md](dts-hd.md) and [dolby-truehd.md](dolby-truehd.md),
+which add a third setting state ("HD") that plays a source's own HD audio track
+— DTS/DTS-HD/DTS:X from its core, TrueHD/Atmos losslessly — stream-copied by
+the server, into the same output stage this document describes.  The AC-3 path
+below is unchanged by them; the 5.1-only assumptions are, since a TrueHD 7.1
+track fills all eight port slots (dolby-truehd.md §3).
+
 ## 1. Summary
 
 Add an opt-in "Surround (5.1)" mode to video playback: the server transcodes

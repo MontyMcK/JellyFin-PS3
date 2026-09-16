@@ -411,8 +411,11 @@ bool jellyfin_get_playback_info(const char *item_id,
     const bool hd = hd1080_enabled();
     // Surround 5.1 (Alpha): same story for audio — the profile must advertise
     // AC-3 and 6 channels or the server silently downgrades to stereo MP3.
-    // Gated — OFF sends the exact shipped stereo blobs.
+    // Gated — OFF sends the exact shipped stereo blobs.  In "DTS" mode the
+    // profile additionally advertises dts, which is what lets the server
+    // stream-copy a DTS / DTS-HD / DTS:X track (see the body_*_dts blobs).
     const bool surround = surround_enabled();
+    const bool hd_pref = surround_hd_preferred();
 
     char source_param[320] = "";
     if (media_source_id && media_source_id[0]) {
@@ -673,8 +676,165 @@ bool jellyfin_get_playback_info(const char *item_id,
           "]"
         "}}";
 
-    const char *body = surround ? (hd ? body_hd_51 : body_sd_51)
-                                : (hd ? body_hd    : body_sd);
+    // Surround "HD" mode blobs: byte-identical to body_sd_51/body_hd_51
+    // except that the profile also ADVERTISES dts and truehd, which is what
+    // makes the server willing to stream-COPY a DTS / DTS-HD MA / DTS:X or a
+    // TrueHD / Atmos track instead of transcoding it (docs/dts-hd.md §5,
+    // docs/dolby-truehd.md §4).  Two deliberate details:
+    //   * the HD codecs are listed LAST in the transcoding AudioCodec list.
+    //     Copy eligibility only asks whether the codec is in the list, but if
+    //     the server does decide to transcode, first-listed is what it reaches
+    //     for — and ac3 is the one that must win there: ffmpeg's dts
+    //     ENcoder is experimental and its truehd encoder cannot do 7.1.
+    //   * the channel ceiling is 8, not 6 — both in the HD CodecProfile and
+    //     in the transcoding profile.  DTS-HD MA, DTS:X and TrueHD tracks are
+    //     routinely 7.1, and a 6-channel ceiling would refuse to copy them;
+    //     copying them is right, because TrueHD then plays as a real 7.1
+    //     program and what this app decodes out of a DTS-HD track is its 5.1
+    //     core whatever the extension carries.  The stream URL raises its own
+    //     MaxAudioChannels to match (player_session.cpp).
+    static const char body_sd_hd[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":8000000,"
+          "\"MaxStaticBitrate\":8000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3,dts,truehd\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"8\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"31\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1280\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"720\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"4000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"dts,truehd\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"8\",\"IsRequired\":false}"
+            "]"
+          "},{"
+          "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    static const char body_hd_hd[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":10000000,"
+          "\"MaxStaticBitrate\":10000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3,dts,truehd\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"8\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"high|main|baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"42\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1920\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"1080\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"10000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"dts,truehd\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"8\",\"IsRequired\":false}"
+            "]"
+          "},{"
+          "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    const char *body;
+    if (surround && hd_pref) body = hd ? body_hd_hd : body_sd_hd;
+    else if (surround)        body = hd ? body_hd_51  : body_sd_51;
+    else                      body = hd ? body_hd     : body_sd;
 
     int status = http_request(1, url, body, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) {

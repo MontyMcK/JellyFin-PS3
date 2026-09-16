@@ -15,8 +15,35 @@
                                 // an AC-3 descriptor in the ES info loop
 #define TS_STREAM_EAC3   0x87   // ATSC E-AC-3 — NOT decodable here (liba52
                                 // is AC-3 only); recognised only to log it
-#define TS_DESC_REG      0x05   // registration descriptor ('AC-3' format id)
-#define TS_DESC_DVB_AC3  0x6A   // DVB AC-3 descriptor (ETSI EN 300 468 D.3)
+// DTS stream types.  ffmpeg's mpegts muxer — which is what Jellyfin runs —
+// writes 0x82 for AV_CODEC_ID_DTS regardless of whether the copied track is
+// plain DTS, DTS-HD HRA, DTS-HD MA or DTS:X (libavformat/mpegtsenc.c,
+// get_dvb_stream_type(): `case AV_CODEC_ID_DTS: stream_type =
+// STREAM_TYPE_BLURAY_AUDIO_DTS`).  The others appear in Blu-ray-derived
+// streams and in ffmpeg's m2ts mode (mpegts.h:160-167,
+// get_m2ts_stream_type()), and all of them carry a DTS core, so accept them
+// too rather than fall back to silence on a stream we can actually play.
+#define TS_STREAM_DTS     0x82  // DTS (what stream.ts actually carries)
+#define TS_STREAM_DTS_HRA 0x85  // DTS-HD High Resolution Audio
+#define TS_STREAM_DTS_MA  0x86  // DTS-HD Master Audio
+#define TS_STREAM_DTS_HD  0x8A  // DTS-HD (mpegts.c:883 maps it to AV_CODEC_ID_DTS)
+// Dolby TrueHD (and the TrueHD substream of a Dolby Atmos track).  ffmpeg's
+// mpegts muxer writes 0x83 for AV_CODEC_ID_TRUEHD in both its DVB and m2ts
+// paths (mpegtsenc.c get_dvb_stream_type()/get_m2ts_stream_type(),
+// STREAM_TYPE_BLURAY_AUDIO_TRUEHD in mpegts.h).
+#define TS_STREAM_TRUEHD  0x83
+#define TS_DESC_REG       0x05  // registration descriptor ('AC-3'/'DTS1' format id)
+#define TS_DESC_DVB_AC3   0x6A  // DVB AC-3 descriptor (ETSI EN 300 468 D.3)
+#define TS_DESC_DVB_DTS   0x7B  // DVB DTS descriptor (ETSI EN 300 468 D.5);
+                                // ffmpeg's demuxer keys on the same tag
+                                // (mpegts.c:226 DTS_DESCRIPTOR, :925)
+
+// Registration descriptor format identifier, as a 4-char compare.
+static bool desc_is_reg(const u8 *desc, int pos, u8 dlen, const char *tag) {
+    return desc[pos] == TS_DESC_REG && dlen >= 4 &&
+           desc[pos+2] == (u8)tag[0] && desc[pos+3] == (u8)tag[1] &&
+           desc[pos+4] == (u8)tag[2] && desc[pos+5] == (u8)tag[3];
+}
 
 // True if the ES descriptor loop marks this PID as AC-3: either a DVB AC-3
 // descriptor (0x6A) or a registration descriptor with format 'AC-3'.
@@ -27,9 +54,29 @@ static bool es_info_has_ac3(const u8 *desc, int len) {
         u8 dlen = desc[pos + 1];
         if (pos + 2 + dlen > len) break;
         if (tag == TS_DESC_DVB_AC3) return true;
-        if (tag == TS_DESC_REG && dlen >= 4 &&
-            desc[pos+2] == 'A' && desc[pos+3] == 'C' &&
-            desc[pos+4] == '-' && desc[pos+5] == '3') return true;
+        if (desc_is_reg(desc, pos, dlen, "AC-3")) return true;
+        pos += 2 + dlen;
+    }
+    return false;
+}
+
+// Same for DTS: a DVB DTS descriptor (0x7B) or a registration descriptor with
+// one of the DTS format ids.  'DTS1'/'DTS2'/'DTS3' are the ones ffmpeg's
+// demuxer recognises (libavformat/mpegts.c:901-903); 'DTSH' and 'DTSE' appear
+// on DTS-HD and DTS Express tracks from other muxers.  All of them carry a
+// decodable core, so they select the same path.
+static bool es_info_has_dts(const u8 *desc, int len) {
+    int pos = 0;
+    while (pos + 2 <= len) {
+        u8 tag  = desc[pos];
+        u8 dlen = desc[pos + 1];
+        if (pos + 2 + dlen > len) break;
+        if (tag == TS_DESC_DVB_DTS) return true;
+        if (desc_is_reg(desc, pos, dlen, "DTS1") ||
+            desc_is_reg(desc, pos, dlen, "DTS2") ||
+            desc_is_reg(desc, pos, dlen, "DTS3") ||
+            desc_is_reg(desc, pos, dlen, "DTSH") ||
+            desc_is_reg(desc, pos, dlen, "DTSE")) return true;
         pos += 2 + dlen;
     }
     return false;
@@ -67,7 +114,9 @@ static void ts_parse_pmt(TSState *ts, const u8 *data, int len) {
             // mismatch shows up in player_log.txt instead of as silence.
             if (stype == TS_STREAM_MP3 || stype == TS_STREAM_MP3_2 ||
                 stype == TS_STREAM_AC3 || stype == TS_STREAM_PRIV ||
-                stype == TS_STREAM_EAC3) {
+                stype == TS_STREAM_EAC3 || stype == TS_STREAM_DTS ||
+                stype == TS_STREAM_DTS_HRA || stype == TS_STREAM_DTS_MA ||
+                stype == TS_STREAM_DTS_HD || stype == TS_STREAM_TRUEHD) {
                 char b[64];
                 snprintf(b, sizeof(b), "pmt_audio: stype=0x%02x pid=0x%x",
                          stype, epid);
@@ -79,10 +128,21 @@ static void ts_parse_pmt(TSState *ts, const u8 *data, int len) {
             } else if (stype == TS_STREAM_AC3) {
                 ts->audio_pid   = epid;
                 ts->audio_codec = TS_AUDIO_AC3;
+            } else if (stype == TS_STREAM_DTS || stype == TS_STREAM_DTS_HRA ||
+                       stype == TS_STREAM_DTS_MA || stype == TS_STREAM_DTS_HD) {
+                ts->audio_pid   = epid;
+                ts->audio_codec = TS_AUDIO_DTS;
+            } else if (stype == TS_STREAM_TRUEHD) {
+                ts->audio_pid   = epid;
+                ts->audio_codec = TS_AUDIO_TRUEHD;
             } else if (stype == TS_STREAM_PRIV && pos + 5 + esinfo <= end &&
                        es_info_has_ac3(data + pos + 5, esinfo)) {
                 ts->audio_pid   = epid;
                 ts->audio_codec = TS_AUDIO_AC3;
+            } else if (stype == TS_STREAM_PRIV && pos + 5 + esinfo <= end &&
+                       es_info_has_dts(data + pos + 5, esinfo)) {
+                ts->audio_pid   = epid;
+                ts->audio_codec = TS_AUDIO_DTS;
             }
             // E-AC-3 (0x87) is deliberately NOT selected: liba52 cannot
             // decode it and the device profile never requests it.  The log
