@@ -15,6 +15,7 @@
 // 6/7 silent; stereo fills 0/1.
 
 #include <stdint.h>
+#include <stddef.h>   /* size_t — newlib's stdint.h does not pull it in */
 
 #ifdef __cplusplus
 extern "C" {
