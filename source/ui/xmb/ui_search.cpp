@@ -7,6 +7,23 @@
 #include "jellyfin_api.h"
 #include "player.h"
 #include "plog.h"
+#include "timing.h"
+
+// Search is a BLOCKING http_request on the UI thread, and it used to run on
+// every single keystroke: type "matrix" and that is six round trips, each one
+// freezing the OSK until the server answers.  On top of feeling broken, the
+// one-and-two-character queries in that sequence are the worst ones to send —
+// Jellyfin matches them loosely, so results appeared, vanished and reappeared
+// as the term grew, which is the "sometimes results, sometimes none" part.
+//
+// So: wait until typing PAUSES, then send one query, and never send a term
+// too short to mean anything.  The pause is checked in the per-frame input
+// handler, which is already called every frame.
+#define SEARCH_DEBOUNCE_US 450000   // typing pause before the query fires
+#define SEARCH_MIN_CHARS   2        // shorter terms are noise, not a search
+
+static u64  s_search_edit_us = 0;   // when the term last changed
+static bool s_search_pending = false;
 
 // Search OSK state
 const char *OSK_LETTERS[OSK_ROWS_N] = {
@@ -216,8 +233,25 @@ bool xmb_handle_input_search(void) {
 
     if (strcmp(prev_buf, g_search_buf) != 0) {
         if (g_search_buf[0]) {
+            // Queue it; the query goes out once typing stops (see the note at
+            // the top of this file).
+            s_search_pending = true;
+            s_search_edit_us = timing_get_us();
+        } else {
+            s_search_pending       = false;
+            g_search_results_count = 0;
+            g_search_focus_results = false;
+        }
+    }
+
+    if (s_search_pending &&
+        timing_get_us() - s_search_edit_us >= SEARCH_DEBOUNCE_US) {
+        s_search_pending = false;
+        if ((int)strlen(g_search_buf) >= SEARCH_MIN_CHARS) {
             xmb_do_search();
         } else {
+            // Too short to search on: show nothing rather than whatever a
+            // one-letter query happens to match.
             g_search_results_count = 0;
             g_search_focus_results = false;
         }

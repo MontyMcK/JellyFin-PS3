@@ -10,6 +10,8 @@
 #include "ui_internal.h"
 #include "ui_wave.h"
 #include "jellyfin_api.h"
+#include "vquality.h"
+#include "hd1080.h"
 #include "rsxutil.h"
 #include "timing.h"
 #include "plog.h"
@@ -219,7 +221,7 @@ void xmb_show_item_info(const XMBItem *root) {
     // Focus moves between the Play button and the More Like This row, which is
     // what Cross acts on.  (Gating this on "is the row visible" made Cross mean
     // Open even at the top of the page, so Play could never be pressed.)
-    enum { FOCUS_PLAY = 0, FOCUS_VERSION = 1, FOCUS_SIM = 2 };
+    enum { FOCUS_PLAY = 0, FOCUS_VERSION = 1, FOCUS_QUALITY = 2, FOCUS_SIM = 3 };
     int focus = FOCUS_PLAY;
     int sim_sel = 0, sim_row_scroll = 0;
 
@@ -274,20 +276,26 @@ void xmb_show_item_info(const XMBItem *root) {
             // Up/down move focus AND jump the page: down drops from the Play
             // button to the recommendations at the bottom, up returns to Play
             // at the top — one press each way.
+            // Row order down the page: Play, Version (only when there is a
+            // real choice), Quality (always), then the recommendations.
             if (BTN_PRESSED(down)) {
                 if (focus == FOCUS_PLAY && versions.n_sources > 1) {
                     focus = FOCUS_VERSION;
                     scroll_y = 0;
-                } else if ((focus == FOCUS_PLAY || focus == FOCUS_VERSION) &&
-                           n_similar > 0) {
+                } else if (focus == FOCUS_PLAY || focus == FOCUS_VERSION) {
+                    focus = FOCUS_QUALITY;
+                    scroll_y = 0;
+                } else if (focus == FOCUS_QUALITY && n_similar > 0) {
                     focus = FOCUS_SIM;
                     scroll_y = max_scroll;
                 }
             }
             if (BTN_PRESSED(up)) {
-                if (focus == FOCUS_SIM && versions.n_sources > 1)
+                if (focus == FOCUS_SIM)
+                    focus = FOCUS_QUALITY;
+                else if (focus == FOCUS_QUALITY && versions.n_sources > 1)
                     focus = FOCUS_VERSION;
-                else if (focus == FOCUS_SIM || focus == FOCUS_VERSION)
+                else if (focus == FOCUS_QUALITY || focus == FOCUS_VERSION)
                     focus = FOCUS_PLAY;
                 scroll_y = 0;
             }
@@ -298,6 +306,11 @@ void xmb_show_item_info(const XMBItem *root) {
                 if (BTN_REPEAT(left) && version_sel > 0) version_sel--;
                 if (BTN_REPEAT(right) && version_sel < versions.n_sources - 1)
                     version_sel++;
+            } else if (focus == FOCUS_QUALITY) {
+                // Persisted immediately, so the choice carries to the next
+                // title the way the web player's quality dropdown does.
+                if (BTN_REPEAT(left))  vquality_next(-1);
+                if (BTN_REPEAT(right)) vquality_next(+1);
             }
             if (BTN_PRESSED(cross)) {
                 if (focus == FOCUS_SIM) {
@@ -315,6 +328,9 @@ void xmb_show_item_info(const XMBItem *root) {
                     exit_armed = false;
                     init_btns();
                     info_skip_frame();
+                    continue;
+                } else if (focus == FOCUS_QUALITY) {
+                    vquality_next(+1);   // X steps it, same as Right
                     continue;
                 } else {
                     // Play — same launch flow as the grid (resume prompt first).
@@ -468,6 +484,44 @@ void xmb_show_item_info(const XMBItem *root) {
                 Y += bh + 18;
             }
 
+            // Quality selector — always shown, because unlike Version it is
+            // always a real choice.  Left/Right (or X) step it; the value is
+            // persisted, so it applies to this title and the next one.
+            {
+                const int bh = 44;
+                const int bw = max_w > 680 ? 680 : max_w;
+                const bool qf = (focus == FOCUS_QUALITY);
+                drawRect((u32)tx, (u32)Y, (u32)bw, (u32)bh,
+                         qf ? XMB_PANEL_HI : XMB_PANEL);
+                if (qf) {
+                    drawRect((u32)(tx - 4), (u32)Y, 3, (u32)bh, XMB_ACCENT);
+                    drawRect((u32)(tx - 1), (u32)(Y - 1), (u32)(bw + 2), 1,
+                             XMB_HAIRLINE);
+                    drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + 2), 1,
+                             XMB_HAIRLINE);
+                }
+                drawTTF_vcentered((u32)(tx + 16), Y + bh / 2, "Quality", 16,
+                                  qf ? XMB_ACCENT : XMB_TEXT_FAINT, true);
+
+                // Spell out what the setting actually asks the server for —
+                // the resolution alone does not say how much bandwidth this
+                // costs, which is the reason to change it.
+                const vquality_t vq = vquality_get();
+                u32 qw = 0, qh = 0; unsigned qbr = 0;
+                vquality_params(vq, hd1080_enabled(), display_width,
+                                display_height, &qw, &qh, NULL, NULL, &qbr);
+                char qtxt[64];
+                if (vq == VQ_AUTO)
+                    snprintf(qtxt, sizeof(qtxt), "Auto  (%ux%u, %u Mbps)",
+                             (unsigned)qw, (unsigned)qh, qbr / 1000000u);
+                else
+                    snprintf(qtxt, sizeof(qtxt), "%s  (%u Mbps)",
+                             vquality_label(vq), qbr / 1000000u);
+                info_clip_text(tx + 118, Y + 11, qtxt, 18,
+                               qf ? XMB_WHITE : XMB_TEXT, bw - 166, qf);
+                Y += bh + 18;
+            }
+
             if (detail.tagline[0]) {
                 drawTTF((u32)tx, (u32)Y, detail.tagline, 20, 0x00AFA3E8UL);
                 Y += 38;
@@ -604,8 +658,9 @@ void xmb_show_item_info(const XMBItem *root) {
             h[nh].glyph = 'C'; h[nh].label = "Back";  nh++;
             if (max_scroll > 0) { h[nh].glyph = 'D'; h[nh].label = "Scroll"; nh++; }
             h[nh].glyph = 'X';
-            h[nh].label = (focus == FOCUS_SIM) ? "Open" :
-                          (focus == FOCUS_VERSION) ? "Choose version" : "Play";
+            h[nh].label = (focus == FOCUS_SIM)     ? "Open" :
+                          (focus == FOCUS_VERSION) ? "Choose version" :
+                          (focus == FOCUS_QUALITY) ? "Change quality" : "Play";
             nh++;
             draw_hints_bar(h, nh);
         }

@@ -15,6 +15,7 @@
 
 #include "plog.h"
 #include "hd1080.h"
+#include "vquality.h"
 #include "surround.h"
 #include "stream.h"
 #include "audio.h"
@@ -196,13 +197,12 @@ void show_player(const JFItem *item, u32 resume_secs,
     // the server for a full 1920×1080 High-profile transcode instead — flat,
     // not capped to the display mode, so the frame is decoded at full res and
     // downscaled at present.  Gated: OFF => the exact 720p ship path.
-    if (hd1080_enabled()) {
-        ps.req_w = 1920;
-        ps.req_h = 1080;
-    } else {
-        ps.req_w = display_width  < 1280 ? display_width  : 1280;
-        ps.req_h = display_height < 720  ? display_height : 720;
-    }
+    // The quality row on the info screen overrides both; at its default
+    // (Auto) vquality_params() resolves to exactly the two cases above, so
+    // an install that never touches it requests what it always did.
+    vquality_params(vquality_get(), hd1080_enabled(),
+                    display_width, display_height,
+                    &ps.req_w, &ps.req_h, NULL, NULL, NULL);
 
     if (!jellyfin_get_playback_info(item->id, media_source_id, ps.session_id,
                                     sizeof(ps.session_id), &ps.total_secs,

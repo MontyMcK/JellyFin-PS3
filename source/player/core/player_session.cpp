@@ -12,6 +12,7 @@
 #include "video.h"
 #include "plog.h"
 #include "hd1080.h"
+#include "vquality.h"
 #include "surround.h"
 #include "track_codec.h"
 #include "ui.h"
@@ -93,10 +94,16 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     // 1080p (Alpha): 1080p exceeds baseline/level-3.1, so ask for a High-profile
     // level-4.2 transcode at a higher ceiling bitrate.  Gated — OFF reproduces
     // the exact baseline/31/4Mbps query the 720p ship path sends.
-    const bool hd        = hd1080_enabled();
-    const char *profile  = hd ? "high" : "baseline";
-    const char *level    = hd ? "42"   : "31";
-    unsigned    vbitrate = hd ? 10000000u : 4000000u;
+    // Resolved through the quality row on the info screen; at its default
+    // (Auto) this is exactly the hd-toggle pair above it used to be.  Note
+    // req_w/req_h were resolved by the same call in player.cpp, so the URL
+    // and the jitter buffer cannot disagree about the frame size.
+    const bool  hd = hd1080_enabled();
+    const char *profile;
+    const char *level;
+    unsigned    vbitrate;
+    vquality_params(vquality_get(), hd, 0, 0, NULL, NULL,
+                    &profile, &level, &vbitrate);
     // Surround 5.1 (Alpha): request an AC-3 5.1 transcode at the standard DVD
     // rate.  Gated — OFF reproduces the exact stereo MP3 query the ship path
     // sends.  This builder is reused by every seek (player_seek.cpp), so the
