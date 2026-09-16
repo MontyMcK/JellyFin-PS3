@@ -231,6 +231,16 @@ int main(int argc, const char *argv[]) {
         // If the menu returned with no token, the user logged out. Keep the
         // server URL (jellyfin_logout preserves it) so the loop goes straight
         // back to the login screen rather than asking for the server again.
+        //
+        // It can also return because the server revoked the saved token
+        // mid-session, which looks like an empty library rather than an
+        // error; jellyfin_session_expired() explains that and clears the
+        // saved login so the loop below asks for credentials again.
+        if (g_auth_expired) {
+            crash_log("13z session expired");
+            slog_state("SESSION_EXPIRED");
+            jellyfin_session_expired();
+        }
     }
 
     crash_log("14 done");

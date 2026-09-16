@@ -160,6 +160,12 @@ void jellyfin_report_stopped(const char *item_id, const char *session_id,
 // is preserved so the user only needs to re-enter their credentials.
 void jellyfin_logout(void);
 
+// Handle a server-revoked session: clear the saved login, tell the user why,
+// and return so the caller can go back to the login screen.  Call it when
+// g_auth_expired is set — see the definition for why an unhandled one shows
+// up as an empty library rather than an error.
+void jellyfin_session_expired(void);
+
 // Screens (each blocks until the user navigates away)
 int  do_login(void);
 void show_library_browser(void);
