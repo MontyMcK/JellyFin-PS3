@@ -12,6 +12,14 @@ extern volatile bool g_stream_cancel;
 // Returns a connected socket fd on success, -1 on failure.
 int stream_open(const char *url);
 
+// Why the last stream_open() failed, in words fit for the error screen
+// ("Server returned HTTP 400", "Could not connect to 192.168.0.5:8096",
+// "Server did not respond in 120s").  "Stream connection failed" on its own
+// cannot tell a refused connection from a 400 caused by a bad MediaSourceId,
+// and those need completely different fixes.  Valid until the next
+// stream_open().
+const char *stream_last_error(void);
+
 // Read exactly 'size' bytes, transparently decoding chunked transfer encoding.
 // Fully resumable across calls — all state is in static storage.
 // Returns:  1 = success

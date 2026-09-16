@@ -164,11 +164,21 @@ void decode_thread_fn(void *arg) {
         }
 
         {
+            // Throttled: this loop spins every millisecond, so an unthrottled
+            // line here wrote thousands of log entries per stall — through the
+            // async log ring, on the thread that is trying to catch up, which
+            // made the stall it was reporting worse.  Once a second is plenty
+            // to see that the buffer is running dry.
+            static u64 jlow_last_us = 0;
             int q = jbuf_count();
             if (q < 4) {
-                char buf[32];
-                snprintf(buf, sizeof(buf), "jbuf_low: q=%d", q);
-                plog(buf);
+                u64 now_us = timing_get_us();
+                if (now_us - jlow_last_us >= 1000000ULL) {
+                    jlow_last_us = now_us;
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "jbuf_low: q=%d", q);
+                    plog(buf);
+                }
             }
         }
 

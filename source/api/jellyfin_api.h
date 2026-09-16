@@ -68,7 +68,7 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
 // Selectable media streams (audio tracks + subtitles)
 // -------------------------------------------------------
 #define JF_MAX_STREAMS 8
-#define JF_MAX_SOURCES 32
+#define JF_MAX_SOURCES 48
 
 typedef struct {
     int  index;       // Jellyfin MediaStream Index (for AudioStreamIndex= etc.)

@@ -36,6 +36,11 @@ static int  s_ctrail       = 0;
 static u8   s_carry[188];   // one TS packet — the only read size callers use
 static int  s_carry_n = 0;
 
+// Why the last stream_open() failed, for the error screen: "Stream connection
+// failed" alone cannot tell a refused connection from a server that answered
+// 400 because the MediaSourceId was wrong, and those need different fixes.
+static char s_last_error[64] = "";
+
 int stream_open(const char *url) {
     const char *p = url;
     if (strncmp(p, "http://", 7) == 0) p += 7;
@@ -60,6 +65,8 @@ int stream_open(const char *url) {
     addr.sin_addr.s_addr = htonl((na<<24)|(nb<<16)|(nc<<8)|nd);
 
     if (netConnect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        snprintf(s_last_error, sizeof(s_last_error),
+                 "Could not connect to %s:%d", host, port);
         netClose(sock); return -1;
     }
 
@@ -104,6 +111,8 @@ int stream_open(const char *url) {
         }
         if (n == 0) {
             plog("stream_open: closed before headers");
+            snprintf(s_last_error, sizeof(s_last_error),
+                     "Server closed the connection");
             netClose(sock); return -1;
         }
         // n < 0: receive timeout — the server hasn't started responding yet.
@@ -114,6 +123,11 @@ int stream_open(const char *url) {
         u64 now = timing_get_us();
         if (now - hdr_t0 >= STREAM_HDR_DEADLINE_US) {
             plog("stream_open: header timeout");
+            // Two minutes with no headers usually means the server is still
+            // grinding on the transcode — a 4K HEVC source re-encoded to
+            // H.264 is the classic case.
+            snprintf(s_last_error, sizeof(s_last_error),
+                     "Server did not respond in 120s (still transcoding?)");
             netClose(sock); return -1;
         }
         if (now - hdr_log_us >= 5000000ULL) {
@@ -142,9 +156,18 @@ int stream_open(const char *url) {
         snprintf(buf, sizeof(buf), "stream_open: status=%d chunked=%d", status, (int)s_chunked);
         plog(buf);
     }
-    if (status != 200) { netClose(sock); return -1; }
+    if (status != 200) {
+        snprintf(s_last_error, sizeof(s_last_error), "Server returned HTTP %d",
+                 status);
+        netClose(sock); return -1;
+    }
 
+    s_last_error[0] = '\0';
     return sock;
+}
+
+const char *stream_last_error(void) {
+    return s_last_error[0] ? s_last_error : "Could not reach the server";
 }
 
 // Stash the partial packet so the next call resumes instead of losing bytes.

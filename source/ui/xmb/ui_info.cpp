@@ -330,8 +330,12 @@ void xmb_show_item_info(const XMBItem *root) {
                     info_skip_frame();
                     continue;
                 } else if (focus == FOCUS_QUALITY) {
-                    vquality_next(+1);   // X steps it, same as Right
-                    continue;
+                    // X steps the value, same as Right.  Deliberately NO
+                    // `continue` here: this frame still has to reach its
+                    // flip() below, or waitflip() at the top of the next
+                    // iteration spins on a flip that was never queued and
+                    // the UI hangs (see info_skip_frame's note above).
+                    vquality_next(+1);
                 } else {
                     // Play — same launch flow as the grid (resume prompt first).
                     int resume = xmb_resume_choice(it);
