@@ -64,7 +64,11 @@ extern u32 running;
 // bounds; below the floor it is not worth the complexity, above the ceiling
 // it starves everything else.
 #define RING_BYTES_MIN  (2u  * 1024u * 1024u)
-#define RING_BYTES_MAX  (14u * 1024u * 1024u)
+#define RING_BYTES_MAX  (40u * 1024u * 1024u)
+// Raised from 14 MB.  A direct-played stream is 3-4x the bitrate of a
+// 10 Mbps transcode, so the old ceiling was barely two seconds of it.
+// The allocator halves down from the ask, so a heap that cannot manage
+// this simply gets a smaller ring rather than a failure.
 
 static u8 *s_ring     = NULL;   // cap * TS_PACKET_SIZE bytes
 static int s_ring_cap = 0;      // packets
