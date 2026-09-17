@@ -48,7 +48,13 @@ extern void crash_log(const char *msg);
 // DTS-HD MA frame at Blu-ray bitrates) is split across consecutive slots by
 // adec_push_pes() rather than dropped, so the slot size stays a memory
 // decision instead of a correctness one.
-#define PES_QUEUE_SLOTS 256
+// 512 slots since the decode thread gained a compressed read-ahead ring: it
+// now buffers seconds of video ahead of playback, and the audio interleaved
+// with those seconds lands here.  At AC-3's 640 kbps the old 256 slots were
+// ~25 s and ample; a stream-copied TrueHD track at ~4 Mbps filled them in
+// about four, and a full queue DROPS THE OLDEST PES, which is an audible
+// jump, not a stall.  512 slots is 4 MB and about eight seconds of HD audio.
+#define PES_QUEUE_SLOTS 512
 #define PES_SLOT_BYTES  8192
 
 // ---- Decoders + PCM ring ----
@@ -412,6 +418,14 @@ void adec_stop(void) {
 }
 
 int adec_pcm_available(void) { return s_n; }
+
+// Room left for more compressed audio.  The decode thread reads video far
+// ahead of playback now, and the audio interleaved with it has to fit HERE —
+// a full queue drops the oldest PES, which is an audible jump.  So the
+// read-ahead asks this before pulling more from the socket.
+bool adec_pes_queue_hungry(void) {
+    return s_pes_q_n < (PES_QUEUE_SLOTS * 3) / 4;
+}
 
 int adec_output_channels(void) { return s_ring_ch; }
 

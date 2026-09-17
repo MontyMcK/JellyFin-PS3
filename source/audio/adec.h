@@ -50,6 +50,11 @@ void adec_push_pes(const u8 *pes, int pes_len);
 // PCM frames currently available in the ring.
 int  adec_pcm_available(void);
 
+// False once the compressed-audio queue is 75% full: the decode thread stops
+// reading further ahead rather than overrun it (a full queue drops the oldest
+// PES, which is heard as a jump).
+bool adec_pes_queue_hungry(void);
+
 // Copy up to n_frames interleaved float32 frames into buf[].  Each frame is
 // adec_output_channels() floats wide.  Returns the number of frames written —
 // may be less than n_frames if the ring is empty.

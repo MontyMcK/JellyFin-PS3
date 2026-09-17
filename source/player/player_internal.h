@@ -166,6 +166,16 @@ void player_display_frame(PlayerState *ps);
 
 bool player_spawn_decode(PlayerState *ps);
 
+// Compressed read-ahead ring (player_threads.cpp).  Allocated per playback
+// from whatever memory is free and released on teardown; this is the buffer
+// that rides out a server delivering its transcode below real time, so a
+// bigger one is strictly better until it starves the rest of the app.
+// decode_ring_fill()/cap() are in PACKETS and drive the pre-roll wait.
+bool decode_ring_alloc(u32 want_bytes);
+void decode_ring_free(void);
+int  decode_ring_fill(void);
+int  decode_ring_cap(void);
+
 // -------------------------------------------------------
 // GPU blit state (defined in gpu/player_gpu.cpp)
 // -------------------------------------------------------

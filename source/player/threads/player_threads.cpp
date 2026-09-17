@@ -2,6 +2,7 @@
 // spawn helper shared by the initial open and the post-seek respawn.
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -26,48 +27,96 @@ extern u32 running;
 // -------------------------------------------------------
 
 // -------------------------------------------------------
-// Video hold-back ring
+// Compressed read-ahead ring
 // -------------------------------------------------------
 // The decode thread used to stop reading the socket entirely whenever the
 // jitter buffer was full:
 //
 //     if (jbuf_count() >= jbuf_cap()) { usleep(1000); continue; }
 //
-// Audio arrives interleaved in that same transport stream, so this capped the
-// audio read-ahead at whatever was interleaved among the buffered video
-// frames — about half a second — no matter how much room the PCM ring had.
-// Measured on hardware: the PCM ring sat at 1% of its one-second target for
-// the whole run and the audio thread starved 175-359 times, on BOTH DTS and
-// TrueHD, i.e. the decoder was never behind on CPU, it was simply never given
-// the bytes.  HD audio made it worse for the obvious reason: a stream-copied
-// TrueHD track is several Mbps rather than AC-3's 640 kbps, so the same
-// half-second of runway carries far more data and any dip empties it.
+// That made the decoded-frame jitter buffer the ONLY shock absorber, and at
+// 1080p it holds sixteen frames — about half a second.  A server transcoding
+// a dense Blu-ray delivers unevenly: fine through dialogue, under real time
+// through a fast-cut action scene.  Half a second of runway does not survive
+// that, which is why a high-bitrate 1080p source stutters while a calm one at
+// the same resolution plays perfectly.  Audio had the same problem for the
+// same reason: it arrives interleaved in this stream, so it could never read
+// further ahead than the video buffer allowed.
 //
-// The fix keeps reading while the audio still wants data, feeds the audio
-// half immediately, and PARKS the video packets here in arrival order until
-// the jitter buffer drains.  Nothing reaches VDEC while the jitter buffer is
-// full — no submits, no pulls — so the decoder cannot back up; the only cost
-// is this buffer.  ~1 MB is roughly 0.8 s of 10 Mbps video, and reading stops
-// again once either it fills or the PCM ring reaches its high-water mark, so
-// the read-ahead stays bounded in both directions.
-#define VHOLD_PKTS 5576                      // * 188 B = ~1.0 MB
+// So the client now buffers COMPRESSED video here instead, and keeps reading
+// until this ring is full rather than until the jitter buffer is.  Audio and
+// PSI packets are fed the moment they arrive; video is queued in arrival
+// order and fed to VDEC as the jitter buffer drains.  Nothing reaches VDEC
+// while that buffer is full — no submits, no pulls — so the decoder cannot
+// back up.
+//
+// ---- Sizing ----
+//
+// The decoded-frame jitter buffer is the wrong place to absorb a server that
+// delivers unevenly, because a decoded 1080p frame is 3.13 MB: sixteen of them
+// is 50 MB and barely half a SECOND of runway, and there is no room on the
+// console for more.  The same memory spent on COMPRESSED data buys ~75x the
+// time — 12 MB of transport stream is about ten seconds at 10 Mbps.  So this
+// ring is the real shock absorber and the jitter buffer is left as the small
+// decode-ahead it always was.
+//
+// Allocated per playback from whatever is free (player.cpp), between these
+// bounds; below the floor it is not worth the complexity, above the ceiling
+// it starves everything else.
+#define RING_BYTES_MIN  (2u  * 1024u * 1024u)
+#define RING_BYTES_MAX  (14u * 1024u * 1024u)
 
-static u8  s_vhold[VHOLD_PKTS][TS_PACKET_SIZE];
-static int s_vhold_rd = 0, s_vhold_wr = 0, s_vhold_n = 0;
+static u8 *s_ring     = NULL;   // cap * TS_PACKET_SIZE bytes
+static int s_ring_cap = 0;      // packets
+static int s_ring_rd = 0, s_ring_wr = 0, s_ring_n = 0;
 
-static void vhold_reset(void) { s_vhold_rd = s_vhold_wr = s_vhold_n = 0; }
+static void ring_reset(void) { s_ring_rd = s_ring_wr = s_ring_n = 0; }
 
-static void vhold_push(const u8 *pkt) {
-    memcpy(s_vhold[s_vhold_wr], pkt, TS_PACKET_SIZE);
-    s_vhold_wr = (s_vhold_wr + 1) % VHOLD_PKTS;
-    s_vhold_n++;
+bool decode_ring_alloc(u32 want_bytes) {
+    decode_ring_free();
+    if (want_bytes < RING_BYTES_MIN) want_bytes = RING_BYTES_MIN;
+    if (want_bytes > RING_BYTES_MAX) want_bytes = RING_BYTES_MAX;
+    int cap = (int)(want_bytes / TS_PACKET_SIZE);
+    // Try the requested size, then halve down to the floor rather than fail
+    // playback outright over a buffer that is only ever an optimisation.
+    while (cap * TS_PACKET_SIZE >= (int)RING_BYTES_MIN) {
+        s_ring = (u8 *)malloc((size_t)cap * TS_PACKET_SIZE);
+        if (s_ring) {
+            s_ring_cap = cap;
+            ring_reset();
+            char b[80];
+            snprintf(b, sizeof(b), "ring: %d KB (%d packets)",
+                     cap * TS_PACKET_SIZE / 1024, cap);
+            plog(b);
+            return true;
+        }
+        cap /= 2;
+    }
+    plog("ring: allocation FAILED - playing without read-ahead");
+    s_ring_cap = 0;
+    return false;
+}
+
+void decode_ring_free(void) {
+    if (s_ring) { free(s_ring); s_ring = NULL; }
+    s_ring_cap = 0;
+    ring_reset();
+}
+
+int decode_ring_fill(void) { return s_ring_n; }
+int decode_ring_cap(void)  { return s_ring_cap; }
+
+static void ring_push(const u8 *pkt) {
+    memcpy(s_ring + (size_t)s_ring_wr * TS_PACKET_SIZE, pkt, TS_PACKET_SIZE);
+    s_ring_wr = (s_ring_wr + 1) % s_ring_cap;
+    s_ring_n++;
 }
 
 bool player_spawn_decode(PlayerState *ps) {
     if (!ps->playing) return false;
     // A seek respawns this thread with a flushed demux, so anything still
-    // parked belongs to the old position and must not be fed.
-    vhold_reset();
+    // buffered belongs to the old position and must not be fed.
+    ring_reset();
     ps->dec_ctx.playing     = &ps->playing;
     ps->dec_ctx.frame_count = &ps->frame_count;
     ps->dec_ctx.sock        = ps->sock;
@@ -106,30 +155,39 @@ void decode_thread_fn(void *arg) {
     int  hb_fr_last            = 0;
 
     while (running && *playing && *ctx->dec_run && !s_vdec_error) {
-        // Parked video first, in arrival order, while there is room for it.
-        while (s_vhold_n > 0 && jbuf_count() < jbuf_cap()) {
-            video_feed_ts(s_vhold[s_vhold_rd]);
-            s_vhold_rd = (s_vhold_rd + 1) % VHOLD_PKTS;
-            s_vhold_n--;
+        // Buffered video first, in arrival order, while there is room for it.
+        while (s_ring_n > 0 && jbuf_count() < jbuf_cap()) {
+            video_feed_ts(s_ring + (size_t)s_ring_rd * TS_PACKET_SIZE);
+            s_ring_rd = (s_ring_rd + 1) % s_ring_cap;
+            s_ring_n--;
         }
 
-        // Read ahead past a full jitter buffer only while the audio ring is
-        // still below the level the decoder targets, and only while there is
-        // somewhere to park the video that comes with it.  When neither holds,
-        // this is the original "stop reading" behaviour.
-        const bool jbuf_full  = jbuf_count() >= jbuf_cap();
-        const bool audio_wants = adec_pcm_available() < PCM_RING_HIGHWATER;
-        if (jbuf_full && (!audio_wants || s_vhold_n >= VHOLD_PKTS)) {
+        // Keep reading until the RING is full, not just until the jitter
+        // buffer is.  This is the whole point of the read-ahead: the server
+        // delivers a transcode unevenly — fine through easy scenes, below
+        // real time through hard ones — and a client that stops reading the
+        // moment its half-second of decoded frames is full has nothing left
+        // to play from when the next hard scene arrives.  Reading on fills
+        // seconds of compressed video instead, which is what rides out the
+        // dip.
+        // The read-ahead is bounded by the AUDIO queue as well as the ring.
+        // Video read far ahead drags the interleaved audio with it, and that
+        // audio has to fit in the compressed-audio queue: overrun it and the
+        // oldest PES is dropped, which is heard as a jump.  So the reserve is
+        // whichever of the two runs out first.
+        const bool jbuf_full = jbuf_count() >= jbuf_cap();
+        const bool ring_full = (s_ring_cap == 0) || (s_ring_n >= s_ring_cap);
+        if (jbuf_full && (ring_full || !adec_pes_queue_hungry())) {
             usleep(1000);
             continue;
         }
 
         for (int batch = 0; batch < 128; batch++) {
-            // Stop the batch when neither the jitter buffer nor the hold ring
-            // can take any more.
+            // Stop the batch when neither the jitter buffer nor the ring can
+            // take any more.
             if (jbuf_count() >= jbuf_cap() &&
-                (s_vhold_n >= VHOLD_PKTS ||
-                 adec_pcm_available() >= PCM_RING_HIGHWATER))
+                (s_ring_cap == 0 || s_ring_n >= s_ring_cap ||
+                 !adec_pes_queue_hungry()))
                 break;
 
             int rd = stream_read(ctx->sock, ts_pkt, TS_PACKET_SIZE);
@@ -148,27 +206,27 @@ void decode_thread_fn(void *arg) {
                 stall_ep_count++;
             }
 
-            // Keep the parked video moving as soon as room appears.  This has
-            // to happen inside the batch, not just once per outer iteration:
-            // the jitter buffer can drain mid-batch.
-            while (s_vhold_n > 0 && jbuf_count() < jbuf_cap()) {
-                video_feed_ts(s_vhold[s_vhold_rd]);
-                s_vhold_rd = (s_vhold_rd + 1) % VHOLD_PKTS;
-                s_vhold_n--;
+            // Keep the buffered video moving as soon as room appears.  This
+            // has to happen inside the batch, not just once per outer
+            // iteration: the jitter buffer drains mid-batch.
+            while (s_ring_n > 0 && jbuf_count() < jbuf_cap()) {
+                video_feed_ts(s_ring + (size_t)s_ring_rd * TS_PACKET_SIZE);
+                s_ring_rd = (s_ring_rd + 1) % s_ring_cap;
+                s_ring_n--;
             }
 
-            // A freshly read video packet may go straight through ONLY when
-            // nothing is parked.  Feeding one while earlier packets still sit
-            // in the ring hands the demuxer packet N+50 before packet N, and
-            // a reordered video PID means every PES reassembles wrong — which
-            // looks like constant macroblock artifacts, not like a bug in the
-            // buffering.  While the ring has anything in it, everything video
-            // goes through the ring.
-            if (s_vhold_n == 0 && jbuf_count() < jbuf_cap()) {
+            // Audio is fed the moment it arrives; video goes through the ring
+            // whenever anything is already queued there.  Feeding a fresh
+            // packet past queued ones would hand the demuxer packet N+50
+            // before packet N, and a reordered video PID reassembles every
+            // PES wrong — which looks like constant macroblock artifacts
+            // rather than like a queueing bug.  A packet only goes straight
+            // through when the ring is empty.
+            if (s_ring_n == 0 && jbuf_count() < jbuf_cap()) {
                 video_feed_ts(ts_pkt);          // normal path, unchanged
             } else if (!video_feed_ts_audio_only(ts_pkt)) {
-                if (s_vhold_n < VHOLD_PKTS) vhold_push(ts_pkt);
-                else                        break;
+                if (s_ring_cap > 0 && s_ring_n < s_ring_cap) ring_push(ts_pkt);
+                else                                         break;
             }
         }
 
@@ -206,11 +264,12 @@ void decode_thread_fn(void *arg) {
             char buf[160];
             long avg_ms = stall_ep_count ? stall_ep_dur_total_us / stall_ep_count / 1000 : 0;
             snprintf(buf, sizeof(buf),
-                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d vhold=%d pcm=%d",
+                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d ring=%d/%d pcm=%d",
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
-                display_fps, s_au_inflight_max, s_vhold_n, adec_pcm_available());
+                display_fps, s_au_inflight_max, s_ring_n, s_ring_cap,
+                adec_pcm_available());
             plog(buf);
             s_au_inflight_max = 0;
             stall_ep_count = stall_ep_dur_max_us = stall_ep_dur_total_us = 0;

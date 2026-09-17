@@ -35,10 +35,21 @@ static volatile int s_jb_n = 0;
 static u32 s_jbuf_slot_bytes = 0;     // capacity of each cached slot
 static int s_jb_cap = JBUF_SD_SLOTS;  // active ring capacity (set by jbuf_reserve)
 
-// Active ring capacity: fewer slots for 1080p (Alpha) so the big frames fit.
-// The ring modulus/full-checks below all use this, so slots >= s_jb_cap are
-// never touched even though the static arrays are always JBUF_MAX_SLOTS long.
-int jbuf_cap(void) { return hd1080_enabled() ? JBUF_1080_SLOTS : JBUF_SD_SLOTS; }
+// Active ring capacity: fewer slots for 1080p so the big frames fit.  The ring
+// modulus/full-checks below all use this, so slots >= s_jb_cap are never
+// touched even though the static arrays are always JBUF_MAX_SLOTS long.
+//
+// Keyed off the SLOT SIZE, not the 1080p toggle.  Since the info screen gained
+// a quality row, the frame size no longer follows that toggle: asking for
+// 1080p with the toggle off used to leave the capacity at the 24-slot SD
+// figure while each slot held a 3.13 MB 1080p frame — a 75 MB jitter buffer,
+// which is more than the console has left at that point.
+// 1080p is 3.13 MB a slot, 720p 1.32 MB; anything above 2 MB is the big path.
+static int jbuf_cap_for_bytes(u32 slot_bytes) {
+    return (slot_bytes > 2u * 1024u * 1024u) ? JBUF_1080_SLOTS : JBUF_SD_SLOTS;
+}
+
+int jbuf_cap(void) { return s_jb_cap; }
 
 // Prefill target must not exceed the capacity or the prefill loop can never
 // reach it (it would spin the whole guard budget forever at 1080p).
@@ -66,7 +77,9 @@ u32 vid_frame_bytes(u32 fw, u32 fh) {
 // the producer never dereferences a NULL slot below the active capacity.
 bool jbuf_reserve(u32 fw, u32 fh) {
     u32 need = vid_frame_bytes(fw, fh);
-    int cap  = jbuf_cap();
+    // From the size about to be reserved, not from any toggle — see
+    // jbuf_cap_for_bytes.
+    int cap  = jbuf_cap_for_bytes(need);
     s_jb_cap = cap;
 
     // Drop any slots beyond the active capacity (saves RAM at 1080p).
