@@ -140,6 +140,27 @@ static void player_draw_next_popup(int auto_secs) {
             XMB_TEXT_DIM);
 }
 
+// Drawn while stream_open() waits for the server's response headers.
+//
+// Switching quality makes Jellyfin start a fresh transcode, and a cold start
+// can take tens of seconds.  Previously nothing was drawn and no button was
+// read for that whole time, so the app looked hung and got force-quit --
+// reported, reasonably, as a crash.  Now it says what it is waiting for,
+// counts, and takes Circle for an answer.
+static const char *s_wait_title = "";
+static bool player_stream_wait(unsigned elapsed_ms)
+{
+    poll_buttons();                          // refresh btn_cur/btn_prev
+    if (BTN_PRESSED(circle)) return false;   // user gave up: abort the open
+
+    char msg[96];
+    snprintf(msg, sizeof(msg),
+             "Waiting for the server... %us   (Circle to cancel)",
+             elapsed_ms / 1000u);
+    player_status_screen(s_wait_title, msg);
+    return true;
+}
+
 void show_player(const JFItem *item, u32 resume_secs,
                  const char *media_source_id) {
     crash_log("p1 enter");
@@ -291,7 +312,10 @@ void show_player(const JFItem *item, u32 resume_secs,
 
     crash_log("p6 stream_open begin");
     plog("show_player: stream_open");
+    s_wait_title = item->name;
+    stream_set_wait_cb(player_stream_wait);
     ps.sock = stream_open(url);
+    stream_set_wait_cb(NULL);
     if (ps.sock < 0) {
         plog("show_player: stream_open FAILED");
         adec_stop();
