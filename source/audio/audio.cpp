@@ -127,27 +127,52 @@ void audio_open(int channels) {
     // 8-wide surround port gets 16 blocks: Movian's ps3_audio.c uses 16, and
     // 8 blocks is only ~42 ms of runway — thin once the decoder is doing real
     // 5.1 work.  The stereo path keeps the shipped 8 blocks untouched.
+    // Port width, widest usable first.  A 5.1 PROGRAM in an 8-wide port makes
+    // the firmware convert 8->6 for a system configured as "Linear PCM 5.1
+    // Ch.", and that conversion is a place channels can go missing before any
+    // speaker sees them — which is exactly the reported symptom (centre leaves
+    // this app hot, measured at -18 dBFS by the ch-peak meter, and is
+    // inaudible).  A native 6-channel port skips the conversion entirely and
+    // is what the firmware's own Blu-ray player uses for 5.1 discs.
+    //
+    // PSL1GHT only DEFINES 2CH and 8CH, but numChannels is a plain u64 and
+    // the hardware supports 6, so the constant is spelled out here.  Falling
+    // back through 8 keeps 7.1 TrueHD working on a system that really is set
+    // to 7.1; the truehd map already folds rears into the surrounds at -3 dB
+    // when it only has six slots, so nothing in the mix is lost either way.
+    #define AUDIO_PORT_6CH 6
     bool surround = (channels == 8);
     audioPortParam p;
-    p.numChannels = surround ? AUDIO_PORT_8CH : AUDIO_PORT_2CH;
-    p.numBlocks   = surround ? AUDIO_BLOCK_16 : AUDIO_BLOCK_8;
-    p.attrib      = 0;
-    p.level       = 1.0f;
+    p.numBlocks = surround ? AUDIO_BLOCK_16 : AUDIO_BLOCK_8;
+    p.attrib    = 0;
+    p.level     = 1.0f;
     crash_log("a3 sysAudioPortOpen");
-    rc = audioPortOpen(&p, &s_audio_port);
-    if (rc != 0 && surround) {
-        // 8ch open rejected — fall back to the shipped stereo port rather
-        // than failing playback outright.
-        snprintf(buf, sizeof(buf),
-                 "audio: 8ch port open failed rc=0x%x, falling back to 2ch", rc);
-        plog(buf);
+
+    static const u64 kWidths[] = { AUDIO_PORT_6CH, AUDIO_PORT_8CH };
+    int opened = 0;
+    if (surround) {
+        for (unsigned i = 0; i < sizeof(kWidths) / sizeof(kWidths[0]); i++) {
+            p.numChannels = kWidths[i];
+            rc = audioPortOpen(&p, &s_audio_port);
+            snprintf(buf, sizeof(buf), "audio: %uch port open rc=0x%x",
+                     (unsigned)kWidths[i], rc);
+            plog(buf);
+            if (rc == 0) { opened = (int)kWidths[i]; break; }
+        }
+    }
+    if (!opened) {
+        // Every surround width rejected (or stereo asked for): fall back to
+        // the shipped stereo port rather than failing playback outright.
+        if (surround)
+            plog("audio: no surround port available, falling back to 2ch");
         surround      = false;
         p.numChannels = AUDIO_PORT_2CH;
         p.numBlocks   = AUDIO_BLOCK_8;
         rc = audioPortOpen(&p, &s_audio_port);
+        opened = 2;
     }
-    s_port_channels   = surround ? 8 : 2;
-    s_output_channels = surround ? 8 : 2;   // program capacity, not a fixed 5.1
+    s_port_channels   = opened;
+    s_output_channels = opened;   // program capacity, not a fixed 5.1
     snprintf(buf, sizeof(buf), "audio: sysAudioPortOpen rc=0x%x port=%u", rc, s_audio_port);
     plog(buf);
     if (rc != 0) { audioQuit(); return; }
@@ -269,11 +294,16 @@ bool audio_write_pcm(void) {
                     // SR — see channel map derivation in adec_ac3.cpp), so it
                     // maps 1:1 onto the first six port slots; an 8ch source
                     // (TrueHD 7.1, truehd_map.c) fills all eight the same
-                    // way.  A 2ch source
-                    // in an 8-wide port fills FL/FR only.  A source wider
-                    // than the port should not happen (the decoder downmixes
-                    // when the port is stereo); take FL/FR as a last resort.
-                    int copy = (src_ch <= s_port_channels) ? src_ch : 2;
+                    // way.  A 2ch source in an 8-wide port fills FL/FR only.
+                    //
+                    // The layouts are prefix-compatible (FL FR FC LFE SL SR
+                    // [BL BR]), so a source WIDER than the port keeps as many
+                    // leading channels as fit rather than collapsing to FL/FR.
+                    // That matters: collapsing would silently drop the centre,
+                    // taking the dialogue with it, which is the loudest
+                    // possible failure for the quietest possible reason.
+                    int copy = (src_ch <= s_port_channels) ? src_ch
+                                                           : s_port_channels;
                     int c = 0;
                     for (; c < copy; c++)            d[c] = s[c];
                     // Zero every unused slot INCLUDING rears 6/7 each block —
