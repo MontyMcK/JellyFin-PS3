@@ -10,6 +10,7 @@
 #include "adec_dts.h"
 #include "adec.h"
 #include "plog.h"
+#include "timing.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -58,6 +59,22 @@ static bool         s_hd_logged = false;
 // rather than to silence.
 #define HD_MAX_CONSEC_ERRORS 32
 static uint32_t s_hd_consec_err = 0;
+
+// Real-time budget.  XLL is far more expensive than the DTS core, and on this
+// PPU it can cost more CPU than the audio it produces is long -- at which
+// point it starves the display thread and the picture collapses to a few
+// frames a second even with every buffer full.  Measured on hardware:
+// everything buffered, nothing underrunning, and 1.2 fps.
+//
+// So the decoder measures itself.  Over a rolling window it compares time
+// SPENT DECODING against the DURATION OF AUDIO PRODUCED; if decoding eats
+// more than this share of real time there is not enough left for video, and
+// the lossless path stands down in favour of libdca's core.  Lossy audio and
+// a smooth picture beats lossless audio and a slideshow.
+#define HD_BUDGET_PCT     70
+#define HD_WINDOW_US      2000000ULL     // judge over 2 s of decoded audio
+static u64 s_hd_dec_us = 0;              // CPU time spent decoding
+static u64 s_hd_aud_us = 0;              // audio duration produced
 static bool          s_logged_frame = false;
 static bool          s_logged_ext   = false;
 static uint32_t      s_logged_bad   = 0;
@@ -75,6 +92,7 @@ static void dts_packet(void *user, const uint8_t *pkt, int len) {
 
     int ch = 0, srate = 0, lossless = 0;
     uint64_t mask = 0;
+    const u64 t0 = timing_get_us();
     int n = dcahd_api_decode(s_hd, pkt, len, &ch, &srate, &mask, &lossless);
     if (n <= 0) {
         if (n < 0 && ++s_hd_consec_err >= HD_MAX_CONSEC_ERRORS) {
@@ -87,6 +105,24 @@ static void dts_packet(void *user, const uint8_t *pkt, int len) {
     s_hd_consec_err = 0;
     s_hd_frames++;
     s_hd_lossless = lossless != 0;
+
+    // Can we decode faster than the audio plays?  If not, give the CPU back.
+    s_hd_dec_us += timing_get_us() - t0;
+    s_hd_aud_us += (u64)n * 1000000ULL / (u64)(srate > 0 ? srate : 48000);
+    if (s_hd_aud_us >= HD_WINDOW_US) {
+        const unsigned pct = (unsigned)((s_hd_dec_us * 100ULL) / s_hd_aud_us);
+        if (pct > HD_BUDGET_PCT) {
+            char b[128];
+            snprintf(b, sizeof(b),
+                     "adec_dts: XLL costs %u%% of real time — too slow here,"
+                     " falling back to the core", pct);
+            plog(b);
+            s_strm.packet = NULL;          // libdca takes over from here
+            s_hd_lossless = false;
+            return;
+        }
+        s_hd_dec_us = s_hd_aud_us = 0;     // rolling window
+    }
 
     if (!s_hd_logged) {
         s_hd_logged = true;
@@ -181,6 +217,7 @@ void adec_dts_close(void) {
 void adec_dts_reset(void) {
     if (s_open) dts_stream_reset(&s_strm);
     if (s_hd) { dcahd_api_flush(s_hd); s_hd_consec_err = 0; }
+    s_hd_dec_us = s_hd_aud_us = 0;         // seek: restart the timing window
 }
 
 bool adec_dts_is_lossless(void) { return s_hd_lossless; }
@@ -201,7 +238,8 @@ static void log_stream_facts(void) {
         char b[96];
         snprintf(b, sizeof(b),
                  "adec_dts: extension substream present (DTS-HD/DTS:X) —"
-                 " decoding the core, ext=%u bytes",
+                 " %s, ext=%u bytes",
+                 s_strm.packet ? "decoding it LOSSLESSLY" : "decoding the core",
                  (unsigned)s_strm.ext_bytes);
         plog(b);
     }
