@@ -11,6 +11,7 @@
 #include "adec.h"
 #include "plog.h"
 #include "timing.h"
+#include "jf_paths.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -166,9 +167,33 @@ static void hd_close(void) {
     s_hd_logged = false;
 }
 
+// DTS-HD MA lossless decoding is OPT-IN and OFF by default.
+//
+// It decodes correctly on the host -- tests/test_dts_hd.c passes with 35-78 dB
+// of channel separation -- but on the PPU it produces audibly wrong output,
+// and hardware logging rules out the obvious explanation: the real-time
+// budget never trips, so it is fast enough. Fast and wrong points at a
+// big-endian bug somewhere in the vendored XLL path, which the x86 host tests
+// cannot see and which needs a hardware debug loop to find.
+//
+// Rather than ship audio that is worse than what it replaced, the default is
+// libdca's lossy core -- exactly what shipped before any of this. The decoder
+// stays built and tested so the work is not lost; create
+// /dev_hdd0/tmp/jellyfin_dtsma.txt containing "1" to switch it back on.
+#define DTSMA_FILE "jellyfin_dtsma.txt"
+static bool hd_enabled(void) {
+    FILE *f = fopen(jf_data_path(DTSMA_FILE), "r");
+    if (!f) return false;
+    int v = 0;
+    bool on = (fscanf(f, "%d", &v) == 1 && v == 1);
+    fclose(f);
+    return on;
+}
+
 // Try to bring the lossless decoder up.  Failure is not fatal: the caller
 // keeps libdca's core path, which is exactly what shipped before.
 static bool hd_open(int out_ch) {
+    if (!hd_enabled()) return false;
     s_hd_out_ch = out_ch;
     s_hd_mem    = malloc((size_t)dcahd_api_instance_size());
     s_hd_plane  = malloc(DCAHD_SAMPLE_BYTES);
@@ -191,7 +216,9 @@ bool adec_dts_open(int out_channels) {
         dts_stream_set_packet_mode(&s_strm, dts_packet, NULL);
         plog("adec_dts: lossless (XLL) decoder open");
     } else {
-        plog("adec_dts: lossless decoder unavailable, using libdca core");
+        plog(hd_enabled()
+             ? "adec_dts: lossless decoder failed to open, using libdca core"
+             : "adec_dts: lossless (XLL) OFF by default, using libdca core");
     }
     s_open         = true;
     s_logged_frame = false;

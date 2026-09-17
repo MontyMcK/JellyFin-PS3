@@ -109,6 +109,7 @@ int main(int argc, const char *argv[]) {
     centermix_load();      // restore the dialogue / centre-channel mode
     statsovl_load();       // restore the player stats overlay toggle
     audio_volume_load();   // restore the saved master volume
+    video_log_capabilities();   // what refresh rates does this panel offer?
 
     crash_log("7 splash drawHeader");
     drawHeader();
