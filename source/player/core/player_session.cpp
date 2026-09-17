@@ -176,12 +176,24 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     // MaxWidth/MaxHeight and MaxFramerate stay in both cases and act as the
     // safety gate: a 4K or 60 fps source exceeds them, so the server scales it
     // down rather than copying something this console cannot decode.
+    // Copy is ALWAYS permitted now, at every quality.  Jellyfin allows a copy
+    // when the source bitrate is <= the requested one, so a ceiling is a
+    // CEILING ON THE COPY, not an instruction to re-encode at that rate:
+    //
+    //   source <= ceiling -> copied untouched (full quality, no server CPU)
+    //   source >  ceiling -> transcoded to the ceiling, exactly as before
+    //
+    // Sending AllowVideoStreamCopy=false, as every mode but Original used to,
+    // forbade the copy even when the source would have fit comfortably --
+    // re-encoding an 8 Mbps file down to a 10 Mbps target for no reason. This
+    // is strictly better at every setting: it can only turn a transcode into
+    // a copy, never the reverse.
     char vparams[96];
     if (vbitrate == 0)
         snprintf(vparams, sizeof(vparams), "&AllowVideoStreamCopy=true");
     else
         snprintf(vparams, sizeof(vparams),
-                 "&VideoBitrate=%u&AllowVideoStreamCopy=false", vbitrate);
+                 "&VideoBitrate=%u&AllowVideoStreamCopy=true", vbitrate);
 
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
