@@ -29,6 +29,16 @@
 //  The boosts fix (2).  Neither is applied by default: NORMAL is the exact
 //  behaviour that shipped, bit-for-bit.
 //
+//  STEREO is for the chain that carries ONLY the front pair -- a soundbar
+//  with no HDMI input, reached through a TV's ARC link, is the common case:
+//  the TV hands on two channels and everything in slots 2..7 is discarded
+//  before it reaches a speaker.  PHANTOM alone would rescue the dialogue but
+//  still lose the surrounds, so STEREO folds centre AND both surround pairs
+//  into L/R (a LoRo downmix at -3 dB, with 3 dB of headroom against the sum)
+//  and mutes the rest.  Nothing in the mix is thrown away.  The LFE is left
+//  out on purpose: the bar runs its own crossover to its subwoofer, and
+//  folding a full-range LFE into the mains only muddies them.
+//
 //  Applied centrally in audio.cpp on the staged source frame, immediately
 //  before it is placed in the DMA block, so it covers every codec at once
 //  (AC-3, DTS/DTS-HD, TrueHD) instead of being repeated in three maps.
@@ -42,7 +52,8 @@ typedef enum {
     CENTER_P6      = 2,   // centre +6 dB
     CENTER_P10     = 3,   // centre +10 dB
     CENTER_PHANTOM = 4,   // fold centre into L/R, mute slot 2
-    CENTER_COUNT   = 5,
+    CENTER_STEREO  = 5,   // full LoRo downmix into L/R, mute every other slot
+    CENTER_COUNT   = 6,
 } center_mode_t;
 
 void          centermix_load(void);

@@ -167,7 +167,7 @@ static bool xmb_input_settings(void) {
         if (g_settings_sel == 4)                                        // Surround 5.1 (Alpha)
             surround_cycle();                                           // Off -> AC-3 -> DTS
         if (g_settings_sel == 5)                                        // Dialogue
-            centermix_cycle();            // Normal -> +3 -> +6 -> +10 -> Phantom
+            centermix_cycle();   // Normal -> +3 -> +6 -> +10 -> Phantom -> Stereo
 #if ENABLE_PLAYER_STATS
         if (g_settings_sel == 6)                                        // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());

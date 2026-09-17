@@ -33,6 +33,7 @@ const char *centermix_label(void) {
     case CENTER_P6:      return "+6 dB";
     case CENTER_P10:     return "+10 dB";
     case CENTER_PHANTOM: return "Phantom";
+    case CENTER_STEREO:  return "Stereo";
     default:             return "Normal";
     }
 }
@@ -68,6 +69,31 @@ void centermix_apply(float *frames, int n, int ch) {
             d[SLOT_FL] = clamp1(d[SLOT_FL] + LEVEL_3DB * c);
             d[SLOT_FR] = clamp1(d[SLOT_FR] + LEVEL_3DB * c);
             d[SLOT_FC] = 0.0f;
+        }
+        return;
+    }
+
+    if (s_mode == CENTER_STEREO) {
+        // LoRo: L' = g*(L + .707*C + .707*Ls + .707*Lb), same for R, with
+        // g = -3 dB of headroom so a lossless source sitting near full scale
+        // does not spend the whole film against the clamp.
+        const float g = LEVEL_3DB;
+        for (int i = 0; i < n; i++) {
+            float *d = frames + (size_t)i * ch;
+            float l = d[SLOT_FL], r = d[SLOT_FR];
+            l += LEVEL_3DB * d[SLOT_FC];
+            r += LEVEL_3DB * d[SLOT_FC];
+            if (ch > 5) {                       // surround pair
+                l += LEVEL_3DB * d[4];
+                r += LEVEL_3DB * d[5];
+            }
+            if (ch > 7) {                       // rear pair (7.1 source)
+                l += LEVEL_3DB * d[6];
+                r += LEVEL_3DB * d[7];
+            }
+            for (int c = 2; c < ch; c++) d[c] = 0.0f;
+            d[SLOT_FL] = clamp1(l * g);
+            d[SLOT_FR] = clamp1(r * g);
         }
         return;
     }
