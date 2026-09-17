@@ -21,7 +21,8 @@ SOURCES     := source source/audio source/audio/a52 source/audio/dca \
                source/ui source/ui/input source/ui/osk source/ui/xmb source/ui/render \
                source/util source/cache source/video source/music
 DATA        := data
-INCLUDES    := source/audio source/audio/mlp/ff source/audio/mlp/ff/libavcodec \
+INCLUDES    := source/audio source/audio/dcahd \
+               source/audio/mlp/ff source/audio/mlp/ff/libavcodec \
                source/gfx source/net source/api \
                source/player source/player/hud source/player/gpu source/player/stream \
                source/ui source/ui/render source/ui/fonts \
