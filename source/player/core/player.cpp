@@ -33,6 +33,7 @@
 #include "jellyfin_api.h"
 #include "rsxutil.h"
 #include "thumbnail_cache.h"
+#include "meminfo.h"   // read-ahead ring sizing
 #include "slog.h"
 
 extern void crash_log(const char *msg);
@@ -337,6 +338,20 @@ void show_player(const JFItem *item, u32 resume_secs,
     }
     crash_log("p8 jbuf alloc OK");
 
+    // ---- Compressed read-ahead ring ----
+    // Claimed after the jitter buffer, from whatever is left: this is the
+    // buffer that decides whether a server delivering its transcode unevenly
+    // stutters or not, and compressed seconds are ~75x cheaper per second
+    // than decoded ones.  Half of free memory, leaving the rest for the UI,
+    // the HUD and the decode path; the ring clamps itself to its own bounds
+    // and halves down if the heap cannot manage the ask.
+    {
+        u32 total = 0, avail = 0;
+        u32 want = 6u * 1024u * 1024u;          // if meminfo is unavailable
+        if (meminfo_get(&total, &avail)) want = avail / 2u;
+        decode_ring_alloc(want);
+    }
+
     // Video GPU blit init — allocate RSX buffers once per session
     vid_gpu_init(jbuf_fw(), jbuf_fh());
 
@@ -358,6 +373,7 @@ void show_player(const JFItem *item, u32 resume_secs,
 
     if (!ps.playing) {
         vid_gpu_free();
+        decode_ring_free();
         jbuf_free();
         netClose(ps.sock);
         adec_stop();
@@ -372,6 +388,62 @@ void show_player(const JFItem *item, u32 resume_secs,
 
     // ---- Spawn decode thread ----
     player_spawn_decode(&ps);
+
+    // ---- Pre-roll: fill the read-ahead ring before the picture starts ----
+    //
+    // The jitter buffer is full by now, which is only ~0.5 s at 1080p.  The
+    // decode thread keeps reading past that into the compressed ring, and
+    // starting playback before that ring has something in it throws away the
+    // whole point of having one: the first hard scene arrives with no reserve
+    // and stutters, exactly as it did before the ring existed.
+    //
+    // So wait for it here.  Waiting a few seconds up front to play a film
+    // through without stalling is a trade worth making, and the wait is
+    // bounded: it gives up at the deadline, on Circle, or the moment the
+    // stream ends.  Nothing is lost by the timeout — playback simply starts
+    // with whatever was buffered.
+    if (ps.playing && decode_ring_cap() > 0) {
+        const int target   = (decode_ring_cap() * 3) / 4;   // 75% full
+        const u64 deadline = timing_get_us() + 90000000ULL; // 90 s ceiling
+        u64 last_draw_us   = 0;
+        int last_pct       = -1;
+        plog("preroll: filling read-ahead ring");
+        init_btns();
+        while (running && ps.playing && decode_ring_fill() < target &&
+               timing_get_us() < deadline) {
+            sysUtilCheckCallback();
+            poll_buttons();
+            if (BTN_PRESSED(circle)) { plog("preroll: skipped by user"); break; }
+            // The audio queue can fill before the ring does (HD audio is
+            // several Mbps), and the decode thread stops reading when it
+            // does.  Waiting past that point achieves nothing.
+            if (!adec_pes_queue_hungry()) {
+                plog("preroll: audio queue full, starting");
+                break;
+            }
+
+            // Redraw at ~4 Hz: the decode thread owns the socket, so this
+            // loop is doing nothing but showing progress.
+            u64 now = timing_get_us();
+            int pct = decode_ring_fill() * 100 / (decode_ring_cap() ? decode_ring_cap() : 1);
+            if (pct != last_pct && now - last_draw_us > 250000ULL) {
+                last_draw_us = now;
+                last_pct     = pct;
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Buffering... %d%%   (O: start now)",
+                         pct * 100 / 75 > 100 ? 100 : pct * 100 / 75);
+                player_status_screen(item->name, msg);
+            }
+            usleep(20000);
+        }
+        {
+            char b[80];
+            snprintf(b, sizeof(b), "preroll: done ring=%d/%d packets",
+                     decode_ring_fill(), decode_ring_cap());
+            plog(b);
+        }
+        init_btns();
+    }
 
     // ---- Spawn audio thread ----
     AudioCtx         aud_ctx = { &ps.playing, &ps.paused };
@@ -653,6 +725,7 @@ void show_player(const JFItem *item, u32 resume_secs,
     vid_gpu_free();
 
     crash_log("p17 jbuf_free begin");
+    decode_ring_free();
     jbuf_free();
     crash_log("p18 jbuf_free OK");
     netClose(ps.sock);
