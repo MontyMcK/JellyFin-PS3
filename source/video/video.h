@@ -9,7 +9,16 @@
 // path), a 1920×1088 slot is 3.13 MB — so the ring holds MORE frames in LESS
 // memory than the shipped 12-slot ARGB buffer ever did.
 #define JBUF_PREFILL      12   // frames to decode before display starts
-#define JBUF_1080_SLOTS   16   // ring slots on the 1080p (Alpha) path (~50 MB)
+#define JBUF_1080_SLOTS   10   // ring slots on the 1080p path (~31 MB)
+// Was 16 (~50 MB).  Hardware logging showed where that memory is better
+// spent: with direct play the console decodes 1080p at a full 24 fps
+// whenever the compressed ring has data, and stalls only when it runs
+// dry -- and the ring was refilling to 72% before draining again, so
+// average delivery MATCHES playback and it is the swings that hurt.
+// Compressed bytes buy roughly 75x the runway per byte that decoded
+// frames do, so six slots (18 MB of decoded video, 0.25 s) moved into
+// the ring is worth several SECONDS of burst tolerance.  Ten slots is
+// still comfortably above JBUF_PREFILL.
 #define JBUF_SD_SLOTS     24   // ring slots on the 720p path       (~32 MB)
 // The static ring arrays are sized for the LARGER of the two active counts;
 // jbuf_cap() picks how many are actually used per path.

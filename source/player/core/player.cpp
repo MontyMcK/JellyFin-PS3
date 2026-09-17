@@ -348,7 +348,10 @@ void show_player(const JFItem *item, u32 resume_secs,
     {
         u32 total = 0, avail = 0;
         u32 want = 6u * 1024u * 1024u;          // if meminfo is unavailable
-        if (meminfo_get(&total, &avail)) want = avail / 2u;
+        // Three quarters, not half: the jitter buffer handed ~18 MB back
+        // and this is where it does the most good.  Bounded by
+        // RING_BYTES_MAX and halved down on allocation failure.
+        if (meminfo_get(&total, &avail)) want = (avail / 4u) * 3u;
         decode_ring_alloc(want);
     }
 
