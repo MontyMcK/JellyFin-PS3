@@ -541,8 +541,12 @@ static void stats_compose(const PlayerStats *s) {
     // lossless 7.1 TrueHD/Atmos bed, "truehd 6/8" a 5.1 one.
     const char *codec_tag = "mp3";
     if (adec_get_codec() == ADEC_CODEC_AC3)      codec_tag = "ac3";
-    else if (adec_get_codec() == ADEC_CODEC_DTS) codec_tag = adec_dts_saw_extension()
-                                                            ? "dts-hd" : "dts";
+    else if (adec_get_codec() == ADEC_CODEC_DTS)
+        // "dts-ma" is the one that matters: the XLL extension decoded
+        // LOSSLESSLY. "dts-hd" means the extension is present but we are
+        // playing its lossy core, which is all libdca could ever do.
+        codec_tag = adec_dts_is_lossless()    ? "dts-ma"
+                  : adec_dts_saw_extension()  ? "dts-hd" : "dts";
     else if (adec_get_codec() == ADEC_CODEC_TRUEHD) codec_tag = "truehd";
     snprintf(v, sizeof(v), "%s %d/%d  pcm %.0f%%  dma %.0f%%",
              codec_tag,

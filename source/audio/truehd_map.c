@@ -190,3 +190,26 @@ void truehd_map_block(const int32_t *in, int nb_ch, int n,
         }
     }
 }
+
+// Planar variant — see truehd_map.h.  Same map, same gains, same output; the
+// only difference is that each source channel is its own contiguous run
+// instead of a stride inside one interleaved block.
+void truehd_map_block_planar(const int32_t *const *planes, int nb_ch, int n,
+                             const truehd_map_t *m, float *out)
+{
+    const float scale = 1.0f / 2147483648.0f;   // int32 full scale -> +-1.0
+    const int   oc    = m->out_ch;
+    (void)nb_ch;
+    for (int i = 0; i < n; i++) {
+        float *d = out + (size_t)i * oc;
+        for (int c = 0; c < oc; c++) {
+            float acc = 0.0f;
+            for (int k = 0; k < TRUEHD_MAX_SRC; k++) {
+                int src = m->src[c][k];
+                if (src < 0) break;
+                acc += (float)planes[src][i] * scale * m->gain[c][k];
+            }
+            d[c] = acc;
+        }
+    }
+}

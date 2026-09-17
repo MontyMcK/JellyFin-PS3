@@ -115,9 +115,35 @@ int ff_get_buffer(AVCodecContext *avctx, AVFrame *frame, int flags)
 {
     (void)flags;
     if (!avctx->opaque) return -1;
-    frame->data[0]         = (uint8_t *)avctx->opaque;
-    frame->extended_data[0] = frame->data[0];
-    frame->format          = avctx->sample_fmt;
+    uint8_t *base = (uint8_t *)avctx->opaque;
+    frame->data[0]          = base;
+    frame->extended_data[0] = base;
+    frame->format           = avctx->sample_fmt;
+
+    /* PLANAR output needs one pointer per channel.  The vendored DTS decoder
+     * (source/audio/dcahd/) emits S32P/S16P -- one plane per speaker -- while
+     * MLP emits interleaved S16/S32 and takes the early return below, leaving
+     * its behaviour byte-for-byte what it was. */
+    int bps;
+    switch (avctx->sample_fmt) {
+    case AV_SAMPLE_FMT_S16P: bps = 2; break;
+    case AV_SAMPLE_FMT_S32P:
+    case AV_SAMPLE_FMT_FLTP: bps = 4; break;
+    default: return 0;                      /* interleaved: one plane is all */
+    }
+
+    const int nch = avctx->ch_layout.nb_channels;
+    if (nch < 1 || nch > 8 || frame->nb_samples <= 0) return -1;
+
+    /* Refuse rather than run off the end of a caller-owned block.  The frame
+     * size is chosen by the BITSTREAM, so a malformed or unexpected stream can
+     * ask for more than the host reserved. */
+    const size_t need = (size_t)nch * (size_t)frame->nb_samples * (size_t)bps;
+    if (avctx->opaque_size > 0 && need > (size_t)avctx->opaque_size) return -1;
+
+    for (int i = 1; i < nch; i++)
+        frame->extended_data[i] = frame->data[i] =
+            base + (size_t)i * (size_t)frame->nb_samples * (size_t)bps;
     return 0;
 }
 

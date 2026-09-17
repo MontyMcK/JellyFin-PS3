@@ -20,7 +20,11 @@
 extern "C" {
 #include "dca/dca.h"
 #include "dts_stream.h"
+#include "dcahd_api.h"
+#include "truehd_map.h"
 }
+
+#include <stdlib.h>
 
 // How much extension-only data to tolerate before declaring the track
 // coreless.  A DTS-HD MA frame is a few KB, so 512 KB is dozens of frames —
@@ -32,6 +36,28 @@ extern "C" {
 static dca_state_t  *s_state = NULL;
 static dts_stream_t  s_strm;          // static: audio path, no malloc
 static bool          s_open         = false;
+
+// ---- lossless path (vendored FFmpeg decoder, source/audio/dcahd/) --------
+// libdca decodes the DTS CORE only, so on a DTS-HD MA track it throws away the
+// lossless audio and keeps the lossy base.  When this decoder opens, the
+// reader is switched to packet mode and whole frames come here instead.
+// Allocated once at open (the audio path never allocates), released at close.
+static dcahd_dec *s_hd       = NULL;
+static void      *s_hd_mem   = NULL;
+static void      *s_hd_plane = NULL;
+static truehd_map_t s_hd_map;
+static uint64_t     s_hd_mask   = 0;   // mask the map was built for
+static int          s_hd_out_ch = 0;
+static bool         s_hd_lossless = false;
+static uint32_t     s_hd_frames = 0, s_hd_errors = 0;
+static bool         s_hd_logged = false;
+
+// Give up on the lossless decoder after this many consecutive failures and
+// fall back to libdca's core.  A handful of errors right after a seek is
+// normal; a stream it simply cannot handle should degrade to lossy audio
+// rather than to silence.
+#define HD_MAX_CONSEC_ERRORS 32
+static uint32_t s_hd_consec_err = 0;
 static bool          s_logged_frame = false;
 static bool          s_logged_ext   = false;
 static uint32_t      s_logged_bad   = 0;
@@ -40,6 +66,80 @@ static uint32_t      s_logged_bad   = 0;
 static void dts_emit(void *user, const float *frames, int n) {
     (void)user;
     adec_push_frames(frames, n);
+}
+
+// One complete DTS packet (core + extensions), on the adec thread.
+static void dts_packet(void *user, const uint8_t *pkt, int len) {
+    (void)user;
+    if (!s_hd) return;
+
+    int ch = 0, srate = 0, lossless = 0;
+    uint64_t mask = 0;
+    int n = dcahd_api_decode(s_hd, pkt, len, &ch, &srate, &mask, &lossless);
+    if (n <= 0) {
+        if (n < 0 && ++s_hd_consec_err >= HD_MAX_CONSEC_ERRORS) {
+            plog("adec_dts: lossless decoder failing, falling back to core");
+            s_hd_errors++;
+            s_strm.packet = NULL;          // back to libdca for the rest
+        }
+        return;
+    }
+    s_hd_consec_err = 0;
+    s_hd_frames++;
+    s_hd_lossless = lossless != 0;
+
+    if (!s_hd_logged) {
+        s_hd_logged = true;
+        char b[128];
+        snprintf(b, sizeof(b),
+                 "adec_dts: HD decode hz=%d ch=%d mask=0x%llx %s",
+                 srate, ch, (unsigned long long)mask,
+                 lossless ? "LOSSLESS (XLL)" : "core only");
+        plog(b);
+    }
+
+    // Rebuild the map only when the layout actually changes.
+    if (mask != s_hd_mask) {
+        if (truehd_map_build(mask, ch, s_hd_out_ch, &s_hd_map) < 0) {
+            s_hd_mask = 0;
+            return;                        // unusable layout: emit nothing
+        }
+        s_hd_mask = mask;
+    }
+
+    // Map in DMA-block-sized chunks rather than one big buffer: a frame can be
+    // thousands of samples, and 256 frames is exactly what the ring wants.
+    const int32_t *const *planes = dcahd_api_planes(s_hd);
+    static float stage[256 * 8];           // adec thread only — no reentry
+    const int32_t *slice[DCAHD_MAX_CHANNELS];
+    for (int off = 0; off < n; off += 256) {
+        int take = (n - off < 256) ? (n - off) : 256;
+        for (int c = 0; c < ch && c < DCAHD_MAX_CHANNELS; c++)
+            slice[c] = planes[c] + off;
+        truehd_map_block_planar(slice, ch, take, &s_hd_map, stage);
+        adec_push_frames(stage, take);
+    }
+}
+
+static void hd_close(void) {
+    if (s_hd) { dcahd_api_close(s_hd); s_hd = NULL; }
+    free(s_hd_mem);   s_hd_mem   = NULL;
+    free(s_hd_plane); s_hd_plane = NULL;
+    s_hd_mask = 0; s_hd_lossless = false;
+    s_hd_frames = s_hd_errors = s_hd_consec_err = 0;
+    s_hd_logged = false;
+}
+
+// Try to bring the lossless decoder up.  Failure is not fatal: the caller
+// keeps libdca's core path, which is exactly what shipped before.
+static bool hd_open(int out_ch) {
+    s_hd_out_ch = out_ch;
+    s_hd_mem    = malloc((size_t)dcahd_api_instance_size());
+    s_hd_plane  = malloc(DCAHD_SAMPLE_BYTES);
+    if (!s_hd_mem || !s_hd_plane) { hd_close(); return false; }
+    s_hd = dcahd_api_open(s_hd_mem, s_hd_plane, (int)DCAHD_SAMPLE_BYTES);
+    if (!s_hd) { hd_close(); return false; }
+    return true;
 }
 
 bool adec_dts_open(int out_channels) {
@@ -51,6 +151,12 @@ bool adec_dts_open(int out_channels) {
     }
     int out_ch = (out_channels == 6) ? 6 : 2;
     dts_stream_init(&s_strm, s_state, out_ch, dts_emit, NULL);
+    if (hd_open(out_ch)) {
+        dts_stream_set_packet_mode(&s_strm, dts_packet, NULL);
+        plog("adec_dts: lossless (XLL) decoder open");
+    } else {
+        plog("adec_dts: lossless decoder unavailable, using libdca core");
+    }
     s_open         = true;
     s_logged_frame = false;
     s_logged_ext   = false;
@@ -63,6 +169,7 @@ bool adec_dts_open(int out_channels) {
 }
 
 void adec_dts_close(void) {
+    hd_close();
     if (s_state) {
         dca_free(s_state);
         s_state = NULL;
@@ -73,7 +180,10 @@ void adec_dts_close(void) {
 
 void adec_dts_reset(void) {
     if (s_open) dts_stream_reset(&s_strm);
+    if (s_hd) { dcahd_api_flush(s_hd); s_hd_consec_err = 0; }
 }
+
+bool adec_dts_is_lossless(void) { return s_hd_lossless; }
 
 bool adec_dts_saw_extension(void) {
     return s_open && s_strm.ext_count > 0;

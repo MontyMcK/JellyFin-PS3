@@ -53,6 +53,9 @@ typedef struct AVCodecContext {
 #define AV_CODEC_FLAG_BITEXACT (1 << 23)
     /* Host hook: the PCM destination ff_get_buffer() hands to the decoder. */
     void               *opaque;
+    /* Bytes available at `opaque`.  0 = unchecked (the MLP path, which
+       predates this field and hands out a single interleaved plane). */
+    int                 opaque_size;
 } AVCodecContext;
 
 void avpriv_request_sample(void *avc, const char *msg, ...);
