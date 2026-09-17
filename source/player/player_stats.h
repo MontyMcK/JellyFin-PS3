@@ -85,6 +85,14 @@ struct PlayerStats {
     u32   audio_blocks;     // DMA blocks written this session
     u32   audio_starves;    // blocks where the decoder had no PCM -> silence
 
+    // ---- per-channel output level ------------------------------------
+    // Peak of each PS3 CellAudio slot in the last DMA block, in 1/32768
+    // units (32768 = full scale), decayed so the overlay is readable.
+    // Slot order: 0=FL 1=FR 2=FC 3=LFE 4=SL 5=SR 6=BL 7=BR.  The centre
+    // slot is the dialogue diagnostic — see centermix.h.
+    u32   ch_peak[8];
+    int   ch_count;         // slots actually carried by the open port
+
     // ---- A/V sync -------------------------------------------------------
     // Read straight out of timing.cpp's existing EMA; not recomputed here.
     s64   avsync_us;        // smoothed video-minus-audio, microseconds
@@ -111,6 +119,11 @@ void player_stats_on_frame_shown(void);
 void player_stats_on_audio_write(int pcm_avail_pairs, int dma_ahead,
                                  int dma_total, bool starved);
 
+// Per-channel peak of the DMA block just written, in 1/32768 units, for
+// `count` port slots.  Integer-only by contract (see the threading note):
+// audio.cpp does the float pass it is already doing anyway.
+void player_stats_on_audio_levels(const int *peaks, int count);
+
 // Snapshot the current metrics.  Safe to call from the display thread.
 void player_stats_get(PlayerStats *out);
 
@@ -127,6 +140,7 @@ static inline void player_stats_overlay_alloc(void) {}
 static inline void player_stats_on_vblank(void) {}
 static inline void player_stats_on_frame_shown(void) {}
 static inline void player_stats_on_audio_write(int, int, int, bool) {}
+static inline void player_stats_on_audio_levels(const int *, int) {}
 static inline void player_stats_get(PlayerStats *) {}
 static inline void player_stats_render_overlay(void) {}
 

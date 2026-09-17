@@ -31,8 +31,16 @@ int main(int argc, char **argv) {
     assert(jellyfin_parse_media_sources(kPlaybackInfo, &all) == 3);
     assert(all.n_sources == 3);
     assert(strcmp(all.source[0].id, "source-a") == 0);
-    assert(strcmp(all.source[0].label, "Same cut (1)") == 0);
-    assert(strcmp(all.source[1].label, "Same cut (2)") == 0);
+    // Version labels carry resolution and codec (source_tag_video), which is
+    // the whole point of the row: two cuts of the same title have to be
+    // tellable apart before you pick one.  The bare "(1)"/"(2)" numbering is
+    // only the fallback for when even those tags collide.
+    assert(strstr(all.source[0].label, "Same cut") != NULL);
+    assert(strstr(all.source[0].label, "720p")     != NULL);
+    assert(strstr(all.source[0].label, "H.264")    != NULL);
+    assert(strstr(all.source[1].label, "Same cut") != NULL);
+    assert(strstr(all.source[1].label, "1080p")    != NULL);
+    assert(strcmp(all.source[0].label, all.source[1].label) != 0);
     assert(all.source[0].runtime_secs == 60);
     assert(all.source[1].runtime_secs == 72);
     assert(all.source[0].tracks.n_audio == 1);
