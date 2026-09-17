@@ -8,6 +8,7 @@
 #include <sysutil/video.h>
 
 #include "rsxutil.h"
+#include "plog.h"
 
 extern void crash_log(const char *msg);
 
@@ -126,6 +127,29 @@ void init_screen(void *host_addr,u32 size)
 	crash_log("2.3 videoConfigure");
 	videoConfigure(0,&vconfig,NULL,0);
 	videoGetState(0,0,&state);
+
+	// What refresh rates does this display actually offer?
+	//
+	// 24fps film on a 60Hz output needs 3:2 pulldown, which is where the
+	// judder comes from -- a Blu-ray player avoids it by switching the TV to
+	// 1080p24.  PSL1GHT only defines AUTO/59.94/50/60/30 (sysutil/video.h),
+	// with no 24Hz constant, so this logs the device's own capability mask to
+	// settle whether the mode is even on offer before anyone tries to force
+	// an undefined one and blanks the screen.
+	{
+		videoDeviceInfo di;
+		memset(&di, 0, sizeof(di));
+		if (videoGetDeviceInfo(0, 0, &di) == 0) {
+			char b[128];
+			snprintf(b, sizeof(b),
+			         "video: refreshRates=0x%04x (1=59.94 2=50 4=60 8=30)"
+			         " current=0x%02x res=%u",
+			         (unsigned)di.availableModes[0].refreshRates,
+			         (unsigned)state.displayMode.refreshRates,
+			         (unsigned)state.displayMode.resolution);
+			plog(b);
+		}
+	}
 
 	gcmSetFlipMode(GCM_FLIP_VSYNC);
 

@@ -8,6 +8,16 @@
 // caller — set it, join, then clear.
 extern volatile bool g_stream_cancel;
 
+// Called roughly twice a second while stream_open() is waiting for response
+// headers.  Return false to abort the open.
+//
+// Without this the app simply stops: switching quality makes the server start
+// a fresh transcode, which can take tens of seconds, and stream_open() would
+// sit there for up to STREAM_HDR_DEADLINE_US with nothing drawn and no way
+// out.  That is indistinguishable from a crash, and was reported as one.
+typedef bool (*stream_wait_fn)(unsigned elapsed_ms);
+void stream_set_wait_cb(stream_wait_fn cb);
+
 // Open an HTTP connection to url and read the response headers.
 // Returns a connected socket fd on success, -1 on failure.
 int stream_open(const char *url);

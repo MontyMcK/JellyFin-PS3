@@ -16,6 +16,8 @@
 extern u32 running;
 
 volatile bool g_stream_cancel = false;
+static stream_wait_fn s_wait_cb = NULL;
+void stream_set_wait_cb(stream_wait_fn cb) { s_wait_cb = cb; }
 
 // How long to wait for the server's response headers.  A burn-in request
 // (SubtitleMethod=Encode) makes Jellyfin extract the subtitle track from the
@@ -121,6 +123,13 @@ int stream_open(const char *url) {
         sysUtilCheckCallback();
         if (!running || g_stream_cancel) { netClose(sock); return -1; }
         u64 now = timing_get_us();
+        // Let the caller keep the screen alive and offer a way out.
+        if (s_wait_cb && !s_wait_cb((unsigned)((now - hdr_t0) / 1000ULL))) {
+            plog("stream_open: cancelled by user");
+            snprintf(s_last_error, sizeof(s_last_error),
+                     "Cancelled while waiting for the server");
+            netClose(sock); return -1;
+        }
         if (now - hdr_t0 >= STREAM_HDR_DEADLINE_US) {
             plog("stream_open: header timeout");
             // Two minutes with no headers usually means the server is still
