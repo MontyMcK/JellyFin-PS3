@@ -164,20 +164,39 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     const char *source_id = (source && source->id[0]) ? source->id : ps->item->id;
     char encoded_source[288];
     url_encode_query(source_id, encoded_source, sizeof(encoded_source));
+    // Video request.  vbitrate == 0 is DIRECT PLAY (the "Original" quality
+    // setting): ask the server to copy the source video through untouched.
+    //
+    // The ceiling has to be ABSENT, not just large.  Jellyfin checks the
+    // requested bitrate before it will allow a copy, so a 10 Mbps ask against
+    // a 30 Mbps remux does not clamp the copy -- it refuses it and re-encodes,
+    // silently. That is the same trap the HD audio path documents above for
+    // AudioBitrate, and it fails the same quiet way.
+    //
+    // MaxWidth/MaxHeight and MaxFramerate stay in both cases and act as the
+    // safety gate: a 4K or 60 fps source exceeds them, so the server scales it
+    // down rather than copying something this console cannot decode.
+    char vparams[96];
+    if (vbitrate == 0)
+        snprintf(vparams, sizeof(vparams), "&AllowVideoStreamCopy=true");
+    else
+        snprintf(vparams, sizeof(vparams),
+                 "&VideoBitrate=%u&AllowVideoStreamCopy=false", vbitrate);
+
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
         "&Profile=%s"
         "&Level=%s"
         "&MaxWidth=%u&MaxHeight=%u"
-        "&VideoBitrate=%u"
+        "%s"
         "%s"
         "&MaxFramerate=30"
-        "&AllowVideoStreamCopy=false&AllowAudioStreamCopy=%s"
+        "&AllowAudioStreamCopy=%s"
         "&DeviceId=%s&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",
-        g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vbitrate,
+        g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vparams,
         aparams, copy_audio,
         jf_device_id(), encoded_source, (unsigned long long)start_ticks);
     if (source && source->live_stream_id[0] && n > 0 && n < url_sz) {
