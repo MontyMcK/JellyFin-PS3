@@ -176,6 +176,23 @@ static bool xmb_input_settings(void) {
     return false;
 }
 
+// See ui_internal.h.  The one place that opens a Series.
+bool xmb_open_series(const XMBItem *it) {
+    if (!it) return false;
+    int tvt = xmb_tab_of_kind(TABKIND_TV);
+    if (tvt < 0) return false;          // no TV tab on this server/profile
+    g_active_tab = tvt;
+    strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id) - 1);
+    strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name) - 1);
+    g_tv_series_id[sizeof(g_tv_series_id) - 1]     = ' ';
+    g_tv_series_name[sizeof(g_tv_series_name) - 1] = ' ';
+    g_tv_sub_start = 0; g_tv_sub_total = 0;
+    g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items,
+                                       XMB_ITEMS_MAX, 0, &g_tv_sub_total);
+    g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+    return true;
+}
+
 // TV sub-screen (Series -> Seasons -> Episodes) — card grid.
 static void xmb_input_tv_sub(void) {
     GridGeom gg;
@@ -550,12 +567,7 @@ bool xmb_handle_input_browse(void) {
         // Keying this off the tab meant only a "tvshows" library could drill
         // in, and everywhere else X fell through to the video player.
         if (strcmp(ty, "Series") == 0) {
-            strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
-            strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
-            g_tv_sub_start = 0; g_tv_sub_total = 0;
-            g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items, XMB_ITEMS_MAX,
-                                                0, &g_tv_sub_total);
-            g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+            xmb_open_series(it);
         } else if (strcmp(ty, "BoxSet") == 0) {
             strncpy(g_col_id,   it->id,   sizeof(g_col_id)-1);
             strncpy(g_col_name, it->name, sizeof(g_col_name)-1);
@@ -640,7 +652,12 @@ bool xmb_handle_input_browse(void) {
     u64 now_us = timing_get_us();
     if (BTN_PRESSED(triangle) && count > 0 && g_sel < count
         && now_us >= g_info_cooldown_until) {
-        xmb_show_item_info(&g_items[tab][g_sel]);
+        const XMBItem *sel = &g_items[tab][g_sel];
+        // A Series has no version to choose, so the overlay would only ever
+        // offer "Play" on something that is not playable.  Browse it instead;
+        // Triangle on an EPISODE still gets the version picker.
+        if (strcmp(sel->type, "Series") == 0) xmb_open_series(sel);
+        else                                  xmb_show_item_info(sel);
     }
     return false;
 }

@@ -78,6 +78,15 @@ void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs,
 // Triangle detail overlay (xmb/ui_info.cpp)
 void xmb_show_item_info(const XMBItem *it);
 
+// Open the Seasons -> Episodes browser for a Series.
+//
+// A Series is a FOLDER, not something playable, so neither X nor Triangle
+// should hand it to the player or to the version overlay -- there is no
+// version to pick until an actual episode is chosen.  Every entry point
+// (home rows, search results, any library list) routes through here so they
+// cannot drift apart again.  Returns false if the TV tab is unavailable.
+bool xmb_open_series(const XMBItem *it);
+
 // Resume-or-restart prompt for a partly-watched item (xmb/ui_info.cpp).
 // Returns seconds to start at (0 = beginning), or <0 if the user cancelled.
 // Returns 0 without prompting when the item is not meaningfully resumable.
