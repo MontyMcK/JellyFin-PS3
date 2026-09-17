@@ -4,6 +4,7 @@
 #include "timing.h"
 #include "meminfo.h"
 #include "hd1080.h"
+#include "vquality.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -59,6 +60,27 @@ static u32 vdec_cb(u32 handle, u32 msgtype, u32 msgdata, u32 arg) {
     return 0;
 }
 
+
+// Is this playback 1080p-class?
+//
+// Everything below used to ask hd1080_enabled() directly, which predates the
+// quality row on the info screen.  Once that row could select 1080p (or
+// Original) independently of the toggle, the toggle stopped being the truth:
+// with it OFF and 1080p picked, VDEC was configured for LEVEL 3.1 and then
+// fed a level-4.1/4.2 stream, and the arena was sized for 720p.  Resolving
+// through vquality_params() is the same call the stream URL and the jitter
+// buffer already use, so all four agree on the frame size by construction.
+//
+// VQ_AUTO still resolves via the toggle, so an install that never touches the
+// quality row behaves exactly as before.
+static bool vdec_wants_hd(void)
+{
+    u32 w = 0, h = 0;
+    vquality_params(vquality_get(), hd1080_enabled(), 0, 0, &w, &h,
+                    NULL, NULL, NULL);
+    return w >= 1920 || h >= 1080;
+}
+
 bool vdec_open(void) {
     crash_log("v1 vdec_open enter");
     crash_log("v2 sysModuleLoad VDEC");
@@ -71,10 +93,12 @@ bool vdec_open(void) {
 
     vdecType codec;
     codec.codec_type    = VDEC_CODEC_TYPE_H264;
-    // 1080p (Alpha) needs H.264 level 4.2 (1920×1080); the shipped 720p path
-    // uses level 3.1.  queryAttr sizes the SPU arena from this, so the level
-    // drives how much memory vdec_reserve_mem()/vdec_open() must grab.
-    codec.profile_level = hd1080_enabled() ? 42 : 31;
+    // 1080p needs H.264 level 4.2 (1920×1080); the 720p path uses level 3.1.
+    // queryAttr sizes the SPU arena from this, so the level drives how much
+    // memory vdec_reserve_mem()/vdec_open() must grab.  Level 4.2 also covers
+    // the 4.1 that Blu-ray H.264 actually uses, which is what makes the
+    // "Original" direct-play setting decodable at all.
+    codec.profile_level = vdec_wants_hd() ? 42 : 31;
 
     crash_log("v4 queryAttr");
     plog("vdec_open: queryAttr");
@@ -95,7 +119,7 @@ bool vdec_open(void) {
     // arena at exactly the queryAttr requirement; num_spus stays 3 for decode
     // throughput (SPU count and work-area size are independent cellVdec params).
     // Gated: the 720p ship path keeps the proven 3× arena unchanged.
-    const u32 arena_mult = hd1080_enabled() ? 1u : NUM_SPUS;
+    const u32 arena_mult = vdec_wants_hd() ? 1u : NUM_SPUS;
     u32 mem_size_aligned = ((attr.mem_size * arena_mult) + (1024*1024-1))
                            & ~(u32)(1024*1024-1);
     // The arena is CACHED across vdec_close/vdec_open (seek reopens the
@@ -220,7 +244,7 @@ void vdec_reserve_mem(void) {
     // see vdec_open), so 64MB is enough and leaves the heap for the bigger
     // jitter-buffer slots.  Reserving up front keeps it off the UI-fragmented
     // heap; vdec_open re-allocates if the real queryAttr comes back larger.
-    const u32 RESERVE = hd1080_enabled() ? 64u * 1024 * 1024
+    const u32 RESERVE = vdec_wants_hd() ? 64u * 1024 * 1024
                                          : 96u * 1024 * 1024;
     if (!s_vdec_mem) {
         s_vdec_mem = (u8*)memalign(1024*1024, RESERVE);
