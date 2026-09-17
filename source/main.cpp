@@ -24,6 +24,7 @@
 #include "hd1080.h"
 #include "vquality.h"
 #include "surround.h"
+#include "centermix.h"
 #include "statsovl.h"
 #include "audio.h"
 #include "video.h"
@@ -105,6 +106,7 @@ int main(int argc, const char *argv[]) {
     hd1080_load();         // restore the 1080p playback (Alpha) toggle
     vquality_load();       // restore the video quality choice (info screen)
     surround_load();       // restore the surround 5.1 (Alpha) toggle
+    centermix_load();      // restore the dialogue / centre-channel mode
     statsovl_load();       // restore the player stats overlay toggle
     audio_volume_load();   // restore the saved master volume
 

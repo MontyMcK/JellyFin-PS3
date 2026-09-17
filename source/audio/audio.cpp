@@ -3,6 +3,7 @@
 #include "plog.h"
 #include "jf_paths.h"
 #include "player_stats.h"
+#include "centermix.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -257,6 +258,10 @@ bool audio_write_pcm(void) {
                 if (src_ch < 1 || src_ch > 8) src_ch = 2;   // defensive clamp
                 s_src_read(stage, AUDIO_BLOCK_SAMPLES);
                 apply_volume(stage, AUDIO_BLOCK_SAMPLES, src_ch);
+                // Dialogue handling (centre boost / phantom fold).  Done here,
+                // on the staged source frame, so it covers every codec at once
+                // and cannot disagree with the per-codec channel maps.
+                centermix_apply(stage, AUDIO_BLOCK_SAMPLES, src_ch);
                 for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
                     float       *d = blk_buf + i * s_port_channels;
                     const float *s = stage   + i * src_ch;
@@ -283,6 +288,25 @@ bool audio_write_pcm(void) {
             s_sil_blocks++;
             plog("audio: decoder stall");
         }
+        // Per-channel peak of the block we just handed to the DMA engine —
+        // the last point the app can observe its own audio.  This is what
+        // answers "is the centre channel silent, or is the chain not playing
+        // it?": a centre peak tracking dialogue with nothing audible means
+        // the sink is dropping slot 2, not that the decode is wrong.
+        {
+            int pk[8] = {0,0,0,0,0,0,0,0};
+            const int pc = (s_port_channels > 8) ? 8 : s_port_channels;
+            for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
+                const float *s = blk_buf + i * s_port_channels;
+                for (int c = 0; c < pc; c++) {
+                    float a = s[c] < 0.0f ? -s[c] : s[c];
+                    int   q = (int)(a * 32768.0f);
+                    if (q > pk[c]) pk[c] = q;
+                }
+            }
+            player_stats_on_audio_levels(pk, pc);
+        }
+
         s_write_blk = (s_write_blk + 1) % s_num_blocks;
 
         // Blocks of runway between the DMA read cursor and where we just
