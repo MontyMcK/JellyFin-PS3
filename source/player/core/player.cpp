@@ -721,6 +721,15 @@ void show_player(const JFItem *item, u32 resume_secs,
     // Tell the server where we stopped (also finalizes Continue Watching).
     jellyfin_report_stopped(item->id, ps.session_id, final_pos_ticks);
 
+    // Kill the server-side transcode for this session.  Without this the job
+    // is left running when playback ends, and starting the SAME item and
+    // version again collides with the orphan — the new stream request comes
+    // back HTTP 500.  Picking a different version appeared to "fix" it only
+    // because a different MediaSourceId is a different job.  Seeks already do
+    // this (player_seek.cpp) for the same reason; ending playback did not.
+    if (ps.session_id[0])
+        jellyfin_stop_transcode(ps.session_id);
+
     // Free video GPU blit resources before releasing the jitter buffer
     vid_gpu_free();
 

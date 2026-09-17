@@ -200,7 +200,17 @@ bool xmb_handle_input_search(void) {
         // a chosen version and quality instead of only the server's default.
         if (BTN_PRESSED(triangle) && g_search_sel < g_search_results_count &&
             timing_get_us() >= g_info_cooldown_until) {
-            xmb_show_item_info(&g_search_results[g_search_sel]);
+            const XMBItem *it = &g_search_results[g_search_sel];
+            if (strcmp(it->type, "Series") == 0) {
+                // Same rule as everywhere else: browse a show rather than
+                // offer it a version overlay it has no versions for.
+                if (xmb_open_series(it)) {
+                    g_search_focus_results = false;
+                    init_btns();
+                }
+            } else {
+                xmb_show_item_info(it);
+            }
             return false;
         }
         if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {
@@ -211,19 +221,7 @@ bool xmb_handle_input_search(void) {
             // choose.  Open the Seasons -> Episodes browser the TV tab and
             // the Home rows already use.
             if (strcmp(it->type, "Series") == 0) {
-                int tvt = xmb_tab_of_kind(TABKIND_TV);
-                if (tvt >= 0) {
-                    g_active_tab = tvt;
-                    strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
-                    strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
-                    g_tv_series_id[sizeof(g_tv_series_id)-1]     = '\0';
-                    g_tv_series_name[sizeof(g_tv_series_name)-1] = '\0';
-                    g_tv_sub_start = 0; g_tv_sub_total = 0;
-                    g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id,
-                                                       g_tv_sub_items,
-                                                       XMB_ITEMS_MAX, 0,
-                                                       &g_tv_sub_total);
-                    g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+                if (xmb_open_series(it)) {
                     g_search_focus_results = false;
                     init_btns();
                 }

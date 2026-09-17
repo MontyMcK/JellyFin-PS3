@@ -97,6 +97,26 @@ static sys_cond_t       s_pes_cond;
 static volatile bool    s_adec_run  = false;
 static sys_ppu_thread_t s_adec_thread = 0;
 
+// Flush generation — the seek barrier for audio.
+//
+// adec_flush() empties the PES queue and the PCM ring, but the decode thread
+// runs CONCURRENTLY and has usually already popped a PES by then.  Worse, it
+// then sleeps in the PCM high-water back-pressure loop still holding that
+// packet, for up to a second.  A seek landing anywhere in that window used to
+// end with pre-seek audio being decoded and pushed into the freshly cleared
+// ring AFTER the flush — which also set the post-seek PTS baseline from stale
+// data.  Heard as audio drifting out of sync with the picture after scrubbing,
+// getting worse the more you scrub, and worst on TrueHD because its frames
+// take the longest to decode.
+//
+// So every flush bumps the generation, the thread stamps each packet it pops,
+// and anything decoded from an older generation is dropped instead of played.
+static volatile u32 s_flush_gen  = 0;   // bumped by adec_flush()
+static volatile u32 s_decode_gen = 0;   // generation of the packet in flight
+
+// True while the packet being decoded still belongs to the current position.
+static inline bool adec_gen_current(void) { return s_decode_gen == s_flush_gen; }
+
 // Returns true and fills *pts_us (microseconds) if the PES header contains a PTS.
 static bool parse_pes_pts(const u8 *pes, int pes_len, u64 *pts_us) {
     if (pes_len < 14) return false;
@@ -129,6 +149,10 @@ void adec_init(void) {
 // to the shipped stereo code.
 static void push_samples(const short *pcm, int n, int channels) {
     sysMutexLock(s_pcm_mtx, 0);
+    if (!adec_gen_current()) {          // stale MP3 frame from before a seek
+        sysMutexUnlock(s_pcm_mtx);
+        return;
+    }
     for (int i = 0; i < n; i++) {
         if (s_n >= PCM_RING_CAP) {
 #if BUILD_FOR_RPCS3
@@ -164,6 +188,14 @@ static void push_samples(const short *pcm, int n, int channels) {
 // sample format and width.
 void adec_push_frames(const float *frames, int n) {
     sysMutexLock(s_pcm_mtx, 0);
+    if (!adec_gen_current()) {
+        // A flush landed while this frame was being decoded.  Dropping it here
+        // matters as much as the check in the thread loop: a codec frame can
+        // take long enough that the seek happens mid-decode, and pushing it
+        // would both play old audio and set the new PTS baseline from it.
+        sysMutexUnlock(s_pcm_mtx);
+        return;
+    }
     int ch = s_ring_ch;
     for (int i = 0; i < n; i++) {
         if (s_n >= PCM_RING_CAP) {
@@ -330,14 +362,22 @@ static void adec_thread_fn(void *arg) {
         local_cont = s_pes_q_cont[s_pes_q_rd] != 0;
         s_pes_q_rd = (s_pes_q_rd + 1) % PES_QUEUE_SLOTS;
         s_pes_q_n--;
+        // Stamp the packet with the position it belongs to, while still under
+        // the lock adec_flush() takes — so the stamp cannot straddle a flush.
+        s_decode_gen = s_flush_gen;
         sysMutexUnlock(s_pes_mtx);
 
         // Back-pressure: don't decode further ahead than the PCM ring high-water.
         // This keeps the decoded-PCM ring small while the compressed burst waits
         // in the (cheap) PES queue, draining in sync with playback.  The popped
         // PES is held in local_pes meanwhile; the demux keeps filling the queue.
-        while (s_adec_run && s_n >= PCM_RING_HIGHWATER)
+        while (s_adec_run && s_n >= PCM_RING_HIGHWATER && adec_gen_current())
             usleep(2000);
+
+        // A seek while we were queued or waiting above: this packet is from
+        // the OLD position.  Drop it rather than decode it.
+        if (!adec_gen_current())
+            continue;
 
         adec_decode_pes(local_pes, local_len, local_cont);
     }
@@ -376,6 +416,10 @@ void adec_start(void) {
 
 void adec_flush(void) {
     sysMutexLock(s_pes_mtx, 0);
+    // Invalidate anything the decode thread already popped. Must happen under
+    // the same lock the thread stamps under, or a packet could be stamped with
+    // the old generation just after we bump it.
+    s_flush_gen++;
     s_pes_q_rd = s_pes_q_wr = s_pes_q_n = 0;
     // Dropping the queue can strand a continuation chunk whose head is gone;
     // clearing the flags means nothing left behind is ever read as one.
