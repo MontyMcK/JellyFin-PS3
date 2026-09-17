@@ -446,12 +446,19 @@ void adec_set_codec(adec_codec_t codec) {
     // downmixed at decode time, so the ring stays 2-wide there.  TrueHD is
     // the one codec that can fill all eight slots (7.1); AC-3 and DTS top
     // out at a 5.1 program.
-    const bool wide_port = audio_output_channels() >= 6;
+    const int  port_ch   = audio_output_channels();
+    const bool wide_port = port_ch >= 6;
     int want_ch = 2;
     if (codec == ADEC_CODEC_AC3 || codec == ADEC_CODEC_DTS)
         want_ch = wide_port ? 6 : 2;
     else if (codec == ADEC_CODEC_TRUEHD)
-        want_ch = wide_port ? 8 : 2;
+        // Never decode WIDER than the port actually is.  The port is now
+        // opened 6-wide when it can be (see audio_open), and a 7.1 ring
+        // feeding a 6-wide port would be wider than its destination — which
+        // the output stage can only resolve by dropping back to FL/FR.
+        // truehd_map folds the rears into the surrounds at -3 dB for a
+        // six-slot program, so nothing in the mix is lost by asking for 6.
+        want_ch = wide_port ? (port_ch >= 8 ? 8 : 6) : 2;
 
     if (codec == s_codec && want_ch == s_ring_ch) return;
 
