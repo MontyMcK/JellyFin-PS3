@@ -37,7 +37,16 @@ typedef enum {
     // setting persists as a digit, so appending keeps every already-saved
     // value meaning exactly what it meant.
     VQ_ORIGINAL = 5,
-    VQ_COUNT = 6,
+    // Middle ground between the 10 Mbps 1080p transcode and uncapped direct
+    // play.  A ceiling is a ceiling ON THE COPY (see build_stream_url), so:
+    //   source <= ceiling -> copied untouched, no encoder involved
+    //   source >  ceiling -> transcoded down to it
+    // Useful when a remux is more data than the link can carry but the
+    // server can still encode at the lower rate.  Appended, like ORIGINAL,
+    // so saved settings keep their meaning.
+    VQ_1080P_20 = 6,   // 1920x1080 High 4.2, copy up to 20 Mbps
+    VQ_1080P_30 = 7,   // 1920x1080 High 4.2, copy up to 30 Mbps
+    VQ_COUNT = 8,
 } vquality_t;
 
 void       vquality_load(void);         // read the persisted value at startup

@@ -18,6 +18,7 @@
 #include "video.h"
 #include "timing.h"
 #include "player_internal.h"
+#include "player_stats.h"
 #include "jellyfin_api.h"
 
 extern u32 running;
@@ -265,15 +266,25 @@ void decode_thread_fn(void *arg) {
                                 / (float)(hb_now - hb_last_us);
             hb_fr_last = *frame_count;
             hb_last_us = hb_now;
-            char buf[160];
+            char buf[224];
             long avg_ms = stall_ep_count ? stall_ep_dur_total_us / stall_ep_count / 1000 : 0;
+            // Pulldown cadence comes along for the ride.  24fps film on a
+            // 60Hz output is displayed 3,2,3,2 vblanks per frame; healthy
+            // playback shows hold2 and hold3 roughly equal and "other" near
+            // zero.  "other" dominating means the cadence is NOT holding,
+            // which is visibly worse judder than correct 3:2 -- and it is
+            // the only part of this the console lets us fix, since PSL1GHT
+            // has no way to request a 24Hz output mode.
+            PlayerStats ps_hb; player_stats_get(&ps_hb);
             snprintf(buf, sizeof(buf),
-                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d ring=%d/%d pcm=%d",
+                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d ring=%d/%d pcm=%d pd=%u/%u/%u",
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
                 display_fps, s_au_inflight_max, s_ring_n, s_ring_cap,
-                adec_pcm_available());
+                adec_pcm_available(),
+                (unsigned)ps_hb.hold2, (unsigned)ps_hb.hold3,
+                (unsigned)ps_hb.hold_other);
             plog(buf);
             s_au_inflight_max = 0;
             stall_ep_count = stall_ep_dur_max_us = stall_ep_dur_total_us = 0;
