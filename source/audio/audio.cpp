@@ -127,20 +127,16 @@ void audio_open(int channels) {
     // 8-wide surround port gets 16 blocks: Movian's ps3_audio.c uses 16, and
     // 8 blocks is only ~42 ms of runway — thin once the decoder is doing real
     // 5.1 work.  The stereo path keeps the shipped 8 blocks untouched.
-    // Port width, widest usable first.  A 5.1 PROGRAM in an 8-wide port makes
-    // the firmware convert 8->6 for a system configured as "Linear PCM 5.1
-    // Ch.", and that conversion is a place channels can go missing before any
-    // speaker sees them — which is exactly the reported symptom (centre leaves
-    // this app hot, measured at -18 dBFS by the ch-peak meter, and is
-    // inaudible).  A native 6-channel port skips the conversion entirely and
-    // is what the firmware's own Blu-ray player uses for 5.1 discs.
+    // Port width.  A 6-channel port was tried here, on the theory that a 5.1
+    // program in an 8-wide port makes the firmware convert 8->6 and that the
+    // centre could go missing in that conversion.  THE PS3 REJECTS IT:
+    // hardware logged `6ch port open rc=0x80310704`, then opened 8ch fine.
+    // PSL1GHT defines only 2CH and 8CH and it turns out that is not an
+    // oversight. Do not try this again; the centre channel is lost somewhere
+    // downstream of the console, not in a width conversion.
     //
-    // PSL1GHT only DEFINES 2CH and 8CH, but numChannels is a plain u64 and
-    // the hardware supports 6, so the constant is spelled out here.  Falling
-    // back through 8 keeps 7.1 TrueHD working on a system that really is set
-    // to 7.1; the truehd map already folds rears into the surrounds at -3 dB
-    // when it only has six slots, so nothing in the mix is lost either way.
-    #define AUDIO_PORT_6CH 6
+    // The loop is kept because the fallback through to stereo is still what
+    // makes a failed surround open degrade instead of killing playback.
     bool surround = (channels == 8);
     audioPortParam p;
     p.numBlocks = surround ? AUDIO_BLOCK_16 : AUDIO_BLOCK_8;
@@ -148,7 +144,7 @@ void audio_open(int channels) {
     p.level     = 1.0f;
     crash_log("a3 sysAudioPortOpen");
 
-    static const u64 kWidths[] = { AUDIO_PORT_6CH, AUDIO_PORT_8CH };
+    static const u64 kWidths[] = { AUDIO_PORT_8CH };
     int opened = 0;
     if (surround) {
         for (unsigned i = 0; i < sizeof(kWidths) / sizeof(kWidths[0]); i++) {
