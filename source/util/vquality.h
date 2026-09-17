@@ -31,7 +31,13 @@ typedef enum {
     VQ_720P  = 2,   // 1280x720 baseline 3.1, 4 Mbps
     VQ_480P  = 3,   // 854x480 baseline 3.1, 1.5 Mbps
     VQ_360P  = 4,   // 640x360 baseline 3.1, 0.7 Mbps
-    VQ_COUNT = 5,
+    // DIRECT PLAY: ask the server to COPY the source video through untouched
+    // instead of re-encoding it -- full disc bitrate, and no encoder on the
+    // server that can fall behind real time.  Added LAST on purpose: the
+    // setting persists as a digit, so appending keeps every already-saved
+    // value meaning exactly what it meant.
+    VQ_ORIGINAL = 5,
+    VQ_COUNT = 6,
 } vquality_t;
 
 void       vquality_load(void);         // read the persisted value at startup
@@ -40,7 +46,7 @@ vquality_t vquality_get(void);
 void       vquality_set(vquality_t q);  // set + persist
 void       vquality_next(int delta);    // cycle (left/right on the info row)
 
-// Short label for the info screen: "Auto", "1080p", "720p", "480p", "360p".
+// Short label for the info screen: "Auto", "1080p", ..., "Original".
 const char *vquality_label(vquality_t q);
 
 // Everything the stream request needs, resolved against the 1080p toggle for
@@ -48,6 +54,13 @@ const char *vquality_label(vquality_t q);
 // request on a 576-line output does not ask for more than can be shown —
 // the same clamp the player applied before this existed.  Any output may be
 // NULL.
+//
+// *out_vbitrate == 0 means DIRECT PLAY: send no VideoBitrate at all and let
+// the server copy the source stream.  A ceiling is not merely unnecessary
+// there, it is fatal -- Jellyfin checks the requested bitrate before allowing
+// a copy, so asking for 10 Mbps on a 30 Mbps remux silently demotes it to a
+// transcode.  Exactly the trap the HD audio path already documents for
+// AudioBitrate.
 void vquality_params(vquality_t q, bool hd_toggle,
                      u32 max_w, u32 max_h,
                      u32 *out_w, u32 *out_h,

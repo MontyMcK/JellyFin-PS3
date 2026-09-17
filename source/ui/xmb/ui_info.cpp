@@ -515,7 +515,12 @@ void xmb_show_item_info(const XMBItem *root) {
                 vquality_params(vq, hd1080_enabled(), display_width,
                                 display_height, &qw, &qh, NULL, NULL, &qbr);
                 char qtxt[64];
-                if (vq == VQ_AUTO)
+                if (qbr == 0)
+                    // Direct play: there is no bitrate to quote, which is
+                    // the entire point of the setting.
+                    snprintf(qtxt, sizeof(qtxt),
+                             "Original  (direct play, no re-encode)");
+                else if (vq == VQ_AUTO)
                     snprintf(qtxt, sizeof(qtxt), "Auto  (%ux%u, %u Mbps)",
                              (unsigned)qw, (unsigned)qh, qbr / 1000000u);
                 else

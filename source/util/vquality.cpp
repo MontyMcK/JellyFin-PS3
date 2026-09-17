@@ -25,6 +25,7 @@ void vquality_next(int delta) {
 
 const char *vquality_label(vquality_t q) {
     switch (q) {
+    case VQ_ORIGINAL: return "Original";
     case VQ_1080P: return "1080p";
     case VQ_720P:  return "720p";
     case VQ_480P:  return "480p";
@@ -49,6 +50,16 @@ void vquality_params(vquality_t q, bool hd_toggle,
     const char *level   = "31";
 
     switch (q) {
+    case VQ_ORIGINAL:
+        // Direct play.  The frame size still says 1920x1080 because the
+        // jitter buffer has to be sized for something, and because MaxWidth/
+        // MaxHeight double as the SAFETY GATE: a 4K source exceeds them, so
+        // the server transcodes it down rather than copying something this
+        // console cannot decode.  A 1080p-or-smaller source fits and is
+        // copied untouched.
+        w = 1920; h = 1080; br = 0;         // 0 => no ceiling, allow copy
+        profile = "high"; level = "42";
+        break;
     case VQ_1080P:
         // 1080p exceeds baseline/level-3.1, so it needs High/4.2 — the same
         // pairing the 1080p (Alpha) path has always requested.
