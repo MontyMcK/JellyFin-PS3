@@ -26,6 +26,8 @@ void vquality_next(int delta) {
 const char *vquality_label(vquality_t q) {
     switch (q) {
     case VQ_ORIGINAL: return "Original";
+    case VQ_1080P_20: return "1080p 20";
+    case VQ_1080P_30: return "1080p 30";
     case VQ_1080P: return "1080p";
     case VQ_720P:  return "720p";
     case VQ_480P:  return "480p";
@@ -60,6 +62,14 @@ void vquality_params(vquality_t q, bool hd_toggle,
         w = 1920; h = 1080; br = 0;         // 0 => no ceiling, allow copy
         profile = "high"; level = "42";
         break;
+    case VQ_1080P_20:
+        w = 1920; h = 1080; br = 20000000u;
+        profile = "high"; level = "42";
+        break;
+    case VQ_1080P_30:
+        w = 1920; h = 1080; br = 30000000u;
+        profile = "high"; level = "42";
+        break;
     case VQ_1080P:
         // 1080p exceeds baseline/level-3.1, so it needs High/4.2 — the same
         // pairing the 1080p (Alpha) path has always requested.
@@ -75,7 +85,8 @@ void vquality_params(vquality_t q, bool hd_toggle,
     // Never ask for more than the output can show.  1080p is deliberately
     // exempt: the point of that mode is the higher-detail transcode, and the
     // player allocates its jitter buffer for the full frame.
-    if (q != VQ_1080P) {
+    if (q != VQ_1080P && q != VQ_1080P_20 && q != VQ_1080P_30 &&
+        q != VQ_ORIGINAL) {
         if (max_w && w > max_w) w = max_w;
         if (max_h && h > max_h) h = max_h;
     }
