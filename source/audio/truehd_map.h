@@ -48,6 +48,18 @@ int truehd_map_build(uint64_t ch_mask, int nb_ch, int out_ch,
 void truehd_map_block(const int32_t *in, int nb_ch, int n,
                       const truehd_map_t *m, float *out);
 
+// As above, but reading PLANAR input: planes[c] is a contiguous run of n
+// int32 samples for source channel c.
+//
+// This exists for the vendored DTS-HD decoder (source/audio/dcahd/), which
+// emits S32P rather than interleaved.  It shares this map file rather than
+// getting its own because the CHANNEL ORDER is identical: both FFmpeg
+// decoders number their output in ascending channel-mask bit order, so the
+// map truehd_map_build() produces is correct for either one.  Only the
+// memory layout differs, which is all this function changes.
+void truehd_map_block_planar(const int32_t *const *planes, int nb_ch, int n,
+                             const truehd_map_t *m, float *out);
+
 #ifdef __cplusplus
 }
 #endif

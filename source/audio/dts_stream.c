@@ -25,6 +25,15 @@ void dts_stream_init(dts_stream_t *s, dca_state_t *state, int out_ch,
     s->user = user;
 }
 
+// Switch to packet mode -- see dts_stream.h.  Nothing decodes in this mode;
+// whole frames go to the caller, which owns the decoder.
+void dts_stream_set_packet_mode(dts_stream_t *s, dts_packet_fn packet,
+                                void *user)
+{
+    s->packet = packet;
+    s->user   = user;
+}
+
 void dts_stream_reset(dts_stream_t *s)
 {
     s->carry_len = 0;
@@ -81,12 +90,73 @@ static void decode_core_frame(dts_stream_t *s, int off, int fsize,
     s->core_frames++;
 }
 
+static inline int is_exss_sync(const uint8_t *p)
+{
+    return p[0] == 0x64 && p[1] == 0x58 && p[2] == 0x20 && p[3] == 0x25;
+}
+
+// Assemble one complete packet at `off`: a core frame plus every extension
+// substream immediately following it, or a lone extension substream on a
+// core-less DTS-HD MA track.
+//
+// Returns the packet length, 0 if more bytes are needed (caller must wait),
+// or -1 if there is no packet at `off` (caller advances one byte).
+static int packet_len_at(dts_stream_t *s, int off)
+{
+    const uint8_t *p     = s->carry + off;
+    const int      avail = s->carry_len - off;
+    int            total = 0;
+
+    if (is_exss_sync(p)) {
+        // Core-less track: the extension substream IS the packet.
+        uint32_t ext = 0;
+        if (!dts_exss_size(p, avail, &ext) || ext == 0) return -1;
+        if ((uint32_t)avail < ext) return 0;
+        s->ext_count++;
+        s->ext_bytes += ext;
+        return (int)ext;
+    }
+
+    int flags = 0, srate = 0, brate = 0, flen = 0;
+    int fsize = dca_syncinfo(s->state, p, &flags, &srate, &brate, &flen);
+    if (fsize <= 0) return -1;
+    if (avail < fsize) return 0;
+    total = fsize;
+
+    // Absorb the extension substreams that belong to this frame.  They are
+    // what makes it DTS-HD; dropping them here would hand the decoder a bare
+    // core and quietly cost exactly the lossless audio we came for.
+    while (off + total + DTS_MIN_SCAN <= s->carry_len &&
+           is_exss_sync(s->carry + off + total)) {
+        uint32_t ext = 0;
+        if (!dts_exss_size(s->carry + off + total,
+                           s->carry_len - off - total, &ext) || ext == 0)
+            break;                       // malformed: emit what we have
+        if ((uint32_t)(s->carry_len - off - total) < ext) return 0;   // wait
+        s->ext_count++;
+        s->ext_bytes += ext;
+        total += (int)ext;
+    }
+    return total;
+}
+
 // Consume everything decodable in the carry buffer; keep the tail.
 static void decode_carry(dts_stream_t *s)
 {
     int off = 0;
     while (s->carry_len - off >= DTS_MIN_SCAN) {
         const uint8_t *p = s->carry + off;
+
+        // ---- packet mode: hand whole frames to the caller's decoder ----
+        if (s->packet) {
+            int len = packet_len_at(s, off);
+            if (len == 0) break;                 // incomplete: wait for more
+            if (len < 0) { off++; continue; }    // no packet here: rescan
+            s->packet(s->user, s->carry + off, len);
+            s->core_frames++;
+            off += len;
+            continue;
+        }
 
         // ---- DTS-HD / DTS:X extension substream: locate and skip ----
         if (p[0] == 0x64 && p[1] == 0x58 && p[2] == 0x20 && p[3] == 0x25) {

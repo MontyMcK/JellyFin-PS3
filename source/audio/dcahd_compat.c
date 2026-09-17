@@ -28,7 +28,12 @@ void av_fast_mallocz(void *ptr, unsigned int *size, size_t min_size)
 }
 
 // --- deliberately absent subsystems --------------------------------------
-// av_tx is FFmpeg MDCT/FFT framework, reached ONLY from the core decoder on
+// av_tx is FFmpeg MDCT/FFT framework, reached only from synth_filter_float,
+// which nothing calls: AV_CODEC_FLAG_BITEXACT pins the decoder to the
+// fixed-point path (see dcahd_api.c). synth_filter.c IS compiled, because
+// a CORE-ONLY DTS stream really does run ff_dca_core_filter_fixed and needs
+// its fixed QMF -- only an XLL stream skips the core filter entirely. That
+// distinction cost a null-pointer crash to learn.
 // its FLOAT output path.  DTS-HD MA decodes on the FIXED-POINT path, where
 // the core synthesis filter is skipped entirely whenever an XLL substream is
 // present.  Stubbing these keeps roughly 200 KB of transform code out of the
@@ -36,7 +41,7 @@ void av_fast_mallocz(void *ptr, unsigned int *size, size_t min_size)
 int  av_tx_init(void **c, void **fn, int t, int inv, int len, const void *s, uint64_t f)
 { (void)c; (void)fn; (void)t; (void)inv; (void)len; (void)s; (void)f; return 0; }
 void av_tx_uninit(void **c) { if (c) *c = 0; }
-void ff_synth_filter_init(void *c) { (void)c; }
+
 void ff_dca_lbr_init_tables(void) { }
 
 int av_log2(unsigned v) { int n = 0; while (v >>= 1) n++; return n; }

@@ -42,6 +42,12 @@ void adec_dts_decode_payload(const u8 *es, int len);
 // Drives the "dts-hd" tag in the stats overlay.
 bool adec_dts_saw_extension(void);
 
+// True once a frame has been decoded from the XLL extension substream rather
+// than the lossy core -- i.e. the track really is playing as DTS-HD Master
+// Audio, losslessly.  False for a plain DTS core track, and false if the
+// lossless decoder could not open and libdca is handling the stream.
+bool adec_dts_is_lossless(void);
+
 // True when this stream has delivered a lot of bytes, all of them extension
 // substream, and NOT ONE decodable core frame — a coreless DTS-HD MA track
 // (rare: Blu-ray always carries a core, but re-encodes need not).  Nothing

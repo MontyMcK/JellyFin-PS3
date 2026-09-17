@@ -23,16 +23,29 @@
 // successor.  Extension substreams are never buffered whole — they can reach
 // a megabyte and are only ever skipped, so a byte counter carries a skip
 // across feeds instead.
-#define DTS_CARRY_BYTES 32768
+// Packet mode (see dts_packet_fn) needs the WHOLE frame resident -- core plus
+// its extension substreams -- not just the core, so the carry is sized for
+// that instead. DTS-HD MA peaks around 24.5 Mbps, which at a 512-sample frame
+// is roughly 32 KB; 64 KB leaves headroom without being extravagant.
+#define DTS_CARRY_BYTES 65536
 
 // Called with n interleaved frames of out_ch floats, in PS3 channel order.
 typedef void (*dts_emit_fn)(void *user, const float *frames, int n);
+
+// Called with one COMPLETE DTS packet: a core frame plus every extension
+// substream that follows it, or a lone extension substream on a core-less
+// DTS-HD MA track.  Setting this switches the reader into packet mode, where
+// it does no libdca decoding at all and hands whole frames to a caller that
+// has its own decoder -- which is how the lossless path works, since the XLL
+// extension libdca skips is exactly the part that carries the lossless audio.
+typedef void (*dts_packet_fn)(void *user, const uint8_t *pkt, int len);
 
 typedef struct {
     dca_state_t *state;        // caller-owned libdca state
     int          out_ch;       // 6 (5.1) or 2
     int          req_flags;    // DCA_* request passed to dca_frame()
     dts_emit_fn  emit;
+    dts_packet_fn packet;      // non-NULL => packet mode, emit unused
     void        *user;
 
     uint8_t  carry[DTS_CARRY_BYTES];
@@ -55,6 +68,12 @@ typedef struct {
 // out_ch 6 requests DCA_3F2R|DCA_LFE, anything else requests DCA_STEREO.
 void dts_stream_init(dts_stream_t *s, dca_state_t *state, int out_ch,
                      dts_emit_fn emit, void *user);
+
+// Switch to packet mode.  Call after dts_stream_init().  `state` is still
+// required: nothing DECODES here, but the frame walker still calls
+// dca_syncinfo() to find core frames and measure them.
+void dts_stream_set_packet_mode(dts_stream_t *s, dts_packet_fn packet,
+                                void *user);
 
 // Drop the partial-frame carry and any pending skip (seek/flush).
 void dts_stream_reset(dts_stream_t *s);

@@ -29,6 +29,7 @@ From `libavcodec/`: `dca.c`, `dca.h`, `dca_core.c`, `dca_core.h`,
 `dcadsp.c`, `dcadsp.h`, `dcadct.c`, `dcadct.h`, `dcahuff.c`, `dcahuff.h`,
 `dcadata.c`, `dcadata.h`, `dcaadpcm.c`, `dcaadpcm.h`, `dcamath.h`,
 `dca_sample_rate_tab.c`, `dca_sample_rate_tab.h`, `dca_syncwords.h`,
+`synth_filter.c`,
 `dca_lbr.h`, `dcaenc.h` (the last only because `dcaadpcm.h` includes it).
 
 Added to the shared `../mlp/ff/` tree: `libavcodec/unary.h`, `put_bits.h`,
@@ -48,11 +49,21 @@ entirely whenever an XLL substream is present:
 if (!(dca->packet & DCA_PACKET_XLL) && (ret = ff_dca_core_filter_fixed(s, 0)) < 0)
 ```
 
-`av_tx_init` / `av_tx_uninit` / `ff_synth_filter_init` are stubbed in
-`../dcahd_compat.c`. That keeps roughly 200 KB of transform code out of the
-build. Fixed-point is also the correct path on principle: lossless output
-requires exact integer arithmetic, and it yields int32 samples, which is the
-same shape the TrueHD path already feeds to its channel map.
+`av_tx_init` / `av_tx_uninit` are stubbed in `../dcahd_compat.c`, which keeps
+roughly 200 KB of transform code out of the build.
+
+`synth_filter.c` **is** vendored, though — an earlier revision stubbed
+`ff_synth_filter_init` too, on the assumption that the fixed path never needs
+the QMF. That is only true when XLL is present. A **core-only** DTS stream
+really does run `ff_dca_core_filter_fixed`, which calls through those function
+pointers, and stubbing the init left them NULL. `tests/test_dts_hd.c` caught it
+as a null-pointer crash on the first frame. `synth_filter_fixed` uses
+`dcadct.c`, not `av_tx`; the float half of the file compiles but is never
+called, because `AV_CODEC_FLAG_BITEXACT` pins the decoder to fixed point.
+
+Fixed-point is the right path on principle anyway: lossless output requires
+exact integer arithmetic, and it yields int32 samples — the same shape the
+TrueHD path already feeds to its channel map.
 
 **`dca_lbr.c` (DTS Express) is NOT vendored.** LBR is a lossy low-bitrate
 extension used for secondary audio and streaming profiles; it never carries
@@ -101,8 +112,32 @@ been observed at 16–33 MB.
 
 ## Status
 
-Compiles and links for PPC64 big-endian, and the full application builds with
-it in tree. **Not yet wired to the player**: it still needs an API entry point,
-a channel map from FFmpeg's DCA speaker order to the PS3 CellAudio order, and
-a bit-exactness test against `ffmpeg` on the host. Until then `adec_dts.cpp`
-continues to use libdca's core-only path.
+Wired and tested on the host; **not yet confirmed on hardware**.
+
+`adec_dts.cpp` opens this decoder at the same time as libdca and, when it
+comes up, switches `dts_stream` into packet mode so whole frames arrive here
+instead of libdca getting a bare core. If it fails to open, or fails on 32
+consecutive frames, the reader falls back to libdca — so the worst case is the
+lossy audio that shipped before, never silence.
+
+`tests/test_dts_hd.c` drives the whole chain (framing, decoder, fixed-point
+output, channel map) with a distinct tone per speaker and asserts every PS3
+slot is dominated by its own tone. Margins measured 35–78 dB.
+
+The fixture is core-only DTS, because ffmpeg's `dca` encoder is the only free
+DTS encoder and it cannot produce DTS-HD MA — **no free XLL encoder exists**.
+So the host test proves the framing, the API, the fixed-point path and the
+channel map, but it cannot synthesise an XLL substream. XLL itself is confirmed
+by playing a real DTS-HD MA track and watching the stats overlay read
+`dts-ma`, which only appears when a frame decoded from the XLL extension.
+
+Generate the fixture with:
+
+```
+ffmpeg -f lavfi -i "sine=f=400:r=48000:d=4" -f lavfi -i "sine=f=700:r=48000:d=4"        -f lavfi -i "sine=f=1100:r=48000:d=4" -f lavfi -i "sine=f=60:r=48000:d=4"        -f lavfi -i "sine=f=1900:r=48000:d=4" -f lavfi -i "sine=f=2600:r=48000:d=4"        -filter_complex "[0:a][1:a][2:a][3:a][4:a][5:a]join=inputs=6:channel_layout=5.1:map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-BL|5.0-BR[a]"        -map "[a]" -c:a dca -strict -2 -ar 48000 tones51.dts
+```
+
+The explicit `map=` is not optional: `join`'s default input order is NOT the
+layout's channel order, and leaving it out produces a fixture whose front three
+channels are rotated. That cost a "failing" test run before a cross-check
+against ffmpeg's own decoder showed our output matched it exactly.
