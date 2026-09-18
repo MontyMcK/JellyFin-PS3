@@ -50,7 +50,7 @@ DCAHD_SRCS = ../source/audio/dcahd_api.c ../source/audio/dcahd_xll.c \
 DTS_HD_DEPS = $(DTS_STREAM_SRC) $(DTS_MAP_SRC) $(DTS_EXSS_SRC) $(DCA_SRCS) \
               ../source/audio/truehd_map.c $(DCAHD_SRCS)
 
-all: test_ac3_map test_ac3_decode test_media_sources \
+all: test_ac3_map test_ac3_decode test_media_sources test_subtitles \
      test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
      test_truehd_map test_truehd_decode \
      test_dts_hd test_dts_xll_dump
@@ -84,6 +84,11 @@ test_truehd_map: test_truehd_map.c ../source/audio/truehd_map.c
 # FFmpeg headers' `#include "config.h"` would otherwise pick up a52's.
 test_truehd_decode: test_truehd_decode.c $(TRUEHD_SRCS)
 	$(CC) $(MLP_CFLAGS) $(CFLAGS) -o $@ $^ -lm
+
+# subtitles.cpp is compiled straight into the test with its console-only
+# dependencies stubbed, so what is tested is the code the PS3 runs.
+test_subtitles: test_subtitles.cpp ../source/player/subtitles.cpp
+	$(CXX) $(CXXFLAGS) -o $@ test_subtitles.cpp
 
 test_media_sources: test_media_sources.cpp ../source/api/media_sources.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $^
@@ -163,9 +168,10 @@ check: all tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 	./test_truehd_decode tones51.thd tones51.thd.ref
 	./test_dts_hd tones51.dts
 	./test_media_sources
+	./test_subtitles
 
 clean:
-	rm -f test_ac3_map test_ac3_decode test_media_sources \
+	rm -f test_ac3_map test_ac3_decode test_media_sources test_subtitles \
 	      test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
 	      test_truehd_map test_truehd_decode test_dts_hd test_dts_xll_dump \
 	      tones51.ac3 tones51.dts tones51.thd tones51.thd.ref

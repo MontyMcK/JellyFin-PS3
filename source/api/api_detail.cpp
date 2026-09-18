@@ -479,16 +479,22 @@ bool jellyfin_get_playback_info(const char *item_id,
             "]"
           "}],"
           "\"ContainerProfiles\":[],"
-          // No on-device subtitle renderer: ask the server to burn subs into
-          // the video (Method=Encode) for every common format.
+          // TEXT subtitles are delivered as a separate file and drawn on the
+          // console (player/subtitles.cpp).  Method=Encode burns them into
+          // the video, which forces a transcode and throws away the
+          // stream-copy path -- and with it the source's lossless TrueHD /
+          // DTS-HD MA track.  External keeps the video copied untouched, so
+          // subtitles and lossless audio stop being mutually exclusive.
+          // pgssub and dvdsub are BITMAPS, cannot become text, and still
+          // need the burn-in until there is an RLE decoder and an overlay.
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -538,13 +544,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -604,13 +610,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -666,13 +672,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -752,13 +758,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -821,13 +827,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 

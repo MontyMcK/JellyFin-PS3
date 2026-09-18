@@ -13,6 +13,14 @@
 #include "plog.h"
 #include "player_stats.h"
 #include "rsxutil.h"
+#include "ui.h"          // drawTTF
+#include "ui_visuals.h" // ttf_text_width
+#include "subtitles.h"
+#include <string.h>
+
+// Longest single rendered line. Cues are capped well below this in
+// subtitles.cpp; this is only the on-stack row buffer.
+#define SUB_ROW_MAX 208
 
 // A/B test knob: define to disable the temporal crossfade entirely (every
 // frame displays as pure-A, Bresenham pulldown only).  Ghosting on flat-color
@@ -290,6 +298,52 @@ void player_display_frame(PlayerState *ps) {
                 (unsigned long long)(clk / 1000000ULL),
                 jbuf_count(), (int)ps->paused);
             plog(buf);
+        }
+    }
+
+    // Subtitles.  Drawn BEFORE the HUD and outside its visibility gate: the
+    // seek bar comes and goes, subtitles must not.  They also use the clock
+    // WITHOUT the seek preview offset that the HUD applies below -- while a
+    // seek is armed the bar should show where you are going, but the words on
+    // screen still belong to the frame actually being displayed.
+    if (subs_active() && ps->frame_count > 0) {
+        const u64 now_ms = (ps->play_base_us + audio_get_clock_us()) / 1000ULL;
+        const char *line = subs_text_at(now_ms);
+        if (line && *line) {
+            // Bottom-centred, one line above the other, inside the title-safe
+            // area so an overscanning CRT or plasma does not clip the text.
+            const int W  = (int)display_width;
+            const int px = (display_height >= 720) ? 30 : 22;
+            const int lh = px + 8;
+            int nlines = 1;
+            for (const char *q = line; *q; q++) if (*q == '\n') nlines++;
+            int y = (int)display_height - (int)(display_height / 12) - nlines * lh;
+
+            const char *p2 = line;
+            char row[SUB_ROW_MAX];
+            while (*p2) {
+                const char *nl = strchr(p2, '\n');
+                int len = nl ? (int)(nl - p2) : (int)strlen(p2);
+                if (len > SUB_ROW_MAX - 1) len = SUB_ROW_MAX - 1;
+                memcpy(row, p2, len); row[len] = '\0';
+
+                const int tw = ttf_text_width(row, (float)px, false);
+                const int x  = (W - tw) / 2;
+                // Cheap 1px outline in every direction.  Film subtitles sit
+                // over whatever is on screen, and white-on-white is unreadable
+                // without it; four offset draws cost far less than a shadow
+                // texture and need no extra GPU state.
+                for (int dy = -1; dy <= 1; dy++)
+                    for (int dx = -1; dx <= 1; dx++)
+                        if (dx || dy)
+                            drawTTF((u32)(x + dx), (u32)(y + dy), row,
+                                    (float)px, 0x000000E0UL);
+                drawTTF((u32)x, (u32)y, row, (float)px, 0xFFFFFFFFUL);
+
+                y += lh;
+                if (!nl) break;
+                p2 = nl + 1;
+            }
         }
     }
 

@@ -71,6 +71,10 @@ struct PlayerState {
     bool     have_tracks;
     int      cur_audio;
     int      cur_sub;
+    // True when cur_sub names a TEXT track this app draws itself rather than
+    // one the server has to burn in.  Decided from the stream's Codec at
+    // selection time; see build_stream_url() for why it changes the URL.
+    bool     sub_is_text;
     int      menu_kind;          // PLAYER_MENU_*
 
     // The version chosen before playback.  Only the active source is retained;

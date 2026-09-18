@@ -8,6 +8,7 @@
 
 #include "player_internal.h"
 #include "plog.h"
+#include "subtitles.h"
 #include "slog.h"
 
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
@@ -55,6 +56,34 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
                    sel - 1 != ps->cur_sub) {
             ps->cur_sub = sel - 1;     // entry 0 = "Off" -> -1
             hud_set_cc_active(ps->cur_sub >= 0);
+
+            // A TEXT track is fetched and drawn here, so it needs no reopen
+            // at all -- the video stream is untouched and carries on. Only a
+            // bitmap track changes the URL (it has to be burned in), and only
+            // that case is worth interrupting playback for.
+            ps->sub_is_text = false;
+            if (ps->cur_sub >= 0) {
+                const JFStream *st = &ps->tracks.subs[ps->cur_sub];
+                ps->sub_is_text = jf_sub_is_text(st->codec);
+                if (ps->sub_is_text) {
+                    const char *msid = ps->source.id;
+                    if (subs_load(ps->item->id, msid, st->index) > 0) {
+                        ps->menu_kind = PLAYER_MENU_NONE;
+                        char b[112];
+                        snprintf(b, sizeof(b),
+                                 "subs: drawing [%d] %.40s on-device, no reopen",
+                                 st->index, st->label);
+                        plog(b);
+                        return act;            // nothing to re-negotiate
+                    }
+                    // Could not fetch it: fall through to the burn-in path
+                    // rather than silently showing nothing.
+                    plog("subs: on-device load failed, asking the server to burn in");
+                    ps->sub_is_text = false;
+                }
+            } else {
+                subs_clear();
+            }
             act = HUD_ACTION_SEEK;     // 0-delta reopen applies the sub
             char buf[96];
             if (ps->cur_sub >= 0)

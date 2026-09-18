@@ -25,6 +25,7 @@
 #include "video.h"
 #include "timing.h"
 #include "plog.h"
+#include "subtitles.h"
 #include "ui.h"
 #include "jellyfin_api.h"
 #include "slog.h"
@@ -40,6 +41,11 @@ extern void crash_log(const char *msg);
 // Set true before the seek flush window, false after the decode thread is
 // respawned.
 static volatile bool s_seeking = false;
+
+// A seek moves the clock backwards as often as forwards, and the cue lookup
+// walks forward from where it last was.  Telling it to start over costs one
+// binary search and keeps the wrong line from lingering after a jump.
+static void subs_after_seek(void) { subs_reset_cursor(); }
 
 static const u64 SEEK_HOLD_DELAY_US = 400000ULL;   // held longer than this -> scrub
 static const u64 SEEK_SCRUB_STEP_US = 250000ULL;   // one scrub step per 250ms
@@ -286,6 +292,7 @@ bool player_execute_seek(PlayerState *ps) {
     // The new stream's PTS restarts at ~0, so its clock now maps to
     // absolute media time target_us.
     ps->play_base_us = (u64)target_us;
+    subs_after_seek();      // the cue cursor must not walk on from the old spot
     { struct { u32 sec; u32 usec; } tv = { 0, 5000 };
       setsockopt(ps->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
     crash_log("sk4 reopened");

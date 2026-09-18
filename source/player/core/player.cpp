@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "plog.h"
+#include "subtitles.h"
 #include "hd1080.h"
 #include "vquality.h"
 #include "surround.h"
@@ -213,6 +214,8 @@ void show_player(const JFItem *item, u32 resume_secs,
     ps.dec_run   = true;
     ps.cur_audio = -1;
     ps.cur_sub   = -1;               // subtitles start off
+    ps.sub_is_text = false;
+    subs_clear();                    // a previous title's cues are not this one's
     ps.menu_kind = PLAYER_MENU_NONE;
 
     // Baseline H.264 level 3.1 caps at 1280×720 @ 30fps.  1080p (Alpha) asks
@@ -778,6 +781,10 @@ void show_player(const JFItem *item, u32 resume_secs,
 
     thumb_cache_init();
     ui_restore_rsx_state();
+    // Cues belong to the title that was playing; the table itself is kept
+    // for the next one (see subtitles.cpp) but its contents must not outlive
+    // this playback.
+    subs_clear();
     crash_log("p19 done");
     plog("show_player: done");
     slog_state("PLAYBACK_STOPPED reason=%s frames=%d vdec_err=%d",

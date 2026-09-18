@@ -35,3 +35,9 @@ tests/test_truehd_map
 tests/test_truehd_decode
 tests/tones51.thd
 tests/tones51.thd.ref
+
+# Compiled host test binaries (tests/Makefile.host builds these)
+tests/test_*
+!tests/test_*.c
+!tests/test_*.cpp
+!tests/test_*.h

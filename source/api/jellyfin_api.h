@@ -83,7 +83,13 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
 typedef struct {
     int  index;       // Jellyfin MediaStream Index (for AudioStreamIndex= etc.)
     char label[64];   // DisplayTitle, e.g. "English - EAC3 - 5.1 - Default"
+    char codec[16];   // "subrip", "ass", "pgssub" ... -- see jf_sub_is_text()
 } JFStream;
+
+// Can this subtitle be drawn on the console, or must the server burn it in?
+// Text formats are fetched as SubRip and rendered by player/subtitles.cpp;
+// bitmap ones (PGS, VOBSUB) have no text to fetch and still cost a transcode.
+bool jf_sub_is_text(const char *codec);
 
 typedef struct {
     JFStream audio[JF_MAX_STREAMS];

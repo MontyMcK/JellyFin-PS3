@@ -26,6 +26,7 @@
 #include "vquality.h"
 #include "surround.h"
 #include "centermix.h"
+#include "net_selftest.h"
 #include "statsovl.h"
 #include "audio.h"
 #include "video.h"
@@ -141,6 +142,10 @@ int main(int argc, const char *argv[]) {
         while (running) sysUtilCheckCallback();
         return 1;
     }
+    // Opt-in diagnostic, before anything else touches the network.  Does
+    // nothing unless jellyfin_nettest.txt exists -- see net_selftest.h.
+    net_selftest_run();
+
     crash_log("9 running=1");
     running = 1;
     crash_log("8b update check");
