@@ -37,17 +37,44 @@
 //  existing settings file keeps meaning exactly what it meant before.
 
 typedef enum {
-    SURROUND_OFF = 0,
-    SURROUND_AC3 = 1,
-    SURROUND_HD = 2,
+    SURROUND_OFF = 0,    // "Stereo"
+    SURROUND_AC3 = 1,    // RETIRED -- see below
+    SURROUND_HD = 2,     // "5.1"
+    SURROUND_HD_71 = 3,  // "7.1" -- only offered where the chain takes 8ch LPCM
 } surround_mode_t;
+
+// -------------------------------------------------------------------------
+//  What the menu offers, and why AC-3 is not in it
+// -------------------------------------------------------------------------
+//  The row reads Stereo / 5.1 / 7.1, because that is the question a listener
+//  actually has. It used to read Off / AC-3 / HD, which mixed up "how many
+//  speakers" with "which track the server sends" and left people picking the
+//  worse of two paths for no gain.
+//
+//  SURROUND_AC3 is RETIRED. It forced the server to transcode to AC-3 5.1
+//  even when the source had an HD track that could be copied untouched, and
+//  SURROUND_HD already falls back to exactly that request when a source has
+//  no HD track -- it is a superset and, as this file has said since it was
+//  written, "never does worse". The only thing the separate option could do
+//  was pick the worse path on purpose. It keeps its digit so saved settings
+//  do not shift, and maps to 5.1.
+//
+//  7.1 is shown only when audio_out_lpcm_max_channels() reports 8. A chain
+//  that caps at 6 -- which is most soundbars -- must not be offered a setting
+//  it cannot honour, and a 7.1 request there would also give up the 5.1
+//  routing fix that makes its centre channel work at all.
+extern const surround_mode_t SURROUND_ORDER[];   // NULL-free, see _N
+extern int surround_order_count(void);           // 2 or 3, decided by the chain
+
+// Map a persisted value onto one that is still offered on THIS chain.
+surround_mode_t surround_sanitize(int v);
 
 void surround_load(void);                    // read the persisted value (once, at startup)
 void surround_save(void);                    // persist the current value
 surround_mode_t surround_get_mode(void);
 void surround_set_mode(surround_mode_t m);   // set + persist immediately
-void surround_cycle(void);                   // Off -> AC-3 -> HD -> Off
-const char *surround_mode_label(void);       // "Off" / "AC-3" / "HD"
+void surround_cycle(void);                   // Stereo -> 5.1 -> [7.1] -> Stereo
+const char *surround_mode_label(void);       // "Stereo" / "5.1" / "7.1"
 
 // True for any surround mode: the one question the audio port, the demux and
 // the device profile all ask.  Every existing call site keeps its meaning.

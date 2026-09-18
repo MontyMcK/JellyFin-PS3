@@ -49,19 +49,31 @@ Defaults are safe but conservative. For a Blu-ray remux on a wired console:
 | Setting | Where | Set it to |
 |---|---|---|
 | **Quality** | Triangle on a title → Quality row | **Max** |
-| **Surround** | Settings → Surround 5.1 | **HD** |
-| **5.1 Routing** | Settings → 5.1 Routing | **On** (the default) |
+| **Audio Output** | Settings → Audio Output | **5.1** |
 
-**5.1 Routing** exists because the cellAudio port is 8 channels wide while the
-HDMI output is 6, so the console folds 8→6 on the way out — and on some
-receivers that fold loses the centre channel, taking the dialogue with it. The
-app's own per-channel meter showed the centre leaving hot (loudest of the
-three fronts in 59% of heartbeats, never silent) while nothing reached the
-speaker, so the loss is downstream of us. Asking the console to treat the
-output as 5.1 fixes the routing. **The wire stays uncompressed LPCM** —
+**Audio Output** is Stereo / 5.1 / 7.1, and 7.1 appears only where the chain
+reports that it takes eight channels of LPCM — the app queries the connected
+display rather than assuming. A surround mode asks the server to stream-copy
+the source's own HD audio track and decodes it here; when a source has no HD
+track it falls back to an AC-3 5.1 transcode automatically, which is why there
+is no separate AC-3 option to pick.
+
+On 5.1 the app also applies a **routing fix**, because the cellAudio port is 8
+channels wide while the HDMI output is 6, so the console folds 8→6 on the way
+out — and on some receivers that fold loses the centre channel, taking the
+dialogue with it. The app's own per-channel meter showed the centre leaving hot
+(loudest of the three fronts in 59% of heartbeats, never silent) while nothing
+reached the speaker, so the loss is downstream of us. Asking the console to
+treat the output as 5.1 corrects it. **The wire stays uncompressed LPCM** —
 verified with `audioOutGetState` — so lossless TrueHD and DTS-HD MA arrive
-intact. If a receiver ever does accept the request for real, the app detects
-that and reverts to LPCM rather than let your audio be silently compressed.
+intact, and if a receiver ever does accept the request for real the app detects
+that and reverts rather than let your audio be silently compressed. It is not a
+setting, because there is nothing for a listener to decide; 7.1 skips it,
+having no 8→6 fold to correct.
+
+**Dialogue Boost** (Off / +3 / +6 / +10 dB) is a separate row and is about
+level, not routing: none of these decoders applies dynamic range compression,
+so full cinema range can leave dialogue well below effects on a compact system.
 
 The Quality row runs 360p → 480p → 720p → **High** (10 Mbps) → **Very High**
 (20) → **Max** (25), and prints the bitrate beside the name.

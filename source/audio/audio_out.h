@@ -99,6 +99,13 @@ s32 audioOutConfigure(u32 audioOut, audioOutConfiguration *config,
 // pursuing on it.  Calls nothing that changes state.
 void audio_out_log_capabilities(void);
 
+// Widest LPCM the chain will take, in channels (2, 6, 8 ... ), or 0 if the
+// query fails.  This is what decides whether a 7.1 output is offered at all:
+// a soundbar that caps at 6 should not be shown a setting it cannot honour.
+// Cached after the first call -- it is a property of the connected display,
+// and the probe runs once at startup anyway.
+int audio_out_lpcm_max_channels(void);
+
 #ifdef __cplusplus
 }
 #endif

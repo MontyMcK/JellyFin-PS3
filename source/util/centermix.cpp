@@ -21,14 +21,13 @@ const center_mode_t CENTERMIX_ORDER[] = {
     CENTER_P3,
     CENTER_P6,
     CENTER_P10,
-    CENTER_STEREO,
 };
 const int CENTERMIX_ORDER_N =
     (int)(sizeof(CENTERMIX_ORDER) / sizeof(CENTERMIX_ORDER[0]));
 
 center_mode_t centermix_sanitize(int v) {
     if (v < CENTER_NORMAL || v >= CENTER_COUNT) return CENTER_NORMAL;
-    if (v == CENTER_PHANTOM) return CENTER_NORMAL;
+    if (v == CENTER_PHANTOM || v == CENTER_STEREO) return CENTER_NORMAL;
     return (center_mode_t)v;
 }
 
@@ -48,12 +47,13 @@ void centermix_cycle(void) {
 
 const char *centermix_label(void) {
     switch (s_mode) {
+    case CENTER_NORMAL:  return "Off";
     case CENTER_P3:      return "+3 dB";
     case CENTER_P6:      return "+6 dB";
     case CENTER_P10:     return "+10 dB";
     case CENTER_PHANTOM: return "Phantom";   // retired; unreachable via the UI
-    case CENTER_STEREO:  return "Stereo";
-    default:             return "Normal";
+    case CENTER_STEREO:  return "Stereo";    // retired; unreachable via the UI
+    default:             return "Off";
     }
 }
 

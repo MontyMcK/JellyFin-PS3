@@ -68,6 +68,7 @@
 
 #include "audio_out.h"
 #include "audio_bitstream.h"
+#include "surround.h"
 #include "jf_paths.h"
 #include "plog.h"
 
@@ -94,6 +95,14 @@ static const char *mode_name(int m)
 
 int bitstream_mode(void)
 {
+	// 7.1 and the routing fix are mutually exclusive, and 7.1 wins.
+	//
+	// The fix works by asking for AC-3, which is 5.1 BY DEFINITION -- that is
+	// the whole reason it forces a correct 5.1 route. A chain wide enough to
+	// take 8 channels of LPCM has no 8 -> 6 fold to get wrong in the first
+	// place, so on it the request would only throw away the rear pair.
+	if (surround_get_mode() == SURROUND_HD_71) return BITSTREAM_OFF;
+
 	// DEFAULT ON.  Missing file means AC-3-routing, not off: a dropped centre
 	// channel takes the dialogue with it, which is the worst failure this app
 	// has, and the request costs nothing on a chain that does not need it --
@@ -301,23 +310,3 @@ void audio_bitstream_end(void)
 }
 
 bool audio_bitstream_engaged(void) { return s_engaged; }
-
-// Any non-zero mode counts as on, so a diagnostic mode set by hand still
-// reads as enabled rather than as a state the menu cannot describe.
-bool bitstream_routing_enabled(void) { return bitstream_mode() != BITSTREAM_OFF; }
-
-const char *bitstream_routing_label(void)
-{
-	return bitstream_routing_enabled() ? "On" : "Off";
-}
-
-void bitstream_routing_toggle(void)
-{
-	const int now = bitstream_routing_enabled() ? BITSTREAM_OFF : BITSTREAM_AC3;
-	FILE *f = fopen(jf_data_path(BITSTREAM_FILE), "w");
-	if (!f) return;
-	fprintf(f, "%d\n", now);
-	fclose(f);
-	// Takes effect on the next playback: begin() re-reads the file each time,
-	// which is also what lets it be changed over FTP mid-session.
-}
