@@ -48,21 +48,37 @@ Defaults are safe but conservative. For a Blu-ray remux on a wired console:
 
 | Setting | Where | Set it to |
 |---|---|---|
-| **Quality** | Triangle on a title → Quality row | **1080p 25** |
+| **Quality** | Triangle on a title → Quality row | **Max** |
 | **Surround** | Settings → Surround 5.1 | **HD** |
+| **5.1 Routing** | Settings → 5.1 Routing | **On** (the default) |
 
-**Why 25 Mbps and not higher.** The PS3 can only *receive* about 20-25 Mbps
-over HTTP — measured, not guessed: 9.4 Mbps PC→PS3 by FTP against 113 Mbps the
-other way, while the same Jellyfin server hands a PC on the same LAN 537 Mbps.
-So the console is the bottleneck, not your network or your server. A bitrate
-setting is a *ceiling*, not a constant, and most scenes sit well under it,
-which is why 25 holds and 30 starves on demanding scenes. **Original** (direct
-play) is not viable for a 50 Mbps remux.
+**5.1 Routing** exists because the cellAudio port is 8 channels wide while the
+HDMI output is 6, so the console folds 8→6 on the way out — and on some
+receivers that fold loses the centre channel, taking the dialogue with it. The
+app's own per-channel meter showed the centre leaving hot (loudest of the
+three fronts in 59% of heartbeats, never silent) while nothing reached the
+speaker, so the loss is downstream of us. Asking the console to treat the
+output as 5.1 fixes the routing. **The wire stays uncompressed LPCM** —
+verified with `audioOutGetState` — so lossless TrueHD and DTS-HD MA arrive
+intact. If a receiver ever does accept the request for real, the app detects
+that and reverts to LPCM rather than let your audio be silently compressed.
+
+The Quality row runs 360p → 480p → 720p → **High** (10 Mbps) → **Very High**
+(20) → **Max** (25), and prints the bitrate beside the name.
+
+**Why Max stops at 25 Mbps.** The PS3 can only *receive* about 20-25 Mbps over
+HTTP — measured, not guessed: 9.4 Mbps PC→PS3 by FTP against 113 Mbps the other
+way, while the same Jellyfin server hands a PC on the same LAN 537 Mbps. So the
+console is the bottleneck, not your network or your server. A bitrate setting
+is a *ceiling*, not a constant, and most scenes sit well under it, which is why
+25 holds where more does not. Back to back on the same film: 25 Mbps ran at
+23.9 fps with every frame on time, 30 Mbps at 16.7, and direct play at 14.9.
+Steps above 25 were removed rather than left in to disappoint.
 
 The quality you pick is remembered **per title**, so a heavy remux and a light
 episode can each keep their own.
 
-If playback stutters, drop to **1080p 20** before anything else.
+If playback stutters, drop to **Very High** before anything else.
 
 ---
 

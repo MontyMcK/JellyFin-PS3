@@ -15,16 +15,35 @@
 
 static center_mode_t s_mode = CENTER_NORMAL;
 
+// See centermix.h: PHANTOM is retired and is not in this list.
+const center_mode_t CENTERMIX_ORDER[] = {
+    CENTER_NORMAL,
+    CENTER_P3,
+    CENTER_P6,
+    CENTER_P10,
+    CENTER_STEREO,
+};
+const int CENTERMIX_ORDER_N =
+    (int)(sizeof(CENTERMIX_ORDER) / sizeof(CENTERMIX_ORDER[0]));
+
+center_mode_t centermix_sanitize(int v) {
+    if (v < CENTER_NORMAL || v >= CENTER_COUNT) return CENTER_NORMAL;
+    if (v == CENTER_PHANTOM) return CENTER_NORMAL;
+    return (center_mode_t)v;
+}
+
 center_mode_t centermix_get(void) { return s_mode; }
 
 void centermix_set(center_mode_t m) {
-    if (m < CENTER_NORMAL || m >= CENTER_COUNT) m = CENTER_NORMAL;
-    s_mode = m;
+    s_mode = centermix_sanitize((int)m);
     centermix_save();
 }
 
 void centermix_cycle(void) {
-    centermix_set((center_mode_t)((s_mode + 1) % CENTER_COUNT));
+    int i = 0;
+    for (int k = 0; k < CENTERMIX_ORDER_N; k++)
+        if (CENTERMIX_ORDER[k] == s_mode) { i = k; break; }
+    centermix_set(CENTERMIX_ORDER[(i + 1) % CENTERMIX_ORDER_N]);
 }
 
 const char *centermix_label(void) {
@@ -32,7 +51,7 @@ const char *centermix_label(void) {
     case CENTER_P3:      return "+3 dB";
     case CENTER_P6:      return "+6 dB";
     case CENTER_P10:     return "+10 dB";
-    case CENTER_PHANTOM: return "Phantom";
+    case CENTER_PHANTOM: return "Phantom";   // retired; unreachable via the UI
     case CENTER_STEREO:  return "Stereo";
     default:             return "Normal";
     }
@@ -110,8 +129,8 @@ void centermix_load(void) {
     FILE *f = fopen(jf_data_path(CENTERMIX_FILE), "r");
     if (!f) return;
     int v = 0;
-    if (fscanf(f, "%d", &v) == 1 && v >= CENTER_NORMAL && v < CENTER_COUNT)
-        s_mode = (center_mode_t)v;
+    if (fscanf(f, "%d", &v) == 1)
+        s_mode = centermix_sanitize(v);
     fclose(f);
 }
 
