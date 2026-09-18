@@ -79,6 +79,84 @@ layout itself. The stub lets `ff_dca_export_downmix_matrix` compile and
 succeed harmlessly — it must SUCCEED rather than fail, because `dca_core.c`
 and `dca_xll.c` both propagate its return value.
 
+## Correction: the core filter is NOT skipped when XLL is present
+
+An earlier revision of this file claimed that `dcadec.c` *skips the core
+synthesis filter entirely whenever an XLL substream is present*, quoting
+
+```c
+if (!(dca->packet & DCA_PACKET_XLL) && (ret = ff_dca_core_filter_fixed(s, 0)) < 0)
+```
+
+That was a misreading, and it mattered. In `decode_frame()` the XLL branch
+does the opposite -- when a core substream is also present it calls
+`ff_dca_core_filter_fixed()` **first**, then `ff_dca_xll_filter_frame()`:
+
+```c
+} else if (s->packet & DCA_PACKET_XLL) {
+    if (s->packet & DCA_PACKET_CORE) {
+        ...
+        if ((ret = ff_dca_core_filter_fixed(&s->core, x96_synth)) < 0)
+```
+
+It has to. DTS-HD MA is frequently **residual-encoded**: the XLL substream
+carries only the difference from the lossy core, and the lossless result is
+core + residual. Real disc rips do this -- the Avatar remux tested here has
+`residual_encode == 0` for all six channels, i.e. every channel is residual.
+So the core decoder is on the lossless critical path, and anything that
+corrupts the core corrupts the lossless output too.
+
+## Two stubs that silently destroyed the output
+
+`../dcahd_compat.c` used to define two upstream tables as zero-filled
+placeholders, on the assumption nothing reachable read them. Both were read,
+and neither failed loudly:
+
+- **`ff_log2_tab[256]`** backs `av_log2_c()`, which shifts the value down to
+  8 bits and then adds `ff_log2_tab[v]`. Zeroed, `av_log2()` returned only
+  the multiple-of-8 part: `av_log2(0xff)` gave 0 instead of 7 and
+  `av_log2(0x60f)` gave 8 instead of 10. `dcadec.c` derives `max_spkr` from
+  `av_log2(ch_mask)`, and `dcaadpcm.c` derives `shift_bits` from
+  `av_log2(max)`.
+- **`ff_inverse[257]`** backs `FASTDIV(a,b)`, which `dca_core.c:538/543` uses
+  to dequantize block codes. Zeroed, `FASTDIV` returned 0 for every input.
+  It was also declared `uint64_t` here while upstream declares it
+  `uint32_t`, so the indexing was wrong independently of the values.
+
+Both are now vendored verbatim (`ff/libavutil/log2_tab.c` and
+`ff/libavcodec/mathtables.c`, included from `../dcahd_compat.c`) rather than
+re-stubbed, which removes the whole class of bug.
+
+A third deviation was in the same file: `av_fast_mallocz()` re-`memset` an
+already-large-enough buffer on every call. Upstream returns early and zeroes
+only on actual (re)allocation. `dca_core.c:784` holds the core's subband
+samples in such a buffer and the ADPCM predictor carries that history ACROSS
+frames, so re-zeroing it per frame destroyed inter-frame prediction. Both
+`av_fast_malloc` and `av_fast_mallocz` now follow upstream's `ff_fast_malloc`
+exactly, including its `min_size + min_size/16 + 32` growth rule.
+
+## How this is verified now
+
+`tests/test_dts_xll_dump.c` decodes a REAL DTS-HD MA fixture and compares it
+byte for byte against `ffmpeg -i x.dts -c:a pcm_s32le`. Because the format is
+lossless that reference is exact, so the test is a true pass/fail.
+
+The fixture does not have to be synthesised -- there is no free DTS-HD MA
+encoder, which is why `test_dts_hd.c` could only ever cover the core -- it is
+EXTRACTED from a disc rip with `ffmpeg -c:a copy`. See `tests/Makefile.host`.
+
+With the three fixes above, an 8-second 5.1 24-bit fixture decodes bit-exact
+on x86-64 AND on big-endian PPC64 (`powerpc64-linux-gnu-gcc -static` under
+`qemu-ppc64`), 806 of 806 frames. Before them the five full-range channels
+were near-full-scale noise (-3.5 dBFS against a -21 dBFS reference, 0.12
+correlation) while LFE was roughly intact -- which is what "sounds wrong on
+hardware" actually was.
+
+Note the byte order was never the problem. x86-64 and big-endian PPC64
+produced BYTE-IDENTICAL output both before and after the fix, so the bug was
+always host-reproducible; it went unnoticed only because no host test fed the
+decoder an XLL stream.
+
 ## Build shape
 
 Two translation units, not one:

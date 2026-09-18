@@ -39,6 +39,16 @@ const char *jf_device_id(void);
 // the login screen instead of silently rendering an empty library.
 extern volatile bool g_auth_expired;
 
+// Source frame rate from the server (MediaStreams[Video].RealFrameRate), in
+// milli-fps: 23.976 fps is 23976.  0 when unknown.
+//
+// The PS3's VDEC does not always report a frame-rate code.  On a TRANSCODE it
+// does, because ffmpeg writes a clean SPS; on a STREAM COPY of a Blu-ray remux
+// it comes back 0 and the player fell back to 30 fps -- pacing 23.976 fps film
+// as 30, which judders permanently no matter how full the buffer is.  The
+// server already knows the answer, so ask it instead of guessing.
+extern int g_source_fps_milli;
+
 // One credited person (cast/crew) for the detail page's Cast & Crew row.
 #define JF_MAX_PEOPLE 12
 typedef struct {

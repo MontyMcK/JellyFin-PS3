@@ -45,10 +45,33 @@ void adec_push_pes(const u8 *pes, int pes_len);
 // can express ring occupancy against the level the decoder actually targets —
 // 100% means a full second of runway, and a slide toward 0 is the starvation
 // that produces the choppy-audio dropouts.
-#define PCM_RING_HIGHWATER  48000
+// ~1.2s of decoded audio, was 48000 (~1.0s).
+//
+// Briefly 115200 (~2.4s) while the judder was blamed on audio decode.
+// The adt= counter then measured that decoder at 3% of a thread for
+// AC-3 and 14-16% for lossless TrueHD -- nowhere near saturated -- and
+// pcm= never approached empty.  So the deep cushion was solving a
+// problem that did not exist, while costing the compressed ring 2 MB.
+// This keeps a fifth more slack than the original 48000 for free, by
+// using capacity the ring already had.
+//
+// This is the cushion between the decoder and the DMA engine, and it is the
+// buffer whose emptying coincides with every judder in the log: pcm= drops
+// from ~48000 to ~150, `audio: decoder stall` fires (the output thread
+// writing silence because nothing was decoded yet), and fps falls with it.
+// One second of slack is not enough to ride out the PPU contention a
+// 30-53 Mbps demux creates alongside a lossless decode.
+//
+// Costs nothing in latency: the A/V clock comes from blocks actually played,
+// not from how far the decoder has run ahead, and a seek flushes the ring.
+#define PCM_RING_HIGHWATER  57600
 
 // PCM frames currently available in the ring.
 int  adec_pcm_available(void);
+
+// Cumulative time spent inside the audio decoder, and the PES count it
+// covers.  The heartbeat diffs these into a duty cycle (adt=).
+void adec_decode_stats(u64 *busy_us, u32 *count);
 
 // False once the compressed-audio queue is 75% full: the decode thread stops
 // reading further ahead rather than overrun it (a full queue drops the oldest

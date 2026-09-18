@@ -54,6 +54,27 @@ imdct.o: CFLAGS += -Wno-array-bounds
 # include path, which is why it needs no -I of its own here.
 mlp_api.o: CFLAGS += -Wno-dangling-else
 
+# The audio decoders get -O3 where the rest of the app stays at -O2.
+#
+# Measured reason, not a hunch: the heartbeat showed playback collapsing
+# exactly when the decoded-PCM buffer emptied, while the network was still
+# delivering 20+ Mbps -- lossless TrueHD/DTS-HD MA decode is what runs out of
+# PPU, not delivery.  -O2 does NOT enable -ftree-vectorize, so with -mcpu=cell
+# the PPU's AltiVec unit was sitting idle through the hottest code in the app.
+#
+# Safe because it is verified, not assumed: tests/test_dts_xll_dump.c decodes a
+# real DTS-HD MA fixture and compares byte-for-byte against ffmpeg, and the
+# result is bit-exact at -O3 on BOTH x86-64 and big-endian PPC64 (the PPU's
+# byte order) -- 806 of 806 frames.  Lossless output is a property that fails
+# loudly under that test, so it is the right thing to gate an optimisation on.
+mlp_api.o:     CFLAGS += -O3
+dcahd_api.o:   CFLAGS += -O3
+dcahd_xll.o:   CFLAGS += -O3
+dcahd_compat.o:CFLAGS += -O3
+adec.o:        CFLAGS += -O3
+adec_truehd.o: CFLAGS += -O3
+adec_dts.o:    CFLAGS += -O3
+
 LIBS        := -lvdec -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm \
                -lnet -lsysmodule -lssl -lhttp -lhttputil
 

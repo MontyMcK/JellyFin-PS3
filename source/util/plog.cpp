@@ -13,7 +13,11 @@
 #include "jf_paths.h"
 
 #define PLOG_RING  256
-#define PLOG_LEN   128
+// 128 clipped the longer diagnostics: the heartbeat was within a few bytes of
+// the limit and would have started losing its tail once the frame counters
+// grew, silently dropping the field at the end of the line.  256 slots x 160
+// bytes is 40 KB of static ring, 8 KB more than before.
+#define PLOG_LEN   160
 
 static char              s_plog_ring[PLOG_RING][PLOG_LEN];
 static volatile int      s_plog_wr      = 0;

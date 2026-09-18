@@ -6,6 +6,7 @@
 #include "adec_truehd.h"
 #include "audio.h"           // audio_output_channels() — port width drives ring width
 #include "plog.h"
+#include "timing.h"      // timing_get_us() — decode-cost telemetry
 #include "../build_config.h"   // relative: source/ is not on the -I path
 
 #include <stdio.h>
@@ -31,6 +32,11 @@ extern void crash_log(const char *msg);
 // decoded-PCM ring small by back-pressuring the decoder to consumption
 // (adec_thread_fn) — decoding the whole burst to float PCM would cost ~8 MB.
 // ~1.37s @ 48 kHz stereo float = 512 KB.
+// 65536 frames.  Must stay a power of two: the read/write
+// cursors wrap with & (PCM_RING_CAP - 1).  At 8 channels of float32 that is
+// 2 MB.  It was briefly 4 MB to chase an audio-decode theory that the
+// adt= telemetry then disproved (3% AC-3, 14-16% lossless TrueHD), so the
+// memory is better spent on the compressed ring -- see adec.h.
 #define PCM_RING_CAP        (1 << 16)
 // PCM_RING_HIGHWATER (~1.0s: decoder idles above this) now lives in adec.h so
 // the stats overlay can scale its ring-fill readout against the same level.
@@ -54,7 +60,17 @@ extern void crash_log(const char *msg);
 // ~25 s and ample; a stream-copied TrueHD track at ~4 Mbps filled them in
 // about four, and a full queue DROPS THE OLDEST PES, which is an audible
 // jump, not a stall.  512 slots is 4 MB and about eight seconds of HD audio.
-#define PES_QUEUE_SLOTS 512
+// 768, was 512.  This queue -- not the ring -- is what ended preroll early:
+// the log's `preroll: audio queue full, starting` fires once it is 75% full,
+// and at TrueHD's ~4.6 Mbps that capped buffering at roughly 5.5 seconds no
+// matter how big the ring was.  768 slots takes that to ~8 s.
+//
+// The 75% hungry threshold is deliberately NOT raised with it.  That margin
+// is what stops pes_enqueue() reaching the full-queue path below, which
+// DROPS the oldest PES -- audible as skipped audio.  Growing the queue buys
+// preroll depth without spending that safety margin; raising the threshold
+// would have bought the same depth by spending it.
+#define PES_QUEUE_SLOTS 768
 #define PES_SLOT_BYTES  8192
 
 // ---- Decoders + PCM ring ----
@@ -93,6 +109,11 @@ static int              s_pes_q_rd  = 0;
 static int              s_pes_q_wr  = 0;
 static volatile int     s_pes_q_n   = 0;
 static sys_mutex_t      s_pes_mtx;
+
+// Decode-cost telemetry (see adec_decode_stats below).  Declared here rather
+// than beside the accessor because adec_thread_fn() updates them above it.
+static volatile u64     s_dec_us    = 0;
+static volatile u32     s_dec_count = 0;
 static sys_cond_t       s_pes_cond;
 static volatile bool    s_adec_run  = false;
 static sys_ppu_thread_t s_adec_thread = 0;
@@ -379,7 +400,12 @@ static void adec_thread_fn(void *arg) {
         if (!adec_gen_current())
             continue;
 
-        adec_decode_pes(local_pes, local_len, local_cont);
+        {
+            u64 dt0 = timing_get_us();
+            adec_decode_pes(local_pes, local_len, local_cont);
+            s_dec_us += timing_get_us() - dt0;
+            s_dec_count++;
+        }
     }
 #if BUILD_FOR_RPCS3
     // Exit freeze fix: this thread otherwise just falls off the end and returns.
@@ -459,6 +485,18 @@ void adec_stop(void) {
     s_codec   = ADEC_CODEC_MP3;
     s_ring_ch = 2;
     crash_log("adx5 adec_stop done");
+}
+
+// Decode-cost telemetry.  The heartbeat showed playback collapsing exactly
+// when the PCM buffer emptied, while the network was still delivering 20+
+// Mbps -- so the suspect is the cost of decoding TrueHD/DTS-HD MA on the
+// PPU, not delivery.  This measures it directly instead of inferring it:
+// microseconds spent inside adec_decode_pes(), and how many PES it covered.
+// Reported as adt=<% of one thread> in the heartbeat.  Near 100% means the
+// decoder is saturated and lossless HD audio cannot hold real time here.
+void adec_decode_stats(u64 *busy_us, u32 *count) {
+    if (busy_us) *busy_us = s_dec_us;
+    if (count)   *count   = s_dec_count;
 }
 
 int adec_pcm_available(void) { return s_n; }

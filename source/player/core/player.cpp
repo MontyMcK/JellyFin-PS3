@@ -430,7 +430,10 @@ void show_player(const JFItem *item, u32 resume_secs,
     // stream ends.  Nothing is lost by the timeout — playback simply starts
     // with whatever was buffered.
     if (ps.playing && decode_ring_cap() > 0) {
-        const int target   = (decode_ring_cap() * 3) / 4;   // 75% full
+        // 90%, was 75%.  The ring is the only thing standing between a slow
+        // patch and a stall, so fill it as far as it will go before starting.
+        // The wait stays bounded by the deadline below and by Circle-to-skip.
+        const int target   = (decode_ring_cap() * 9) / 10;  // 90% full
         const u64 deadline = timing_get_us() + 90000000ULL; // 90 s ceiling
         u64 last_draw_us   = 0;
         int last_pct       = -1;
@@ -458,7 +461,7 @@ void show_player(const JFItem *item, u32 resume_secs,
                 last_pct     = pct;
                 char msg[64];
                 snprintf(msg, sizeof(msg), "Buffering... %d%%   (O: start now)",
-                         pct * 100 / 75 > 100 ? 100 : pct * 100 / 75);
+                         pct * 100 / 90 > 100 ? 100 : pct * 100 / 90);
                 player_status_screen(item->name, msg);
             }
             usleep(20000);

@@ -9,7 +9,17 @@
 // path), a 1920×1088 slot is 3.13 MB — so the ring holds MORE frames in LESS
 // memory than the shipped 12-slot ARGB buffer ever did.
 #define JBUF_PREFILL      12   // frames to decode before display starts
-#define JBUF_1080_SLOTS   10   // ring slots on the 1080p path (~31 MB)
+// 8 slots, was 10.  These come from the SAME heap the compressed
+// read-ahead ring draws from, so every slot removed is ~3.1 MB the ring
+// gains -- and a compressed byte buys far more runway than a decoded one.
+//
+// Safe because the jitter buffer is never the constraint: `q=` in the
+// heartbeat sits pinned at its cap in every healthy sample, i.e. the
+// decoder always outruns the display and the extra slots were idle.
+// Every measured stall had ring=0, not q=0.  8 slots is still a third of
+// a second of decode jitter at 24fps, and the display only ever needs two
+// (current + next, for the blend).
+#define JBUF_1080_SLOTS   8    // ring slots on the 1080p path (~25 MB)
 // Was 16 (~50 MB).  Hardware logging showed where that memory is better
 // spent: with direct play the console decodes 1080p at a full 24 fps
 // whenever the compressed ring has data, and stalls only when it runs

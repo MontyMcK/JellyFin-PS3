@@ -46,7 +46,16 @@ typedef enum {
     // so saved settings keep their meaning.
     VQ_1080P_20 = 6,   // 1920x1080 High 4.2, copy up to 20 Mbps
     VQ_1080P_30 = 7,   // 1920x1080 High 4.2, copy up to 30 Mbps
-    VQ_COUNT = 8,
+    // 25 Mbps sits deliberately AT the console's measured receive ceiling.
+    // The PS3 pulls roughly 20-25 Mbps over HTTP (PC->PS3 measured at 9.4
+    // Mbps by FTP against 113 Mbps the other way; in-player `net=` sits at
+    // 21-28 Mbps while `rxw=` shows it BLOCKED in netRecv 70-85% of the
+    // time), and a bitrate figure is a CEILING, not a constant -- most
+    // scenes sit well under it.  So 30 starves on demanding scenes and 20
+    // leaves headroom unused; 25 is the middle.  Appended, like the two
+    // above, so every already-saved digit keeps its meaning.
+    VQ_1080P_25 = 8,   // 1920x1080 High 4.2, copy up to 25 Mbps
+    VQ_COUNT = 9,
 } vquality_t;
 
 void       vquality_load(void);         // read the persisted value at startup
