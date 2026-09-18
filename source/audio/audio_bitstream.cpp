@@ -9,13 +9,44 @@
 //
 // What each mode is, in the XMB's own vocabulary:
 //
-//   AC-3 / DTS      "Bitstream (Mix)".  The system encodes our LPCM to Dolby
-//                   Digital or DTS and sends that.  The receiver decodes it
-//                   itself rather than being handed 6 channels of LPCM, which
-//                   is the whole point on a chain that mishandles multichannel
-//                   LPCM -- e.g. one that silently drops the centre channel.
-//                   The console owns the encoder (libddlenc2.sprx /
-//                   libdtsenc2.sprx); we do not have to load or drive it.
+//   AC-3 / DTS      The hope was "Bitstream (Mix)": the system encodes our
+//                   LPCM to Dolby Digital or DTS and sends that, so a receiver
+//                   that mishandles multichannel LPCM -- e.g. one that
+//                   silently drops the centre channel, taking the dialogue
+//                   with it -- gets a stream it decodes itself.
+//
+//                   TESTED 2026-09-18, RESULT GENUINELY AMBIGUOUS -- do not
+//                   record it as either a success or a failure yet:
+//
+//                     * audioOutConfigure(AC-3) returns 0 and the
+//                       configuration reads back encoder=1, every playback.
+//                       That proves nothing on its own; the read-back echoes
+//                       what was ASKED FOR, exactly as getsockopt(SO_RCVBUF)
+//                       reports a receive buffer nothing is backing.
+//                     * The soundbar lights no Dolby Digital indicator.
+//                     * But the CENTRE CHANNEL STARTED WORKING.  With the
+//                       Dialogue setting on NORMAL -- no fold, no boost, the
+//                       shipped path -- dialogue came out of the centre
+//                       speaker for the first time.  Before this it was only
+//                       audible via CENTER_STEREO's LoRo downmix.
+//
+//                   The only audio-path change against v1.0 is this call, and
+//                   the output was ALREADY ch=6 downmix=0 at startup, so the
+//                   one thing that changed is encoder 0 -> 1.  A chain that
+//                   mishandles 8ch LPCM but decodes AC-3 correctly would
+//                   behave exactly like this, and plenty of bars show no
+//                   indicator over ARC.  Equally, the encode may not be
+//                   happening and something else about re-configuring the
+//                   output fixed the routing.
+//
+//                   audioOutGetState reports the mode the output is actually
+//                   in, so that is what begin() believes below, and the log
+//                   says CONFIG-ONLY when it disagrees with the read-back.
+//                   Settle it from that line, not from the indicator.
+//
+//                   If it turns out the system does NOT encode for us: the
+//                   Blu-ray player imports cellDdlEnc2/cellDtsEnc2 directly,
+//                   so the encode would be ours to do via libddlenc2.sprx.
 //
 //   RAW (0xff)      CELL_AUDIO_OUT_CODING_TYPE_BITSTREAM.  A long shot, and
 //                   included because it costs one enum value to try: it is the
@@ -42,7 +73,8 @@
 
 #define BITSTREAM_FILE "jellyfin_bitstream.txt"
 
-static bool s_engaged        = false;
+static bool s_engaged        = false;   // bitstream is on the WIRE
+static bool s_applied        = false;   // we changed the config, engaged or not
 static u8   s_saved_encoder  = AUDIO_OUT_CODING_LPCM;
 static u8   s_saved_channel  = 0;
 static u32  s_saved_downmix  = 0;
@@ -125,9 +157,46 @@ void audio_bitstream_begin(int port_channels)
 		audio_bitstream_end();
 		return;
 	}
+
+	// The configuration read-back is NOT proof: on 2026-09-18 this path logged
+	// "ENGAGED AC-3" on every playback purely on the strength of it, while the
+	// soundbar showed no Dolby Digital indicator.  audioOutGetConfiguration
+	// echoes what was ASKED FOR -- the same trap as getsockopt(SO_RCVBUF)
+	// reporting a receive buffer nothing is backing.
+	//
+	// audioOutGetState reports the sound mode the OUTPUT is actually in, so
+	// that is what decides here.  Log both either way: this call is also the
+	// prime suspect for the centre channel starting to work on that same
+	// build, so which of the two is true matters beyond the indicator.
+	s_applied = true;
+
+	audioOutState st;
+	memset(&st, 0, sizeof(st));
+	const s32 srate = audioOutGetState(AUDIO_OUT_PRIMARY, 0, &st);
+	snprintf(b, sizeof(b),
+	         "bitstream: state rc=%d state=%u encoder=%u mode type=%u ch=%u fs=0x%02x",
+	         (int)srate, (unsigned)st.state, (unsigned)st.encoder,
+	         (unsigned)st.soundMode.type, (unsigned)st.soundMode.channel,
+	         (unsigned)st.soundMode.fs);
+	plog(b);
+
+	if (srate == 0 && st.soundMode.type != want.encoder) {
+		// Accepted on paper, something else on the wire.  Leave it applied --
+		// it is harmless, and on this chain it coincided with the centre
+		// channel finally working -- but do not call it engaged, because the
+		// output is not reporting the coding type we asked for.
+		snprintf(b, sizeof(b),
+		         "bitstream: CONFIG-ONLY -- asked %s, wire reports type=%u",
+		         mode_name(mode), (unsigned)st.soundMode.type);
+		plog(b);
+		s_engaged = false;
+		return;
+	}
+
 	s_engaged = true;
-	snprintf(b, sizeof(b), "bitstream: ENGAGED %s at %u ch",
-	         mode_name(mode), (unsigned)after.channel);
+	snprintf(b, sizeof(b), "bitstream: ENGAGED %s at %u ch (wire type=%u)",
+	         mode_name(mode), (unsigned)after.channel,
+	         (unsigned)st.soundMode.type);
 	plog(b);
 }
 
@@ -142,13 +211,14 @@ void audio_bitstream_end(void)
 	back.encoder   = s_saved_encoder;
 	back.downMixer = s_saved_downmix;
 	const s32 rc = audioOutConfigure(AUDIO_OUT_PRIMARY, &back, NULL, 1);
-	if (s_engaged) {
+	if (s_applied) {
 		char b[96];
 		snprintf(b, sizeof(b), "bitstream: restored encoder=%u rc=%d",
 		         (unsigned)s_saved_encoder, (int)rc);
 		plog(b);
 	}
 	s_engaged = false;
+	s_applied = false;
 }
 
 bool audio_bitstream_engaged(void) { return s_engaged; }

@@ -267,7 +267,7 @@ void decode_thread_fn(void *arg) {
                                 / (float)(hb_now - hb_last_us);
             hb_fr_last = *frame_count;
             hb_last_us = hb_now;
-            char buf[256];
+            char buf[352];
             long avg_ms = stall_ep_count ? stall_ep_dur_total_us / stall_ep_count / 1000 : 0;
             // Pulldown cadence comes along for the ride.  24fps film on a
             // 60Hz output is displayed 3,2,3,2 vblanks per frame; healthy
@@ -304,8 +304,23 @@ void decode_thread_fn(void *arg) {
             int adt = (int)(((dbusy - s_db_last) * 100ULL) / rx_span);
             unsigned adn = dcnt - s_dc_last;
             s_db_last = dbusy; s_dc_last = dcnt;
+            // lvl=<peak per port channel, 0-32768, in port order
+            // FL FR FC LFE SL SR [BL BR]>.  This is the LAST point the app
+            // can observe its own audio, so it separates the two things that
+            // look identical from the sofa: a centre channel we never filled,
+            // versus one we filled and the chain did not play.  The soundbar
+            // dropping dialogue in multichannel LPCM is the whole reason the
+            // bitstream work exists, and until now that evidence lived only
+            // in the on-screen overlay, where no log could capture it.
+            char lvl[96]; int lvn = 0;
+            for (int c = 0; c < ps_hb.ch_count && c < 8 &&
+                            lvn < (int)sizeof(lvl) - 8; c++)
+                lvn += snprintf(lvl + lvn, sizeof(lvl) - lvn, "%s%u",
+                                c ? "/" : "", (unsigned)ps_hb.ch_peak[c]);
+            if (!lvn) { lvl[0] = 45; lvl[1] = 0; }   /* "-" */
+
             snprintf(buf, sizeof(buf),
-                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d ring=%d/%d pcm=%d net=%.1fM rxw=%d%% adt=%d%% adn=%u pes=%u/%uk pd=%u/%u/%u",
+                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d ring=%d/%d pcm=%d net=%.1fM rxw=%d%% adt=%d%% adn=%u pes=%u/%uk pd=%u/%u/%u lvl=%s",
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
@@ -314,7 +329,7 @@ void decode_thread_fn(void *arg) {
                 net_mbps, rx_wpct, adt, adn,
                 (unsigned)pes_v.trunc_count, (unsigned)(pes_v.max_want / 1024),
                 (unsigned)ps_hb.hold2, (unsigned)ps_hb.hold3,
-                (unsigned)ps_hb.hold_other);
+                (unsigned)ps_hb.hold_other, lvl);
             plog(buf);
             s_au_inflight_max = 0;
             stall_ep_count = stall_ep_dur_max_us = stall_ep_dur_total_us = 0;
