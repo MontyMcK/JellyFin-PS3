@@ -260,7 +260,51 @@ static int build_headers(char *req, int cap, const char *method,
 int http_init(void) {
     int ret;
     ret = sysModuleLoad(SYSMODULE_NET); if (ret < 0) return ret;
-    ret = netInitialize();              if (ret < 0) { sysModuleUnload(SYSMODULE_NET); return ret; }
+
+    // Bring libnet up with a BIGGER MEMORY POOL than PSL1GHT's.
+    //
+    // netInitialize() hands libnet a hardcoded 128 KB pool
+    // (LIBNET_MEMORY_SIZE in ppu/sprx/libnet/init.c) shared by EVERY socket
+    // in the process, and socket receive buffers are charged against it.
+    // That is the real reason this app's receive throughput sat around
+    // 20-25 Mbps no matter what: SO_RCVBUF=512KB was accepted and read back
+    // as 524288, but there was never 512 KB of pool to back it, so the
+    // window stayed small and netRecv kept returning two TCP segments after
+    // 100+ ms.  getsockopt reports what was ASKED FOR, not what is backed,
+    // which is why that looked like a dead end.
+    //
+    // netInitializeNetworkEx() is exported, so the pool can simply be
+    // bigger.  Ask for a generous one and step down rather than fail: on a
+    // console where the heap is already carved up for VDEC and the ring, a
+    // refused 4 MB must not take the network down with it.  Falling all the
+    // way back to netInitialize() leaves behaviour exactly as it was.
+    {
+        static const u32 kPool[] = { 4u<<20, 2u<<20, 1u<<20, 512u<<10, 256u<<10 };
+        bool up = false;
+        for (unsigned i = 0; i < sizeof(kPool)/sizeof(kPool[0]) && !up; i++) {
+            void *mem = malloc(kPool[i]);
+            if (!mem) continue;
+            netInitParam pp;
+            memset(&pp, 0, sizeof(pp));
+            pp.memory      = (u32)(u64)mem;
+            pp.memory_size = kPool[i];
+            pp.flags       = 0;
+            if (netInitializeNetworkEx(&pp) == 0) {
+                up = true;
+                char b[80];
+                snprintf(b, sizeof(b), "net: libnet pool %u KB (PSL1GHT default is 128)",
+                         (unsigned)(kPool[i] >> 10));
+                plog(b);
+            } else {
+                free(mem);
+            }
+        }
+        if (!up) {
+            plog("net: enlarged pool refused, falling back to netInitialize()");
+            ret = netInitialize();
+            if (ret < 0) { sysModuleUnload(SYSMODULE_NET); return ret; }
+        }
+    }
     sys_mutex_attr_t attr;
     memset(&attr, 0, sizeof(attr));
     attr.attr_protocol  = SYS_MUTEX_PROTOCOL_FIFO;

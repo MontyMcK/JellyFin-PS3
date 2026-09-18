@@ -36,6 +36,12 @@ CONTENTID   := UP0001-$(APPID)_00-0000000000000000
 # Compiler flags
 #---------------------------------------------------------------------------
 CFLAGS      := -O2 -Wall -mcpu=cell $(MACHDEP) $(INCLUDE)
+
+# .S files: -mregnames so r0/r1/r2 assemble as REGISTERS rather than as
+# undefined symbols.  PSL1GHT's own sprx Makefile passes this for the same
+# reason; without it the stub trampolines in source/audio/audio_out_stub.S
+# fail with "unsupported relocation against r1".
+ASFLAGS     := -mregnames -mcpu=cell $(MACHDEP) $(INCLUDE) -D__ASSEMBLY__
 CXXFLAGS    := $(CFLAGS)
 LDFLAGS     := $(MACHDEP) -Wl,-Map,$(notdir $@).map
 

@@ -1,6 +1,7 @@
 #include "audio.h"
 #include "adec.h"
 #include "plog.h"
+#include "audio_bitstream.h"   // compressed output instead of LPCM
 #include "jf_paths.h"
 #include "player_stats.h"
 #include "centermix.h"
@@ -236,6 +237,13 @@ void audio_open(int channels) {
     { sys_event_t ev; while (sysEventQueueReceive(s_audio_eq, &ev, 1) == 0) { } }
 
     s_audio_ok = true;
+
+    // Ask for a compressed wire format if one is configured.  Done AFTER the
+    // port is up and started, so the port's own channel count is settled and
+    // can be handed to the request; it verifies by read-back and reverts
+    // itself if the console declines.
+    audio_bitstream_begin(s_port_channels);
+
     crash_log("a5 audio_open done");
 }
 
@@ -366,6 +374,10 @@ bool audio_write_pcm(void) {
 void audio_close(void) {
     crash_log("ax1 audio_close enter");
     if (!s_audio_ok) return;
+    // Put the wire format back before tearing the port down.  The output is a
+    // shared console resource -- the XMB and the next app should not inherit a
+    // coding type this app asked for.
+    audio_bitstream_end();
     crash_log("ax2 sysAudioPortStop");
     audioPortStop(s_audio_port);
     audioRemoveNotifyEventQueue(s_audio_key);

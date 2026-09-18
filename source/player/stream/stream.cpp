@@ -270,10 +270,19 @@ int stream_open(const char *url) {
     sb_reset();     // new connection — drop anything buffered from the old one
     {
         char buf[64];
+        // Report what the socket ACTUALLY has, not just what was asked for.
+        // getsockopt(SO_RCVBUF) returns the REQUESTED size even when libnet
+        // cannot fund it -- that is exactly how a 512 KB request read back as
+        // 524288 while behaving like 64 KB, and why the window looked like a
+        // dead end.  netGetSockInfo reports the real receive queue, so the
+        // two together say whether the enlarged libnet pool actually landed.
         int rb_eff = 0; socklen_t rl = sizeof(rb_eff);
         if (getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb_eff, &rl) != 0) rb_eff = -1;
-        snprintf(buf, sizeof(buf), "stream_open: status=%d chunked=%d rcvbuf=%d",
-                 status, (int)s_chunked, rb_eff);
+        netSocketInfo si; memset(&si, 0, sizeof(si));
+        int rq = (netGetSockInfo(sock, &si, 1) == 0) ? si.recv_queue_len : -1;
+        snprintf(buf, sizeof(buf),
+                 "stream_open: status=%d chunked=%d rcvbuf=%d recvq=%d",
+                 status, (int)s_chunked, rb_eff, rq);
         plog(buf);
     }
     if (status != 200) {
