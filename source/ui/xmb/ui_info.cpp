@@ -527,8 +527,10 @@ void xmb_show_item_info(const XMBItem *root) {
                                 display_height, &qw, &qh, NULL, NULL, &qbr);
                 char qtxt[64];
                 if (qbr == 0)
-                    // Direct play: there is no bitrate to quote, which is
-                    // the entire point of the setting.
+                    // Direct play.  Retired from the ladder (it could not hold
+                    // a remux on this console), so this is only reachable from
+                    // a settings file written by an older build -- say what it
+                    // is rather than printing a bitrate of zero.
                     snprintf(qtxt, sizeof(qtxt),
                              "Original  (direct play, no re-encode)");
                 else if (vq == VQ_AUTO)

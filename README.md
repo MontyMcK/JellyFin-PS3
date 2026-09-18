@@ -48,21 +48,25 @@ Defaults are safe but conservative. For a Blu-ray remux on a wired console:
 
 | Setting | Where | Set it to |
 |---|---|---|
-| **Quality** | Triangle on a title → Quality row | **1080p 25** |
+| **Quality** | Triangle on a title → Quality row | **Max** |
 | **Surround** | Settings → Surround 5.1 | **HD** |
 
-**Why 25 Mbps and not higher.** The PS3 can only *receive* about 20-25 Mbps
-over HTTP — measured, not guessed: 9.4 Mbps PC→PS3 by FTP against 113 Mbps the
-other way, while the same Jellyfin server hands a PC on the same LAN 537 Mbps.
-So the console is the bottleneck, not your network or your server. A bitrate
-setting is a *ceiling*, not a constant, and most scenes sit well under it,
-which is why 25 holds and 30 starves on demanding scenes. **Original** (direct
-play) is not viable for a 50 Mbps remux.
+The Quality row runs 360p → 480p → 720p → **High** (10 Mbps) → **Very High**
+(20) → **Max** (25), and prints the bitrate beside the name.
+
+**Why Max stops at 25 Mbps.** The PS3 can only *receive* about 20-25 Mbps over
+HTTP — measured, not guessed: 9.4 Mbps PC→PS3 by FTP against 113 Mbps the other
+way, while the same Jellyfin server hands a PC on the same LAN 537 Mbps. So the
+console is the bottleneck, not your network or your server. A bitrate setting
+is a *ceiling*, not a constant, and most scenes sit well under it, which is why
+25 holds where more does not. Back to back on the same film: 25 Mbps ran at
+23.9 fps with every frame on time, 30 Mbps at 16.7, and direct play at 14.9.
+Steps above 25 were removed rather than left in to disappoint.
 
 The quality you pick is remembered **per title**, so a heavy remux and a light
 episode can each keep their own.
 
-If playback stutters, drop to **1080p 20** before anything else.
+If playback stutters, drop to **Very High** before anything else.
 
 ---
 
