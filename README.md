@@ -30,8 +30,9 @@
 > | **AC-3 5.1** | — | yes, server-transcoded |
 > | **1080p** | stalls on big files | stable to **25 Mbps** |
 >
-> **Download:** [`release/JellyFin-PS3.pkg`](release/JellyFin-PS3.pkg) —
-> click, then **Download raw file**. Copy it to a USB stick and install it from
+> ### [⬇ Download JellyFin-PS3.pkg](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/raw/main/release/JellyFin-PS3.pkg)
+>
+> One click, straight to the file. Copy it to a USB stick and install it from
 > the XMB, or drop it in `/dev_hdd0/packages/` over FTP and use webMAN's
 > Package Manager.
 >
@@ -176,8 +177,8 @@ Notes and limitations:
 
 ## Install
 
-Download [`release/JellyFin-PS3.pkg`](release/JellyFin-PS3.pkg) — open the link,
-then click **Download raw file**.
+**[⬇ Download JellyFin-PS3.pkg](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/raw/main/release/JellyFin-PS3.pkg)** — one click, straight to the file.
+(It also lives in [`release/`](release/) in the repo.)
 
 Then either:
 

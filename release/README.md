@@ -1,6 +1,6 @@
 # Download
 
-**[`JellyFin-PS3.pkg`](JellyFin-PS3.pkg)** — open it, then click **Download raw file**.
+**[⬇ Download JellyFin-PS3.pkg](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/raw/main/release/JellyFin-PS3.pkg)** — one click, straight to the file.
 
 ## Install
 
