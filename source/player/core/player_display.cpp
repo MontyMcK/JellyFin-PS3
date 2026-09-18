@@ -16,6 +16,7 @@
 #include "ui.h"          // drawTTF
 #include "ui_visuals.h" // ttf_text_width
 #include "subtitles.h"
+#include "subfont.h"
 #include <string.h>
 
 // Longest single rendered line. Cues are capped well below this in
@@ -343,7 +344,8 @@ void player_display_frame(PlayerState *ps) {
                 if (len > SUB_ROW_MAX - 1) len = SUB_ROW_MAX - 1;
                 memcpy(row, p2, len); row[len] = '\0';
 
-                const int tw = ttf_text_width(row, (float)px, true);
+                const int face = subfont_face();
+                const int tw   = ttf_text_width_face(row, (float)px, face);
                 const int x  = (W - tw) / 2;
                 // Outline in every direction.  Film subtitles sit over
                 // whatever happens to be on screen, and white on a bright
@@ -354,9 +356,9 @@ void player_display_frame(PlayerState *ps) {
                 for (int dy = -ow; dy <= ow; dy++)
                     for (int dx = -ow; dx <= ow; dx++)
                         if (dx || dy)
-                            drawTTF((u32)(x + dx), (u32)(y + dy), row,
-                                    (float)px, 0x000000E6UL, true);
-                drawTTF((u32)x, (u32)y, row, (float)px, 0xFFFFFFFFUL, true);
+                            drawTTF_face((u32)(x + dx), (u32)(y + dy), row,
+                                         (float)px, 0x000000E6UL, face);
+                drawTTF_face((u32)x, (u32)y, row, (float)px, 0xFFFFFFFFUL, face);
 
                 y += lh;
                 if (!nl) break;

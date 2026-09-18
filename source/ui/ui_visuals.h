@@ -286,7 +286,7 @@ extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 // The "Player Stats Overlay" row only exists when the diagnostics module is
 // compiled in — a build with ENABLE_PLAYER_STATS 0 has nothing for it to
 // toggle, so the row goes away rather than sitting there doing nothing.
-#define XMB_SETTINGS_COUNT (6 + ENABLE_PLAYER_STATS)  // selectable settings entries
+#define XMB_SETTINGS_COUNT (7 + ENABLE_PLAYER_STATS)  // selectable settings entries
 extern int   g_settings_sel;       // highlighted settings entry
 extern bool  g_settings_confirm;   // true while the logout confirm prompt is up
 extern bool  g_overscan_calib;     // true while the overscan calibration screen is up
@@ -321,7 +321,17 @@ void ps_sprites_preload(void);
 void visuals_cleanup(void);
 void ttf_init(void);
 void ttf_prewarm_hud(void);
+// Typefaces available to drawTTF_face()/ttf_text_width_face().  The two
+// subtitle faces are bold-only and subset to Latin plus SubRip's punctuation;
+// see source/gfx/fonts/LICENSES.md for provenance and licences.
+#define UI_FACE_REGULAR   0
+#define UI_FACE_BOLD      1
+#define UI_FACE_NOTO      2   // Noto Sans Bold        (SIL OFL 1.1)
+#define UI_FACE_ROBOCOND  3   // Roboto Condensed Bold (Apache 2.0)
+
 int  ttf_text_width(const char *text, float px, bool bold = false);
+int  ttf_text_width_face(const char *text, float px, int face);
+void drawTTF_face(u32 x, u32 y, const char *text, float px, u32 color, int face);
 void xmb_draw_tabs(void);
 void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14);
 

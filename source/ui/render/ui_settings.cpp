@@ -13,10 +13,11 @@
 #include "surround.h"
 #include "centermix.h"
 #include "statsovl.h"
+#include "subfont.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
     { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)",
-      "Audio Output", "Dialogue Boost"
+      "Audio Output", "Dialogue Boost", "Subtitle Font"
 #if ENABLE_PLAYER_STATS
     , "Player Stats Overlay"
 #endif
@@ -26,7 +27,8 @@ static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
 // ui/fonts/tabler_icons.h) — a new glyph would mean regenerating the subset.
 // ICON_MUSIC (already in the subset) marks the surround audio row.
 static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  =
-    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE, ICON_MUSIC, ICON_MUSIC
+    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE, ICON_MUSIC, ICON_MUSIC,
+      ICON_TV
 #if ENABLE_PLAYER_STATS
     , ICON_BUG
 #endif
@@ -204,8 +206,16 @@ void xmb_draw_settings(void) {
                     (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
                     val, 18, centermix_active() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
+        if (i == 6) {   // Subtitle Font — right-aligned typeface name
+            const char *val = subfont_label();
+            int vw = ttf_text_width(val, 18, sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
+                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
+                    val, 18,
+                    subfont_get() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
 #if ENABLE_PLAYER_STATS
-        if (i == 6) {   // Player Stats Overlay — right-aligned On/Off state
+        if (i == 7) {   // Player Stats Overlay — right-aligned On/Off state
             const char *val = statsovl_enabled() ? "On" : "Off";
             int vw = ttf_text_width(val, 18, sel);
             drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),

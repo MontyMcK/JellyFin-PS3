@@ -16,6 +16,8 @@
 #include "opensans_regular.h"
 #include "opensans_bold.h"
 #include "tabler_icons.h"
+#include "notosans_bold.h"
+#include "robotocondensed_bold.h"
 #include "icons.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -41,6 +43,12 @@ static bool            s_ttf_ok   = false;
 static stbtt_fontinfo  s_font_bold;
 static bool            s_ttf_bold_ok = false;
 static stbtt_fontinfo  s_icons;
+// Subtitle faces.  Bold only -- subtitles are never set in a regular weight --
+// and subset to Latin plus SubRip's punctuation, which is why two extra faces
+// cost 41 KB instead of 1.1 MB.  See source/gfx/fonts/LICENSES.md.
+static stbtt_fontinfo  s_font_noto;
+static stbtt_fontinfo  s_font_robocond;
+static bool            s_noto_ok = false, s_robocond_ok = false;
 static bool            s_icons_ok    = false;
 
 // Gamma LUTs for correct anti-aliasing.  Blending coverage in linear light
@@ -94,6 +102,9 @@ static inline u8 aa_blend(u8 a, u8 fg, u8 bg) {
 #define GC_FONT_REG     0
 #define GC_FONT_BOLD    1
 #define GC_FONT_ICONS   2
+#define GC_FONT_NOTO    3
+#define GC_FONT_ROBOCND 4
+#define GC_FONT_COUNT   5
 
 typedef struct {
     float px;
@@ -113,13 +124,15 @@ static bool       s_gc_on      = false;
 
 // Per-font ascent (size-independent) and per-(font,ASCII) unscaled advance.
 // Both were re-read from the font tables on every call; neither ever changes.
-static int  s_ascent[3];
-static int  s_adv[3][128];
-static bool s_adv_ok[3][128];
+static int  s_ascent[GC_FONT_COUNT];
+static int  s_adv[GC_FONT_COUNT][128];
+static bool s_adv_ok[GC_FONT_COUNT][128];
 
 static inline int font_id_of(const stbtt_fontinfo *fi) {
-    if (fi == &s_font_bold) return GC_FONT_BOLD;
-    if (fi == &s_icons)     return GC_FONT_ICONS;
+    if (fi == &s_font_bold)    return GC_FONT_BOLD;
+    if (fi == &s_icons)        return GC_FONT_ICONS;
+    if (fi == &s_font_noto)    return GC_FONT_NOTO;
+    if (fi == &s_font_robocond) return GC_FONT_ROBOCND;
     return GC_FONT_REG;
 }
 
@@ -375,9 +388,22 @@ void drawTextScaled(u32 x, u32 y, const char *text, int px) {
 // color: 0x00RRGGBB.  Falls back to drawTextScaled if font not loaded.
 // -------------------------------------------------------
 
-int ttf_text_width(const char *text, float px, bool bold) {
+// Which face a UI_FACE_* id resolves to, falling back to the bold UI face
+// whenever a subtitle face failed to load -- a missing font must degrade to
+// readable text, never to nothing on screen.
+static stbtt_fontinfo *face_of(int face) {
+    switch (face) {
+    case UI_FACE_NOTO:     if (s_noto_ok)      return &s_font_noto;     break;
+    case UI_FACE_ROBOCOND: if (s_robocond_ok)  return &s_font_robocond; break;
+    case UI_FACE_BOLD:     break;
+    default:               return s_ttf_ok ? &s_font : &s_font;
+    }
+    return s_ttf_bold_ok ? &s_font_bold : &s_font;
+}
+
+int ttf_text_width_face(const char *text, float px, int face) {
     if (!s_ttf_ok) return (int)(strlen(text) * px);
-    stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
+    stbtt_fontinfo *fi = face_of(face);
     int   id    = font_id_of(fi);
     float scale = stbtt_ScaleForPixelHeight(fi, px);
     float xf = 0.0f;
@@ -392,13 +418,17 @@ int ttf_text_width(const char *text, float px, bool bold) {
     return (int)xf;
 }
 
-void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
+int ttf_text_width(const char *text, float px, bool bold) {
+    return ttf_text_width_face(text, px, bold ? UI_FACE_BOLD : UI_FACE_REGULAR);
+}
+
+void drawTTF_face(u32 x, u32 y, const char *text, float px, u32 color, int face) {
     if (!s_ttf_ok) {
         drawTextScaled(x, y, text, (int)px);
         return;
     }
 
-    stbtt_fontinfo *fi = (bold && s_ttf_bold_ok) ? &s_font_bold : &s_font;
+    stbtt_fontinfo *fi = face_of(face);
 
     int   id       = font_id_of(fi);
     float scale    = stbtt_ScaleForPixelHeight(fi, px);
@@ -420,6 +450,10 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
         prev_cp = cp;
         text++;
     }
+}
+
+void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
+    drawTTF_face(x, y, text, px, color, bold ? UI_FACE_BOLD : UI_FACE_REGULAR);
 }
 
 void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
@@ -484,6 +518,10 @@ void ttf_init(void) {
         s_ttf_bold_ok = true;
     if (stbtt_InitFont(&s_icons, (unsigned char*)TablerIcons_ttf, 0))
         s_icons_ok = true;
+    if (stbtt_InitFont(&s_font_noto, (unsigned char*)NotoSans_Bold_ttf, 0))
+        s_noto_ok = true;
+    if (stbtt_InitFont(&s_font_robocond, (unsigned char*)RobotoCondensed_Bold_ttf, 0))
+        s_robocond_ok = true;
 
     // Ascent is size-independent — read it once here instead of on every call.
     if (s_ttf_ok)
@@ -492,6 +530,10 @@ void ttf_init(void) {
         stbtt_GetFontVMetrics(&s_font_bold, &s_ascent[GC_FONT_BOLD],  NULL, NULL);
     if (s_icons_ok)
         stbtt_GetFontVMetrics(&s_icons,     &s_ascent[GC_FONT_ICONS], NULL, NULL);
+    if (s_noto_ok)
+        stbtt_GetFontVMetrics(&s_font_noto, &s_ascent[GC_FONT_NOTO],  NULL, NULL);
+    if (s_robocond_ok)
+        stbtt_GetFontVMetrics(&s_font_robocond, &s_ascent[GC_FONT_ROBOCND], NULL, NULL);
 
     // Glyph cache.  A failed allocation is non-fatal: every draw then falls
     // back to rasterizing directly, exactly as it did before the cache existed.

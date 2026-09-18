@@ -15,6 +15,7 @@
 #include "hd1080.h"
 #include "surround.h"
 #include "centermix.h"
+#include "subfont.h"
 #include "statsovl.h"
 
 // -------------------------------------------------------
@@ -168,8 +169,10 @@ static bool xmb_input_settings(void) {
             surround_cycle();    // Stereo -> 5.1 -> [7.1 where offered]
         if (g_settings_sel == 5)                                        // Dialogue Boost
             centermix_cycle();   // Off -> +3 -> +6 -> +10
+        if (g_settings_sel == 6)                                        // Subtitle Font
+            subfont_cycle();     // Open Sans -> Noto Sans -> Roboto Cond.
 #if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 6)                                        // Player Stats Overlay
+        if (g_settings_sel == 7)                                        // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());
 #endif
     }
