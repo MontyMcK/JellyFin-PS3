@@ -87,18 +87,24 @@ static const char *mode_name(int m)
 	case BITSTREAM_DTS:  return "DTS";
 	case BITSTREAM_RAW:  return "raw bitstream";
 	case BITSTREAM_LPCM: return "LPCM re-configure";
+	case BITSTREAM_LPCM_KICK: return "LPCM via 8ch transition";
 	default:             return "?";
 	}
 }
 
 int bitstream_mode(void)
 {
+	// DEFAULT ON.  Missing file means AC-3-routing, not off: a dropped centre
+	// channel takes the dialogue with it, which is the worst failure this app
+	// has, and the request costs nothing on a chain that does not need it --
+	// the wire stays LPCM either way, and the block above backs off if a
+	// console ever really would encode.
 	FILE *f = fopen(jf_data_path(BITSTREAM_FILE), "r");
-	if (!f) return BITSTREAM_OFF;
+	if (!f) return BITSTREAM_AC3;
 	int v = BITSTREAM_OFF;
 	if (fscanf(f, "%d", &v) != 1) v = BITSTREAM_OFF;
 	fclose(f);
-	if (v < BITSTREAM_OFF || v > BITSTREAM_LPCM) v = BITSTREAM_OFF;
+	if (v < BITSTREAM_OFF || v > BITSTREAM_LPCM_KICK) v = BITSTREAM_OFF;
 	return v;
 }
 
@@ -109,6 +115,7 @@ static u8 coding_for(int mode)
 	case BITSTREAM_DTS: return AUDIO_OUT_CODING_DTS;
 	case BITSTREAM_RAW: return AUDIO_OUT_CODING_BITSTREAM;
 	case BITSTREAM_LPCM:
+	case BITSTREAM_LPCM_KICK:
 	default:            return AUDIO_OUT_CODING_LPCM;
 	}
 }
@@ -143,6 +150,23 @@ void audio_bitstream_begin(int port_channels)
 	want.channel   = (port_channels >= 6) ? 6 : (u8)port_channels;
 	want.encoder   = coding_for(mode);
 	want.downMixer = AUDIO_OUT_DOWNMIXER_NONE;
+
+	// Mode 5: go somewhere else first, so the call that lands on 6ch LPCM is a
+	// real transition rather than a request for what is already set.  8ch is
+	// the detour on purpose -- it is what the cellAudio port is actually open
+	// at, and if the second call were somehow to fail, being left wide is a
+	// far better failure than being left at stereo.
+	if (mode == BITSTREAM_LPCM_KICK) {
+		audioOutConfiguration wide;
+		memset(&wide, 0, sizeof(wide));
+		wide.channel   = 8;
+		wide.encoder   = AUDIO_OUT_CODING_LPCM;
+		wide.downMixer = AUDIO_OUT_DOWNMIXER_NONE;
+		const s32 krc = audioOutConfigure(AUDIO_OUT_PRIMARY, &wide, NULL, 1);
+		if (krc == 0) s_applied = true;
+		snprintf(b, sizeof(b), "bitstream: kick to 8ch LPCM rc=%d", (int)krc);
+		plog(b);
+	}
 
 	const s32 rc = audioOutConfigure(AUDIO_OUT_PRIMARY, &want, NULL, 1);
 	// Mark it applied the moment the call SUCCEEDS, not once the result is
@@ -186,15 +210,48 @@ void audio_bitstream_begin(int port_channels)
 	plog(b);
 
 	if (srate == 0 && st.soundMode.type != want.encoder) {
-		// Accepted on paper, something else on the wire.  Leave it applied --
-		// it is harmless, and on this chain it coincided with the centre
-		// channel finally working -- but do not call it engaged, because the
-		// output is not reporting the coding type we asked for.
+		// ASKED FOR A CODEC, GOT LPCM -- and for this app that is the GOOD
+		// outcome, which is why it is not treated as a failure.
+		//
+		// The point of the AC-3 request is not Dolby Digital. It is that AC-3
+		// is 5.1 BY DEFINITION, so naming it makes the console route the
+		// 8-wide cellAudio port to the 6-wide output as true 5.1. Left on
+		// LPCM the console does some other 8 -> 6 fold, and on at least one
+		// soundbar that fold loses the centre channel entirely. Measured:
+		// dialogue returns with AC-3 requested and disappears without it,
+		// while the app's own meter shows the centre leaving hot either way.
+		//
+		// The wire stays LPCM, so nothing is compressed and the lossless
+		// TrueHD / DTS-HD MA decode reaches the receiver intact. Routing
+		// fixed, quality untouched.
 		snprintf(b, sizeof(b),
-		         "bitstream: CONFIG-ONLY -- asked %s, wire reports type=%u",
+		         "bitstream: routing as %s, wire stays type=%u (LPCM intact)",
 		         mode_name(mode), (unsigned)st.soundMode.type);
 		plog(b);
-		s_engaged = false;
+		s_engaged = false;      // nothing compressed is on the wire
+		return;
+	}
+
+	// THE WIRE REALLY DID BECOME THE REQUESTED CODEC.
+	//
+	// On the chain this was developed against that never happens, but another
+	// receiver may well accept it -- and then the console is encoding our
+	// audio to AC-3 or DTS on the way out. Dolby Digital Live runs at 640
+	// kbps against roughly 4.6 Mbps for uncompressed 5.1 LPCM, so that would
+	// quietly throw away most of what the lossless decoder is for, to fix a
+	// routing problem that receiver may not even have.
+	//
+	// This app exists to deliver lossless audio, so it backs off and says
+	// why, rather than silently trading the thing it is for. Anyone who
+	// prefers the routing fix can still force it with mode 2 (DTS) or by
+	// reading this line and deciding for themselves.
+	if (srate == 0 && (mode == BITSTREAM_AC3 || mode == BITSTREAM_DTS)) {
+		snprintf(b, sizeof(b),
+		         "bitstream: wire really became %s (type=%u) -- that is LOSSY, "
+		         "reverting to LPCM", mode_name(mode),
+		         (unsigned)st.soundMode.type);
+		plog(b);
+		audio_bitstream_end();
 		return;
 	}
 
@@ -244,3 +301,23 @@ void audio_bitstream_end(void)
 }
 
 bool audio_bitstream_engaged(void) { return s_engaged; }
+
+// Any non-zero mode counts as on, so a diagnostic mode set by hand still
+// reads as enabled rather than as a state the menu cannot describe.
+bool bitstream_routing_enabled(void) { return bitstream_mode() != BITSTREAM_OFF; }
+
+const char *bitstream_routing_label(void)
+{
+	return bitstream_routing_enabled() ? "On" : "Off";
+}
+
+void bitstream_routing_toggle(void)
+{
+	const int now = bitstream_routing_enabled() ? BITSTREAM_OFF : BITSTREAM_AC3;
+	FILE *f = fopen(jf_data_path(BITSTREAM_FILE), "w");
+	if (!f) return;
+	fprintf(f, "%d\n", now);
+	fclose(f);
+	// Takes effect on the next playback: begin() re-reads the file each time,
+	// which is also what lets it be changed over FTP mid-session.
+}
