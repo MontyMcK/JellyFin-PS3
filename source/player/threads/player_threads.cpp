@@ -392,6 +392,10 @@ void upload_thread_fn(void *arg) {
         sysMutexLock(s_jbuf_mtx, 0);
         const u8 *slot_a = jbuf_peek();
         const u8 *slot_b = jbuf_peek_next();
+        // Which frame this is, read under the same lock as the pointer so
+        // the two cannot disagree.  The display needs it to distinguish a
+        // new picture from a re-upload of the one already on screen.
+        const u32 seq_a  = jbuf_peek_seq();
         sysMutexUnlock(s_jbuf_mtx);
 
         if (!slot_a) { usleep(1000); continue; }
@@ -401,6 +405,7 @@ void upload_thread_fn(void *arg) {
         upload_yuv_planes(slot_a, s_yuvA_buf[back]);
         if (slot_b) { upload_yuv_planes(slot_b, s_yuvB_buf[back]); s_vid_b_present = true; }
         else        { s_vid_b_present = false; }
+        s_vid_uploaded_seq = seq_a;
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = true;
     }

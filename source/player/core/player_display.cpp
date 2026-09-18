@@ -61,6 +61,32 @@ static void log_refresh_rate(void) {
     }
 }
 
+// Count a PRESENTATION, not a buffer swap.
+//
+// player_stats_on_frame_shown() derives `held` -- how many vblanks a frame
+// stayed on screen -- from the hardware vblank counter, and the pulldown
+// figures (pd= in the heartbeat) are built from it: 24fps on a 59.94Hz
+// output should alternate 3,2,3,2, so hold2 and hold3 should be roughly
+// equal and hold_other near zero.
+//
+// It used to be called from BOTH flip paths below, unconditionally, and
+// that made the numbers meaningless.  The upload thread re-stages
+// jbuf_peek() and raises s_vid_frame_ready again the moment the display
+// consumes it, WITHOUT popping -- so the flag goes true about once per
+// vblank even for 24fps content.  `held` was therefore almost always 1,
+// which is neither 2 nor 3, and every sample fell into hold_other.  That
+// is why pd read like 14/1/1905: not broken cadence, a broken counter.
+//
+// The upload thread now records WHICH frame it staged, so a re-upload of
+// the picture already on screen is ignored and `held` becomes the number
+// of vblanks that frame was actually displayed.
+static void stats_on_picture_shown(void) {
+    static u32 s_last_seq = 0xFFFFFFFFu;
+    const u32  seq = s_vid_uploaded_seq;
+    if (seq == s_last_seq) return;      // same picture, re-staged
+    s_last_seq = seq;
+    player_stats_on_frame_shown();
+}
 void player_display_frame(PlayerState *ps) {
     check_fps_fallback(ps);
     log_refresh_rate();
@@ -152,7 +178,7 @@ void player_display_frame(PlayerState *ps) {
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = false;
         s_vid_disp_idx ^= 1;
-        player_stats_on_frame_shown();   // observe only
+        stats_on_picture_shown();   // observe only; ignores re-staged frames
         {
             static u64 s_fi_last_us = 0;
             static u64 s_fi_gaps[2] = {0, 0};
@@ -207,7 +233,7 @@ void player_display_frame(PlayerState *ps) {
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = false;
         s_vid_disp_idx ^= 1;
-        player_stats_on_frame_shown();   // observe only
+        stats_on_picture_shown();   // observe only; ignores re-staged frames
     } else if (ps->show_seek_frame && ps->paused && s_vid_frame_ready) {
         // Paused seek: display the target frame exactly once, staying paused.
         __asm__ volatile("sync" ::: "memory");

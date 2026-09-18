@@ -235,6 +235,13 @@ void xmb_show_item_info(const XMBItem *root) {
             detail_media_free(&hero_poster);
             memset(&detail, 0, sizeof(detail));
             jellyfin_fetch_item_detail(cur->id, &detail);
+            // Re-apply the quality last chosen for THIS title, if any.
+            // Done on load rather than at play time so the info row shows
+            // what will actually be requested.
+            {
+                int remembered = vquality_for_item(cur->id);
+                if (remembered >= 0) vquality_set((vquality_t)remembered);
+            }
             memset(&versions, 0, sizeof(versions));
             if (strcmp(cur->type, "Movie") == 0 ||
                 strcmp(cur->type, "Episode") == 0 ||
@@ -309,8 +316,12 @@ void xmb_show_item_info(const XMBItem *root) {
             } else if (focus == FOCUS_QUALITY) {
                 // Persisted immediately, so the choice carries to the next
                 // title the way the web player's quality dropdown does.
-                if (BTN_REPEAT(left))  vquality_next(-1);
-                if (BTN_REPEAT(right)) vquality_next(+1);
+                if (BTN_REPEAT(left) || BTN_REPEAT(right)) {
+                    vquality_next(BTN_REPEAT(left) ? -1 : +1);
+                    // Remember it for this title as well as globally, so
+                    // coming back to a heavy remux does not mean re-picking.
+                    vquality_remember_item(cur_item.id, vquality_get());
+                }
             }
             if (BTN_PRESSED(cross)) {
                 if (focus == FOCUS_SIM) {
