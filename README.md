@@ -78,14 +78,22 @@ so full cinema range can leave dialogue well below effects on a compact system.
 The Quality row runs 360p → 480p → 720p → **High** (10 Mbps) → **Very High**
 (20) → **Max** (25), and prints the bitrate beside the name.
 
-**Why Max stops at 25 Mbps.** The PS3 can only *receive* about 20-25 Mbps over
-HTTP — measured, not guessed: 9.4 Mbps PC→PS3 by FTP against 113 Mbps the other
-way, while the same Jellyfin server hands a PC on the same LAN 537 Mbps. So the
-console is the bottleneck, not your network or your server. A bitrate setting
-is a *ceiling*, not a constant, and most scenes sit well under it, which is why
-25 holds where more does not. Back to back on the same film: 25 Mbps ran at
-23.9 fps with every frame on time, 30 Mbps at 16.7, and direct play at 14.9.
-Steps above 25 were removed rather than left in to disappoint.
+**Why Max stops at 25 Mbps.** The console can only *receive* about 25 Mbps
+sustained. That is measured, not guessed, and it is the server that proves it:
+the same Jellyfin endpoint hands a PC on the same LAN 537 Mbps. Back to back on
+the same film, on an otherwise identical build:
+
+| setting | throughput | frames on time | buffer ran empty |
+|---|---|---|---|
+| **25 Mbps** | 30.1 Mbps | **98%** | **never** |
+| 30 Mbps | 25.0 Mbps | 30% | 68% of samples |
+
+Note which way the throughput goes. Asking for 30 delivers *less* than asking
+for 25, because the 30.1 is the buffer being topped up in bursts against a
+demand of only 25 — it is fill rate with headroom, not a sustained rate. Ask
+for 30 sustained and you get 25. A buffer bridges a spike; it cannot bridge a
+permanent shortfall, so steps above 25 were removed rather than left in to
+disappoint.
 
 The quality you pick is remembered **per title**, so a heavy remux and a light
 episode can each keep their own.

@@ -66,12 +66,21 @@ typedef enum {
 //  against a console that pulls ~25 is a permanent deficit rather than a spike
 //  a buffer can bridge -- it measured 14.9 fps with half the frames late.
 //
-//  VQ_1080P_30 was retired alongside it on a 16.7 fps measurement, and is now
-//  BACK ON TRIAL. That measurement was taken while two other things were
-//  wrong: the libnet pool change had throughput at 12 Mbps median instead of
-//  25, and preroll was ending at 33% of the ring. Both are fixed, and a
-//  bitrate setting is a ceiling rather than a constant, so the case against 30
-//  has to be re-made on a healthy build before it stands.
+//  VQ_1080P_30 is retired too, and this one was re-tried properly rather than
+//  assumed. Its first verdict came from a build with two unrelated faults, so
+//  it was put back on trial once those were fixed, with a full preroll and a
+//  512 KB receive buffer. Same film, back to back:
+//
+//                  net median   fps median   frames on time   ring empty
+//    25 Mbps        30.1 Mbps      24.0            98%            0%
+//    30 Mbps        25.0 Mbps      12.2            30%           68%
+//
+//  Note which way the throughput went. Asking for 30 got us LESS than asking
+//  for 25, because the 30.1 at the lower setting is the ring being topped up
+//  in bursts against a demand of 25 -- it is fill rate, not a sustained rate.
+//  Ask for 30 sustained and the console delivers 25. That is the ceiling, and
+//  it is the same ~25 Mbps figure this project has measured three times now.
+//  A cushion bridges a spike; it cannot bridge a permanent deficit.
 //
 //  They are retired rather than deleted because the value is PERSISTED as a
 //  digit, here and in the per-title file: renumbering would silently turn
