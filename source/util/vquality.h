@@ -61,13 +61,17 @@ typedef enum {
 // -------------------------------------------------------------------------
 //  What is actually OFFERED, and why two values are not
 // -------------------------------------------------------------------------
-//  VQ_1080P_30 and VQ_ORIGINAL are RETIRED: they stay in the enum, keep their
-//  numbers, and still resolve in vquality_params(), but nothing selects them
-//  any more.  Both sit past the console's measured receive ceiling and could
-//  only ever disappoint -- back to back on the same movie, 30 Mbps managed
-//  16.7 fps with the compressed ring empty 94% of the time and Original 14.9,
-//  against 23.9 fps and 100% of frames on time at 25.  Offering a setting that
-//  cannot work is worse than not offering it.
+//  VQ_ORIGINAL is RETIRED: it stays in the enum, keeps its number, and still
+//  resolves in vquality_params(), but nothing selects it. 53 Mbps sustained
+//  against a console that pulls ~25 is a permanent deficit rather than a spike
+//  a buffer can bridge -- it measured 14.9 fps with half the frames late.
+//
+//  VQ_1080P_30 was retired alongside it on a 16.7 fps measurement, and is now
+//  BACK ON TRIAL. That measurement was taken while two other things were
+//  wrong: the libnet pool change had throughput at 12 Mbps median instead of
+//  25, and preroll was ending at 33% of the ring. Both are fixed, and a
+//  bitrate setting is a ceiling rather than a constant, so the case against 30
+//  has to be re-made on a healthy build before it stands.
 //
 //  They are retired rather than deleted because the value is PERSISTED as a
 //  digit, here and in the per-title file: renumbering would silently turn
