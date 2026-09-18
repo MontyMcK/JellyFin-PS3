@@ -167,25 +167,32 @@ static void hd_close(void) {
     s_hd_logged = false;
 }
 
-// DTS-HD MA lossless decoding is OPT-IN and OFF by default.
+// DTS-HD MA lossless decoding is ON by default.
 //
-// It decodes correctly on the host -- tests/test_dts_hd.c passes with 35-78 dB
-// of channel separation -- but on the PPU it produces audibly wrong output,
-// and hardware logging rules out the obvious explanation: the real-time
-// budget never trips, so it is fast enough. Fast and wrong points at a
-// big-endian bug somewhere in the vendored XLL path, which the x86 host tests
-// cannot see and which needs a hardware debug loop to find.
+// It was opt-in for a while because it produced audibly wrong output on the
+// PPU while passing every host test, and the standing theory was a big-endian
+// bug in the vendored XLL path that only hardware could find.  That theory was
+// wrong.  x86-64 and big-endian PPC64 produced BYTE-IDENTICAL output, so the
+// bug was host-reproducible all along -- it went unnoticed only because no
+// host test fed the decoder an XLL stream.  test_dts_hd.c says in its own
+// header that it cannot: there is no free DTS-HD MA encoder to build a fixture
+// with.  But a fixture can be EXTRACTED from a disc rip instead of encoded,
+// which is what tests/test_dts_xll_dump.c does.
 //
-// Rather than ship audio that is worse than what it replaced, the default is
-// libdca's lossy core -- exactly what shipped before any of this. The decoder
-// stays built and tested so the work is not lost; create
-// /dev_hdd0/tmp/jellyfin_dtsma.txt containing "1" to switch it back on.
+// The cause was three bugs in the hand-written compat layer, not the decoder:
+// zero-filled ff_log2_tab and ff_inverse tables, and an av_fast_mallocz that
+// wiped the core's inter-frame ADPCM history.  See dcahd/PROVENANCE.md.
+//
+// Now verified bit-exact against ffmpeg on x86-64 AND on big-endian PPC64 --
+// 806 of 806 frames of real 5.1 24-bit DTS-HD MA -- and confirmed working on
+// the console.  Lossless is the point of this branch, so it is the default.
+// Put "0" in /dev_hdd0/tmp/jellyfin_dtsma.txt to force libdca's lossy core.
 #define DTSMA_FILE "jellyfin_dtsma.txt"
 static bool hd_enabled(void) {
     FILE *f = fopen(jf_data_path(DTSMA_FILE), "r");
-    if (!f) return false;
-    int v = 0;
-    bool on = (fscanf(f, "%d", &v) == 1 && v == 1);
+    if (!f) return true;              // no file: lossless, the default
+    int v = 1;
+    bool on = !(fscanf(f, "%d", &v) == 1 && v == 0);
     fclose(f);
     return on;
 }
@@ -218,7 +225,7 @@ bool adec_dts_open(int out_channels) {
     } else {
         plog(hd_enabled()
              ? "adec_dts: lossless decoder failed to open, using libdca core"
-             : "adec_dts: lossless (XLL) OFF by default, using libdca core");
+             : "adec_dts: lossless (XLL) disabled by setting, using libdca core");
     }
     s_open         = true;
     s_logged_frame = false;
