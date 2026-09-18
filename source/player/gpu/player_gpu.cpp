@@ -36,6 +36,10 @@ u8  *s_vid_vbuf          = NULL;  // RSX-local 4-vertex quad buffer
 u32  s_vid_vbuf_off      = 0;
 volatile int  s_vid_disp_idx    = 0;
 volatile bool s_vid_frame_ready = false;
+// Decode sequence number of the frame the upload thread last staged.  The
+// display uses it to tell a NEW picture from a re-upload of the same one --
+// see the pulldown counters in player_display.cpp.
+volatile u32  s_vid_uploaded_seq = 0;
 volatile bool s_vid_b_present   = false;
 
 // Frame size the letterbox quad was last built for.  vid_gpu_init builds it

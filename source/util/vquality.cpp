@@ -3,6 +3,7 @@
 #include "vquality.h"
 #include "jf_paths.h"     // jf_data_path()
 #include <stdio.h>
+#include <string.h>
 
 #define VQUALITY_FILE "jellyfin_vquality.txt"
 
@@ -105,6 +106,70 @@ void vquality_params(vquality_t q, bool hd_toggle,
 }
 
 // Missing file => Auto, which is the behaviour that shipped.
+// -------------------------------------------------------------------------
+//  Per-title memory
+// -------------------------------------------------------------------------
+//  A heavy Blu-ray remux and a small episode do not want the same setting,
+//  and re-picking it every time is exactly the sort of chore that makes
+//  people leave it on the wrong one.  So the choice is remembered against
+//  the item it was made for, and re-applied when that item is opened.
+//
+//  Deliberately simple: one line per title, newest first, capped at
+//  VQ_ITEMS_MAX and rewritten whole.  At 64 entries that is ~2 KB, which is
+//  not worth a smarter structure, and dropping the oldest entry costs a
+//  user nothing but one re-pick on a title they have not touched in a long
+//  time.
+#define VQ_ITEMS_FILE "jellyfin_vq_items.txt"
+#define VQ_ITEMS_MAX  64
+#define VQ_ID_LEN     40
+
+int vquality_for_item(const char *item_id) {
+    if (!item_id || !item_id[0]) return -1;
+    FILE *f = fopen(jf_data_path(VQ_ITEMS_FILE), "r");
+    if (!f) return -1;
+    char id[VQ_ID_LEN]; int q; int found = -1;
+    while (fscanf(f, "%39s %d", id, &q) == 2) {
+        if (strcmp(id, item_id) == 0 && q >= VQ_AUTO && q < VQ_COUNT) {
+            found = q;
+            break;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+void vquality_remember_item(const char *item_id, vquality_t q) {
+    if (!item_id || !item_id[0]) return;
+    if (q < VQ_AUTO || q >= VQ_COUNT) return;
+    if (strlen(item_id) >= VQ_ID_LEN) return;
+
+    static char ids[VQ_ITEMS_MAX][VQ_ID_LEN];
+    static int  qs [VQ_ITEMS_MAX];
+    int n = 0;
+
+    // This item goes first, so the cap drops the least recently chosen.
+    snprintf(ids[n], VQ_ID_LEN, "%s", item_id);
+    qs[n] = (int)q;
+    n++;
+
+    FILE *f = fopen(jf_data_path(VQ_ITEMS_FILE), "r");
+    if (f) {
+        char id[VQ_ID_LEN]; int old;
+        while (n < VQ_ITEMS_MAX && fscanf(f, "%39s %d", id, &old) == 2) {
+            if (strcmp(id, item_id) == 0) continue;   // superseded above
+            if (old < VQ_AUTO || old >= VQ_COUNT) continue;
+            snprintf(ids[n], VQ_ID_LEN, "%s", id);
+            qs[n] = old;
+            n++;
+        }
+        fclose(f);
+    }
+
+    f = fopen(jf_data_path(VQ_ITEMS_FILE), "w");
+    if (!f) return;
+    for (int i = 0; i < n; i++) fprintf(f, "%s %d\n", ids[i], qs[i]);
+    fclose(f);
+}
 void vquality_load(void) {
     FILE *f = fopen(jf_data_path(VQUALITY_FILE), "r");
     if (!f) return;

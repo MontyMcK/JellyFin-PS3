@@ -185,6 +185,7 @@ extern volatile u8  * s_yuvA_buf[2][3];  extern u32 s_yuvA_off[2][3];
 extern volatile u8  * s_yuvB_buf[2][3];  extern u32 s_yuvB_off[2][3];
 extern volatile int   s_vid_disp_idx;
 extern volatile bool  s_vid_frame_ready;
+extern volatile u32   s_vid_uploaded_seq;
 extern volatile bool  s_vid_b_present;
 
 void vid_gpu_init(u32 fw, u32 fh);

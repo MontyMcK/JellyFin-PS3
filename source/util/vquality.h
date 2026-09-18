@@ -64,6 +64,13 @@ vquality_t vquality_get(void);
 void       vquality_set(vquality_t q);  // set + persist
 void       vquality_next(int delta);    // cycle (left/right on the info row)
 
+// Per-title memory.  vquality_for_item() returns the quality last chosen for
+// that item, or -1 if it has none; vquality_remember_item() records one.
+// A heavy remux and a small episode do not want the same setting, and having
+// to re-pick every time is what leaves people stuck on the wrong one.
+int        vquality_for_item(const char *item_id);
+void       vquality_remember_item(const char *item_id, vquality_t q);
+
 // Short label for the info screen: "Auto", "1080p", ..., "Original".
 const char *vquality_label(vquality_t q);
 

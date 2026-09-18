@@ -161,15 +161,7 @@ check: all tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 	./test_track_codec
 	./test_truehd_map
 	./test_truehd_decode tones51.thd tones51.thd.ref
-# NOT run here: test_dts_hd FAILS on the current tree, and did so before the
-# XLL work too (verified against a pristine `git archive HEAD` build), so it
-# is a pre-existing bug and not a regression.  It feeds ffmpeg's experimental
-# `dca` CORE encoder through dcahd + truehd_map and finds LFE routed
-# correctly while the other five slots bleed into each other -- a channel-map
-# or core-path problem, separate from XLL, which test_dts_xll_dump now covers
-# bit-exactly.  Build it with `all`, run it by hand, fix it, then put this
-# line back:
-#	./test_dts_hd tones51.dts
+	./test_dts_hd tones51.dts
 	./test_media_sources
 
 clean:

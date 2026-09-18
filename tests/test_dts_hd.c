@@ -32,7 +32,15 @@
 #define MAXFRAMES (SR * 4)
 
 // Tone assigned to each PS3 slot by the generator below: FL FR FC LFE SL SR.
-static const double kTone[OUT_CH] = { 400, 700, 1100, 60, 1900, 2600 };
+// These MUST match the tones Makefile.host actually puts in tones51.dts.
+// They did not: the table read { 400, 700, 1100, 60, 1900, 2600 } while the
+// fixture is built with 300/500/700/60/900/1100, mapped FL|FR|FC|LFE|SL|SR.
+// Only index 3 agreed -- 60 Hz LFE -- which is exactly why LFE was the one
+// slot that passed and the other five looked catastrophically mis-routed.
+// The decoder and the channel map were never at fault: this test and the
+// real playback path both go through truehd_map_build() +
+// truehd_map_block_planar(), and that path is confirmed correct on hardware.
+static const double kTone[OUT_CH] = { 300, 500, 700, 60, 900, 1100 };
 
 static float  *g_out;
 static size_t  g_out_n;
