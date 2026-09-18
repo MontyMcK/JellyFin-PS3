@@ -38,6 +38,94 @@ static int  s_ctrail       = 0;
 static u8   s_carry[188];   // one TS packet — the only read size callers use
 static int  s_carry_n = 0;
 
+// ---------------------------------------------------------------------------
+// Socket read buffer.
+//
+// stream_read() is called once per 188-byte TS packet, and before this it did
+// a netRecv() PER CALL -- plus, on a chunked response, one netRecv PER BYTE of
+// every chunk header and its CRLF trailer.  At 30 Mbps that is ~20 000 packet
+// reads a second before counting chunk framing, and each netRecv is an lv2
+// syscall through the network PRX.  The PPU was spending its time in syscall
+// entry rather than moving bytes: measured ceiling was roughly 10-19 Mbps,
+// while the same server hands this LAN 599 Mbps to a PC.  That is why the ring
+// drained at 20/30 Mbps and at Original, and why raising the bitrate cap made
+// it worse rather than better.
+//
+// Reading 64 KB at a time and serving packets and chunk headers out of memory
+// cuts the syscall count by ~350x for the same bytes.  It changes nothing about
+// the TCP stream itself -- this is a buffer over the same sequential bytes, so
+// chunk framing still parses exactly as it did.
+//
+// Deliberately NOT used for the response headers: stream_open() reads those a
+// byte at a time precisely so it cannot over-read into the body, and it happens
+// once per open, so it costs nothing worth reclaiming.  The buffer therefore
+// starts empty at the first stream_read() and owns every byte after the header.
+#define SB_SIZE 65536
+static u8   s_sb[SB_SIZE];
+static int  s_sb_n = 0;      // valid bytes in s_sb
+static int  s_sb_p = 0;      // read cursor
+
+// Receive telemetry.  Two hypotheses about the 20/30 Mbps ceiling (syscall
+// count, then the TCP window) both turned out to be wrong, and both were
+// guesses made without a number for what the client actually pulls.  These
+// counters answer it directly: bytes in, and how much of the wall clock was
+// spent blocked inside netRecv.  High Mbps with low wait = fine.  Low Mbps
+// with HIGH wait = we are waiting on the network.  Low Mbps with LOW wait =
+// nobody is asking for data and the bottleneck is elsewhere in the player.
+static volatile u64 s_rx_bytes   = 0;
+static volatile u64 s_rx_wait_us = 0;
+static volatile u32 s_rx_calls   = 0;
+
+void stream_rx_stats(u64 *bytes, u64 *wait_us, u32 *calls) {
+    if (bytes)   *bytes   = s_rx_bytes;
+    if (wait_us) *wait_us = s_rx_wait_us;
+    if (calls)   *calls   = s_rx_calls;
+}
+
+static void sb_reset(void) { s_sb_n = 0; s_sb_p = 0; }
+
+// Refill when empty.  Returns bytes available (>0), 0 if the peer closed, or
+// -1 on receive timeout -- the same three outcomes netRecv gave the old code,
+// so the carry/resume logic above is unchanged.
+static int sb_fill(int sock) {
+    if (s_sb_p < s_sb_n) return s_sb_n - s_sb_p;
+    s_sb_p = s_sb_n = 0;
+    u64 t0 = timing_get_us();
+    int n = netRecv(sock, s_sb, SB_SIZE, 0);
+    u64 dt = timing_get_us() - t0;
+    s_rx_wait_us += dt;
+    s_rx_calls++;
+    if (n <= 0) return n;
+    s_rx_bytes += (u64)n;
+    if (dt > 50000) {
+        char lb[64];
+        snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
+                 (unsigned long long)(dt / 1000ULL), n);
+        plog(lb);
+    }
+    s_sb_n = n;
+    return n;
+}
+
+// One byte, for chunk-header and trailer parsing.  1 = got it, 0 = closed,
+// -1 = timeout.
+static int sb_getc(int sock, u8 *c) {
+    int a = sb_fill(sock);
+    if (a <= 0) return a;
+    *c = s_sb[s_sb_p++];
+    return 1;
+}
+
+// Up to `want` bytes.  Returns the count copied (>0), 0 closed, -1 timeout.
+static int sb_read(int sock, u8 *dst, int want) {
+    int a = sb_fill(sock);
+    if (a <= 0) return a;
+    int n = a < want ? a : want;
+    memcpy(dst, s_sb + s_sb_p, n);
+    s_sb_p += n;
+    return n;
+}
+
 // Why the last stream_open() failed, for the error screen: "Stream connection
 // failed" alone cannot tell a refused connection from a server that answered
 // 400 because the MediaSourceId was wrong, and those need different fixes.
@@ -57,6 +145,25 @@ int stream_open(const char *url) {
 
     int sock = netSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock < 0) return -1;
+
+    // TCP receive buffer.  This was never set, so the socket ran on the lv2
+    // default -- and that default is what actually capped playback, not the
+    // PPU and not the server.  Evidence: with a 64 KB application read, the
+    // log showed `net_stall: 111ms bytes=2896`, i.e. netRecv came back after
+    // 111 ms holding TWO 1448-byte segments, while the same Jellyfin transcode
+    // endpoint hands a PC on this LAN 537 Mbps sustained.  A receive buffer
+    // that small keeps the advertised window tiny, so the server may only have
+    // a couple of segments in flight and throughput collapses to a fraction of
+    // the link -- exactly the "ring drains to zero" symptom at 20/30 Mbps and
+    // at Original, where the stream needs 30-53 Mbps to keep up.
+    //
+    // It MUST be set before netConnect(): the window scale factor is
+    // negotiated in the SYN, so raising the buffer afterwards cannot widen the
+    // window beyond 64 KB.
+    {
+        int rb = 512 * 1024;
+        setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
+    }
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
@@ -160,9 +267,13 @@ int stream_open(const char *url) {
     s_chdr_n       = 0;
     s_ctrail       = 0;
     s_carry_n      = 0;
+    sb_reset();     // new connection — drop anything buffered from the old one
     {
         char buf[64];
-        snprintf(buf, sizeof(buf), "stream_open: status=%d chunked=%d", status, (int)s_chunked);
+        int rb_eff = 0; socklen_t rl = sizeof(rb_eff);
+        if (getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb_eff, &rl) != 0) rb_eff = -1;
+        snprintf(buf, sizeof(buf), "stream_open: status=%d chunked=%d rcvbuf=%d",
+                 status, (int)s_chunked, rb_eff);
         plog(buf);
     }
     if (status != 200) {
@@ -205,27 +316,19 @@ int stream_read(int sock, u8 *buf, int size) {
     }
     while (got < size) {
         if (!s_chunked) {
-            u64 t0 = timing_get_us();
-            int n = netRecv(sock, buf + got, size - got, 0);
-            u64 dt = timing_get_us() - t0;
+            int n = sb_read(sock, buf + got, size - got);
             if (n == 0) {
                 plog("net_error: rc=0 (closed)");
                 return -1;
             }
             if (n < 0) return stream_save_carry(buf, got);   // timeout: resume later
-            if (dt > 50000) {
-                char lb[64];
-                snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
-                         (unsigned long long)(dt / 1000ULL), n);
-                plog(lb);
-            }
             got += n;
             continue;
         }
 
         if (s_ctrail > 0) {
             u8 c;
-            int n = netRecv(sock, &c, 1, 0);
+            int n = sb_getc(sock, &c);
             if (n == 0) return -1;
             if (n <  0) return stream_save_carry(buf, got);   // timeout: resume later
             s_ctrail--;
@@ -234,7 +337,7 @@ int stream_read(int sock, u8 *buf, int size) {
 
         if (s_chunk_remain <= 0) {
             u8 c;
-            int n = netRecv(sock, &c, 1, 0);
+            int n = sb_getc(sock, &c);
             if (n == 0) return -1;
             if (n <  0) return stream_save_carry(buf, got);   // timeout: resume later
             if (c == '\n') {
@@ -253,20 +356,12 @@ int stream_read(int sock, u8 *buf, int size) {
 
         int want = size - got;
         if (want > s_chunk_remain) want = s_chunk_remain;
-        u64 t0 = timing_get_us();
-        int n = netRecv(sock, buf + got, want, 0);
-        u64 dt = timing_get_us() - t0;
+        int n = sb_read(sock, buf + got, want);
         if (n == 0) {
             plog("net_error: rc=0 (closed)");
             return -1;
         }
         if (n < 0) return stream_save_carry(buf, got);   // timeout: resume later
-        if (dt > 50000) {
-            char lb[64];
-            snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
-                     (unsigned long long)(dt / 1000ULL), n);
-            plog(lb);
-        }
         got            += n;
         s_chunk_remain -= n;
         if (s_chunk_remain == 0)

@@ -26,6 +26,9 @@ void xmb_switch_tab(int new_tab);
 int  xmb_next_enabled(int start, int dir);
 
 void xmb_detect_tabs(void);
+// One attempt only — for the XMB's background retry, which must not block
+// the render loop inside the full retry set.
+bool xmb_detect_tabs_once(void);
 void xmb_fetch_tab_items(int tab);
 int  xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
                        int start_index, int *out_total);

@@ -23,6 +23,10 @@ static u8      s_codec_applied = TS_AUDIO_NONE;
 
 void video_reset(void) {
     memset(&s_ts, 0, sizeof(s_ts));
+    // The truncation counters live in ts_demux.cpp, not in TSState, so the
+    // memset above does not reach them.  Zero them per playback session so
+    // "pes=" in the heartbeat means this stream, not everything since boot.
+    ts_pes_stats_reset();
     s_codec_applied = TS_AUDIO_NONE;
     vdec_reset_counters();
     s_au_inflight_max = 0;

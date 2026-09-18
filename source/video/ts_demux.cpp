@@ -155,25 +155,41 @@ static void ts_parse_pmt(TSState *ts, const u8 *data, int len) {
 // Accumulate one TS payload into a PES reassembly buffer.  When a new
 // payload-unit start arrives, the previously assembled PES is emitted to
 // `out`/`out_len` first.  Returns true if a complete PES was emitted.
+// Per-stream reassembly state that outlives one packet.  "want" tracks the
+// PES's true length even after the buffer is full, so max_want reports the
+// size the buffer WOULD have needed rather than the size it was clipped to.
+typedef struct {
+    int trunc_log;     // PES_TRUNC lines emitted so far (capped at 20)
+    int want;          // true byte count of the PES being assembled
+    PesStats st;
+} PesAcc;
+
+static PesAcc s_v_acc;
+static PesAcc s_a_acc;
+
 static bool pes_accumulate(u8 *buf, int cap, int *len, bool *started,
                            bool pusi, const u8 *pay, int plen,
                            u8 *out, int *out_len,
-                           int *trunc_log, const char *tag) {
+                           PesAcc *acc, const char *tag) {
     bool emitted = false;
     if (pusi && *started && *len > 0) {
+        // Close out the PES that just ended and record what it really was.
+        if ((u32)acc->want > acc->st.max_want) acc->st.max_want = (u32)acc->want;
+        if (acc->want > cap) acc->st.trunc_count++;
         int copy = *len < cap ? *len : cap;
         memcpy(out, buf, copy);
         *out_len = copy;
         emitted  = true;
         *len     = 0;
     }
-    if (pusi) { *started = true; *len = 0; }
+    if (pusi) { *started = true; *len = 0; acc->want = 0; }
     if (*started && plen > 0) {
+        acc->want += plen;             // count it whether or not it fits
         int room = cap - *len;
         int copy = plen < room ? plen : room;
-        if (copy < plen && *trunc_log < 20) {
+        if (copy < plen && acc->trunc_log < 20) {
             // Truncated PES = corrupted AU = corruption until next IDR.
-            (*trunc_log)++;
+            acc->trunc_log++;
             char msg[64];
             snprintf(msg, sizeof(msg), "PES_TRUNC: %s PES > %d bytes", tag, cap);
             plog(msg);
@@ -184,12 +200,19 @@ static bool pes_accumulate(u8 *buf, int cap, int *len, bool *started,
     return emitted;
 }
 
+void ts_pes_stats(PesStats *video_out, PesStats *audio_out) {
+    if (video_out) *video_out = s_v_acc.st;
+    if (audio_out) *audio_out = s_a_acc.st;
+}
+
+void ts_pes_stats_reset(void) {
+    memset(&s_v_acc, 0, sizeof(s_v_acc));
+    memset(&s_a_acc, 0, sizeof(s_a_acc));
+}
+
 int ts_process(TSState *ts, const u8 *pkt,
                u8 *out_vpes, int *out_vlen,
                u8 *out_apes, int *out_alen) {
-    static int s_v_trunc_log = 0;
-    static int s_a_trunc_log = 0;
-
     *out_vlen = 0;
     *out_alen = 0;
     if (pkt[0] != TS_SYNC_BYTE) return 0;
@@ -226,14 +249,14 @@ int ts_process(TSState *ts, const u8 *pkt,
         pes_accumulate(ts->pes_buf, (int)sizeof(ts->pes_buf),
                        &ts->pes_len, &ts->pes_started,
                        pusi, pay, plen, out_vpes, out_vlen,
-                       &s_v_trunc_log, "video"))
+                       &s_v_acc, "video"))
         result |= 1;
 
     if (ts->audio_pid && pid == ts->audio_pid &&
         pes_accumulate(ts->a_pes_buf, (int)sizeof(ts->a_pes_buf),
                        &ts->a_pes_len, &ts->a_pes_started,
                        pusi, pay, plen, out_apes, out_alen,
-                       &s_a_trunc_log, "audio"))
+                       &s_a_acc, "audio"))
         result |= 2;
 
     return result;

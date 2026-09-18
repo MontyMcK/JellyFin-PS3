@@ -139,10 +139,17 @@ static const char *object_end(const char *start, const char *limit) {
     return NULL;
 }
 
+// Defined HERE, in the file that sets it, rather than beside the other API
+// globals: this parser is deliberately free of PS3-only dependencies so it
+// can be host-tested standalone (tests/test_media_sources.cpp), and putting
+// the definition in api_auth.cpp broke that link.
+int g_source_fps_milli = 0;
+
 static void parse_tracks(const char *source, const char *source_end,
                          JFTracks *out, char *first_video, int video_cap) {
     memset(out, 0, sizeof(*out));
     if (first_video && video_cap > 0) first_video[0] = '\0';
+    g_source_fps_milli = 0;   // re-learned from this source's Video stream
     const char *arr = find_top_value(source, source_end, "MediaStreams");
     if (!arr || arr >= source_end || *arr != '[') return;
     const char *p = arr + 1;
@@ -166,6 +173,26 @@ static void parse_tracks(const char *source, const char *source_end,
         if (strcmp(type, "Video") == 0) {
             if (first_video && !first_video[0] && display[0])
                 snprintf(first_video, video_cap, "%s", display);
+            // Frame rate, for the player timing when VDEC reports no
+            // frame-rate code -- which is exactly what a stream copy does.
+            // Kept as milli-fps so it stays integer: 23.976025 -> 23976.
+            if (!g_source_fps_milli) {
+                const char *fr = find_top_value(p, oe, "RealFrameRate");
+                if (!fr) fr = find_top_value(p, oe, "AverageFrameRate");
+                if (fr) {
+                    char numbuf[32]; int k = 0;
+                    const char *q = fr;
+                    while (q < oe && k < (int)sizeof(numbuf) - 1 &&
+                           ((*q >= '0' && *q <= '9') || *q == '.'))
+                        numbuf[k++] = *q++;
+                    numbuf[k] = '\0';
+                    if (numbuf[0]) {
+                        double f = atof(numbuf);
+                        if (f > 1.0 && f < 1000.0)
+                            g_source_fps_milli = (int)(f * 1000.0 + 0.5);
+                    }
+                }
+            }
         } else if (index >= 0 && strcmp(type, "Audio") == 0 &&
                    out->n_audio < JF_MAX_STREAMS) {
             int pos = out->n_audio++;

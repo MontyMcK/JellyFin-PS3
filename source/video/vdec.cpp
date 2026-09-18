@@ -1,10 +1,12 @@
 #include "video.h"
 #include "video_internal.h"
+#include "ts_demux.h"   // TS_VPES_AU_MAX — one shared AU ceiling
 #include "plog.h"
 #include "timing.h"
 #include "meminfo.h"
 #include "hd1080.h"
 #include "vquality.h"
+#include "jellyfin_api.h"   // g_source_fps_milli — server-reported frame rate
 
 #include <stdio.h>
 #include <string.h>
@@ -21,7 +23,13 @@ extern void crash_log(const char *msg);
 // VDEC — video decoder
 // -------------------------------------------------------
 
-#define AU_BUF_SIZE  (512 * 1024)
+// One access unit.  Must match the demuxer's ceiling: at 512 KB a 53 Mbps
+// 1080p remux had its I-frames truncated upstream and handed here as corrupt
+// AUs that passed this size check, so the drop below never fired and the
+// decoder simply stopped producing frames.  TS_VPES_AU_MAX is the H.264
+// Level 4.1 maximum coded frame size (MaxFS * 384 / MinCR = 1,572,864), so a
+// conforming stream at the level these remuxes use always fits.
+#define AU_BUF_SIZE  TS_VPES_AU_MAX
 #define AU_BUF_COUNT 4
 
 static u32  s_vdec     = 0;
@@ -421,8 +429,35 @@ static void fps_from_frc(int frc, int *num, int *den) {
         case 7: *num = 60000; *den = 1001; break;  /* 59.94fps  */
         case 8: *num = 60;    *den = 1;    break;  /* 60fps     */
         default:
-            plog("fps_detect: unknown frc, defaulting to 30fps");
-            *num = 30; *den = 1; break;
+            // VDEC gave us no frame-rate code.  A TRANSCODE always has one
+            // (ffmpeg writes a clean SPS); a STREAM COPY of a Blu-ray remux
+            // frequently does not, and this used to fall through to 30 fps.
+            // Pacing 23.976 fps film at 30 judders permanently however full
+            // the buffer is -- which is exactly what "Original always
+            // judders" was.  Prefer the rate the server reported.
+            if (g_source_fps_milli > 1000) {
+                // Snap the common broadcast rates to their EXACT fractions.
+                // The server reports 23.976, which as 23976/1000 is not quite
+                // 24000/1001 -- and 59.94Hz / (24000/1001) is exactly 2.5, the
+                // clean 3:2 pulldown ratio, while 59.94 / 23.976 is not.  The
+                // transcode path gets the exact fraction from the frame-rate
+                // code, so snapping here makes the stream-copy path identical
+                // rather than merely close.
+                int m = g_source_fps_milli;
+                if      (m >= 23950 && m <= 23990) { *num = 24000; *den = 1001; }
+                else if (m >= 29950 && m <= 29990) { *num = 30000; *den = 1001; }
+                else if (m >= 59900 && m <= 59980) { *num = 60000; *den = 1001; }
+                else { *num = m; *den = 1000; }
+                char b[80];
+                snprintf(b, sizeof(b),
+                         "fps_detect: no frc, using server rate %d.%03d",
+                         g_source_fps_milli / 1000, g_source_fps_milli % 1000);
+                plog(b);
+            } else {
+                plog("fps_detect: no frc and no server rate, defaulting to 30fps");
+                *num = 30; *den = 1;
+            }
+            break;
     }
 }
 
@@ -437,7 +472,12 @@ static s64 dur_from_frc(int frc) {
         case 6: return 20000;   /* 50 fps     */
         case 7: return 16683;   /* 59.94 fps  */
         case 8: return 16667;   /* 60 fps     */
-        default: return 40000;
+        default:
+            // Same fallback as fps_from_frc(): the server rate beats a
+            // hardcoded 25 fps guess when VDEC reports no code.
+            if (g_source_fps_milli > 1000)
+                return (s64)(1000000000LL / g_source_fps_milli);
+            return 40000;
     }
 }
 

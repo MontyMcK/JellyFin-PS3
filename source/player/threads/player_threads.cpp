@@ -16,6 +16,7 @@
 #include "adec.h"
 #include "hd1080.h"
 #include "video.h"
+#include "ts_demux.h"   // PesStats — PES truncation telemetry
 #include "timing.h"
 #include "player_internal.h"
 #include "player_stats.h"
@@ -266,7 +267,7 @@ void decode_thread_fn(void *arg) {
                                 / (float)(hb_now - hb_last_us);
             hb_fr_last = *frame_count;
             hb_last_us = hb_now;
-            char buf[224];
+            char buf[256];
             long avg_ms = stall_ep_count ? stall_ep_dur_total_us / stall_ep_count / 1000 : 0;
             // Pulldown cadence comes along for the ride.  24fps film on a
             // 60Hz output is displayed 3,2,3,2 vblanks per frame; healthy
@@ -276,13 +277,42 @@ void decode_thread_fn(void *arg) {
             // the only part of this the console lets us fix, since PSL1GHT
             // has no way to request a 24Hz output mode.
             PlayerStats ps_hb; player_stats_get(&ps_hb);
+            // pes=<truncations>/<largest PES seen, KB>.  A non-zero count means
+            // AUs are being clipped and handed to VDEC corrupt; the KB figure
+            // is what TS_VPES_AU_MAX would have to be to hold this stream.
+            PesStats pes_v; ts_pes_stats(&pes_v, NULL);
+            // net=<Mbps pulled since the last heartbeat>, rxw=<% of that
+            // interval spent blocked inside netRecv>.  Together they say
+            // whether a starved ring is the network's fault or ours.
+            u64 rxb = 0, rxw = 0; u32 rxc = 0;
+            stream_rx_stats(&rxb, &rxw, &rxc);
+            static u64 s_rxb_last = 0, s_rxw_last = 0; static u32 s_rxc_last = 0;
+            static u64 s_rx_t_last = 0;
+            u64 rx_now = timing_get_us();
+            u64 rx_span = (s_rx_t_last && rx_now > s_rx_t_last) ? (rx_now - s_rx_t_last) : 1;
+            double net_mbps = (double)(rxb - s_rxb_last) * 8.0 / (double)rx_span;
+            int    rx_wpct  = (int)(((rxw - s_rxw_last) * 100ULL) / rx_span);
+            unsigned rx_n   = rxc - s_rxc_last;
+            s_rxb_last = rxb; s_rxw_last = rxw; s_rxc_last = rxc; s_rx_t_last = rx_now;
+            // adt=<% of one PPU thread the audio decoder used this interval>.
+            // The collapse always coincides with pcm= emptying, so this is the
+            // number that says whether lossless HD audio simply costs more than
+            // real time once the demux is also busy at 30-53 Mbps.
+            u64 dbusy = 0; u32 dcnt = 0;
+            adec_decode_stats(&dbusy, &dcnt);
+            static u64 s_db_last = 0; static u32 s_dc_last = 0;
+            int adt = (int)(((dbusy - s_db_last) * 100ULL) / rx_span);
+            unsigned adn = dcnt - s_dc_last;
+            s_db_last = dbusy; s_dc_last = dcnt;
             snprintf(buf, sizeof(buf),
-                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d ring=%d/%d pcm=%d pd=%u/%u/%u",
+                "hb: fr=%d q=%d au=%u ab=%llu stalls=%ld max=%ldms avg=%ldms fps=%.1f aumax=%d ring=%d/%d pcm=%d net=%.1fM rxw=%d%% adt=%d%% adn=%u pes=%u/%uk pd=%u/%u/%u",
                 *frame_count, jbuf_count(), s_au_submitted,
                 (unsigned long long)audio_block_count(),
                 stall_ep_count, stall_ep_dur_max_us / 1000, avg_ms,
                 display_fps, s_au_inflight_max, s_ring_n, s_ring_cap,
                 adec_pcm_available(),
+                net_mbps, rx_wpct, adt, adn,
+                (unsigned)pes_v.trunc_count, (unsigned)(pes_v.max_want / 1024),
                 (unsigned)ps_hb.hold2, (unsigned)ps_hb.hold3,
                 (unsigned)ps_hb.hold_other);
             plog(buf);

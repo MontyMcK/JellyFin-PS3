@@ -12,6 +12,7 @@
 #include "thumbnail_cache.h"
 #include "slog.h"
 #include "plog.h"
+#include "timing.h"        // timing_get_us() — background library retry
 #include "jellyfin_api.h"   // g_auth_expired — the XMB leaves when it is set
 
 extern void crash_log(const char *msg);
@@ -298,6 +299,47 @@ void ui_run_xmb(void) {
         waitflip();
         if (first_iter) crash_log("13.5b syscb");
         sysUtilCheckCallback();
+
+        // Self-heal an empty library bar.
+        //
+        // The library list is fetched once, at startup.  If the network was not
+        // up yet -- routine for the first launch after a console power-cycle --
+        // detect_tabs exhausted its tries and the XMB sat there with no Movies
+        // and no TV for the rest of the session, which reads as a broken app
+        // rather than a slow network.  Keep trying quietly instead.
+        //
+        // ONE attempt per wake-up, never the full retry set: this runs on the
+        // render thread, and a failed request costs its timeout.  The interval
+        // doubles from 5s to a 60s ceiling so a genuinely absent server costs
+        // almost nothing, while the usual case -- network arriving a few
+        // seconds late -- recovers on the first or second try.
+        if (!g_auth_expired) {
+            static u64 s_lib_next_us = 0;
+            static u64 s_lib_gap_us  = 5000000ULL;
+            bool have_lib = false;
+            for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
+                if (g_tabs[t].enabled) { have_lib = true; break; }
+            if (have_lib) {
+                s_lib_next_us = 0;
+                s_lib_gap_us  = 5000000ULL;
+            } else {
+                u64 now = timing_get_us();
+                if (s_lib_next_us == 0) {
+                    s_lib_next_us = now + s_lib_gap_us;
+                } else if (now >= s_lib_next_us) {
+                    plog("xmb: library bar empty - retrying detect_tabs");
+                    if (xmb_detect_tabs_once()) {
+                        plog("xmb: libraries recovered");
+                        if (!g_tabs[g_active_tab].enabled) {
+                            for (int t = 0; t < XMB_TAB_COUNT; t++)
+                                if (g_tabs[t].enabled) { g_active_tab = t; break; }
+                        }
+                    }
+                    if (s_lib_gap_us < 60000000ULL) s_lib_gap_us *= 2;
+                    s_lib_next_us = timing_get_us() + s_lib_gap_us;
+                }
+            }
+        }
         thumb_cache_tick();   // age out thumbs nothing on screen still wants
         if (first_iter) crash_log("13.5c clearScreen");
         clearScreen(XMB_BG);

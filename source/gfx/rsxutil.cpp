@@ -208,6 +208,29 @@ void flip()
 	first_fb = 0;
 }
 
+// 24Hz OUTPUT: TESTED ON HARDWARE, DOES NOT WORK.  Do not try this again
+// without reading this first.
+//
+// videoConfiguration carries no refresh field, so the resolution id is the
+// only lever.  Probing a Panasonic UT30 plasma: id 0x83 refuses to configure
+// (it is 1920x2205, 3D frame packing), while id 130 (0x82) configures CLEANLY,
+// reports exactly 1920x1080 and a refresh bit of 0x40 -- none of
+// 59.94/50/60/30.  Every read-back said success.
+//
+// The panel still showed NO PICTURE.  So a clean videoConfigure and a
+// plausible read-back are NOT evidence the display can sync to the mode, and
+// nothing available to a homebrew process can tell you that it cannot.
+//
+// Worse, the confirm-or-revert safety net did not save it.  The countdown
+// drew to the screen, and flip() waits on a vblank that a mode the panel
+// cannot lock to never delivers -- so it blocked forever and the revert that
+// followed it never ran.  The console needed a hard power-off.  If anyone
+// ever retries this: do NOT draw or flip while the experimental mode is up.
+// Sleep, poll the pad, revert -- nothing that can block on the display.
+//
+// The capability dump below stays because it is pure reporting and costs
+// nothing; the code that CHANGED the mode has been removed.
+
 // Called from main() once plog is open.  This USED to run inside
 // init_screen(), which happens long before logging exists, so every
 // line was thrown away and the log showed nothing at all.
@@ -257,8 +280,15 @@ void video_log_capabilities(void)
 		}
 		// Resolution ids the SDK defines but PSL1GHT does not name, plus the
 		// 3D frame-packing ones.  Availability is a query, not a change.
+		// 0x82/0x83 were missing from the first pass and they are the whole
+		// point: the panel's own mode list advertises res=130 (0x82) and
+		// res=131 (0x83), and 0x83 offers ONLY rate bits 0x10|0x20 --
+		// 23.98 and 24 Hz.  Availability is a query, not a change, so
+		// asking costs nothing and cannot blank the display.
 		static const u32 kProbe[] = {
-			1 /*1080*/, 2 /*720*/, 0x81 /*720 3D FP*/, 0x88, 0x89, 0x8a, 0x8b,
+			1 /*1080*/, 2 /*720*/, 0x81 /*720 3D FP*/,
+			0x82 /*? 24Hz-only per mode list*/, 0x83 /*? 24Hz-only*/,
+			0x88, 0x89, 0x8a, 0x8b,
 			0x91 /*720 dualview*/, 0x98, 0x99,
 		};
 		char b[160]; int n = 0;
