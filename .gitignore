@@ -7,6 +7,12 @@ build/
 *.d
 *.pkg
 *.gnpdrm.pkg
+
+# ...but the PUBLISHED build is not a build artifact, it is the download the
+# README points at.  Without this negation `git add release` silently took the
+# README and skipped the .pkg -- no error, and every download link on GitHub
+# pointed at a file that was never pushed.
+!release/*.pkg
 *.self
 *.elf
 *.map
