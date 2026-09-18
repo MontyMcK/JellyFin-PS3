@@ -14,10 +14,11 @@
 #include "centermix.h"
 #include "statsovl.h"
 #include "subfont.h"
+#include "subcolor.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
     { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)",
-      "Audio Output", "Dialogue Boost", "Subtitle Font"
+      "Audio Output", "Dialogue Boost", "Subtitle Font", "Subtitle Colour"
 #if ENABLE_PLAYER_STATS
     , "Player Stats Overlay"
 #endif
@@ -28,7 +29,7 @@ static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
 // ICON_MUSIC (already in the subset) marks the surround audio row.
 static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  =
     { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE, ICON_MUSIC, ICON_MUSIC,
-      ICON_TV
+      ICON_TV, ICON_TV
 #if ENABLE_PLAYER_STATS
     , ICON_BUG
 #endif
@@ -214,8 +215,16 @@ void xmb_draw_settings(void) {
                     val, 18,
                     subfont_get() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
+        if (i == 7) {   // Subtitle Colour — right-aligned look name
+            const char *val = subcolor_label();
+            int vw = ttf_text_width(val, 18, sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
+                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
+                    val, 18,
+                    subcolor_get() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
 #if ENABLE_PLAYER_STATS
-        if (i == 7) {   // Player Stats Overlay — right-aligned On/Off state
+        if (i == 8) {   // Player Stats Overlay — right-aligned On/Off state
             const char *val = statsovl_enabled() ? "On" : "Off";
             int vw = ttf_text_width(val, 18, sel);
             drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),

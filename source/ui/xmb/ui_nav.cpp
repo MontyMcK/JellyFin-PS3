@@ -16,6 +16,7 @@
 #include "surround.h"
 #include "centermix.h"
 #include "subfont.h"
+#include "subcolor.h"
 #include "statsovl.h"
 
 // -------------------------------------------------------
@@ -171,8 +172,10 @@ static bool xmb_input_settings(void) {
             centermix_cycle();   // Off -> +3 -> +6 -> +10
         if (g_settings_sel == 6)                                        // Subtitle Font
             subfont_cycle();     // Open Sans -> Noto Sans -> Roboto Cond.
+        if (g_settings_sel == 7)                                        // Subtitle Colour
+            subcolor_cycle();    // White -> Soft Yellow -> Soft Grey
 #if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 7)                                        // Player Stats Overlay
+        if (g_settings_sel == 8)                                        // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());
 #endif
     }

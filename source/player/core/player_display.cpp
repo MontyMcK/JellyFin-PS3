@@ -17,6 +17,7 @@
 #include "ui_visuals.h" // ttf_text_width
 #include "subtitles.h"
 #include "subfont.h"
+#include "subcolor.h"
 #include <string.h>
 
 // Longest single rendered line. Cues are capped well below this in
@@ -329,9 +330,14 @@ void player_display_frame(PlayerState *ps) {
             const int W  = (int)display_width;
             const int px = (display_height >= 720) ? 32 : 22;
             const int lh = px + 8;
-            // Outline thickness has to scale too: one pixel that reads as a
-            // clean edge at 480p is nearly invisible at 1080p.
-            const int ow = (display_height >= 720) ? 2 : 1;
+            // Fill, outline and outline weight all come from the chosen
+            // look -- they are not independent. A pale fill needs a heavier
+            // outline than a saturated one to hold its edge, and a
+            // translucent fill needs a thin one or the outline ends up more
+            // solid than the letters it surrounds. See subcolor.h.
+            const u32 fill    = subcolor_fill();
+            const u32 outline = subcolor_outline();
+            const int ow      = subcolor_outline_px(display_height);
             int nlines = 1;
             for (const char *q = line; *q; q++) if (*q == '\n') nlines++;
             int y = (int)display_height - (int)(display_height / 12) - nlines * lh;
@@ -357,8 +363,8 @@ void player_display_frame(PlayerState *ps) {
                     for (int dx = -ow; dx <= ow; dx++)
                         if (dx || dy)
                             drawTTF_face((u32)(x + dx), (u32)(y + dy), row,
-                                         (float)px, 0x000000E6UL, face);
-                drawTTF_face((u32)x, (u32)y, row, (float)px, 0xFFFFFFFFUL, face);
+                                         (float)px, outline, face);
+                drawTTF_face((u32)x, (u32)y, row, (float)px, fill, face);
 
                 y += lh;
                 if (!nl) break;

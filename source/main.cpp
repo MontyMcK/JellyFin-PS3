@@ -28,6 +28,7 @@
 #include "centermix.h"
 #include "net_selftest.h"
 #include "subfont.h"
+#include "subcolor.h"
 #include "statsovl.h"
 #include "audio.h"
 #include "video.h"
@@ -111,6 +112,7 @@ int main(int argc, const char *argv[]) {
     surround_load();       // restore the surround 5.1 (Alpha) toggle
     centermix_load();      // restore the dialogue / centre-channel mode
     subfont_load();        // restore the subtitle typeface
+    subcolor_load();       // restore the subtitle colour
     statsovl_load();       // restore the player stats overlay toggle
     audio_volume_load();   // restore the saved master volume
     video_log_capabilities();   // what refresh rates does this panel offer?
