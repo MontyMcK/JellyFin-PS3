@@ -86,6 +86,7 @@ static const char *mode_name(int m)
 	case BITSTREAM_AC3:  return "AC-3";
 	case BITSTREAM_DTS:  return "DTS";
 	case BITSTREAM_RAW:  return "raw bitstream";
+	case BITSTREAM_LPCM: return "LPCM re-configure";
 	default:             return "?";
 	}
 }
@@ -97,7 +98,7 @@ int bitstream_mode(void)
 	int v = BITSTREAM_OFF;
 	if (fscanf(f, "%d", &v) != 1) v = BITSTREAM_OFF;
 	fclose(f);
-	if (v < BITSTREAM_OFF || v > BITSTREAM_RAW) v = BITSTREAM_OFF;
+	if (v < BITSTREAM_OFF || v > BITSTREAM_LPCM) v = BITSTREAM_OFF;
 	return v;
 }
 
@@ -107,6 +108,7 @@ static u8 coding_for(int mode)
 	case BITSTREAM_AC3: return AUDIO_OUT_CODING_AC3;
 	case BITSTREAM_DTS: return AUDIO_OUT_CODING_DTS;
 	case BITSTREAM_RAW: return AUDIO_OUT_CODING_BITSTREAM;
+	case BITSTREAM_LPCM:
 	default:            return AUDIO_OUT_CODING_LPCM;
 	}
 }
@@ -143,6 +145,11 @@ void audio_bitstream_begin(int port_channels)
 	want.downMixer = AUDIO_OUT_DOWNMIXER_NONE;
 
 	const s32 rc = audioOutConfigure(AUDIO_OUT_PRIMARY, &want, NULL, 1);
+	// Mark it applied the moment the call SUCCEEDS, not once the result is
+	// judged good: a configure that returned 0 but did not land the encoder
+	// has still written to the output, and end() must put it back. Setting
+	// this only after the checks below would leave that case unreverted.
+	if (rc == 0) s_applied = true;
 
 	audioOutConfiguration after;
 	memset(&after, 0, sizeof(after));
@@ -168,8 +175,6 @@ void audio_bitstream_begin(int port_channels)
 	// that is what decides here.  Log both either way: this call is also the
 	// prime suspect for the centre channel starting to work on that same
 	// build, so which of the two is true matters beyond the indicator.
-	s_applied = true;
-
 	audioOutState st;
 	memset(&st, 0, sizeof(st));
 	const s32 srate = audioOutGetState(AUDIO_OUT_PRIMARY, 0, &st);
@@ -202,16 +207,33 @@ void audio_bitstream_begin(int port_channels)
 
 void audio_bitstream_end(void)
 {
-	// Runs even when begin() bailed part-way, which is the point: the console
-	// is a shared resource and the next app -- or the XMB -- should not inherit
-	// a coding type this one asked for.
+	// RESTORE WHAT WE CHANGED, AND ONLY IF WE CHANGED IT.
+	//
+	// This used to reconfigure the output unconditionally, on every playback
+	// end, even when bitstream was off and begin() had returned immediately
+	// without touching anything. That is wrong twice over. It writes to a
+	// shared console resource this app never took -- with channel=8 out of
+	// `s_saved_channel ? : 8`, a value that was never read from the console
+	// but invented here -- and it makes "bitstream off" fail to mean "make no
+	// cellAudioOut calls", which is exactly what an A/B test of this feature
+	// needs it to mean.
+	//
+	// It matters right now: the centre channel began working on the build that
+	// introduced these calls, while the wire stayed LPCM, so WHICH configure
+	// call is responsible is an open question. It cannot be answered while the
+	// off switch still makes one.
+	if (!s_applied) {
+		s_engaged = false;
+		return;
+	}
+
 	audioOutConfiguration back;
 	memset(&back, 0, sizeof(back));
 	back.channel   = s_saved_channel ? s_saved_channel : 8;
 	back.encoder   = s_saved_encoder;
 	back.downMixer = s_saved_downmix;
 	const s32 rc = audioOutConfigure(AUDIO_OUT_PRIMARY, &back, NULL, 1);
-	if (s_applied) {
+	{
 		char b[96];
 		snprintf(b, sizeof(b), "bitstream: restored encoder=%u rc=%d",
 		         (unsigned)s_saved_encoder, (int)rc);

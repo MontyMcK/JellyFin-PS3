@@ -12,19 +12,32 @@
 extern "C" {
 #endif
 
-#define BITSTREAM_OFF  0   // LPCM, the behaviour this app has always had
+#define BITSTREAM_OFF  0   // no cellAudioOut calls AT ALL -- the v1.0 behaviour
 #define BITSTREAM_AC3  1   // Dolby Digital, encoded by the console  ("Mix")
 #define BITSTREAM_DTS  2   // DTS, encoded by the console            ("Mix")
 #define BITSTREAM_RAW  3   // coding type 0xff -- the long shot      ("Direct")
+// Re-configure the output to 6ch LPCM, no downmixer -- i.e. make the same
+// audioOutConfigure() call as the modes above but ASK FOR NOTHING NEW.  This
+// exists to answer one question and is worth a mode of its own: the centre
+// channel started working on the build that introduced these calls, while the
+// wire stayed LPCM (audioOutGetState reported type=0), so it may be the ACT of
+// configuring that fixes the routing rather than anything about AC-3.
+//   OFF  vs 4  -> does calling audioOutConfigure at all matter?
+//   4    vs 1  -> does asking for AC-3 specifically matter?
+// If 4 is what works, that is what should ship, under an honest name.
+#define BITSTREAM_LPCM 4
 
 int  bitstream_mode(void);
 
-// Ask for the configured mode, verify by read-back, and revert if the console
-// did not take it.  Safe to call when the mode is OFF: it does nothing.
+// Ask for the configured mode, verify against audioOutGetState, and revert if
+// the console did not take it.  When the mode is OFF this makes NO cellAudioOut
+// calls whatsoever, which is what lets OFF serve as the control in the A/B
+// above.
 void audio_bitstream_begin(int port_channels);
 
-// Restore whatever the output was set to before.  Safe to call unconditionally,
-// including when begin() failed part-way.
+// Restore whatever the output was set to before -- and nothing at all if this
+// app never changed it.  Safe to call unconditionally, including when begin()
+// failed part-way.
 void audio_bitstream_end(void);
 
 bool audio_bitstream_engaged(void);
