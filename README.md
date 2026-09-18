@@ -145,7 +145,11 @@ Notes and limitations:
     bit. Atmos *objects* are not rendered (no free renderer exists, and the
     app cannot know your speaker layout), so an Atmos track plays as its bed.
     See [docs/dolby-truehd.md](docs/dolby-truehd.md).
-  - **DTS-HD MA and DTS:X: core quality — 5.1, lossless.** DTS:X object data doesn't work for the same reason as Atmos.
+  - **DTS-HD MA: lossless.** The XLL extension is decoded, not just the
+    backward-compatible core — verified bit-exact against ffmpeg on x86 and on
+    the PPU's own big-endian PowerPC. **DTS:X** plays its 5.1 bed; the object
+    data is not rendered, for the same reason as Atmos. **DTS-HD HRA and
+    DTS-ES** play from their core, at up to 1509 kbps.
     See [docs/dts-hd.md](docs/dts-hd.md).
   - **Dolby Digital Plus (E-AC-3), including DD+ Atmos: unchanged.** Nothing
     here decodes it; the server transcodes it to AC-3 5.1 as before.
