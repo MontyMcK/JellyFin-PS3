@@ -289,10 +289,19 @@ void decode_thread_fn(void *arg) {
             static u64 s_rxb_last = 0, s_rxw_last = 0; static u32 s_rxc_last = 0;
             static u64 s_rx_t_last = 0;
             u64 rx_now = timing_get_us();
-            u64 rx_span = (s_rx_t_last && rx_now > s_rx_t_last) ? (rx_now - s_rx_t_last) : 1;
-            double net_mbps = (double)(rxb - s_rxb_last) * 8.0 / (double)rx_span;
-            int    rx_wpct  = (int)(((rxw - s_rxw_last) * 100ULL) / rx_span);
-            unsigned rx_n   = rxc - s_rxc_last;
+            // Every one of these is a RATE over the interval since the last
+            // heartbeat, so the first tick of a playback has no interval to
+            // divide by.  It used to divide by 1 microsecond and print
+            // net=102924528.0M rxw=186999200%, a garbage line at the top of
+            // every log that had to be explained away each time it was read.
+            // Take the baselines on that tick and report zero.
+            const bool rx_first = (s_rx_t_last == 0) || (rx_now <= s_rx_t_last);
+            u64 rx_span = rx_first ? 1 : (rx_now - s_rx_t_last);
+            double net_mbps = rx_first ? 0.0
+                            : (double)(rxb - s_rxb_last) * 8.0 / (double)rx_span;
+            int    rx_wpct  = rx_first ? 0
+                            : (int)(((rxw - s_rxw_last) * 100ULL) / rx_span);
+            unsigned rx_n   = rx_first ? 0u : (rxc - s_rxc_last);
             s_rxb_last = rxb; s_rxw_last = rxw; s_rxc_last = rxc; s_rx_t_last = rx_now;
             // adt=<% of one PPU thread the audio decoder used this interval>.
             // The collapse always coincides with pcm= emptying, so this is the
@@ -301,8 +310,9 @@ void decode_thread_fn(void *arg) {
             u64 dbusy = 0; u32 dcnt = 0;
             adec_decode_stats(&dbusy, &dcnt);
             static u64 s_db_last = 0; static u32 s_dc_last = 0;
-            int adt = (int)(((dbusy - s_db_last) * 100ULL) / rx_span);
-            unsigned adn = dcnt - s_dc_last;
+            int adt = rx_first ? 0
+                    : (int)(((dbusy - s_db_last) * 100ULL) / rx_span);
+            unsigned adn = rx_first ? 0u : (dcnt - s_dc_last);
             s_db_last = dbusy; s_dc_last = dcnt;
             // lvl=<peak per port channel, 0-32768, in port order
             // FL FR FC LFE SL SR [BL BR]>.  This is the LAST point the app

@@ -24,7 +24,7 @@ Two settings do almost all the work:
 
 | Setting | Where | Set it to |
 |---|---|---|
-| **Quality** | Triangle on a title → Quality row | **1080p 25** |
+| **Quality** | Triangle on a title → Quality row | **Max** |
 | **Surround** | Settings → Surround 5.1 | **HD** |
 
 For actual multichannel output the PS3 itself must also be told your setup can
@@ -32,9 +32,9 @@ take it: *Settings → Sound Settings → Audio Output Settings → HDMI → Man
 then tick **Dolby Digital 5.1 Ch** and **Linear PCM 5.1 Ch** (and 7.1 if your
 receiver does 7.1).
 
-Stuttering? Drop to **1080p 20** before changing anything else. The console can
-only pull about 20-25 Mbps over HTTP — see the main
-[README](../README.md#recommended-settings) for the measurements.
+Stuttering? Drop to **Very High** before changing anything else. The console
+can only pull about 20-25 Mbps over HTTP, which is why **Max** stops at 25 —
+see the main [README](../README.md#recommended-settings) for the measurements.
 
 ## Verifying the download
 

@@ -9,28 +9,62 @@
 
 static vquality_t s_q = VQ_AUTO;
 
+// Offered steps, in picture-quality order -- see vquality.h.  The enum's own
+// order is historical (the 1080p ceilings were appended as they were added),
+// so cycling it directly made left/right jump about.
+const vquality_t VQUALITY_ORDER[] = {
+    VQ_AUTO,
+    VQ_360P,
+    VQ_480P,
+    VQ_720P,
+    VQ_1080P,       // 10 Mbps -- "High"
+    VQ_1080P_20,    // 20 Mbps -- "Very High"
+    VQ_1080P_25,    // 25 Mbps -- "Max"
+};
+const int VQUALITY_ORDER_N = (int)(sizeof(VQUALITY_ORDER) / sizeof(VQUALITY_ORDER[0]));
+
+vquality_t vquality_sanitize(int v) {
+    if (v < VQ_AUTO || v >= VQ_COUNT) return VQ_AUTO;
+    // The two retired steps both sat past the receive ceiling; 25 is the best
+    // one that works, so that is where anyone still on them lands.
+    if (v == VQ_ORIGINAL || v == VQ_1080P_30) return VQ_1080P_25;
+    return (vquality_t)v;
+}
+
+// Index of q in the offered list, or -1.  Used only for cycling.
+static int order_index(vquality_t q) {
+    for (int i = 0; i < VQUALITY_ORDER_N; i++)
+        if (VQUALITY_ORDER[i] == q) return i;
+    return -1;
+}
+
 vquality_t vquality_get(void) { return s_q; }
 
 void vquality_set(vquality_t q) {
-    if (q < VQ_AUTO || q >= VQ_COUNT) q = VQ_AUTO;
-    s_q = q;
+    s_q = vquality_sanitize((int)q);
     vquality_save();
 }
 
 void vquality_next(int delta) {
-    int n = (int)s_q + delta;
-    if (n < 0)          n = VQ_COUNT - 1;
-    if (n >= VQ_COUNT)  n = 0;
-    vquality_set((vquality_t)n);
+    int i = order_index(s_q);
+    if (i < 0) i = 0;                       // retired value: start from Auto
+    i += delta;
+    if (i < 0)                  i = VQUALITY_ORDER_N - 1;
+    if (i >= VQUALITY_ORDER_N)  i = 0;
+    vquality_set(VQUALITY_ORDER[i]);
 }
 
 const char *vquality_label(vquality_t q) {
     switch (q) {
+    // The three 1080p steps differ only in ceiling, so naming them by rank
+    // reads as the ladder it is.  The row prints the Mbps alongside.
+    case VQ_1080P:    return "High";
+    case VQ_1080P_20: return "Very High";
+    case VQ_1080P_25: return "Max";
+    // Retired -- unreachable through the UI, kept so a stale saved digit
+    // that slipped past sanitising still prints as itself rather than "Auto".
     case VQ_ORIGINAL: return "Original";
-    case VQ_1080P_20: return "1080p 20";
     case VQ_1080P_30: return "1080p 30";
-    case VQ_1080P_25: return "1080p 25";
-    case VQ_1080P: return "1080p";
     case VQ_720P:  return "720p";
     case VQ_480P:  return "480p";
     case VQ_360P:  return "360p";
@@ -130,7 +164,8 @@ int vquality_for_item(const char *item_id) {
     char id[VQ_ID_LEN]; int q; int found = -1;
     while (fscanf(f, "%39s %d", id, &q) == 2) {
         if (strcmp(id, item_id) == 0 && q >= VQ_AUTO && q < VQ_COUNT) {
-            found = q;
+            // A title remembered on a retired step must not resurrect it.
+            found = (int)vquality_sanitize(q);
             break;
         }
     }
@@ -174,8 +209,8 @@ void vquality_load(void) {
     FILE *f = fopen(jf_data_path(VQUALITY_FILE), "r");
     if (!f) return;
     int v = 0;
-    if (fscanf(f, "%d", &v) == 1 && v >= VQ_AUTO && v < VQ_COUNT)
-        s_q = (vquality_t)v;
+    if (fscanf(f, "%d", &v) == 1)
+        s_q = vquality_sanitize(v);
     fclose(f);
 }
 

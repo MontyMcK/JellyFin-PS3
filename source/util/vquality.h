@@ -58,6 +58,32 @@ typedef enum {
     VQ_COUNT = 9,
 } vquality_t;
 
+// -------------------------------------------------------------------------
+//  What is actually OFFERED, and why two values are not
+// -------------------------------------------------------------------------
+//  VQ_1080P_30 and VQ_ORIGINAL are RETIRED: they stay in the enum, keep their
+//  numbers, and still resolve in vquality_params(), but nothing selects them
+//  any more.  Both sit past the console's measured receive ceiling and could
+//  only ever disappoint -- back to back on the same movie, 30 Mbps managed
+//  16.7 fps with the compressed ring empty 94% of the time and Original 14.9,
+//  against 23.9 fps and 100% of frames on time at 25.  Offering a setting that
+//  cannot work is worse than not offering it.
+//
+//  They are retired rather than deleted because the value is PERSISTED as a
+//  digit, here and in the per-title file: renumbering would silently turn
+//  every saved 8 into something else.  vquality_sanitize() maps the two
+//  retired digits onto VQ_1080P_25, so anyone who was on them lands on the
+//  best step that does work.
+//
+//  The offered list is ordered by picture quality, which the enum is not --
+//  the 1080p ceilings were appended over time and are scattered through it.
+//  vquality_next() walks THIS list, so left/right move steadily up and down.
+extern const vquality_t VQUALITY_ORDER[];
+extern const int        VQUALITY_ORDER_N;
+
+// Map a persisted or remembered value onto one that is still offered.
+vquality_t vquality_sanitize(int v);
+
 void       vquality_load(void);         // read the persisted value at startup
 void       vquality_save(void);
 vquality_t vquality_get(void);
@@ -71,7 +97,11 @@ void       vquality_next(int delta);    // cycle (left/right on the info row)
 int        vquality_for_item(const char *item_id);
 void       vquality_remember_item(const char *item_id, vquality_t q);
 
-// Short label for the info screen: "Auto", "1080p", ..., "Original".
+// Short label for the info screen.  The three 1080p steps are named for
+// what they are to a viewer -- "High", "Very High", "Max" -- rather than
+// by bitrate: the row already prints the Mbps beside the label, so the
+// number is not lost, and a ladder that reads as a ladder is easier to
+// pick from than three entries differing only in a figure.
 const char *vquality_label(vquality_t q);
 
 // Everything the stream request needs, resolved against the 1080p toggle for

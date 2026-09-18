@@ -25,9 +25,20 @@
 //       has no DRC at all.  Full cinema dynamic range on a compact system
 //       puts dialogue well below effects and music.
 //
-//  PHANTOM fixes (1) by folding centre into L/R, which are always rendered.
-//  The boosts fix (2).  Neither is applied by default: NORMAL is the exact
+//  The boosts fix (2).  They are not applied by default: NORMAL is the exact
 //  behaviour that shipped, bit-for-bit.
+//
+//  PHANTOM was the fix for (1) -- fold centre into L/R and mute slot 2 -- and
+//  is now RETIRED.  It existed because slot 2 never reached a speaker on the
+//  author's chain; as of 2026-09-18 it does, with Dialogue on NORMAL, so
+//  PHANTOM would now throw away a working centre channel to solve a problem
+//  that is gone.  STEREO stays, because a chain that carries only the front
+//  pair (a bar behind a TV's ARC link) is a real configuration and PHANTOM
+//  would rescue its dialogue while still losing the surrounds.
+//
+//  Retired rather than deleted: the mode is PERSISTED as a digit, so the
+//  values must not shift under a saved file.  centermix_sanitize() maps it
+//  onto NORMAL, which is where someone who needed PHANTOM now wants to be.
 //
 //  STEREO is for the chain that carries ONLY the front pair -- a soundbar
 //  with no HDMI input, reached through a TV's ARC link, is the common case:
@@ -51,10 +62,18 @@ typedef enum {
     CENTER_P3      = 1,   // centre +3 dB
     CENTER_P6      = 2,   // centre +6 dB
     CENTER_P10     = 3,   // centre +10 dB
-    CENTER_PHANTOM = 4,   // fold centre into L/R, mute slot 2
+    CENTER_PHANTOM = 4,   // RETIRED -- fold centre into L/R, mute slot 2
     CENTER_STEREO  = 5,   // full LoRo downmix into L/R, mute every other slot
     CENTER_COUNT   = 6,
 } center_mode_t;
+
+// Offered modes, in the order the Dialogue row cycles them.  PHANTOM is
+// absent; the enum keeps its value so saved digits do not shift.
+extern const center_mode_t CENTERMIX_ORDER[];
+extern const int           CENTERMIX_ORDER_N;
+
+// Map a persisted value onto one that is still offered.
+center_mode_t centermix_sanitize(int v);
 
 void          centermix_load(void);
 void          centermix_save(void);
