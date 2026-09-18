@@ -9,12 +9,58 @@
   It's built to feel like it belongs on the console instead of a web page squeezed
   onto a TV.
 
-  [![Latest release](https://img.shields.io/github/v/release/MontyMcK/JellyFin-PS3?include_prereleases&sort=semver&label=release&color=8b5cf6)](../../releases/latest)
   [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-8b5cf6)](LICENSE)
 
   C/C++ · PSL1GHT · Evilnat CFW / HEN
 
 </div>
+
+---
+
+> ### This is the Lossless Audio fork
+>
+> A fork of [MontyMcK/JellyFin-PS3](https://github.com/MontyMcK/JellyFin-PS3)
+> that adds **lossless HD audio** and fixes 1080p playback.
+>
+> | | upstream | this fork |
+> |---|---|---|
+> | **TrueHD / Atmos** | not decoded | **lossless** 5.1 / 7.1 |
+> | **DTS-HD MA** | not decoded | **lossless** (bit-exact vs ffmpeg) |
+> | **DTS / DTS:X / DTS-ES** | not decoded | 5.1 core, up to 1509 kbps |
+> | **AC-3 5.1** | — | yes, server-transcoded |
+> | **1080p** | stalls on big files | stable to **25 Mbps** |
+>
+> **Download:** [`release/JellyFin-PS3.pkg`](release/JellyFin-PS3.pkg) —
+> click, then **Download raw file**. Copy it to a USB stick and install it from
+> the XMB, or drop it in `/dev_hdd0/packages/` over FTP and use webMAN's
+> Package Manager.
+>
+> **Then read [Recommended settings](#recommended-settings).** Two settings do
+> almost all the work.
+
+---
+
+## Recommended settings
+
+Defaults are safe but conservative. For a Blu-ray remux on a wired console:
+
+| Setting | Where | Set it to |
+|---|---|---|
+| **Quality** | Triangle on a title → Quality row | **1080p 25** |
+| **Surround** | Settings → Surround 5.1 | **HD** |
+
+**Why 25 Mbps and not higher.** The PS3 can only *receive* about 20-25 Mbps
+over HTTP — measured, not guessed: 9.4 Mbps PC→PS3 by FTP against 113 Mbps the
+other way, while the same Jellyfin server hands a PC on the same LAN 537 Mbps.
+So the console is the bottleneck, not your network or your server. A bitrate
+setting is a *ceiling*, not a constant, and most scenes sit well under it,
+which is why 25 holds and 30 starves on demanding scenes. **Original** (direct
+play) is not viable for a 50 Mbps remux.
+
+The quality you pick is remembered **per title**, so a heavy remux and a light
+episode can each keep their own.
+
+If playback stutters, drop to **1080p 20** before anything else.
 
 ---
 
@@ -75,7 +121,7 @@ states:
 |---|---|
 | **Off**   | Stereo MP3 — the shipped path, untouched. |
 | **AC-3**  | Transcode the audio to AC-3 (Dolby Digital) 5.1 at 640 kbps. Works with any source. |
-| **HD**    | Send the source's own HD audio track untouched (no audio transcode) and decode it on the PS3: **TrueHD / Dolby Atmos** plays **losslessly** in 5.1 or **7.1**; **DTS, DTS-HD MA, DTS-HD HRA, DTS-ES, DTS:X** play from their 5.1 core at up to 1509 kbps. Any other track — including Dolby Digital Plus — falls back to the AC-3 request, so HD never plays worse than AC-3. |
+| **HD**    | Send the source's own HD audio track untouched (no audio transcode) and decode it on the PS3. **TrueHD / Dolby Atmos** plays **losslessly** in 5.1 or 7.1. **DTS-HD MA** also plays **losslessly** — its XLL extension is decoded, verified bit-exact against ffmpeg on both x86 and the PPU's own big-endian PowerPC. **DTS, DTS-HD HRA, DTS-ES and DTS:X** play from their 5.1 core at up to 1509 kbps (no free decoder exists for those extensions). Anything else — including Dolby Digital Plus — falls back to the AC-3 request, so HD never plays worse than AC-3. |
 
 For actual surround output you must also tell the PS3 your setup can take it:
 
@@ -130,9 +176,18 @@ Notes and limitations:
 
 ## Install
 
-Grab `JellyFin---PS3.pkg` from the [latest release](../../releases/latest) and
-install it. If you'd rather run the `.self` directly, copy it over FTP or USB and
-launch it through webMAN or multiMAN.
+Download [`release/JellyFin-PS3.pkg`](release/JellyFin-PS3.pkg) — open the link,
+then click **Download raw file**.
+
+Then either:
+
+- **USB:** copy the `.pkg` to the root of a USB stick, plug it into the console,
+  and install it from the XMB (Game → Package Manager → Install Package Files), or
+- **FTP:** drop it in `/dev_hdd0/packages/` and install it from webMAN MOD →
+  Package Manager, no USB needed.
+
+Installing over an existing copy is fine — your login and settings live outside
+the app and are kept.
 
 ## Build from source
 
