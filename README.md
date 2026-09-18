@@ -50,6 +50,18 @@ Defaults are safe but conservative. For a Blu-ray remux on a wired console:
 |---|---|---|
 | **Quality** | Triangle on a title → Quality row | **Max** |
 | **Surround** | Settings → Surround 5.1 | **HD** |
+| **5.1 Routing** | Settings → 5.1 Routing | **On** (the default) |
+
+**5.1 Routing** exists because the cellAudio port is 8 channels wide while the
+HDMI output is 6, so the console folds 8→6 on the way out — and on some
+receivers that fold loses the centre channel, taking the dialogue with it. The
+app's own per-channel meter showed the centre leaving hot (loudest of the
+three fronts in 59% of heartbeats, never silent) while nothing reached the
+speaker, so the loss is downstream of us. Asking the console to treat the
+output as 5.1 fixes the routing. **The wire stays uncompressed LPCM** —
+verified with `audioOutGetState` — so lossless TrueHD and DTS-HD MA arrive
+intact. If a receiver ever does accept the request for real, the app detects
+that and reverts to LPCM rather than let your audio be silently compressed.
 
 The Quality row runs 360p → 480p → 720p → **High** (10 Mbps) → **Very High**
 (20) → **Max** (25), and prints the bitrate beside the name.
