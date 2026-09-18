@@ -60,18 +60,30 @@ extern void crash_log(const char *msg);
 // ~25 s and ample; a stream-copied TrueHD track at ~4 Mbps filled them in
 // about four, and a full queue DROPS THE OLDEST PES, which is an audible
 // jump, not a stall.  512 slots is 4 MB and about eight seconds of HD audio.
-// 768, was 512.  This queue -- not the ring -- is what ended preroll early:
-// the log's `preroll: audio queue full, starting` fires once it is 75% full,
-// and at TrueHD's ~4.6 Mbps that capped buffering at roughly 5.5 seconds no
-// matter how big the ring was.  768 slots takes that to ~8 s.
+// 2048 x 3072, was 768 x 8192.  IDENTICAL MEMORY -- 6,291,456 bytes either
+// way -- and it is the shape that was wrong, not the size.
 //
-// The 75% hungry threshold is deliberately NOT raised with it.  That margin
-// is what stops pes_enqueue() reaching the full-queue path below, which
-// DROPS the oldest PES -- audible as skipped audio.  Growing the queue buys
-// preroll depth without spending that safety margin; raising the threshold
-// would have bought the same depth by spending it.
-#define PES_QUEUE_SLOTS 768
-#define PES_SLOT_BYTES  8192
+// This queue, not the ring, is what ends preroll early: the log's
+// `preroll: audio queue full, starting` fires once it is 75% full, and it is
+// counted in SLOTS. Measured on hardware, a PES here is `len=2904` at worst
+// (five separate logs, never higher), so an 8192-byte slot ran about 65%
+// empty and the queue hit its slot limit holding only ~1.7 MB of audio. The
+// console was then starting playback with the video ring 33% full --
+// `preroll: done ring=44405/133435` -- when the target was 90%.
+//
+// Re-cut at 3072 the same memory holds ~2.6x as many PES, so preroll gets
+// that much further before the threshold trips. An oversized PES is still
+// SPLIT rather than dropped (see below), so a DTS-HD MA packet simply takes
+// three slots instead of one and the bytes held are unchanged -- the split
+// path is why shrinking the slot is safe at all.
+//
+// The 75% hungry threshold is deliberately NOT raised. That margin is what
+// stops pes_enqueue() reaching the full-queue path below, which DROPS the
+// oldest PES -- audible as skipped audio. Reshaping the queue buys preroll
+// depth without spending that safety margin; raising the threshold would buy
+// the same depth by spending it.
+#define PES_QUEUE_SLOTS 2048
+#define PES_SLOT_BYTES  3072
 
 // ---- Decoders + PCM ring ----
 static mp3dec_t         s_dec;
@@ -308,8 +320,8 @@ static void pes_enqueue(const u8 *buf, int len, bool cont) {
         // queue full — drop oldest to avoid back-pressuring the demux thread
         s_pes_q_rd = (s_pes_q_rd + 1) % PES_QUEUE_SLOTS;
         s_pes_q_n--;
-#if BUILD_FOR_RPCS3
-        // A dropped PES = skipped audio = playback jumps ahead.  Count it.
+        // A dropped PES = skipped audio = playback jumps ahead.  Count it --
+        // on hardware too, where it is the thing people actually hear.
         static u64 s_pes_drops = 0;
         if ((s_pes_drops++ % 32) == 0) {
             char b[64];
@@ -317,16 +329,18 @@ static void pes_enqueue(const u8 *buf, int len, bool cont) {
                      (unsigned long long)s_pes_drops);
             plog(b);
         }
-#endif
     }
     memcpy(s_pes_q[s_pes_q_wr], buf, len);
     s_pes_q_len[s_pes_q_wr]  = len;
     s_pes_q_cont[s_pes_q_wr] = cont ? 1 : 0;
     s_pes_q_wr = (s_pes_q_wr + 1) % PES_QUEUE_SLOTS;
     s_pes_q_n++;
-#if BUILD_FOR_RPCS3
     // Sizing telemetry: worst-case PES length (-> PES_SLOT_BYTES) and worst-case
-    // queue depth (-> PES_QUEUE_SLOTS) so the buffers are sized to the real burst.
+    // queue depth (-> PES_QUEUE_SLOTS) so the buffers are sized to the real
+    // burst.  This was behind #if BUILD_FOR_RPCS3 and so had NEVER run on a
+    // console -- which is exactly why an 8 KB slot holding a 2.9 KB payload
+    // went unnoticed while it was quietly capping preroll at 33%.  A handful
+    // of lines per playback, only on a new high-water mark.
     { static int s_max_len = 0, s_max_depth = 0;
       bool chg = false;
       if (len > s_max_len)       { s_max_len = len;         chg = true; }
@@ -337,7 +351,6 @@ static void pes_enqueue(const u8 *buf, int len, bool cont) {
                  s_max_len, s_max_depth, PES_QUEUE_SLOTS);
         plog(b);
       } }
-#endif
     sysCondSignal(s_pes_cond);
 }
 

@@ -3,6 +3,7 @@
 #include "jellyfin_api.h"
 #include "http.h"
 #include "timing.h"
+#include "jf_paths.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -60,10 +61,25 @@ static int  s_carry_n = 0;
 // byte at a time precisely so it cannot over-read into the body, and it happens
 // once per open, so it costs nothing worth reclaiming.  The buffer therefore
 // starts empty at the first stream_read() and owns every byte after the header.
-#define SB_SIZE 65536
+// 256 KB, was 64 KB, and how much of it one netRecv asks for is a RUNTIME
+// knob -- jellyfin_netbuf.txt, in KB.
+//
+// Movian is the reference here: a mature PS3 player whose buffered-file layer
+// uses a 256 KB minimum request for big/streaming content
+// (bf_min_request, src/fileaccess/fa_buffer.c). Ours asked for 64 KB. That is
+// not a syscall-count argument -- 64 KB reads at 25 Mbps is only ~48 calls a
+// second and syscall overhead was measured and ruled out long ago -- it is
+// about giving the stack a deep enough request to hand back a large burst in
+// one go instead of returning whatever is in the socket right now.
+//
+// Runtime rather than compiled in because every network theory on this
+// project has had to be A/B'd on hardware, and doing that over FTP costs
+// seconds where a rebuild and reinstall costs twenty minutes.
+#define SB_SIZE (256 * 1024)
 static u8   s_sb[SB_SIZE];
 static int  s_sb_n = 0;      // valid bytes in s_sb
 static int  s_sb_p = 0;      // read cursor
+static int  s_sb_req = 0;    // bytes to ask netRecv for; 0 until resolved
 
 // Receive telemetry.  Two hypotheses about the 20/30 Mbps ceiling (syscall
 // count, then the TCP window) both turned out to be wrong, and both were
@@ -84,6 +100,19 @@ void stream_rx_stats(u64 *bytes, u64 *wait_us, u32 *calls) {
 
 static void sb_reset(void) { s_sb_n = 0; s_sb_p = 0; }
 
+// Read the two network knobs once per connection.  Both default to what
+// Movian uses on this console.
+static int netcfg_kb(const char *name, int def_kb, int max_kb) {
+    FILE *f = fopen(jf_data_path(name), "r");
+    if (!f) return def_kb;
+    int v = 0;
+    if (fscanf(f, "%d", &v) != 1) v = 0;
+    fclose(f);
+    if (v <= 0)      return def_kb;
+    if (v > max_kb)  return max_kb;
+    return v;
+}
+
 // Refill when empty.  Returns bytes available (>0), 0 if the peer closed, or
 // -1 on receive timeout -- the same three outcomes netRecv gave the old code,
 // so the carry/resume logic above is unchanged.
@@ -91,7 +120,7 @@ static int sb_fill(int sock) {
     if (s_sb_p < s_sb_n) return s_sb_n - s_sb_p;
     s_sb_p = s_sb_n = 0;
     u64 t0 = timing_get_us();
-    int n = netRecv(sock, s_sb, SB_SIZE, 0);
+    int n = netRecv(sock, s_sb, s_sb_req ? s_sb_req : SB_SIZE, 0);
     u64 dt = timing_get_us() - t0;
     s_rx_wait_us += dt;
     s_rx_calls++;
@@ -161,8 +190,20 @@ int stream_open(const char *url) {
     // negotiated in the SYN, so raising the buffer afterwards cannot widen the
     // window beyond 64 KB.
     {
-        int rb = 512 * 1024;
+        // 128 KB, was 512 KB -- and the old value was incoherent.  libnet's
+        // pool is 128 KB TOTAL, shared by every socket in the process, so
+        // asking for 512 KB on one socket was asking for four times the whole
+        // pool. Movian, on this same console, asks for exactly 128 KB here
+        // (net_psl1ght.c) while its POSIX backend asks for 192 -- i.e. it
+        // deliberately requests LESS on PS3, matched to the pool.
+        //
+        // getsockopt reports the request rather than what is funded, so this
+        // cannot be checked by reading it back; that is why it is a knob
+        // (jellyfin_rcvbuf.txt, KB) and not a new guess.
+        int rb = netcfg_kb("jellyfin_rcvbuf.txt", 128, 2048) * 1024;
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
+        s_sb_req = netcfg_kb("jellyfin_netbuf.txt", SB_SIZE / 1024,
+                             SB_SIZE / 1024) * 1024;
     }
 
     struct sockaddr_in addr;
@@ -286,8 +327,8 @@ int stream_open(const char *url) {
         netSocketInfo si; memset(&si, 0, sizeof(si));
         int rq = (netGetSockInfo(sock, &si, 1) == 0) ? si.recv_queue_len : -1;
         snprintf(buf, sizeof(buf),
-                 "stream_open: status=%d chunked=%d rcvbuf=%d recvq=%d",
-                 status, (int)s_chunked, rb_eff, rq);
+                 "stream_open: status=%d chunked=%d rcvbuf=%d recvq=%d read=%dK",
+                 status, (int)s_chunked, rb_eff, rq, s_sb_req / 1024);
         plog(buf);
     }
     if (status != 200) {
