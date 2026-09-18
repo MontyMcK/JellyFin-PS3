@@ -15,6 +15,7 @@
 #include "hd1080.h"
 #include "surround.h"
 #include "centermix.h"
+#include "audio_bitstream.h"
 #include "statsovl.h"
 
 // -------------------------------------------------------
@@ -168,8 +169,10 @@ static bool xmb_input_settings(void) {
             surround_cycle();                                           // Off -> AC-3 -> DTS
         if (g_settings_sel == 5)                                        // Dialogue
             centermix_cycle();   // Normal -> +3 -> +6 -> +10 -> Stereo
+        if (g_settings_sel == 6)                                        // 5.1 Routing
+            bitstream_routing_toggle();
 #if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 6)                                        // Player Stats Overlay
+        if (g_settings_sel == 7)                                        // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());
 #endif
     }

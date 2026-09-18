@@ -26,6 +26,15 @@ extern "C" {
 //   4    vs 1  -> does asking for AC-3 specifically matter?
 // If 4 is what works, that is what should ship, under an honest name.
 #define BITSTREAM_LPCM 4
+// LPCM again, but reached by an actual TRANSITION: configure the output wide
+// (8ch) first, then back to 6ch.  Mode 4 measured as a no-op -- the output was
+// already ch=6 encoder=0, so asking for ch=6 encoder=0 changed nothing and the
+// dialogue stayed missing, while AC-3 (which really does change encoder 0->1)
+// brings it back.  So the operative thing may be that the configuration CHANGES
+// at all, not that it names AC-3.  This asks that question directly, and if the
+// answer is yes it is what should ship: it ends on the coding type the wire
+// actually carries instead of one the hardware has already refused.
+#define BITSTREAM_LPCM_KICK 5
 
 int  bitstream_mode(void);
 
@@ -41,6 +50,20 @@ void audio_bitstream_begin(int port_channels);
 void audio_bitstream_end(void);
 
 bool audio_bitstream_engaged(void);
+
+// -------------------------------------------------------------------------
+//  The Settings row
+// -------------------------------------------------------------------------
+//  What the user sees is a single On/Off called "5.1 Routing", because that
+//  is what it does for them: it decides whether the console is told to treat
+//  the output as 5.1, which on some chains is the difference between hearing
+//  dialogue and not.  The AC-3 request behind it is an implementation detail
+//  and a misleading thing to put in a menu -- nothing is encoded, and
+//  begin() backs off if a console ever really would.  The numbered modes
+//  above stay reachable by editing the file, for diagnosis.
+bool bitstream_routing_enabled(void);
+void bitstream_routing_toggle(void);
+const char *bitstream_routing_label(void);
 
 #ifdef __cplusplus
 }
