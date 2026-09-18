@@ -17,7 +17,11 @@
 // the limit and would have started losing its tail once the frame counters
 // grew, silently dropping the field at the end of the line.  256 slots x 160
 // bytes is 40 KB of static ring, 8 KB more than before.
-#define PLOG_LEN   160
+// 160 truncated the heartbeat the moment lvl= was added to it -- the line
+// reached ~200 characters and the per-channel levels, the whole point of
+// the field, were the part that got cut.  256 x 256 is 64 KB of ring,
+// 24 KB more than before, against a heap that has ~48 MB free at reserve.
+#define PLOG_LEN   256
 
 static char              s_plog_ring[PLOG_RING][PLOG_LEN];
 static volatile int      s_plog_wr      = 0;

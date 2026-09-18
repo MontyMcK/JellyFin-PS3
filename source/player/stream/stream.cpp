@@ -270,10 +270,24 @@ int stream_open(const char *url) {
     sb_reset();     // new connection — drop anything buffered from the old one
     {
         char buf[64];
+        // getsockopt(SO_RCVBUF) returns the REQUESTED size, not what libnet
+        // has funded, so on its own it says little -- a 512 KB request reads
+        // back as 524288 either way.  It earns its place as a HEALTH CHECK
+        // instead: under the 4 MB libnet pool this same call failed outright
+        // and returned -1, which is how that experiment was caught.
+        //
+        // recvq= is netGetSockInfo, and it returns -1 on this firmware whether
+        // the pool is stock or enlarged -- it has never worked here, so do not
+        // read a -1 there as a fault.  It stays only because a non-negative
+        // value would be the real receive queue if a future build gets it
+        // working.
         int rb_eff = 0; socklen_t rl = sizeof(rb_eff);
         if (getsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb_eff, &rl) != 0) rb_eff = -1;
-        snprintf(buf, sizeof(buf), "stream_open: status=%d chunked=%d rcvbuf=%d",
-                 status, (int)s_chunked, rb_eff);
+        netSocketInfo si; memset(&si, 0, sizeof(si));
+        int rq = (netGetSockInfo(sock, &si, 1) == 0) ? si.recv_queue_len : -1;
+        snprintf(buf, sizeof(buf),
+                 "stream_open: status=%d chunked=%d rcvbuf=%d recvq=%d",
+                 status, (int)s_chunked, rb_eff, rq);
         plog(buf);
     }
     if (status != 200) {

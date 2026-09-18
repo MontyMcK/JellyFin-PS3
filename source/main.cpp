@@ -20,6 +20,7 @@
 #include "img_arena.h"
 #include "meminfo.h"
 #include "plog.h"
+#include "audio/audio_out.h"   // audio_out_log_capabilities()
 #include "overscan.h"
 #include "hd1080.h"
 #include "vquality.h"
@@ -110,6 +111,7 @@ int main(int argc, const char *argv[]) {
     statsovl_load();       // restore the player stats overlay toggle
     audio_volume_load();   // restore the saved master volume
     video_log_capabilities();   // what refresh rates does this panel offer?
+    audio_out_log_capabilities();  // ...and will this chain take a bitstream?
 
     crash_log("7 splash drawHeader");
     drawHeader();
