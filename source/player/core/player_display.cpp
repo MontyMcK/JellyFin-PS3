@@ -312,9 +312,25 @@ void player_display_frame(PlayerState *ps) {
         if (line && *line) {
             // Bottom-centred, one line above the other, inside the title-safe
             // area so an overscanning CRT or plasma does not clip the text.
+            // TYPEFACE AND WEIGHT.
+            //
+            // The fonts people associate with subtitles -- Arial, Helvetica,
+            // Netflix Sans, Tiresias -- are all proprietary and cannot ship in
+            // a GPLv3 package. Open Sans, already bundled here for the UI, is
+            // the open face closest to them: a humanist sans with a large
+            // x-height and open apertures, which is what actually drives
+            // legibility at a distance.
+            //
+            // Weight matters more than which humanist sans it is, and every
+            // broadcaster and streaming service sets subtitles semibold or
+            // bolder. The bold face is already loaded, so this costs nothing
+            // and is the single biggest readability win available.
             const int W  = (int)display_width;
-            const int px = (display_height >= 720) ? 30 : 22;
+            const int px = (display_height >= 720) ? 32 : 22;
             const int lh = px + 8;
+            // Outline thickness has to scale too: one pixel that reads as a
+            // clean edge at 480p is nearly invisible at 1080p.
+            const int ow = (display_height >= 720) ? 2 : 1;
             int nlines = 1;
             for (const char *q = line; *q; q++) if (*q == '\n') nlines++;
             int y = (int)display_height - (int)(display_height / 12) - nlines * lh;
@@ -327,18 +343,20 @@ void player_display_frame(PlayerState *ps) {
                 if (len > SUB_ROW_MAX - 1) len = SUB_ROW_MAX - 1;
                 memcpy(row, p2, len); row[len] = '\0';
 
-                const int tw = ttf_text_width(row, (float)px, false);
+                const int tw = ttf_text_width(row, (float)px, true);
                 const int x  = (W - tw) / 2;
-                // Cheap 1px outline in every direction.  Film subtitles sit
-                // over whatever is on screen, and white-on-white is unreadable
-                // without it; four offset draws cost far less than a shadow
-                // texture and need no extra GPU state.
-                for (int dy = -1; dy <= 1; dy++)
-                    for (int dx = -1; dx <= 1; dx++)
+                // Outline in every direction.  Film subtitles sit over
+                // whatever happens to be on screen, and white on a bright
+                // scene is unreadable without one; offset draws cost far less
+                // than a shadow texture and need no extra GPU state. The
+                // glyph cache means the repeats are cheap -- each glyph is
+                // rasterized once and blitted nine times.
+                for (int dy = -ow; dy <= ow; dy++)
+                    for (int dx = -ow; dx <= ow; dx++)
                         if (dx || dy)
                             drawTTF((u32)(x + dx), (u32)(y + dy), row,
-                                    (float)px, 0x000000E0UL);
-                drawTTF((u32)x, (u32)y, row, (float)px, 0xFFFFFFFFUL);
+                                    (float)px, 0x000000E6UL, true);
+                drawTTF((u32)x, (u32)y, row, (float)px, 0xFFFFFFFFUL, true);
 
                 y += lh;
                 if (!nl) break;
