@@ -20,26 +20,14 @@ const vquality_t VQUALITY_ORDER[] = {
     VQ_1080P,       // 10 Mbps -- "High"
     VQ_1080P_20,    // 20 Mbps -- "Very High"
     VQ_1080P_25,    // 25 Mbps -- "Max"
-    // 30 Mbps is BACK, on trial.  It was retired on a measurement taken when
-    // two other things were wrong: the libnet pool change had throughput at
-    // 12 Mbps median instead of 25, and preroll was ending at 33% of the ring
-    // because the audio queue hit its slot limit.  Both are fixed, and a
-    // bitrate setting is a CEILING not a constant -- a 30 Mbps film sits well
-    // under 30 most of the time and spikes on demanding scenes, which is
-    // exactly what a cushion is for. It has never been tried on a healthy
-    // build with a full buffer.  Labelled as a test so nobody mistakes it for
-    // a recommendation until the numbers say so.
-    VQ_1080P_30,    // 30 Mbps -- "30 Mbps (test)"
 };
 const int VQUALITY_ORDER_N = (int)(sizeof(VQUALITY_ORDER) / sizeof(VQUALITY_ORDER[0]));
 
 vquality_t vquality_sanitize(int v) {
     if (v < VQ_AUTO || v >= VQ_COUNT) return VQ_AUTO;
-    // Original sat far past the receive ceiling -- 53 Mbps sustained against a
-    // console that pulls ~25 is a permanent deficit, not a spike to bridge --
-    // so it stays retired and lands on the best step that works.  30 is on
-    // trial again and is offered, so it is NOT mapped away.
-    if (v == VQ_ORIGINAL) return VQ_1080P_25;
+    // Both sit past what the console can sustain; 25 is the best step that
+    // works, so that is where anyone still on them lands.
+    if (v == VQ_ORIGINAL || v == VQ_1080P_30) return VQ_1080P_25;
     return (vquality_t)v;
 }
 
@@ -73,11 +61,9 @@ const char *vquality_label(vquality_t q) {
     case VQ_1080P:    return "High";
     case VQ_1080P_20: return "Very High";
     case VQ_1080P_25: return "Max";
-    // On trial -- see VQUALITY_ORDER.  Named for what it is rather than given
-    // a rank, so it does not read as a recommendation.
-    case VQ_1080P_30: return "30 Mbps (test)";
     // Retired -- unreachable through the UI, kept so a stale saved digit
     // that slipped past sanitising still prints as itself rather than "Auto".
+    case VQ_1080P_30: return "1080p 30";
     case VQ_ORIGINAL: return "Original";
     case VQ_720P:  return "720p";
     case VQ_480P:  return "480p";

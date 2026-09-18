@@ -190,17 +190,25 @@ int stream_open(const char *url) {
     // negotiated in the SYN, so raising the buffer afterwards cannot widen the
     // window beyond 64 KB.
     {
-        // 128 KB, was 512 KB -- and the old value was incoherent.  libnet's
-        // pool is 128 KB TOTAL, shared by every socket in the process, so
-        // asking for 512 KB on one socket was asking for four times the whole
-        // pool. Movian, on this same console, asks for exactly 128 KB here
-        // (net_psl1ght.c) while its POSIX backend asks for 192 -- i.e. it
-        // deliberately requests LESS on PS3, matched to the pool.
+        // 512 KB.  It was briefly cut to 128 to match libnet's pool, on the
+        // reasoning that asking for four times the whole shared pool was
+        // incoherent and that Movian asks for exactly 128 here on this same
+        // console (net_psl1ght.c) while its POSIX backend asks for 192.
+        // Sound reasoning. Wrong answer -- measured back to back at 1080p 25,
+        // same film:
+        //
+        //             net median   frames on time   heartbeats with ring empty
+        //   128 KB      24.7 Mbps        81%                  15%
+        //   512 KB      31.1 Mbps        97%                   0%
+        //
+        // So the request is not clamped to the pool in any way that helps,
+        // and a larger one measurably wins. Borrowing a constant from another
+        // project is reasoning, not measurement; this is the measurement.
         //
         // getsockopt reports the request rather than what is funded, so this
-        // cannot be checked by reading it back; that is why it is a knob
-        // (jellyfin_rcvbuf.txt, KB) and not a new guess.
-        int rb = netcfg_kb("jellyfin_rcvbuf.txt", 128, 2048) * 1024;
+        // cannot be settled by reading it back -- hence the knob
+        // (jellyfin_rcvbuf.txt, in KB) rather than another guess.
+        int rb = netcfg_kb("jellyfin_rcvbuf.txt", 512, 2048) * 1024;
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
         s_sb_req = netcfg_kb("jellyfin_netbuf.txt", SB_SIZE / 1024,
                              SB_SIZE / 1024) * 1024;
