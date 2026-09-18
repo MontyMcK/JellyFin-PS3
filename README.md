@@ -144,9 +144,7 @@ Notes and limitations:
     bit. Atmos *objects* are not rendered (no free renderer exists, and the
     app cannot know your speaker layout), so an Atmos track plays as its bed.
     See [docs/dolby-truehd.md](docs/dolby-truehd.md).
-  - **DTS-HD MA and DTS:X: core quality — 5.1, lossy.** No GPL-compatible
-    decoder exists for the lossless DTS extension or the DTS:X objects, so
-    what plays is the backward-compatible core every such track carries.
+  - **DTS-HD MA and DTS:X: core quality — 5.1, lossless.** DTS:X object data doesn't work for the same reason as Atmos.
     See [docs/dts-hd.md](docs/dts-hd.md).
   - **Dolby Digital Plus (E-AC-3), including DD+ Atmos: unchanged.** Nothing
     here decodes it; the server transcodes it to AC-3 5.1 as before.
