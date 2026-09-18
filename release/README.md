@@ -25,15 +25,21 @@ Two settings do almost all the work:
 | Setting | Where | Set it to |
 |---|---|---|
 | **Quality** | Triangle on a title → Quality row | **Max** |
-| **Surround** | Settings → Surround 5.1 | **HD** |
-| **5.1 Routing** | Settings → 5.1 Routing | **On** (already the default) |
+| **Audio Output** | Settings → Audio Output | **5.1** |
 
-**No dialogue, or a silent centre speaker?** That is what **5.1 Routing** is
-for. The PS3's audio port is 8 channels wide and its HDMI output is 6, and on
-some receivers the console's own 8→6 fold loses the centre channel — which is
-where nearly all the dialogue in a film mix lives. Leaving this On makes the
-console route the output as true 5.1 and the centre comes back. Nothing is
-compressed: the audio on the wire stays uncompressed LPCM either way.
+**Audio Output** is Stereo / 5.1 / 7.1. 7.1 only appears if your receiver
+actually accepts eight channels of LPCM — most soundbars cap at six, and the
+app asks yours rather than guessing.
+
+On 5.1 the app also fixes a fault that silences dialogue on some receivers.
+The PS3's audio port is 8 channels wide and its HDMI output is 6, and the
+console's own 8→6 fold can lose the centre channel — which is where nearly all
+the dialogue in a film mix lives. Nothing is compressed to achieve this: the
+audio on the wire stays uncompressed LPCM.
+
+**Dialogue still too quiet?** Settings → **Dialogue Boost** (+3/+6/+10 dB).
+Film mixes carry full cinema dynamic range and none of these decoders applies
+compression, so dialogue can sit well below effects on a compact system.
 
 For actual multichannel output the PS3 itself must also be told your setup can
 take it: *Settings → Sound Settings → Audio Output Settings → HDMI → Manual*,

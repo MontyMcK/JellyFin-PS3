@@ -51,19 +51,12 @@ void audio_bitstream_end(void);
 
 bool audio_bitstream_engaged(void);
 
-// -------------------------------------------------------------------------
-//  The Settings row
-// -------------------------------------------------------------------------
-//  What the user sees is a single On/Off called "5.1 Routing", because that
-//  is what it does for them: it decides whether the console is told to treat
-//  the output as 5.1, which on some chains is the difference between hearing
-//  dialogue and not.  The AC-3 request behind it is an implementation detail
-//  and a misleading thing to put in a menu -- nothing is encoded, and
-//  begin() backs off if a console ever really would.  The numbered modes
-//  above stay reachable by editing the file, for diagnosis.
-bool bitstream_routing_enabled(void);
-void bitstream_routing_toggle(void);
-const char *bitstream_routing_label(void);
+// NOT a user setting.  It was briefly a Settings row called "5.1 Routing",
+// and that was the wrong call: it is a workaround for a console quirk with an
+// automatic back-off if a chain ever really would encode, so there is nothing
+// for a listener to decide.  It is on unless jellyfin_bitstream.txt says
+// otherwise, and that file exists for diagnosis -- it is what let all four
+// candidate fixes be A/B'd over FTP without a reinstall.
 
 #ifdef __cplusplus
 }

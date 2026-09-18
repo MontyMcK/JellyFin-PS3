@@ -36,9 +36,19 @@
 //  pair (a bar behind a TV's ARC link) is a real configuration and PHANTOM
 //  would rescue its dialogue while still losing the surrounds.
 //
+//  STEREO is retired too, for a different reason: the Audio Output row now
+//  offers Stereo directly, which asks the SERVER for a stereo mix instead of
+//  decoding six channels here and folding five of them away. Same result for
+//  a chain that carries only the front pair, less work, and one less place
+//  where "stereo" can be set.
+//
+//  What is left is boost, so the row is now called Dialogue Boost and says
+//  Off / +3 / +6 / +10. Mixing a downmix into a list of gains was most of why
+//  these settings read as confusing.
+//
 //  Retired rather than deleted: the mode is PERSISTED as a digit, so the
-//  values must not shift under a saved file.  centermix_sanitize() maps it
-//  onto NORMAL, which is where someone who needed PHANTOM now wants to be.
+//  values must not shift under a saved file.  centermix_sanitize() maps both
+//  onto NORMAL.
 //
 //  STEREO is for the chain that carries ONLY the front pair -- a soundbar
 //  with no HDMI input, reached through a TV's ARC link, is the common case:
@@ -63,7 +73,7 @@ typedef enum {
     CENTER_P6      = 2,   // centre +6 dB
     CENTER_P10     = 3,   // centre +10 dB
     CENTER_PHANTOM = 4,   // RETIRED -- fold centre into L/R, mute slot 2
-    CENTER_STEREO  = 5,   // full LoRo downmix into L/R, mute every other slot
+    CENTER_STEREO  = 5,   // RETIRED -- full LoRo downmix into L/R
     CENTER_COUNT   = 6,
 } center_mode_t;
 

@@ -125,3 +125,14 @@ void audio_out_log_capabilities(void)
 		}
 	}
 }
+
+int audio_out_lpcm_max_channels(void)
+{
+	static int s_cached = -1;
+	if (s_cached >= 0) return s_cached;
+	const s32 ch = audioOutGetSoundAvailability(AUDIO_OUT_PRIMARY,
+	                                            AUDIO_OUT_CODING_LPCM,
+	                                            AUDIO_OUT_FS_48KHZ, 0);
+	s_cached = (ch > 0) ? (int)ch : 0;
+	return s_cached;
+}
