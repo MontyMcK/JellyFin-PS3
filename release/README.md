@@ -26,6 +26,14 @@ Two settings do almost all the work:
 |---|---|---|
 | **Quality** | Triangle on a title → Quality row | **Max** |
 | **Surround** | Settings → Surround 5.1 | **HD** |
+| **5.1 Routing** | Settings → 5.1 Routing | **On** (already the default) |
+
+**No dialogue, or a silent centre speaker?** That is what **5.1 Routing** is
+for. The PS3's audio port is 8 channels wide and its HDMI output is 6, and on
+some receivers the console's own 8→6 fold loses the centre channel — which is
+where nearly all the dialogue in a film mix lives. Leaving this On makes the
+console route the output as true 5.1 and the centre comes back. Nothing is
+compressed: the audio on the wire stays uncompressed LPCM either way.
 
 For actual multichannel output the PS3 itself must also be told your setup can
 take it: *Settings → Sound Settings → Audio Output Settings → HDMI → Manual*,
