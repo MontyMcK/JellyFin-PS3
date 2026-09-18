@@ -1,6 +1,9 @@
 # Download
 
-**[⬇ Download JellyFin-PS3.pkg](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/raw/main/release/JellyFin-PS3.pkg)** — one click, straight to the file.
+**[⬇ Download the latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)** — the recommended link.
+
+Direct file: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/download/v1.0/JellyFin-PS3.pkg). This folder mirrors it so the
+repo always carries an installable build alongside the source it was made from.
 
 ## Install
 

@@ -9,6 +9,7 @@
   It's built to feel like it belongs on the console instead of a web page squeezed
   onto a TV.
 
+  [![Latest release](https://img.shields.io/github/v/release/vortigauntlet/JellyFin-PS3-LosslessAudio?label=release&color=8b5cf6)](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)
   [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-8b5cf6)](LICENSE)
 
   C/C++ · PSL1GHT · Evilnat CFW / HEN
@@ -30,7 +31,7 @@
 > | **AC-3 5.1** | — | yes, server-transcoded |
 > | **1080p** | stalls on big files | stable to **25 Mbps** |
 >
-> ### [⬇ Download JellyFin-PS3.pkg](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/raw/main/release/JellyFin-PS3.pkg)
+> ### [⬇ Download the latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)
 >
 > One click, straight to the file. Copy it to a USB stick and install it from
 > the XMB, or drop it in `/dev_hdd0/packages/` over FTP and use webMAN's
@@ -179,8 +180,10 @@ Notes and limitations:
 
 ## Install
 
-**[⬇ Download JellyFin-PS3.pkg](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/raw/main/release/JellyFin-PS3.pkg)** — one click, straight to the file.
-(It also lives in [`release/`](release/) in the repo.)
+**[⬇ JellyFin-PS3.pkg — latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)**
+
+Direct link to the current build: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/download/v1.0/JellyFin-PS3.pkg).  
+The same file is mirrored in [`release/`](release/) in the repo.
 
 Then either:
 
