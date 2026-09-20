@@ -183,6 +183,10 @@ void jellyfin_report_stopped(const char *item_id, const char *session_id,
 // One-slot mailbox -- a report is absolute state, so a newer one replaces an
 // unsent older one rather than queueing behind it.  Call jellyfin_report_flush()
 // before tearing a session down.
+// Call once, from a single-threaded moment, before any async report.  Without
+// it the first report falls back to the blocking path rather than racing two
+// threads through a lazy init.
+void jellyfin_report_init(void);
 void jellyfin_report_progress_async(const char *item_id, const char *session_id,
                                     unsigned long long pos_ticks, bool paused);
 void jellyfin_report_flush(void);

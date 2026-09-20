@@ -449,6 +449,8 @@ bool music_start(const MusicTrack *tracks, int count, int start_idx) {
     s_run     = true;
     s_active  = true;
     s_started = true;
+    // Before the threads exist, so neither of the two callers can race it up.
+    jellyfin_report_init();
     sysThreadCreate(&s_pump_tid, music_pump_thread, NULL,
                     700, 0x8000, THREAD_JOINABLE, (char*)"jf_mpump");
     sysThreadCreate(&s_stream_tid, music_stream_thread, NULL,
@@ -478,6 +480,16 @@ void music_stop(void) {
 
 void music_toggle_pause(void) {
     s_paused = !s_paused;
+    // Logged because the last hardware freeze happened within a second of a
+    // pause and there was no way to tell, afterwards, whether the app stopped
+    // because of the pause or merely while paused.
+    {
+        char b[64];
+        snprintf(b, sizeof b, "music: %s at %llus",
+                 s_paused ? "PAUSE" : "RESUME",
+                 (unsigned long long)(elapsed_ticks() / 10000000ULL));
+        plog(b);
+    }
     // Push the state so the server UI flips too -- but hand it to the report
     // thread, because this runs on the RENDER LOOP, from the music screen's
     // input handler.  The blocking version froze every frame until the server

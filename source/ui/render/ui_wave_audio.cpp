@@ -161,11 +161,16 @@ void wave_audio_frame(float *dt_scale, float *perturb, float *drive)
             // mapped drive being too gentle to see -- and they need completely
             // different fixes.  One line every five seconds tells them apart:
             // rms says whether audio reached the analyser at all, drive says
-            // what the renderer was asked for.  Capped at 24 lines so a long
-            // listening session does not fill the log.
+            // what the renderer was asked for.
+            //
+            // The cap was 24 lines, which ran out two minutes into a session
+            // and took the render thread's only proof of life with it -- so
+            // when the app died there was no way to tell whether the UI had
+            // stopped drawing.  At one line per five seconds, 600 covers a
+            // fifty-minute sitting for 30 KB of log.
             static int s_dbg_n  = 0;
             static u64 s_dbg_us = 0;
-            if (s_dbg_n < 24 && (s_dbg_us == 0 || now - s_dbg_us >= 5000000ULL)) {
+            if (s_dbg_n < 600 && (s_dbg_us == 0 || now - s_dbg_us >= 5000000ULL)) {
                 s_dbg_us = now;
                 s_dbg_n++;
                 char b[112];

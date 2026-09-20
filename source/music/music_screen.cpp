@@ -772,11 +772,33 @@ static void music_screen_run(const MusicCtx *ctx, int count, int start_idx) {
     s_last_pos  = -1;
     init_btns();
 
+    // Render-thread proof of life.  When the app died on hardware there was no
+    // way to tell whether this loop was still turning, because the only thing
+    // it logged was a wave trace that had already hit its cap.  One line every
+    // five seconds, carrying the frame count and the paused flag, dates the
+    // last frame the music screen ever drew.
+    u64 hb_us    = 0;
+    u32 hb_frame = 0;
+
     while (running) {
         waitflip();
         sysUtilCheckCallback();
         clearScreen(XMB_BG);
         wave_draw();
+
+        hb_frame++;
+        {
+            u64 now = timing_get_us();
+            if (hb_us == 0 || now - hb_us >= 5000000ULL) {
+                hb_us = now;
+                char b[80];
+                snprintf(b, sizeof b, "music_screen: f=%u %s pos=%us",
+                         (unsigned)hb_frame,
+                         music_is_paused() ? "PAUSED" : "playing",
+                         (unsigned)music_elapsed_secs());
+                plog(b);
+            }
+        }
 
         poll_buttons();
         if (music_screen_input(s_tracks, count)) break;

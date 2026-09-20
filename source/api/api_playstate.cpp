@@ -33,9 +33,18 @@ static void post_playstate(const char *endpoint, const char *item_id,
     char resp[256];
     int status = http_request(HTTP_POST, url, body, g_token, resp, sizeof(resp));
 
-    static int s_log = 0;
-    if (s_log < 12 || (status != 200 && status != 204)) {
-        if (s_log < 32) {
+    // The first dozen, then one in every six, and every failure.
+    //
+    // It used to stop after twelve successes, which is why the log from the
+    // last crash showed reports ending an hour before the app did -- they had
+    // not stopped, they had stopped being written, and that read as a dead
+    // thread.  A heartbeat that goes quiet when healthy is worse than no
+    // heartbeat.
+    static int s_log = 0, s_seen = 0;
+    s_seen++;
+    bool failed = (status != 200 && status != 204);
+    if (s_log < 12 || failed || (s_seen % 6) == 0) {
+        if (s_log < 400) {
             s_log++;
             char buf[112];
             snprintf(buf, sizeof(buf), "playstate: %s http=%d pos=%llus",
@@ -128,26 +137,42 @@ static void report_thread(void *arg) {
     sysThreadExit(0);
 }
 
+// Start the worker.  EXPLICIT, from a single-threaded moment (music_start),
+// rather than lazily on first use: the two callers are the stream thread's
+// heartbeat and the render thread's pause handler, and if they had ever raced
+// here on the first report they would each have created a mutex and a thread,
+// leaving one of them locking a handle the other had overwritten.
+//
+// 64 KB of stack because this thread runs http_request(), whose frame alone is
+// 5,376 bytes -- measured, with post_playstate above it and build_headers and
+// newlib's printf below.  The other thread in this app that calls into the
+// same path (thumb_fetch) is given exactly this, and the stream thread that
+// used to make these calls had 128 KB.  16 KB was ~60% consumed at peak, which
+// is not a margin.
+void jellyfin_report_init(void) {
+    if (s_rep_started) return;
+    sys_mutex_attr_t mattr;
+    sysMutexAttrInitialize(mattr);
+    if (sysMutexCreate(&s_rep_mtx, &mattr) != 0) {
+        // No mailbox, no thread: fall back to the blocking call rather
+        // than silently dropping the report.  A stutter beats a server
+        // session that thinks nothing is playing.
+        plog("playstate: async mutex failed, reporting inline");
+        s_rep_started = -1;
+        return;
+    }
+    s_rep_pending = 0;
+    s_rep_run     = 1;
+    s_rep_started = 1;
+    sysThreadCreate(&s_rep_tid, report_thread, NULL,
+                    1000, 0x10000, THREAD_JOINABLE, (char*)"jf_report");
+    plog("playstate: report thread up");
+}
+
 void jellyfin_report_progress_async(const char *item_id, const char *session_id,
                                     unsigned long long pos_ticks, bool paused) {
     if (!item_id || !item_id[0]) return;
 
-    if (!s_rep_started) {
-        sys_mutex_attr_t mattr;
-        sysMutexAttrInitialize(mattr);
-        if (sysMutexCreate(&s_rep_mtx, &mattr) != 0) {
-            // No mailbox, no thread: fall back to the blocking call rather
-            // than silently dropping the report.  A stutter beats a server
-            // session that thinks nothing is playing.
-            plog("playstate: async mutex failed, reporting inline");
-            s_rep_started = -1;
-        } else {
-            s_rep_run = 1;
-            s_rep_started = 1;
-            sysThreadCreate(&s_rep_tid, report_thread, NULL,
-                            1000, 0x4000, THREAD_JOINABLE, (char*)"jf_report");
-        }
-    }
     if (s_rep_started != 1) {
         post_playstate("/Sessions/Playing/Progress", item_id, session_id,
                        pos_ticks, paused);
@@ -164,17 +189,22 @@ void jellyfin_report_progress_async(const char *item_id, const char *session_id,
     sysMutexUnlock(s_rep_mtx);
 }
 
+// Wait briefly for a queued report to go out.  It does NOT stop the thread.
+//
+// It used to join it, and that was a deadlock I walked into: this runs on the
+// render thread on the way out of the music screen, while the stream thread is
+// on ITS way out making blocking report_stopped/stop_transcode calls that hold
+// the global HTTP mutex.  The worker wanting that mutex cannot reach its
+// `while (s_rep_run)` check, so the join waits on a thread that is waiting on a
+// thread the join is blocking behind.  After a long pause -- when the server
+// has already discarded the transcode and those calls take their full timeout
+// -- that is a visibly hung app during teardown.
+//
+// So the worker now lives for the process. It costs a 20 Hz poll of one int,
+// and nothing has to be torn down at exactly the wrong moment. Not destroying
+// the mutex also removes the other hazard here: any late report arriving after
+// a destroy would have locked freed handle.
 void jellyfin_report_flush(void) {
     if (s_rep_started != 1) return;
-    // Give a pending report a moment to go out before the caller tears the
-    // session down, then stop the thread.  Bounded: this runs on the way out
-    // of the music screen, and a server that is not answering must not hold
-    // the UI there.
-    for (int i = 0; i < 40 && s_rep_pending; i++) usleep(25000);
-    s_rep_run = 0;
-    u64 ret;
-    sysThreadJoin(s_rep_tid, &ret);
-    sysMutexDestroy(s_rep_mtx);
-    s_rep_started = 0;
-    s_rep_pending = 0;
+    for (int i = 0; i < 20 && s_rep_pending; i++) usleep(25000);
 }
