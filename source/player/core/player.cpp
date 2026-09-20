@@ -36,6 +36,7 @@
 #include "thumbnail_cache.h"
 #include "meminfo.h"   // read-ahead ring sizing
 #include "slog.h"
+#include "trickplay.h"
 
 extern void crash_log(const char *msg);
 
@@ -132,7 +133,7 @@ static void player_draw_next_popup(int auto_secs) {
 
     char hint[96];
     if (auto_secs >= 0)
-        snprintf(hint, sizeof(hint), "%s \xB7 starting in %ds",
+        snprintf(hint, sizeof(hint), "%s \xC2\xB7 starting in %ds",
                  s_next_hint, auto_secs);
     else
         snprintf(hint, sizeof(hint), "%s", s_next_hint);
@@ -216,6 +217,7 @@ void show_player(const JFItem *item, u32 resume_secs,
     ps.cur_sub   = -1;               // subtitles start off
     ps.sub_is_text = false;
     subs_clear();                    // a previous title's cues are not this one's
+    trickplay_reset();                // ditto for a previous title's scrub sheet
     ps.menu_kind = PLAYER_MENU_NONE;
 
     // Baseline H.264 level 3.1 caps at 1280×720 @ 30fps.  1080p (Alpha) asks
@@ -252,8 +254,35 @@ void show_player(const JFItem *item, u32 resume_secs,
         ps.source.tracks = ps.tracks;
         ps.source.runtime_secs = ps.total_secs;
     }
-    if (ps.have_tracks && ps.tracks.n_audio > 0)
+    if (ps.have_tracks && ps.tracks.n_audio > 0) {
         ps.cur_audio = ps.tracks.default_audio;
+        // A track the user picked earlier this session (see player_menu.cpp)
+        // wins over the server's own default -- that is the whole point of
+        // remembering it, otherwise every episode reopens on commentary or
+        // a lossy default and has to be switched by hand again.
+        int pref_audio = track_pref_find_audio(&ps.tracks);
+        if (pref_audio >= 0) ps.cur_audio = pref_audio;
+    }
+
+    // A remembered TEXT subtitle preference is applied the same way a manual
+    // pick is: fetch and parse the cues now so the URL builder below sees
+    // sub_is_text=true and never asks the server to burn it in. A remembered
+    // preference is only ever noted from a track the user chose themselves
+    // (track_pref_note_sub), so this can never surprise them with a track
+    // they never picked, and it never matches a bitmap track (track_pref_
+    // find_sub requires jf_sub_is_text), so it can never trigger an
+    // unexpected transcode.
+    if (ps.have_tracks && ps.tracks.n_subs > 0) {
+        int pref_sub = track_pref_find_sub(&ps.tracks);
+        if (pref_sub >= 0) {
+            const JFStream *st = &ps.tracks.subs[pref_sub];
+            if (subs_load(item->id, ps.source.id, st->index) > 0) {
+                ps.cur_sub     = pref_sub;
+                ps.sub_is_text = true;
+                hud_set_cc_active(true);
+            }
+        }
+    }
 
     // Continue Watching: open the transcode at the saved position.  The new
     // stream's PTS starts at 0, so play_base_us anchors the absolute clock —
