@@ -75,6 +75,11 @@ struct PlayerState {
     // one the server has to burn in.  Decided from the stream's Codec at
     // selection time; see build_stream_url() for why it changes the URL.
     bool     sub_is_text;
+    // Same idea for a PGS bitmap track drawn on-device (subtitles_pgs.h) --
+    // a separate flag rather than folding into sub_is_text because the
+    // fetch/decode/draw paths are entirely different, but build_stream_url()
+    // treats both identically: either one means "do not ask for burn-in".
+    bool     sub_is_pgs;
     int      menu_kind;          // PLAYER_MENU_*
 
     // The version chosen before playback.  Only the active source is retained;
@@ -139,6 +144,24 @@ void player_prefill(PlayerState *ps, bool fatal_on_eof, int guard_max);
 // still to perform: HUD_ACTION_SEEK when a track change needs a 0-delta
 // reopen, otherwise HUD_ACTION_NONE (or act unchanged if not menu-related).
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act);
+
+// Remembered audio/subtitle track choice, for the rest of this app run (not
+// persisted to disk -- a binge session is the whole point; surviving a
+// relaunch is not). Matched by exact JFTracks label rather than index or
+// language, because Jellyfin's DisplayTitle is stable across episodes of the
+// same show while stream indices are not, and a fuzzy match risks silently
+// landing on the wrong track. Only ever set from a track the user actually
+// picked (see player_menu.cpp), so applying it can never surprise the user
+// with a track they did not choose themselves at some point this session.
+void track_pref_note_audio(const JFStream *s);
+void track_pref_note_sub(const JFStream *s);   // NULL = "subtitles off"
+
+// Index into tracks->audio[]/subs[] matching the remembered preference, or
+// -1 if there is none yet or nothing in this title matches. The subtitle
+// match additionally requires a TEXT codec (jf_sub_is_text) -- a remembered
+// preference must never silently trigger the burn-in transcode path.
+int  track_pref_find_audio(const JFTracks *tracks);
+int  track_pref_find_sub(const JFTracks *tracks);
 
 // -------------------------------------------------------
 // core/player_seek.cpp — seek input machine + seek execution

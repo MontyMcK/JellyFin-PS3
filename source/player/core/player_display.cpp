@@ -308,7 +308,29 @@ void player_display_frame(PlayerState *ps) {
     // WITHOUT the seek preview offset that the HUD applies below -- while a
     // seek is armed the bar should show where you are going, but the words on
     // screen still belong to the frame actually being displayed.
-    if (subs_active() && ps->frame_count > 0) {
+    if (subs_active() && ps->frame_count > 0 && subs_is_pgs()) {
+        const u64 now_ms = (ps->play_base_us + audio_get_clock_us()) / 1000ULL;
+        const PgsBitmap *bmp = subs_pgs_at(now_ms);
+        if (bmp && bmp->rgba && bmp->frame_w > 0 && bmp->frame_h > 0) {
+            // Position scales from the PG stream's OWN authored coordinate
+            // space (bmp->frame_w/h -- typically 1920x1080 for a BD disc)
+            // into the actual display output. SIZE DOES NOT: drawBitmapRect-
+            // Alpha is a crop, not a resize (see ui.h), so the bitmap is
+            // drawn at its own decoded pixel dimensions regardless of
+            // display resolution. For a PS3 set to output at the disc's
+            // native resolution (the common 1080p BD -> 1080p output case)
+            // that scale factor is 1:1 and this is exactly right; at a
+            // lower output resolution (e.g. 720p) an authored-1080p bitmap
+            // will render oversized relative to the frame. Flagged rather
+            // than silently wrong -- a scaling blit is the fix if hardware
+            // testing shows this matters in practice.
+            int dx = (int)((s64)bmp->x * (s64)display_width  / bmp->frame_w);
+            int dy = (int)((s64)bmp->y * (s64)display_height / bmp->frame_h);
+            drawBitmapRectAlpha(bmp->rgba, (u32)bmp->width,
+                                0, 0, (u32)bmp->width, (u32)bmp->height,
+                                (u32)dx, (u32)dy);
+        }
+    } else if (subs_active() && ps->frame_count > 0) {
         const u64 now_ms = (ps->play_base_us + audio_get_clock_us()) / 1000ULL;
         const char *line = subs_text_at(now_ms);
         if (line && *line) {
@@ -396,7 +418,7 @@ void player_display_frame(PlayerState *ps) {
             s64 prev = (s64)hud_elapsed + (s64)ps->seek.pending_secs * 1000000LL;
             hud_elapsed = prev < 0 ? 0 : (u64)prev;
         }
-        hud_draw(hud_elapsed, ps->paused);
+        hud_draw(hud_elapsed, ps->paused, ps->seek.state == SEEK_SCRUB);
         { static int s_hg2 = 0; if (s_hg2 < 12) { plog("hud_gate: draw returned"); s_hg2++; } }
     }
 

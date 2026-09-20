@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "subtitles.h"
+#include <stdlib.h>
 // The host test (tests/test_subtitles.cpp) compiles THIS file with stubs for
 // the console-only dependencies, so the parser under test is the one the PS3
 // actually runs rather than a copy that can drift away from it.
@@ -27,17 +28,43 @@ static SubCue *s_cues   = NULL;
 static int     s_n      = 0;
 static int     s_cursor = 0;
 
-bool subs_active(void) { return s_n > 0; }
+// Which kind of track (if any) is currently loaded. Both tables/buffers
+// below are kept allocated across subs_clear() regardless of mode -- see
+// the existing text-cue comment for why (switching tracks mid-film should
+// not have to find that memory again on an already-tight heap).
+typedef enum { SUB_NONE = 0, SUB_TEXT, SUB_PGS } SubMode;
+static SubMode s_mode = SUB_NONE;
+
+// ---- PGS state (see subtitles.h's memory note) ----------------------------
+#define PGS_SUP_MAX (4 * 1024 * 1024)
+static uint8_t  *s_pgs_raw     = NULL;   // the whole .sup body, kept resident
+static int        s_pgs_raw_len = 0;
+static PgsIndex   s_pgs_index;
+
+static uint32_t  *s_pgs_px      = NULL;  // decoded-bitmap scratch, grows on demand
+static int         s_pgs_px_cap = 0;     // pixels
+static PgsBitmap   s_pgs_cur;
+static bool        s_pgs_cur_ok    = false;
+static int         s_pgs_cur_epoch = -1; // which epoch s_pgs_cur holds, -1 = none
+
+bool subs_active(void) { return s_mode != SUB_NONE; }
+
+bool subs_is_pgs(void) { return s_mode == SUB_PGS; }
 
 void subs_reset_cursor(void) { s_cursor = 0; }
 
 void subs_clear(void)
 {
+    s_mode = SUB_NONE;
     s_n = 0;
     s_cursor = 0;
-    // The table itself is kept: switching tracks mid-film should not have to
-    // find 850 KB again on a heap that VDEC and the ring have already carved
-    // up, and holding it costs nothing the player was going to use.
+    // The tables themselves are kept: switching tracks mid-film should not
+    // have to find that memory again on a heap that VDEC and the ring have
+    // already carved up, and holding it costs nothing the player was going
+    // to use.
+    s_pgs_index.n   = 0;
+    s_pgs_cur_epoch = -1;
+    s_pgs_cur_ok    = false;
 }
 
 // "00:01:23,456" -> milliseconds.  Accepts '.' as well as ',' because WebVTT
@@ -161,7 +188,58 @@ int subs_load(const char *item_id, const char *media_source_id, int stream_index
              (s_n == SUB_MAX_CUES) ? " [TABLE FULL]" : "");
     plog(b);
     s_cursor = 0;
-    return s_n > 0 ? s_n : -1;
+    if (s_n <= 0) return -1;
+    s_mode = SUB_TEXT;
+    return s_n;
+}
+
+int subs_load_pgs(const char *item_id, const char *media_source_id, int stream_index)
+{
+    subs_clear();
+    if (!item_id || !item_id[0] || stream_index < 0) return -1;
+
+    if (!s_pgs_raw) {
+        s_pgs_raw = (uint8_t *)malloc(PGS_SUP_MAX);
+        if (!s_pgs_raw) { plog("subs: out of memory for the .sup buffer"); return -1; }
+    }
+
+    // Unlike Stream.srt, Jellyfin serves this format's raw bytes rather than
+    // transcoding it -- there is nothing to transcode a bitmap subtitle
+    // INTO that still counts as text, so .sup is the extracted elementary
+    // stream verbatim (see subtitles_pgs.h's format PROVENANCE note).
+    char url[640];
+    snprintf(url, sizeof(url),
+             "%s/Videos/%s/%s/Subtitles/%d/Stream.sup",
+             g_server, item_id,
+             (media_source_id && media_source_id[0]) ? media_source_id : item_id,
+             stream_index);
+
+    const int rc = http_fetch_binary(url, g_token, s_pgs_raw, PGS_SUP_MAX);
+    if (rc <= 0) {
+        char b[112];
+        snprintf(b, sizeof(b), "subs: pgs fetch failed rc=%d idx=%d", rc, stream_index);
+        plog(b);
+        return -1;
+    }
+    if (rc >= PGS_SUP_MAX - 1) {
+        // plog() itself truncates at 127 chars -- keep this short rather
+        // than write a long explanation that never reaches the log file.
+        char b[80];
+        snprintf(b, sizeof(b),
+                 "subs: pgs fetch hit %dMB cap -- likely TRUNCATED",
+                 PGS_SUP_MAX / (1024 * 1024));
+        plog(b);
+    }
+    s_pgs_raw_len = rc;
+
+    const int n = pgs_build_index(s_pgs_raw, s_pgs_raw_len, &s_pgs_index);
+    char b[112];
+    snprintf(b, sizeof(b), "subs: pgs loaded %d epochs (%d bytes) idx=%d",
+             n, s_pgs_raw_len, stream_index);
+    plog(b);
+    if (n <= 0) return -1;
+    s_mode = SUB_PGS;
+    return n;
 }
 
 const char *subs_text_at(u64 pts_ms)
@@ -199,4 +277,52 @@ const char *subs_text_at(u64 pts_ms)
     const SubCue *c = &s_cues[s_cursor];
     if (t >= c->start_ms && t <= c->end_ms) return c->text;
     return NULL;
+}
+
+const PgsBitmap *subs_pgs_at(u64 pts_ms)
+{
+    if (s_mode != SUB_PGS || s_pgs_index.n <= 0) return NULL;
+
+    const int idx = pgs_find_epoch(&s_pgs_index, (u32)pts_ms);
+    if (idx < 0) return NULL;
+
+    const PgsEpoch *e = &s_pgs_index.epoch[idx];
+    if (!e->has_object) return NULL;   // an explicit "hide subtitle" epoch
+
+    if (idx == s_pgs_cur_epoch) return s_pgs_cur_ok ? &s_pgs_cur : NULL;
+
+    // A new display set: decode it now. Grown on demand rather than
+    // pre-allocated at PGS_MAX_W*PGS_MAX_H up front -- most cropped dialogue
+    // bitmaps are far smaller than that worst case, so this only pays for
+    // what a given disc's subtitles actually need (same reasoning
+    // thumbnail_cache.cpp's slot sizing comment gives).
+    if (!s_pgs_px) {
+        s_pgs_px_cap = 800 * 140;   // a modest first guess; grows below if wrong
+        s_pgs_px = (uint32_t *)malloc((size_t)s_pgs_px_cap * 4);
+    }
+    bool ok = s_pgs_px &&
+        pgs_decode_epoch(s_pgs_raw, s_pgs_raw_len, e->pcs_offset,
+                         s_pgs_px, s_pgs_px_cap, &s_pgs_cur);
+    if (!ok && s_pgs_px && s_pgs_cur.width > 0 && s_pgs_cur.height > 0) {
+        const long need = (long)s_pgs_cur.width * s_pgs_cur.height;
+        if (need <= (long)PGS_MAX_W * PGS_MAX_H) {
+            uint32_t *grown = (uint32_t *)realloc(s_pgs_px, (size_t)need * 4);
+            if (grown) {
+                s_pgs_px     = grown;
+                s_pgs_px_cap = (int)need;
+                ok = pgs_decode_epoch(s_pgs_raw, s_pgs_raw_len, e->pcs_offset,
+                                      s_pgs_px, s_pgs_px_cap, &s_pgs_cur);
+            }
+        } else {
+            char b[112];
+            snprintf(b, sizeof(b),
+                     "subs: pgs object %dx%d exceeds PGS_MAX_W/H -- skipped",
+                     s_pgs_cur.width, s_pgs_cur.height);
+            plog(b);
+        }
+    }
+
+    s_pgs_cur_epoch = idx;
+    s_pgs_cur_ok    = ok;
+    return ok ? &s_pgs_cur : NULL;
 }

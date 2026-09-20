@@ -91,6 +91,12 @@ typedef struct {
 // bitmap ones (PGS, VOBSUB) have no text to fetch and still cost a transcode.
 bool jf_sub_is_text(const char *codec);
 
+// PGS is also drawn on the console now (source/player/subtitles_pgs.h), via
+// the raw .sup elementary stream rather than SubRip -- a separate check from
+// jf_sub_is_text() because the fetch and decode paths are entirely
+// different. VOBSUB ("dvdsub") is neither: still burn-in only.
+bool jf_sub_is_pgs(const char *codec);
+
 typedef struct {
     JFStream audio[JF_MAX_STREAMS];
     int      n_audio;

@@ -32,7 +32,11 @@ int       hud_seek_delta(void);
 
 // Draw the overlay onto the current framebuffer.  Must be called after rsxSync().
 // elapsed_us: microseconds of playback elapsed (from audio_get_clock_us()).
-void      hud_draw(u64 elapsed_us, bool paused);
+// scrubbing: true only during an active L2/R2 hold-scrub (player_seek.cpp's
+// SEEK_SCRUB state) -- draws the trickplay preview card above the seek bar
+// when a tile is available (trickplay.h). Never true for a quick tap, so a
+// ±10s skip never shows the card.
+void      hud_draw(u64 elapsed_us, bool paused, bool scrubbing);
 
 // True when the overlay is currently visible.
 bool      hud_is_visible(void);

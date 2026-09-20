@@ -35,6 +35,19 @@ static int http_request(int, const char *, const char *, const char *,
     out[n] = '\0';
     return n;
 }
+// Binary counterpart, for subs_load_pgs()'s Stream.sup fetch -- a separate
+// fake body since it is raw bytes (may embed NULs), not a C string.
+static const unsigned char *g_fake_binary     = NULL;
+static int                  g_fake_binary_len = 0;
+static int http_fetch_binary(const char *, const char *,
+                             unsigned char *out, int out_size)
+{
+    if (!g_fake_binary) return -1;
+    int n = g_fake_binary_len;
+    if (n > out_size) n = out_size;
+    memcpy(out, g_fake_binary, (size_t)n);
+    return n;
+}
 static void plog(const char *) {}
 
 #define JF_SUBTITLES_TEST 1
@@ -128,6 +141,63 @@ int main(void)
     g_fake_body = "not a subtitle file at all\n\nreally not\n";
     check(subs_load("item", "src", 2) == -1 && !subs_active(),
           "unparseable input yields no cues");
+
+    // ---- PGS path: subtitles.cpp's own glue (mode switching, buffer
+    // growth, subs_clear() teardown) around subtitles_pgs.c, which is
+    // separately exhaustively tested by test_subtitles_pgs.c against the
+    // real segment format -- this just proves the wiring, with one minimal
+    // hand-built epoch (2x2 bitmap, palette index 9, at t=500ms). -------
+    {
+        static unsigned char sup[128];
+        int n2 = 0;
+        auto put_seg = [&](unsigned pts90k, unsigned char type,
+                           const unsigned char *payload, int plen) {
+            sup[n2++] = 'P'; sup[n2++] = 'G';
+            sup[n2++] = (unsigned char)(pts90k >> 24); sup[n2++] = (unsigned char)(pts90k >> 16);
+            sup[n2++] = (unsigned char)(pts90k >> 8);  sup[n2++] = (unsigned char)pts90k;
+            sup[n2++] = 0; sup[n2++] = 0; sup[n2++] = 0; sup[n2++] = 0;
+            sup[n2++] = (unsigned char)type;
+            sup[n2++] = (unsigned char)(plen >> 8); sup[n2++] = (unsigned char)plen;
+            memcpy(sup + n2, payload, (size_t)plen);
+            n2 += plen;
+        };
+        const unsigned char pcs[] = {
+            0x07,0x80,0x04,0x38, 0x10, 0x00,0x00, 0x80, 0x00, 0x01, 0x01,
+            0x00,0x01, 0x00, 0x00, 0x00,0x05, 0x00,0x05,
+        };
+        const unsigned char pds[] = { 0x01,0x00, 0x09,150,128,128,255 };
+        const unsigned char ods[] = {
+            0x00,0x01, 0x00, 0xC0, 0x00,0x00,0x0E, 0x00,0x02, 0x00,0x02,
+            0x00,0x82,0x09, 0x00,0x00,
+            0x00,0x82,0x09, 0x00,0x00,
+        };
+        put_seg(45000, 0x16, pcs, sizeof(pcs));   // 45000/90 = 500ms
+        put_seg(45000, 0x14, pds, sizeof(pds));
+        put_seg(45000, 0x15, ods, sizeof(ods));
+        put_seg(45000, 0x80, NULL, 0);
+
+        g_fake_binary = sup; g_fake_binary_len = n2;
+        int epochs = subs_load_pgs("item", "src", 3);
+        check(epochs == 1, "pgs: one epoch indexed through subs_load_pgs");
+        check(subs_active() && subs_is_pgs(),
+             "pgs: subs_active()+subs_is_pgs() true after load");
+        check(subs_text_at(500) == NULL,
+             "pgs: subs_text_at() stays NULL while a PGS track is active");
+
+        const PgsBitmap *bmp = subs_pgs_at(500);
+        check(bmp && bmp->width == 2 && bmp->height == 2,
+             "pgs: subs_pgs_at() decodes the bitmap at its epoch");
+        check(bmp && bmp->x == 5 && bmp->y == 5, "pgs: composition position (5,5)");
+        check(subs_pgs_at(0) == NULL, "pgs: nothing before the epoch starts");
+
+        subs_clear();
+        check(!subs_active() && !subs_is_pgs() && subs_pgs_at(500) == NULL,
+             "pgs: subs_clear() empties the track and drops out of PGS mode");
+
+        g_fake_binary = NULL;
+        check(subs_load_pgs("item", "src", 3) == -1 && !subs_active(),
+             "pgs: a failed fetch leaves subtitles off");
+    }
 
     if (failures) { printf("test_subtitles: %d FAILED\n", failures); return 1; }
     printf("test_subtitles: all checks passed\n");
