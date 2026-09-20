@@ -77,38 +77,98 @@ int xmb_tab_order(int *order);
 #define OSK_ROWS_N 4
 
 // -------------------------------------------------------
-// Palette — deep indigo base (XMB-style), one violet accent
-// (Jellyfin brand-adjacent), white reserved for selection.
-// Text comes in three fixed levels; never invent new greys.
+// Palette — now a RUNTIME struct, not #defines.  See theme.h.
 // -------------------------------------------------------
-#define XMB_BG          0x000B0E1EUL   // RSX clear color (sits under the gradient)
-#define XMB_BG_TOP      0x00151A38UL   // background gradient, top edge
-#define XMB_BG_BOT      0x0005060CUL   // background gradient, bottom edge
-#define XMB_ACCENT      0x008F6FE8UL   // violet: progress fills, active marks, brand tag
-#define XMB_ACCENT_DEEP 0x005B43A8UL   // latched accent (caps-lock key)
-#define XMB_TEXT        0x00E9EBF5UL   // primary text (soft white)
-#define XMB_TEXT_DIM    0x0099A0BCUL   // secondary text / metadata
-#define XMB_TEXT_FAINT  0x005C6386UL   // tertiary text, section labels, empty states
-#define XMB_WHITE       0x00FFFFFFUL   // selected emphasis only
-#define XMB_PANEL       0x00191E3CUL   // raised panels (settings card, modals)
-#define XMB_PANEL_HI    0x00232950UL   // selected row fill
-#define XMB_HAIRLINE    0x002C3258UL   // 1px panel borders
-#define XMB_THUMB_DIM   0x0012162CUL   // thumbnail loading placeholder
-#define XMB_TRACK       0x0010142AUL   // progress bar track
-#define XMB_KEY_NORMAL  0x001A1F3EUL   // OSK key
-#define XMB_KEY_SEL     0x00F0F2FAUL   // OSK selected key (white, dark label)
-#define XMB_KEY_LABEL_SEL 0x0010142AUL // label color on the selected key
-#define XMB_ICON_IDLE   0x00646C96UL   // inactive tab icons / chrome glyphs
+// Phase 1 of the XMB revamp moved every colour below into `Theme`, so the
+// palette can be swapped at runtime (Settings > Theme) and shipped as .ini
+// files.  theme.h defines one shim macro per colour that used to live here —
+// XMB_ACCENT and friends still resolve, now to g_theme fields — so every
+// existing draw call site compiles and reads exactly as before.
+//
+// Adding a colour: put it in the Theme struct, give both built-ins a value,
+// add an [colors] key in theme_load(), and add its shim to theme.h.  Do NOT
+// reintroduce a bare #define here — it would silently ignore the theme.
+//
+// XMB_ACCENT changed value in this phase: the old 8F6FE8 violet became
+// AA5CC3, Jellyfin's official purple, per handoff section 2.1.  XMB_ACCENT_DEEP
+// likewise changed role, from the OSK caps-lock latch to the primary-action
+// ramp start; the caps-lock key still uses it and still reads as a deeper
+// accent, so nothing needed re-pointing.
+#include "theme.h"
 
 // -------------------------------------------------------
-// XMB layout constants — pixel values authored at 1280×720.
-// UIS_W/UIS_H scale them down proportionally on SD framebuffers
-// (576i → 720×576, 480i/p → 720×480); HD modes keep the authored
-// sizes.  Runtime expressions: fine everywhere they're used (no
-// array sizes), evaluated after init_screen() sets display_*.
+// XMB layout constants -- pixel values authored at 1280x720, scaled to the
+// framebuffer.
 // -------------------------------------------------------
-#define UIS_W(px) ((int)display_width  < 1280 ? (px) * (int)display_width  / 1280 : (px))
-#define UIS_H(px) ((int)display_height <  720 ? (px) * (int)display_height /  720 : (px))
+// ONE scale, applied to everything the XMB draws: geometry through UIS_W/UIS_H
+// and type through UIS_TF.  That uniformity is the whole point, and it was not
+// always true -- see below.
+//
+// These used to scale DOWN only:
+//
+//     #define UIS_H(px) ((int)display_height < 720 ? (px) * h / 720 : (px))
+//
+// i.e. SD framebuffers shrank, and 720p and above got the authored number as a
+// literal pixel count.  On this console's 1920x1080 that made the whole UI
+// two-thirds of its intended size, which is why a 12.5px label taken straight
+// from the design handoff was reported unreadable on the TV.
+//
+// Fixing that for the chrome alone (a separate UIS_T that scaled both ways) was
+// worse than either extreme: the top bar, tab strip and hints bar rendered at
+// 1.5x while the cards, rows, jump bar and every literal font size stayed at
+// 1.0x, so the UI was at TWO scales at once -- reported as "a lot of the sizing
+// in general seems off", with the A-Z jump bar as the loudest symptom (letters
+// sized from the rescaled grid, drawn in a column that had not moved).
+//
+// So UIS_W/UIS_H now scale in both directions and UIS_T is gone.  Anything
+// authored against the handoff's 1280x720 canvas goes through one of these
+// three macros -- no bare pixel literals in XMB draw code, including font
+// sizes, or that thing alone stays at 1.0x and the mismatch is back.
+//
+// Width and height scale independently on purpose: SD is 720x576 and 720x480,
+// which are not 16:9 pixel grids, and the previous code already treated the
+// two axes separately.  At 720p and 1080p the two factors are equal.
+//
+// NOT in scope: the player HUD (player/hud/) and the boot/auth screens, whose
+// geometry is raw pixels throughout and self-consistent that way.  Scaling
+// their type without their boxes would overflow rows that are 30px tall.
+//
+// Runtime expressions -- fine everywhere they are used (no array sizes),
+// evaluated after init_screen() has set display_*.
+// The live scale, as a percentage of the authoring canvas.  0 means AUTO:
+// track the framebuffer, which is the default and what the paragraphs above
+// describe.  Any other value overrides it on both axes, so 100 reproduces the
+// pre-2026-09-20 look exactly (authored numbers as literal pixels) and 120 is
+// the "increase by 10-20%" that prompted this work.
+//
+// Settable without a rebuild -- it is read from jellyfin_uiscale.txt at boot
+// (ui_scale.cpp), which is an ordinary text file in the app data dir and can be
+// dropped in over FTP.  That matters because this is the one change in the UI
+// whose only real test is looking at it on a TV: if the proportional default is
+// wrong for a given set, the fix is one line in a text file rather than a
+// rebuild and a reflash.
+extern int g_uis_pct;
+
+static inline int uis_w(int px) {
+    return g_uis_pct ? px * g_uis_pct / 100
+                     : px * (int)display_width / 1280;
+}
+static inline int uis_h(int px) {
+    return g_uis_pct ? px * g_uis_pct / 100
+                     : px * (int)display_height / 720;
+}
+static inline float uis_tf(float px) {
+    return g_uis_pct ? px * (float)g_uis_pct / 100.0f
+                     : px * (float)display_height / 720.0f;
+}
+
+#define UIS_W(px)  uis_w((int)(px))
+#define UIS_H(px)  uis_h((int)(px))
+
+// Float form, for type sizes and the handoff's fractional values -- drawTTF()
+// and ttf_text_width() both take a float, and rounding a 12.5px label to 12
+// before scaling loses more than it looks like it should.
+#define UIS_TF(px) uis_tf((float)(px))
 
 // CRT overscan inset (Settings > Screen Size).  0 by default, so with no
 // calibration every anchor below is byte-identical to before.  Folded into the
@@ -118,6 +178,14 @@ int xmb_tab_order(int *order);
 #define XMB_OY          overscan_y()
 #define XMB_OX          overscan_x()
 
+// The chrome band, from the handoff's measured numbers.
+//
+// Section 3.1 and the Phase 2 block in section 8 put the tab icons at y=61, the
+// active label at y=96, its underline at y=110 and the divider at y=144, all on
+// the 1280x720 authoring canvas.  Those four have to keep their spacing
+// relative to each other, so they go through one scale -- and now so does
+// everything below them, which is the fix described at the top of this file.
+// At 1080p the divider lands at 216, which IS 144 on this screen.
 #define XMB_TOPBAR_H    UIS_H(64)
 #define XMB_TABBAR_H    UIS_H(80)
 #define XMB_DIVIDER_Y   (XMB_OY + XMB_TOPBAR_H + XMB_TABBAR_H)
@@ -130,12 +198,12 @@ int xmb_tab_order(int *order);
 
 // Centered narrow list layout (search results keep this style).
 // 780 (~60% of 1280) when it fits, otherwise the framebuffer minus margins.
-#define XMB_LIST_W      ((int)display_width - 2 * XMB_ITEM_PAD < 780 \
-                             ? (int)display_width - 2 * XMB_ITEM_PAD : 780)
+#define XMB_LIST_W      ((int)display_width - 2 * XMB_ITEM_PAD  < UIS_W(780) \
+                             ? (int)display_width - 2 * XMB_ITEM_PAD : UIS_W(780))
 #define XMB_ROW_H       UIS_H(88)                   // row visual height
 #define XMB_ROW_GAP     UIS_H(16)                   // vertical gap between rows
 #define XMB_ROW_STRIDE  (XMB_ROW_H + XMB_ROW_GAP)
-#define XMB_ROW_RADIUS    8                         // reserved for future rounded corners
+#define XMB_ROW_RADIUS  UIS_W(8)                         // reserved for future rounded corners
 
 // Items visible simultaneously in the list area
 #define XMB_ITEMS_VIS ((int)((display_height - XMB_CONTENT_Y - XMB_BOTTOM_PAD) / XMB_ROW_STRIDE))
@@ -157,10 +225,10 @@ int xmb_tab_order(int *order);
 // Cards are sized to fill the space between the content area and the hints
 // bar at any resolution.  The 26px reserve covers the breadcrumb offset on
 // sub-screens so the bottom row's text band never runs into the hints bar.
-#define XMB_GRID_AVAIL_H ((int)display_height - XMB_BOTTOM_PAD - XMB_GRID_Y0 - 26)
-#define XMB_CARD_H_FIT   (XMB_GRID_AVAIL_H / XMB_GRID_ROWS - XMB_CARD_TEXT_H - 6)
-#define XMB_CARD_W_CAP   ((int)display_width * 300 / 1280)
-#define XMB_GRID_Y0      (XMB_CONTENT_Y + 8)
+#define XMB_GRID_AVAIL_H ((int)display_height - XMB_BOTTOM_PAD - XMB_GRID_Y0 - UIS_H(26))
+#define XMB_CARD_H_FIT   (XMB_GRID_AVAIL_H / XMB_GRID_ROWS - XMB_CARD_TEXT_H - UIS_H(6))
+#define XMB_CARD_W_CAP   UIS_W(300)
+#define XMB_GRID_Y0      (XMB_CONTENT_Y + UIS_H(8))
 
 // Music tab: square album cards under a sub-tab header row, with a taller
 // text band (title + artist + meta for the selected card).
@@ -191,20 +259,24 @@ void xmb_grid_geom(int tab, GridGeom *gg);
 // Poster-grid geometry not tied to any tab (search list, thumb prefetch).
 void xmb_grid_geom_portrait(GridGeom *gg);
 
-// Jump bar (narrow letter column to the left of the item list)
+// Jump bar (narrow letter column to the left of the item list).  The column
+// scales with the letters in it -- when it did not, the font size derived from
+// the grid outgrew a fixed 20px column and the A-Z strip overflowed.
 #define JBAR_ENTRIES 27
-#define JBAR_W       20
-#define JBAR_GAP      8
+#define JBAR_W       UIS_W(20)
+#define JBAR_GAP     UIS_W(8)
 
-// OSK constants (pixels).  Keys are sized so the widest keyboard row —
-// 11 step units on the login OSK (Caps + zxcvbnm + backspace) — fits the
-// framebuffer with a small margin; capped at the 720p-authored 80px so HD
-// modes are unchanged.  A 720px-wide SD framebuffer otherwise overflows
-// both edges (the 576i "can't enter my server address" report).
+// OSK constants, authored at 1280x720 like everything else here.  Keys are
+// sized so the widest keyboard row -- 11 step units on the login OSK (Caps +
+// zxcvbnm + backspace) -- fits the framebuffer with a small margin, capped at
+// the authored 80px.  A 720px-wide SD framebuffer otherwise overflows both
+// edges (the 576i "can't enter my server address" report), and the FIT term is
+// what catches that: the cap alone would not, because the cap scales with the
+// screen and the row's total width does not fit at every aspect.
 #define OSK_UNITS_MAX 11
-#define OSK_GAP       8
-#define OSK_KEY_W_FIT (((int)display_width - 24) / OSK_UNITS_MAX - OSK_GAP)
-#define OSK_KEY_W     (OSK_KEY_W_FIT < 80 ? OSK_KEY_W_FIT : 80)
+#define OSK_GAP      UIS_W(8)
+#define OSK_KEY_W_FIT (((int)display_width - UIS_W(24)) / OSK_UNITS_MAX - OSK_GAP)
+#define OSK_KEY_W     (OSK_KEY_W_FIT < UIS_W(80) ? OSK_KEY_W_FIT : UIS_W(80))
 #define OSK_KEY_H     UIS_H(44)
 #define OSK_STEP_X   (OSK_KEY_W + OSK_GAP)
 #define OSK_STEP_Y   (OSK_KEY_H + OSK_GAP)
@@ -274,6 +346,12 @@ extern int     g_search_sel;
 extern int     g_search_scroll;
 extern char    g_search_buf[64];
 extern int     g_search_results_count;
+// True while a search is out on its worker thread (ui_search.cpp).  Declared
+// here beside the rest of the search state because BOTH sides need it: the
+// input handler starts and collects the query, and the results list uses it to
+// show "Searching..." instead of "No results" for the several seconds the
+// server takes to answer.
+bool xmb_search_in_flight(void);
 extern XMBItem g_search_results[XMB_ITEMS_MAX];
 extern int     OSK_Y0;
 
@@ -286,7 +364,7 @@ extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 // The "Player Stats Overlay" row only exists when the diagnostics module is
 // compiled in — a build with ENABLE_PLAYER_STATS 0 has nothing for it to
 // toggle, so the row goes away rather than sitting there doing nothing.
-#define XMB_SETTINGS_COUNT (8 + ENABLE_PLAYER_STATS)  // selectable settings entries
+#define XMB_SETTINGS_COUNT (9 + ENABLE_PLAYER_STATS)  // selectable settings entries
 extern int   g_settings_sel;       // highlighted settings entry
 extern bool  g_settings_confirm;   // true while the logout confirm prompt is up
 extern bool  g_overscan_calib;     // true while the overscan calibration screen is up
@@ -301,6 +379,12 @@ void xmb_overscan_calib_text(void);
 // -------------------------------------------------------
 // Hints bar
 // -------------------------------------------------------
+// glyph: X/C/S/T face buttons, A=START, B=SELECT, D/E=d-pad, L=L2, R=R2 --
+// all drawn from the Kenney sprite sheet -- plus lowercase 'l'/'r' for L1/R1,
+// which are drawn instead as outlined badges (handoff section 3.1).
+//
+// An EMPTY label pairs a hint with the one after it, sharing that one's label:
+// {{'l',""},{'r',"Tab"}} renders as a single "L1 R1 Tab" cluster.
 typedef struct { char glyph; const char *label; } Hint;
 
 // -------------------------------------------------------
@@ -328,17 +412,53 @@ void ttf_prewarm_hud(void);
 #define UI_FACE_BOLD      1
 #define UI_FACE_NOTO      2   // Noto Sans Bold        (SIL OFL 1.1)
 #define UI_FACE_ROBOCOND  3   // Roboto Condensed Bold (Apache 2.0)
+// The v1.0 type roles, one per design token.  Each resolves to a FALLBACK
+// CHAIN, not a single face -- see face_chain() in render/ui_text.cpp.  The
+// display face in particular is a 99-glyph subset with no hyphen or accents,
+// so "Spider-Man" only renders because Rodin backs it up mid-word.
+//
+// REGULAR/BOLD are SCE-PS3 Rodin LATIN: --font-system and --font-tech, the
+// face for every string that is not one of the four roles below.
+#define UI_FACE_DISPLAY   4   // GT America Expanded Bold - media titles
+#define UI_FACE_SPEC      5   // Michroma - codec / quality values
+#define UI_FACE_EYEBROW   6   // Microgramma - eyebrows and section labels
+#define UI_FACE_TAB       7   // Satoshi Bold - tab labels, clock
+#define UI_FACE_TAB_REG   8   // Satoshi Regular - date, cast names
 
 int  ttf_text_width(const char *text, float px, bool bold = false);
 int  ttf_text_width_face(const char *text, float px, int face);
 void drawTTF_face(u32 x, u32 y, const char *text, float px, u32 color, int face);
+
+// Letter-spacing, in pixels ADDED BETWEEN glyphs (the design spells it in em:
+// 0.04em at 11.5px is 0.46px).  See the note in render/ui_text.cpp -- these
+// take the per-glyph path, so they are for short labels, not body text.
+void drawTTF_tracked(u32 x, u32 y, const char *text, float px, u32 color,
+                     int face, float track);
+int  ttf_text_width_tracked(const char *text, float px, int face, float track);
+
+// ASCII-only uppercase, in place.  Safe on the UTF-8 the server sends.
+void ui_upper_ascii(char *s);
+
+// Glyph-blit counters (ui_text.cpp).  blend_px counts pixels that took the
+// read-modify-write branch -- one uncached read of RSX video memory each,
+// which tools/spubench measured at 100x the cost of a write -- and opaque_px
+// counts the ones that hit the store-only fast path.  Read by the XMB's
+// per-frame cost line; see docs/spu-feasibility.md.
+void ui_text_stats_reset(void);
+void ui_text_stats_get(u32 *glyphs, u32 *blend_px, u32 *opaque_px);
 void xmb_draw_tabs(void);
-void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = 14);
+void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = UIS_TF(14));
 
 // Card grid (library tabs).  Two phases per frame (after rsxSync):
 //   cpu   — card images (CPU blit from main RAM), placeholders, selection
 //           border, progress strips, next-page prefetch
 //   text  — titles under every card (selected emphasized) + scroll arrows
+// GPU phase (BEFORE rsxSync): card images as RSX textured quads, drawn from
+// each cache slot's VRAM mirror.  The matching CPU call then skips its blit.
+// See ui/render/ui_card_gpu.h for why this exists and what it costs.
+void xmb_grid_gpu(const GridGeom *gg, const XMBItem *items, int count,
+                  int sel, int scroll, int y0);
+
 void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
                   int sel, int scroll, int y0);
 
@@ -356,6 +476,13 @@ bool xmb_cpu_blit_thumb(const char *item_id, int x, int y, int w, int h);
 // and the triangle detail overlay's poster.
 void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y, int w, int h);
 
+// The same image as a CIRCLE of diameter d, with a one-pixel rim.  v1.0 uses
+// this for the cast headshots.  Write-only, including its anti-aliasing -- see
+// the note on cpu_blit_bitmap_circle() in render/ui_lists.cpp for why that
+// matters and what it costs to get wrong.
+void xmb_cpu_blit_thumb_circle(const char *item_id, int x, int y, int d,
+                               u32 rim);
+
 // Music sub-tab header row.  active = g_music_subtab; focused = the d-pad
 // is on the header (active label pops white instead of just underlined).
 void xmb_draw_music_subtabs(int x, int y, int active, bool focused);
@@ -370,6 +497,11 @@ void xmb_cpu_draw_search_results(void);
 void xmb_draw_jumpbar(int tab);
 void draw_hints_bar(const Hint *hints, int n);
 void xmb_draw_topbar(void);         // brand top-left, clock top-right
+
+// Section eyebrow: the small uppercase label above a row (--font-eyebrow,
+// 11px, 0.18em tracking).  Returns its advance so a count can follow it.
+int  xmb_draw_eyebrow(int x, int y, const char *text, u32 color);
+int  xmb_eyebrow_width(const char *text);
 void xmb_draw_divider(void);        // faded hairline under the tab bar (CPU phase)
 // Centered empty-state: the tab's icon, dimmed, above one line of text.
 void xmb_draw_empty_state(int tab, const char *msg);
