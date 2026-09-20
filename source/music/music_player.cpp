@@ -291,11 +291,16 @@ static int play_one_track(u32 start_secs) {
         if (c != MCMD_NONE) { ret = c; break; }
 
         // ~10 s progress heartbeat keeps the server's session view honest.
+        //
+        // ASYNC, and it has to be: this thread is the only thing refilling a
+        // ring that holds 683 ms of audio, and the blocking version of this
+        // call stalled it for a whole server round trip every ten seconds.
+        // That is the dropout you could hear.
         u64 now = timing_get_us();
         if (now - last_prog_us >= 10000000ULL) {
             last_prog_us = now;
-            jellyfin_report_progress(t->id, s_session_id, elapsed_ticks(),
-                                     s_paused);
+            jellyfin_report_progress_async(t->id, s_session_id, elapsed_ticks(),
+                                           s_paused);
         }
 
         // Fill: keep a healthy sync window ahead of the decoder.  A read
@@ -462,6 +467,10 @@ void music_stop(void) {
     g_stream_cancel = false;
     audio_close();
     audio_set_source(NULL, NULL, NULL);   // hand the port back to the video path
+    // Let a queued progress report go out, then retire the worker.  Bounded at
+    // one second: leaving the music screen must not wait on a server that has
+    // stopped answering.
+    jellyfin_report_flush();
     s_started = false;
     s_active  = false;
     plog("music: stopped");
@@ -469,10 +478,14 @@ void music_stop(void) {
 
 void music_toggle_pause(void) {
     s_paused = !s_paused;
-    // Push the state immediately so the server UI flips too.
+    // Push the state so the server UI flips too -- but hand it to the report
+    // thread, because this runs on the RENDER LOOP, from the music screen's
+    // input handler.  The blocking version froze every frame until the server
+    // answered, which is a whole second of dead UI for a button press whose
+    // own effect (the flag above) is instant.
     if (s_pos < s_count)
-        jellyfin_report_progress(s_queue[s_order[s_pos]].id, s_session_id,
-                                 elapsed_ticks(), s_paused);
+        jellyfin_report_progress_async(s_queue[s_order[s_pos]].id, s_session_id,
+                                       elapsed_ticks(), s_paused);
 }
 
 void music_next(void) { s_cmd = MCMD_NEXT; }

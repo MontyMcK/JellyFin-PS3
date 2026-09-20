@@ -153,6 +153,30 @@ void wave_audio_frame(float *dt_scale, float *perturb, float *drive)
 
             wm_update(&s_wm, &f, dt);             // UI-thread state only
             wrm_map(&s_wm.p, &s_out);
+
+            // A bounded trace of what the wave is actually being driven with.
+            //
+            // This subsystem has three ways to look identical from the sofa --
+            // the tap never arriving, the analyser hearing nothing, and the
+            // mapped drive being too gentle to see -- and they need completely
+            // different fixes.  One line every five seconds tells them apart:
+            // rms says whether audio reached the analyser at all, drive says
+            // what the renderer was asked for.  Capped at 24 lines so a long
+            // listening session does not fill the log.
+            static int s_dbg_n  = 0;
+            static u64 s_dbg_us = 0;
+            if (s_dbg_n < 24 && (s_dbg_us == 0 || now - s_dbg_us >= 5000000ULL)) {
+                s_dbg_us = now;
+                s_dbg_n++;
+                char b[112];
+                snprintf(b, sizeof b,
+                         "wave: rms=%d.%02d b0=%d.%02d drive=%d.%02d ts=%d.%02d",
+                         (int)f.rms, (int)(f.rms * 100) % 100,
+                         (int)f.band[0], (int)(f.band[0] * 100) % 100,
+                         (int)s_out.drive, (int)(s_out.drive * 100) % 100,
+                         (int)s_out.dt_scale, (int)(s_out.dt_scale * 100) % 100);
+                plog(b);
+            }
         }
     }
 

@@ -176,6 +176,17 @@ void jellyfin_report_progress(const char *item_id, const char *session_id,
 void jellyfin_report_stopped(const char *item_id, const char *session_id,
                              unsigned long long pos_ticks);
 
+// The same progress report, handed to a worker thread instead of being waited
+// on.  For callers that must not block: the music pump thread (it is the only
+// thing refilling a 683 ms PCM ring) and anything on the render loop.
+//
+// One-slot mailbox -- a report is absolute state, so a newer one replaces an
+// unsent older one rather than queueing behind it.  Call jellyfin_report_flush()
+// before tearing a session down.
+void jellyfin_report_progress_async(const char *item_id, const char *session_id,
+                                    unsigned long long pos_ticks, bool paused);
+void jellyfin_report_flush(void);
+
 // Log out of the current session.  Best-effort notifies the server
 // (POST /Sessions/Logout), clears the in-memory credentials, and removes the
 // saved config so the next launch returns to the login screen.  The server URL
