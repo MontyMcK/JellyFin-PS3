@@ -23,6 +23,7 @@
 
 #include "music_player.h"
 #include "music_fft.h"
+#include "ui_wave_audio.h"
 #include "minimp3.h"
 #include "audio.h"
 #include "stream.h"
@@ -120,6 +121,11 @@ static int music_read_pcm(float *buf, int n_pairs) {
     // run ~700 ms ahead through the PCM ring — bars must move with what's
     // audible, not with what's buffered.
     music_viz_push(buf, got);
+    // Second consumer of the same tap, for the same reason: the XMB's
+    // background wave reacts to what is audible now.  See
+    // source/ui/render/ui_wave_audio.h.  Cheap (fourteen one-pole filters per
+    // sample) and a no-op while the gate is off.
+    wave_audio_push(buf, got);
     return got;
 }
 
