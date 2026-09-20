@@ -35,6 +35,24 @@ static bool        s_http_mtx_ok = false;
 #define HTTP_CONNECT_TIMEOUT_MS 5000
 #define HTTP_IO_TIMEOUT_SEC        8
 
+// SO_RCVTIMEO is an IDLE timeout, but on the FIRST read it is really a
+// time-to-first-byte limit, and those are very different budgets.
+//
+// Measured against this user's server (a debrid/AIOStreams-backed library):
+// a browse/tab request answers in 35 ms, but a `searchTerm` query takes
+// 2.5-8.4 s to emit its first byte, varying run to run for the same term.
+// Eight seconds sits right on top of that spread, so search timed out
+// constantly while everything else was nowhere near the limit -- and no
+// rearrangement of the query helps, because Limit, SortBy, Fields and
+// EnableTotalRecordCount were each measured and none of them is what costs
+// the time.
+//
+// So let the FIRST byte wait longer, and go straight back to failing fast on
+// an idle socket the moment any data has arrived. A server that is simply
+// down still fails at connect() in 5 s; this only extends the case where the
+// server accepted the connection and is thinking about it.
+#define HTTP_FIRST_BYTE_TRIES      3   // x HTTP_IO_TIMEOUT_SEC = 24 s
+
 static void url_parse(const char *url, char *host, int hsz,
                       int *port, char *path, int psz) {
     const char *p = url;
@@ -176,11 +194,27 @@ static int dechunk(char *body, int len) {
 // the byte offset and length of the (decoded) body within buf. Bounded by the
 // socket's idle timeout, and stops early on Content-Length so keep-alive
 // connections don't stall waiting for a close.
+// Why a read ended the way it did.  Filled in unconditionally (it is a handful
+// of stores), but only ever LOGGED when the result is anomalous -- see the
+// "200 but EMPTY body" case in http_request().  Thumbnail fetches run this
+// path constantly, so a log line per request is not acceptable; a log line per
+// impossible-looking result is.
+struct RespDiag {
+    int  total;         // bytes read from the socket in all
+    int  header_end;    // offset of the body, -1 if headers never completed
+    int  reads;         // successful netRecv calls
+    int  last_n;        // what the final netRecv returned (0/-1 = close/timeout)
+    long content_len;   // -1 when the server framed it chunked instead
+    bool chunked;
+    bool cap_hit;       // ran out of buffer rather than out of response
+};
+
 static int read_response(int sock, char *buf, int cap,
-                         int *body_off, int *body_len) {
+                         int *body_off, int *body_len, RespDiag *dg) {
     int  total = 0, header_end = -1;
     long content_len = -1;
     bool chunked = false, parsed = false;
+    int  reads = 0, last_n = 0, first_byte_tries = 0;
     *body_off = 0; *body_len = 0;
 
     while (total < cap - 1) {
@@ -189,7 +223,16 @@ static int read_response(int sock, char *buf, int cap,
             break;
 
         int n = netRecv(sock, buf + total, cap - 1 - total, 0);
-        if (n <= 0) break;        // close, error, or idle timeout
+        last_n = n;
+        if (n <= 0) {
+            // Close, error, or timeout.  While NOTHING has arrived yet this is
+            // a time-to-first-byte timeout rather than an idle one, so spend
+            // the larger budget before giving up -- see HTTP_FIRST_BYTE_TRIES.
+            if (total == 0 && ++first_byte_tries < HTTP_FIRST_BYTE_TRIES)
+                continue;
+            break;
+        }
+        reads++;
         total += n;
         buf[total] = '\0';
 
@@ -206,8 +249,29 @@ static int read_response(int sock, char *buf, int cap,
         }
     }
 
+    if (dg) {
+        dg->total       = total;
+        dg->header_end  = header_end;
+        dg->reads       = reads;
+        dg->last_n      = last_n;
+        dg->content_len = content_len;
+        dg->chunked     = chunked;
+        dg->cap_hit     = (total >= cap - 1);
+    }
+
+    // `total` guards the status parse, and it is not paranoia -- it is the bug
+    // that hid the search failure for a whole session.
+    //
+    // `buf` is s_raw_buf, a STATIC buffer reused by every request. When a read
+    // fails outright (total == 0) nothing is written into it, so it still holds
+    // the PREVIOUS response -- which began "HTTP/1.1 200 OK". The parse below
+    // happily read that and returned 200 for a request that received zero
+    // bytes, so a hard timeout was reported to callers as a successful empty
+    // result. The search screen then showed "No results" instead of an error,
+    // and the log said `status=200 count=0`, which is why this looked for a
+    // long time like the server returning nothing.
     int status = -1;
-    if (strncmp(buf, "HTTP/", 5) == 0) {
+    if (total >= 12 && strncmp(buf, "HTTP/", 5) == 0) {
         char *sp = strchr(buf, ' ');
         if (sp) status = atoi(sp + 1);
     }
@@ -391,9 +455,29 @@ int http_request(int method, const char *url, const char *body,
     if (blen > 0) send_all(sock, body, blen);
 
     int body_off, body_len;
+    RespDiag dg; memset(&dg, 0, sizeof(dg));
     int status = read_response(sock, s_raw_buf, sizeof(s_raw_buf),
-                               &body_off, &body_len);
+                               &body_off, &body_len, &dg);
     netClose(sock);
+
+    // A 200 with nothing in it is not a thing a server does, so when it
+    // happens the interesting facts are on THIS side of the socket and they
+    // are gone the moment this function returns.  The search screen hit
+    // exactly this -- "search status: 200 count: 0" with a provably non-empty
+    // response on the wire (24 items, 57 KB, confirmed against the server) --
+    // and there was no way to tell whether the body never arrived, arrived and
+    // failed to dechunk, or arrived and overflowed.  Now there is.
+    if (status == 200 && body_len <= 0) {
+        char b[224];
+        snprintf(b, sizeof(b),
+                 "http: 200 EMPTY body -- total=%d hdr_end=%d reads=%d "
+                 "last_n=%d chunked=%d clen=%ld cap_hit=%d raw=%.28s | %.60s",
+                 dg.total, dg.header_end, dg.reads, dg.last_n,
+                 dg.chunked ? 1 : 0, dg.content_len, dg.cap_hit ? 1 : 0,
+                 dg.header_end > 0 ? s_raw_buf + dg.header_end : "(no body)",
+                 path);
+        plog(b);
+    }
 
     // 401 on a request that carried a token: the saved session is dead
     // (revoked server-side).  Login itself sends no token, so a wrong
@@ -454,7 +538,7 @@ int http_fetch_binary(const char *url, const char *token,
     // heap exhaustion — see img_arena.h.  Keeping this anyway: it's correct.)
     int body_off, body_len;
     int status = read_response(sock, (char*)out, out_size,
-                               &body_off, &body_len);
+                               &body_off, &body_len, NULL);
     netClose(sock);
 
     if (status != 200 || body_len <= 0) {

@@ -424,3 +424,9 @@ bool jf_sub_is_text(const char *codec)
         if (ieq(codec, kText[i])) return true;
     return false;
 }
+
+bool jf_sub_is_pgs(const char *codec)
+{
+    if (!codec || !codec[0]) return false;
+    return ieq(codec, "pgssub") || ieq(codec, "hdmv_pgs_subtitle");
+}

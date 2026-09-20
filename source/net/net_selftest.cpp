@@ -24,7 +24,34 @@
 // everybody.
 #define RANGE_STRIDE  (64ull * 1024 * 1024)
 
+// -------------------------------------------------------------------------
+//  Bounded waits
+// -------------------------------------------------------------------------
+//  This runs on the boot path, between http_init() and running = 1, so a
+//  blocking socket call in here is a black screen with no way out: on
+//  2026-09-19 a gate file left behind from an earlier session pointed at a
+//  server that was no longer listening, netConnect never returned, and the
+//  app never reached the XMB (crash_log stuck at "8 http_init").  Nothing
+//  below may wait without a bound.
+//
+//  A gate file pointing at a live server never comes near any of these — a
+//  LAN connect and header exchange are milliseconds — so the throughput
+//  figures stay comparable to previous runs.
+#define CONNECT_TIMEOUT_MS   5000   // per-socket, non-blocking connect + poll
+#define IO_TIMEOUT_SEC          5   // per-call recv/send idle timeout
+#define DEADLINE_MARGIN_SEC    15   // wall-clock slack on top of the gate file's seconds
+
 static u8 s_scratch[SCRATCH];
+
+// Milliseconds left before the overall deadline, clamped to cap_ms.  Zero
+// means the deadline has passed and the caller should give up now.
+static int remaining_ms(u64 deadline_us, int cap_ms)
+{
+    const u64 now = timing_get_us();
+    if (now >= deadline_us) return 0;
+    const u64 ms = (deadline_us - now) / 1000ull;
+    return ms > (u64)cap_ms ? cap_ms : (int)ms;
+}
 
 // Minimal URL split — this only ever sees a URL a human put in a config file,
 // and a wrong one costs a log line, so it stays small on purpose.
@@ -48,6 +75,11 @@ static u32 resolve(const char *host)
     unsigned a = 0, b = 0, c = 0, d = 0;
     if (sscanf(host, "%u.%u.%u.%u", &a, &b, &c, &d) == 4)
         return htonl((a << 24) | (b << 16) | (c << 8) | d);
+    // netGetHostByName is the one call in here with no timeout knob, so it is
+    // also the one place that can still stall the boot path.  Log before it so
+    // the log says where we stopped; put a literal IP in the gate file and
+    // this branch never runs.
+    plog("nettest: resolving hostname (no timeout available — prefer a literal IP)");
     struct net_hostent *he = netGetHostByName(host);
     if (he) {
         u32 *list = (u32 *)(u64)he->h_addr_list;
@@ -59,7 +91,10 @@ static u32 resolve(const char *host)
 // Connect, send a ranged GET, and leave the socket positioned at the body.
 // Returns the socket or -1.  Header bytes are read one at a time so the read
 // cannot run past the body and lose bytes we are about to count.
-static int open_ranged(u32 ip, int port, const char *host, const char *path, u64 start)
+// deadline_us is the overall wall clock for the whole test; every wait in here
+// is clamped to whatever is left of it.
+static int open_ranged(u32 ip, int port, const char *host, const char *path,
+                       u64 start, u64 deadline_us)
 {
     int s = netSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s < 0) return -1;
@@ -75,9 +110,34 @@ static int open_ranged(u32 ip, int port, const char *host, const char *path, u64
     int rb = 512 * 1024;
     setsockopt(s, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
 
+    // Non-blocking connect bounded by poll — same shape as http_connect() in
+    // http.cpp.  A blocking netConnect to a host that answers ARP but has
+    // nothing on the port (server stopped, firewall dropping SYN) never
+    // returns, which is exactly how this wedged startup.
+    int nb = 1;
+    netSetSockOpt(s, SOL_SOCKET, SO_NBIO, &nb, sizeof(nb));
     if (netConnect(s, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        netClose(s); return -1;
+        struct pollfd pfd;
+        pfd.fd = s; pfd.events = POLLOUT; pfd.revents = 0;
+        const int budget = remaining_ms(deadline_us, CONNECT_TIMEOUT_MS);
+        if (budget <= 0 || netPoll(&pfd, 1, budget) <= 0 || !(pfd.revents & POLLOUT)) {
+            netClose(s); return -1;
+        }
+        int soerr = 0; socklen_t sl = sizeof(soerr);
+        if (netGetSockOpt(s, SOL_SOCKET, SO_ERROR, &soerr, &sl) < 0 || soerr != 0) {
+            netClose(s); return -1;
+        }
     }
+    nb = 0;
+    netSetSockOpt(s, SOL_SOCKET, SO_NBIO, &nb, sizeof(nb));
+
+    // Idle timeouts on BOTH directions, armed before the request goes out so
+    // the send cannot park forever on a window that never opens.  The receive
+    // value is the same 5 s the test has always used and stays in effect for
+    // the measurement loop below, so nothing about the measurement changes.
+    struct { u32 sec; u32 usec; } tv = { IO_TIMEOUT_SEC, 0 };
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     char req[640];
     int n = snprintf(req, sizeof(req),
@@ -86,11 +146,12 @@ static int open_ranged(u32 ip, int port, const char *host, const char *path, u64
                      path, host, (unsigned long long)start);
     if (netSend(s, req, n, 0) != n) { netClose(s); return -1; }
 
-    struct { u32 sec; u32 usec; } tv = { 5, 0 };
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
     char hdr[2048]; int t = 0;
     while (t < (int)sizeof(hdr) - 1) {
+        // One byte per recv with a 5 s idle timeout is up to 2048 * 5 s if a
+        // server dribbles the header, so the overall deadline is rechecked
+        // every byte.  timing_get_us() is a timebase register read.
+        if (timing_get_us() >= deadline_us) { netClose(s); return -1; }
         int r = netRecv(s, hdr + t, 1, 0);
         if (r <= 0) { netClose(s); return -1; }
         t += r; hdr[t] = '\0';
@@ -124,6 +185,14 @@ void net_selftest_run(void)
     if (!split_url(url, host, sizeof(host), &port, path, sizeof(path))) {
         plog("nettest: bad url"); return;
     }
+    // Overall wall clock for everything below.  secs is the measurement
+    // window; the margin covers connects and header exchange, which cost
+    // milliseconds against a reachable server.  Once it passes, the test
+    // abandons whatever it is doing and returns.
+    const int total_budget_secs = secs + DEADLINE_MARGIN_SEC;
+    const u64 t_start  = timing_get_us();
+    const u64 deadline = t_start + (u64)total_budget_secs * 1000000ull;
+
     u32 ip = resolve(host);
     if (!ip) { plog("nettest: cannot resolve host"); return; }
 
@@ -135,16 +204,51 @@ void net_selftest_run(void)
     int  sk[MAX_SOCKETS];
     u64  got[MAX_SOCKETS];
     int  live = 0;
+    bool abandoned = false;
+    for (int i = 0; i < nsock; i++) { sk[i] = -1; got[i] = 0; }
+
     for (int i = 0; i < nsock; i++) {
-        sk[i]  = open_ranged(ip, port, host, path, (u64)i * RANGE_STRIDE);
-        got[i] = 0;
+        if (timing_get_us() >= deadline) {
+            snprintf(b, sizeof(b),
+                     "nettest: ABANDONED - %ds budget gone while opening socket %d of %d",
+                     total_budget_secs, i, nsock);
+            plog(b);
+            abandoned = true;
+            break;
+        }
+        sk[i] = open_ranged(ip, port, host, path, (u64)i * RANGE_STRIDE, deadline);
         if (sk[i] >= 0) live++;
     }
-    if (!live) { plog("nettest: no sockets opened"); return; }
+    if (abandoned || !live) {
+        // Nothing was measured, so there is nothing to report — just make sure
+        // no socket is left behind before the UI comes up.
+        int closed = 0;
+        for (int i = 0; i < nsock; i++)
+            if (sk[i] >= 0) { netClose(sk[i]); sk[i] = -1; closed++; }
+        if (!abandoned)
+            plog("nettest: ABANDONED - no sockets opened (server not listening?)");
+        snprintf(b, sizeof(b), "nettest: gave up after %.1fs, %d socket(s) closed",
+                 (double)(timing_get_us() - t_start) / 1e6, closed);
+        plog(b);
+        return;
+    }
 
     const u64 t0  = timing_get_us();
     const u64 end = t0 + (u64)secs * 1000000ull;
-    while (timing_get_us() < end) {
+    for (;;) {
+        const u64 now = timing_get_us();
+        if (now >= end) break;
+        if (now >= deadline) {
+            // Only reachable if opening the sockets ate the whole margin; the
+            // figures below are still bytes over real elapsed time, but the
+            // window was cut short, so flag it rather than let the numbers be
+            // compared against a full run.
+            snprintf(b, sizeof(b),
+                     "nettest: ABANDONED - %ds budget gone during measurement, "
+                     "window cut short", total_budget_secs);
+            plog(b);
+            break;
+        }
         struct pollfd pfd[MAX_SOCKETS];
         int map[MAX_SOCKETS], np = 0;
         for (int i = 0; i < nsock; i++) {
@@ -156,6 +260,10 @@ void net_selftest_run(void)
         if (netPoll(pfd, np, 200) <= 0) continue;
         for (int k = 0; k < np; k++) {
             if (!(pfd[k].revents & POLLIN)) continue;
+            // POLLIN says this recv returns immediately, and SO_RCVTIMEO caps
+            // it at 5 s if it does not; stopping here keeps the worst case at
+            // one stalled recv rather than one per socket.
+            if (timing_get_us() >= deadline) break;
             int i = map[k];
             int r = netRecv(sk[i], s_scratch, SCRATCH, 0);
             if (r > 0)      got[i] += (u64)r;

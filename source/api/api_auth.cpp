@@ -142,7 +142,7 @@ int do_login(void) {
     drawTTF(40, 96, "Signing in...", 18, XMB_TEXT);
     {
         char line[320];
-        snprintf(line, sizeof(line), "%s  \xB7  %s", g_username, g_server);
+        snprintf(line, sizeof(line), "%s  \xC2\xB7  %s", g_username, g_server);
         drawTTF(40, 128, line, 14, XMB_TEXT_DIM);
     }
     flip();

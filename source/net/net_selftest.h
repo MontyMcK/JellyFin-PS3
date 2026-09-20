@@ -27,6 +27,15 @@
 //  of the same bytes arriving from one server-side read.
 //
 //  Results go to the log as `nettest:` lines -- per socket and aggregate.
+//
+//  BOUNDED: this is called before the UI loop exists, so it can never be left
+//  waiting on a socket.  Connects use a 5 s non-blocking connect + poll, reads
+//  and writes carry a 5 s idle timeout, and the whole run is capped at
+//  <seconds> + 15 s of wall clock.  Past that it logs a `nettest: ABANDONED`
+//  line saying why, closes every socket, and returns.  A stale gate file left
+//  pointing at a server that has since stopped listening therefore costs a few
+//  seconds and two log lines, not a hung boot.  The one remaining unbounded
+//  call is netGetHostByName, so put a literal IP in the gate file.
 
 #ifdef __cplusplus
 extern "C" {
