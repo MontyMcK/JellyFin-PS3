@@ -144,13 +144,24 @@ static int http_connect(const char *host, int port) {
     return sock;
 }
 
-static void send_all(int sock, const char *buf, int len) {
+// Returns true only when every byte went out.
+//
+// It used to return void and `break` on failure, which made a half-sent
+// request look exactly like a sent one.  That is worse than it sounds for a
+// POST: the server has the headers, so it sits waiting for the Content-Length
+// bytes that will never arrive, and the client sits waiting for a response
+// the server will not send until it gives up on the body.  Kestrel gives up
+// via MinRequestBodyDataRate after a five-second grace and answers 500 --
+// which is exactly the "playstate: http=500" this client was logging while
+// the music thread sat blocked behind it.
+static bool send_all(int sock, const char *buf, int len) {
     int sent = 0;
     while (sent < len) {
         int n = netSend(sock, buf + sent, len - sent, 0);
-        if (n <= 0) break;
+        if (n <= 0) return false;
         sent += n;
     }
+    return true;
 }
 
 // Case-insensitive substring search over a fixed-length region (needle is lowercase).
@@ -448,11 +459,38 @@ int http_request(int method, const char *url, const char *body,
     const char *verb = (method == HTTP_POST)   ? "POST"   :
                        (method == HTTP_DELETE) ? "DELETE" : "GET";
     int  blen = (method == HTTP_POST && body) ? (int)strlen(body) : 0;
-    char req[2048];
+    char req[4096];
     int  rlen = build_headers(req, sizeof(req), verb,
                               path, host, port, token, "application/json", blen);
-    send_all(sock, req, rlen);
-    if (blen > 0) send_all(sock, body, blen);
+
+    // ONE send for headers AND body.
+    //
+    // They used to go as two writes, and Nagle is on: the body is a small
+    // segment queued behind an unacknowledged one, so it waits for the peer's
+    // delayed ACK before it leaves the console.  The server meanwhile has a
+    // complete header block announcing a Content-Length it has not received,
+    // which is precisely the state Kestrel's MinRequestBodyDataRate exists to
+    // kill.  A JSON playstate body is a few hundred bytes and the headers are
+    // under 1 KB, so both fit in one buffer and therefore one segment.
+    bool sent;
+    if (blen > 0 && rlen + blen < (int)sizeof(req)) {
+        memcpy(req + rlen, body, (size_t)blen);
+        sent = send_all(sock, req, rlen + blen);
+    } else {
+        sent = send_all(sock, req, rlen);
+        if (sent && blen > 0) sent = send_all(sock, body, blen);
+    }
+    if (!sent) {
+        // Do not wait for a response to a request that never fully left: that
+        // wait is the whole stall.  -2 distinguishes it from a failed connect.
+        char b[128];
+        snprintf(b, sizeof(b), "http: send failed (%d hdr + %d body) %.60s",
+                 rlen, blen, path);
+        plog(b);
+        netClose(sock);
+        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        return -2;
+    }
 
     int body_off, body_len;
     RespDiag dg; memset(&dg, 0, sizeof(dg));
