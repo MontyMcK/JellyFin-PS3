@@ -30,6 +30,7 @@
 #include "satoshi_bold.h"         // --font-tab      700: tab labels, clock
 #include "satoshi_regular.h"      // --font-tab      400/500: date, cast names
 #include "michroma.h"             // --font-spec
+#include "mata_bold.h"            // the lockup wordmark, and nothing else
 #include "icons.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -68,8 +69,10 @@ static stbtt_fontinfo  s_font_eyebrow;   // Microgramma
 static stbtt_fontinfo  s_font_tab;       // Satoshi Bold
 static stbtt_fontinfo  s_font_tab_reg;   // Satoshi Regular
 static stbtt_fontinfo  s_font_spec;      // Michroma
+static stbtt_fontinfo  s_font_lockup;    // Mata Bold
 static bool            s_display_ok = false, s_spec_ok = false;
 static bool            s_eyebrow_ok = false, s_tab_ok = false, s_tab_reg_ok = false;
+static bool            s_lockup_ok  = false;
 static bool            s_icons_ok    = false;
 
 // Gamma LUTs for correct anti-aliasing.  Blending coverage in linear light
@@ -130,7 +133,8 @@ static inline u8 aa_blend(u8 a, u8 fg, u8 bg) {
 #define GC_FONT_EYEBROW 7
 #define GC_FONT_TAB     8
 #define GC_FONT_TABREG  9
-#define GC_FONT_COUNT  10
+#define GC_FONT_LOCKUP 10
+#define GC_FONT_COUNT  11
 
 typedef struct {
     float px;
@@ -164,6 +168,7 @@ static inline int font_id_of(const stbtt_fontinfo *fi) {
     if (fi == &s_font_eyebrow) return GC_FONT_EYEBROW;
     if (fi == &s_font_tab)     return GC_FONT_TAB;
     if (fi == &s_font_tab_reg) return GC_FONT_TABREG;
+    if (fi == &s_font_lockup)  return GC_FONT_LOCKUP;
     return GC_FONT_REG;
 }
 
@@ -509,6 +514,7 @@ static stbtt_fontinfo *face_of(int face) {
     case UI_FACE_EYEBROW:  if (s_eyebrow_ok)  return &s_font_eyebrow;  break;
     case UI_FACE_TAB:      if (s_tab_ok)      return &s_font_tab;      break;
     case UI_FACE_TAB_REG:  if (s_tab_reg_ok)  return &s_font_tab_reg;  break;
+    case UI_FACE_LOCKUP:   if (s_lockup_ok)   return &s_font_lockup;   break;
     case UI_FACE_BOLD:     break;
     default:               return &s_font;
     }
@@ -575,6 +581,7 @@ static void chain_of(int face, float px, FaceChain *c)
     case UI_FACE_TAB:
     case UI_FACE_TAB_REG:
     case UI_FACE_SPEC:
+    case UI_FACE_LOCKUP:
         if (primary != &s_font) c->fi[c->n++] = &s_font;      // → Rodin
         break;
     default:
@@ -903,8 +910,27 @@ void drawTTF_face(u32 x, u32 y, const char *text, float px, u32 color, int face)
 // Costed deliberately: per-glyph blits are the path that can increment `bpx`
 // (see UI-BRIEF.md), so this must stay confined to short strings.  It is not a
 // replacement for drawTTF_face on body text.
+// Sample a ramp of evenly spaced stops at t in [0,1].  The design spells the
+// wordmark's stops at 0/34/67/100%, which is even to within a rounding, so
+// even spacing is the ramp rather than an approximation of it.
+static u32 ramp_at(const u32 *stop, int n, float t)
+{
+    if (n <= 0)             return 0;
+    if (n == 1 || t <= 0.0f) return stop[0];
+    if (t >= 1.0f)           return stop[n - 1];
+    float f = t * (float)(n - 1);
+    int   i = (int)f;
+    float g = f - (float)i;
+    u32   a = stop[i], b = stop[i + 1];
+    u32 r = (u32)((float)((a >> 16) & 0xFF) * (1.0f - g) + (float)((b >> 16) & 0xFF) * g);
+    u32 v = (u32)((float)((a >>  8) & 0xFF) * (1.0f - g) + (float)((b >>  8) & 0xFF) * g);
+    u32 l = (u32)((float)( a        & 0xFF) * (1.0f - g) + (float)( b        & 0xFF) * g);
+    return (r << 16) | (v << 8) | l;
+}
+
 static float run_tracked(u32 x, u32 y, const char *text, float px, u32 color,
-                         int face, float track, bool draw)
+                         int face, float track, bool draw,
+                         const u32 *ramp, int nramp)
 {
     if (!s_ttf_ok) {
         if (draw) drawTextScaled(x, y, text, (int)px);
@@ -912,6 +938,14 @@ static float run_tracked(u32 x, u32 y, const char *text, float px, u32 color,
     }
     FaceChain ch;
     chain_of(face, px, &ch);
+
+    // A ramp is positional, so it needs the run's width before the first glyph
+    // is drawn.  The measure pass is the same walk with draw off, and it warms
+    // the glyph cache for the pass that follows, so it costs a loop and not a
+    // second rasterization.
+    float total = 0.0f;
+    if (draw && ramp && nramp > 0)
+        total = run_tracked(0, 0, text, px, 0, face, track, false, NULL, 0);
 
     float xf      = draw ? (float)x : 0.0f;
     int   prev_cp = 0, prev_k = -1;
@@ -925,11 +959,21 @@ static float run_tracked(u32 x, u32 y, const char *text, float px, u32 color,
             xf += stbtt_GetCodepointKernAdvance(ch.fi[k], prev_cp, cp) * ch.scale[k];
         if (!first) xf += track;          // the space goes BETWEEN glyphs only
 
-        if (draw)
-            draw_glyph(ch.fi[k], ch.id[k], px, ch.scale[k], cp,
-                       (int)xf, (int)y + ch.baseline, color, true);
+        float adv = (float)glyph_advance(ch.fi[k], ch.id[k], cp) * ch.scale[k];
 
-        xf += (float)glyph_advance(ch.fi[k], ch.id[k], cp) * ch.scale[k];
+        if (draw) {
+            // PER GLYPH, not per pixel.  A per-pixel gradient would have to
+            // reach into the coverage blend, and the only string that wants
+            // one is eight letters wide -- at which point each letter is ~12%
+            // of the ramp and the steps are not visible on a TV.
+            u32 col = color;
+            if (ramp && nramp > 0 && total > 0.0f)
+                col = ramp_at(ramp, nramp, (xf - (float)x + adv * 0.5f) / total);
+            draw_glyph(ch.fi[k], ch.id[k], px, ch.scale[k], cp,
+                       (int)xf, (int)y + ch.baseline, col, true);
+        }
+
+        xf += adv;
         prev_cp = cp; prev_k = k; first = false;
     }
     return draw ? xf - (float)x : xf;
@@ -938,12 +982,21 @@ static float run_tracked(u32 x, u32 y, const char *text, float px, u32 color,
 void drawTTF_tracked(u32 x, u32 y, const char *text, float px, u32 color,
                      int face, float track)
 {
-    run_tracked(x, y, text, px, color, face, track, true);
+    run_tracked(x, y, text, px, color, face, track, true, NULL, 0);
+}
+
+// The wordmark's gradient.  Same walk as drawTTF_tracked, with the colour
+// taken from the ramp at each glyph's centre instead of being constant.
+void drawTTF_ramp(u32 x, u32 y, const char *text, float px,
+                  const u32 *stops, int nstops, int face, float track)
+{
+    run_tracked(x, y, text, px, stops ? stops[0] : 0, face, track, true,
+                stops, nstops);
 }
 
 int ttf_text_width_tracked(const char *text, float px, int face, float track)
 {
-    return (int)run_tracked(0, 0, text, px, 0, face, track, false);
+    return (int)run_tracked(0, 0, text, px, 0, face, track, false, NULL, 0);
 }
 
 // ASCII-only uppercase, in place, for the labels v1.0 sets in caps.
@@ -963,16 +1016,22 @@ void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold) {
     drawTTF_face(x, y, text, px, color, bold ? UI_FACE_BOLD : UI_FACE_REGULAR);
 }
 
-void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
-                       bool bold) {
-    if (!s_ttf_ok) { drawTTF(x, (u32)(cy - (int)(px * 0.5f)), text, px, color, bold); return; }
-    const int face = bold ? UI_FACE_BOLD : UI_FACE_REGULAR;
+// The y a run should be drawn at for its INK to centre on cy, for any face.
+//
+// This is the whole of what drawTTF_vcentered used to do inline, lifted out
+// because the lockup needs the same answer for a face it cannot reach through
+// the bold flag -- and because "centre the ink, not the em box" is the only
+// way to sit 14px type against a 21px mark without eyeballing an offset that
+// then has to be re-eyeballed at every scale.
+//
+// Returns false when the string has no ink at all (all spaces), which means
+// draw nothing -- not draw it at cy.
+bool ttf_center_y(const char *text, float px, int face, int cy, int *out_y)
+{
+    if (!s_ttf_ok) { *out_y = cy - (int)(px * 0.5f); return true; }
     FaceChain ch;
     chain_of(face, px, &ch);
 
-    // Union of every glyph's bitmap box (baseline-relative) = the ink extent.
-    // Measuring through the cache also warms it for the drawTTF below, so a
-    // centred string rasterizes at most once instead of once per frame.
     int y0min = 0, y1max = 0;
     bool any = false;
     for (const char *p = text; *p; ) {
@@ -994,11 +1053,21 @@ void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
         if (!any || gy1 > y1max) y1max = gy1;
         any = true;
     }
-    if (!any) return;
+    if (!any) return false;
 
-    // drawTTF puts glyph ink at y + baseline + gy; centre that span on cy.
     int y = cy - ch.baseline - (y0min + y1max) / 2;
-    if (y < 0) y = 0;
+    *out_y = y < 0 ? 0 : y;
+    return true;
+}
+
+void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
+                       bool bold) {
+    const int face = bold ? UI_FACE_BOLD : UI_FACE_REGULAR;
+    int y;
+    // ttf_center_y measures through the glyph cache, which warms it for the
+    // draw below -- a centred string still rasterizes at most once, not once
+    // per frame.
+    if (!ttf_center_y(text, px, face, cy, &y)) return;
     drawTTF(x, (u32)y, text, px, color, bold);
 }
 
@@ -1075,6 +1144,9 @@ void ttf_init(void) {
     // --font-spec: codec / quality values only.
     if (stbtt_InitFont(&s_font_spec, (unsigned char*)Michroma_ttf, 0))
         s_spec_ok = true;
+    // The lockup wordmark.  One string, once a frame -- see UI_FACE_LOCKUP.
+    if (stbtt_InitFont(&s_font_lockup, (unsigned char*)Mata_Bold_otf, 0))
+        s_lockup_ok = true;
     if (stbtt_InitFont(&s_icons, (unsigned char*)TablerIcons_ttf, 0))
         s_icons_ok = true;
     if (stbtt_InitFont(&s_font_noto, (unsigned char*)NotoSans_Bold_ttf, 0))
@@ -1103,6 +1175,8 @@ void ttf_init(void) {
         stbtt_GetFontVMetrics(&s_font_tab_reg, &s_ascent[GC_FONT_TABREG],  NULL, NULL);
     if (s_spec_ok)
         stbtt_GetFontVMetrics(&s_font_spec,    &s_ascent[GC_FONT_SPEC],    NULL, NULL);
+    if (s_lockup_ok)
+        stbtt_GetFontVMetrics(&s_font_lockup,  &s_ascent[GC_FONT_LOCKUP],  NULL, NULL);
 
     // Glyph cache.  A failed allocation is non-fatal: every draw then falls
     // back to rasterizing directly, exactly as it did before the cache existed.

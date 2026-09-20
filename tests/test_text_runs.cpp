@@ -215,6 +215,110 @@ static bool run_case(const char *s, float px, int fc, int x, Result *res,
     return true;
 }
 
+// ---- phase 3: the lockup wordmark ------------------------------------------
+//
+// drawTTF_ramp draws one string in the whole app, so the risk is not that it
+// looks slightly wrong -- it is that colouring per glyph quietly moved the pen.
+// The ramp is supposed to change what colour a glyph is drawn in and NOTHING
+// else, so:
+//
+//   1. with every stop set to the same colour it must be bit-identical to the
+//      flat tracked path.  That pins the pen, the kerning and the tracking;
+//   2. the width must not move either -- a gradient occupies no space;
+//   3. and the colours must actually run cyan to violet across the word, in
+//      that order, or the lockup is drawing the theme's ramp backwards.
+//
+// (3) is checked as quartile means rather than per column: anti-aliased edges
+// against black darken a column's brightest pixel unevenly, which is noise on
+// a strict per-column monotonicity test but averages out across a quarter of
+// the word.
+static u32 s_fb_flat[FB_W * FB_H];
+
+static int test_wordmark_ramp(void)
+{
+    const char *W     = "JELLYFIN";
+    const float px    = 14.0f;
+    const float track = px * 0.02f;           // the design's 0.02em
+    const int   face  = UI_FACE_LOCKUP;
+    const u32   X = 20, Y = 40;
+
+    printf("-- phase 3: the lockup wordmark ramp --\n");
+
+    // 1. a flat "ramp" is the flat path
+    fb_clear(0x00000000);
+    drawTTF_tracked(X, Y, W, px, 0x00FFFFFF, face, track);
+    memcpy(s_fb_flat, s_fb, sizeof s_fb);
+
+    const u32 flat[4] = { 0x00FFFFFF, 0x00FFFFFF, 0x00FFFFFF, 0x00FFFFFF };
+    fb_clear(0x00000000);
+    drawTTF_ramp(X, Y, W, px, flat, 4, face, track);
+    if (memcmp(s_fb_flat, s_fb, sizeof s_fb) != 0) {
+        printf("FAIL: a single-colour ramp does not match drawTTF_tracked --\n"
+               "      the ramp path has moved the glyphs, not just recoloured\n");
+        return 1;
+    }
+    printf("flat ramp == tracked : bit-exact\n");
+
+    // 2. and it costs no width
+    const int w_flat = ttf_text_width_tracked(W, px, face, track);
+    if (w_flat <= 0) { printf("FAIL: zero-width wordmark -- is Mata loaded?\n"); return 1; }
+
+    // 3. cyan on the left, violet on the right -- the theme's wordmark ramp
+    const u32 ramp[4] = { 0x0000A4DC, 0x004189D3, 0x007A70CA, 0x00AA5CC3 };
+    fb_clear(0x00000000);
+    drawTTF_ramp(X, Y, W, px, ramp, 4, face, track);
+
+    long  q_sum[4] = { 0, 0, 0, 0 };
+    long  q_n[4]   = { 0, 0, 0, 0 };
+    for (int col = 0; col < w_flat; col++) {
+        int best = -1, best_lum = 0;
+        for (int y = 0; y < FB_H; y++) {
+            u32 p = s_fb[(size_t)y * FB_W + X + col];
+            int lum = (int)((p >> 16 & 0xFF) + (p >> 8 & 0xFF) + (p & 0xFF));
+            if (lum > best_lum) { best_lum = lum; best = (int)p; }
+        }
+        if (best < 0 || best_lum < 96) continue;      // background or a gap
+        int q = col * 4 / w_flat; if (q > 3) q = 3;
+        q_sum[q] += (int)((best >> 16 & 0xFF)) - (int)(best & 0xFF);   // r - b
+        q_n[q]++;
+    }
+
+    // The endpoints are measured against the STOPS, not against a sign.  Both
+    // ends of Jellyfin's pair are blue-dominant -- AA5CC3 is r170 b195 -- so
+    // "ends warm" is not true of this ramp at either end, and a test that
+    // assumed it would fail on correct output.  What distinguishes the two is
+    // the DISTANCE from cyan: r-b runs about -220 to -25.
+    const double rb_first = (double)((ramp[0] >> 16) & 0xFF) - (double)(ramp[0] & 0xFF);
+    const double rb_last  = (double)((ramp[3] >> 16) & 0xFF) - (double)(ramp[3] & 0xFF);
+
+    printf("r-b by quarter       :");
+    double q_avg[4];
+    for (int q = 0; q < 4; q++) {
+        if (!q_n[q]) { printf("\nFAIL: quarter %d of the word has no ink\n", q); return 1; }
+        q_avg[q] = (double)q_sum[q] / (double)q_n[q];
+        printf(" %+.1f", q_avg[q]);
+    }
+    printf("   (stops: %+.0f -> %+.0f)\n", rb_first, rb_last);
+
+    for (int q = 1; q < 4; q++) {
+        if (q_avg[q] < q_avg[q - 1]) {
+            printf("FAIL: quarter %d sits back down the ramp from %d -- "
+                   "not monotonic\n", q, q - 1);
+            return 1;
+        }
+    }
+    if (fabs(q_avg[0] - rb_first) >= fabs(q_avg[0] - rb_last)) {
+        printf("FAIL: the word does not start at the first stop\n");
+        return 1;
+    }
+    if (fabs(q_avg[3] - rb_last) >= fabs(q_avg[3] - rb_first)) {
+        printf("FAIL: the word does not end at the last stop -- reversed?\n");
+        return 1;
+    }
+    printf("PASS\n");
+    return 0;
+}
+
 int main(void)
 {
     ttf_init();
@@ -315,6 +419,7 @@ int main(void)
                100.0 * (double)res.delta_px / (double)res.total_ink);
         return 1;
     }
-    printf("PASS\n");
-    return 0;
+    printf("PASS\n\n");
+
+    return test_wordmark_ramp();
 }

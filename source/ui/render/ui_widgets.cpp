@@ -12,6 +12,7 @@
 #include "icons.h"
 #include "stb_image.h"
 #include "ps_buttons_png.h"
+#include "jfmark_png.h"
 #include "plog.h"
 
 // -------------------------------------------------------
@@ -50,27 +51,46 @@ static int tab_icon(int tab) {
 // -------------------------------------------------------
 
 // Top bar: lockup left, clock right, both on the same 24px row at y=20
-// (handoff section 8's Phase 2 block).  Scales with UIS_T so it stays
+// (handoff section 8's Phase 2 block).  Scales with the UI scale so it stays
 // proportional inside the chrome band above the tab strip.
 //
-// NOT YET the design's lockup.  Section 3.1 asks for a 24x24 mark with a 16px
-// wordmark in the display face at x=71, and section 3.0 names that face as
-// Microgramma Bold Extended.  Neither the mark nor the three handoff typefaces
-// are embedded in this build yet, so this keeps the text lockup and only fixes
-// its geometry and scale.  The "PS3" tag stays until the mark replaces it --
-// the revision removed it because the new mark carries the PS3 icon itself.
+// This is the design's lockup now: the rasterised mark (gfx/jfmark_png.h) and
+// "JELLYFIN" in Mata Bold running the theme's wordmark ramp.  v1.0's sizes --
+// mark 21px, wordmark 14px, gap 6 -- and no "PS3" tag, because the mark
+// carries the PS3 icon itself.
+//
+// Two deviations from the canvas, both deliberate:
+//
+//   * NO skewX(-7deg) scaleX(0.88).  Shearing would mean rasterising the word
+//     into a scratch buffer and blitting it row-shifted, which is real work
+//     every frame for a 1.7px lean at 14px.  Revisit it if it reads as wrong
+//     on a TV beside the mark, which is where this has to be judged anyway.
+//   * ONE shadow pass, not the canvas's stack of five.  They exist so the
+//     wordmark survives the wave moving behind it; at 14px they resolve to
+//     about a single hard 1px drop, which is what this draws.
 void xmb_draw_topbar(void) {
-    const int oy = XMB_OY;   // shift the top bar down out of the CRT overscan
+    const int oy    = XMB_OY;   // shift the top bar down out of the CRT overscan
     const int row_y = oy + UIS_H(20);            // the shared 24px row
+    const int cy    = row_y + UIS_H(24) / 2;
 
-    // Brand lockup.  v1.0 shrank it: the mark 24 -> 21px, the wordmark 16 ->
-    // 14px, the gap 7 -> 6.  The "PS3" tag stays until the mark asset replaces
-    // it -- the design removed it because the new mark carries PS3 itself.
-    const float brand_px = UIS_TF(21.0f);
-    const float tag_px   = UIS_TF(12.0f);
-    drawTTF(XMB_ITEM_PAD, (u32)row_y, "Jellyfin", brand_px, XMB_TEXT, true);
-    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", brand_px, true) + UIS_H(6),
-            (u32)(row_y + UIS_H(7)), "PS3", tag_px, XMB_ACCENT, true);
+    const int mark_px = UIS_H(21);
+    xmb_draw_mark((int)XMB_ITEM_PAD, cy - mark_px / 2, mark_px);
+
+    // The wordmark's ink is centred on the same line as the mark rather than
+    // being given a y of its own: 14px type against a 21px mark is exactly the
+    // case where an eyeballed offset stops being right at the next scale.
+    const float word_px = UIS_TF(14.0f);
+    const float track   = word_px * 0.02f;       // the design's 0.02em
+    const u32   ramp[4] = { XMB_LK_WORD_A, XMB_LK_WORD_B,
+                            XMB_LK_WORD_C, XMB_LK_WORD_D };
+    const int   wx = (int)XMB_ITEM_PAD + mark_px + UIS_H(6);
+    int wy;
+    if (ttf_center_y("JELLYFIN", word_px, UI_FACE_LOCKUP, cy, &wy)) {
+        drawTTF_tracked((u32)wx, (u32)(wy + UIS_H(1)), "JELLYFIN", word_px,
+                        0x00000000, UI_FACE_LOCKUP, track);
+        drawTTF_ramp((u32)wx, (u32)wy, "JELLYFIN", word_px,
+                     ramp, 4, UI_FACE_LOCKUP, track);
+    }
 
     // Clock, right-aligned, with the date dimmer beside it.
     time_t now = time(NULL);
@@ -128,22 +148,44 @@ int xmb_eyebrow_width(const char *text)
     const float px = UIS_TF(11.0f);
     return ttf_text_width_tracked(up, px, UI_FACE_EYEBROW, px * 0.18f);
 }
-// Faded hairline under the tab bar — bright at the center, dissolving
-// toward the edges instead of a hard full-width line.
-void xmb_draw_divider(void) {
-    int W = (int)display_width;
-    u32 *row = color_buffer[curr_fb] + (u32)XMB_DIVIDER_Y * display_width;
-    const u32 c_r = 0x8A, c_g = 0x93, c_b = 0xC8;
-    for (int x = 0; x < W; x++) {
-        // Triangular falloff, peak alpha ~72/255 at center.
-        int d = x < W / 2 ? x : W - x;
-        u32 a = (u32)(72 * d * 2 / W);
-        if (a == 0) continue;
+// One 1px rule of the divider stack: x 40 -> 1240, flat across the middle and
+// fading to nothing over the outer 12% at each end.
+//
+// The canvas spells it as a gradient stop list --
+//   linear-gradient(90deg, transparent, hair 12%, hair 88%, transparent)
+// -- which is a flat line with two ramps, NOT the triangular falloff this used
+// to draw.  The old version was also full-bleed and a hardcoded 8A93C8, which
+// is within a shade of `hairline` composited over the shipping background but
+// would have stayed blue on a gold screen.
+static void divider_rule(int y, u32 color, u32 alpha) {
+    if (y < 0 || (u32)y >= display_height || !alpha) return;
+    const int x0 = (int)XMB_ITEM_PAD;
+    const int x1 = (int)display_width - (int)XMB_ITEM_PAD;
+    const int w  = x1 - x0;
+    if (w <= 0) return;
+    const int fade = w * 12 / 100;               // the outer 12%, each end
+
+    u32 *row = color_buffer[curr_fb] + (u32)y * display_width;
+    const u32 c_r = (color >> 16) & 0xFF, c_g = (color >> 8) & 0xFF, c_b = color & 0xFF;
+    for (int x = x0; x < x1; x++) {
+        int d = x - x0 < x1 - 1 - x ? x - x0 : x1 - 1 - x;
+        u32 a = (fade > 0 && d < fade) ? alpha * (u32)d / (u32)fade : alpha;
+        if (!a) continue;
         u32 bg = row[x];
         row[x] = (((a*c_r + (255-a)*((bg>>16)&0xFF))/255) << 16) |
                  (((a*c_g + (255-a)*((bg>> 8)&0xFF))/255) <<  8) |
                   ((a*c_b + (255-a)*( bg     &0xFF))/255);
     }
+}
+
+// The divider under the tab bar: the hairline, and the trim rule 4px below it
+// that the canvas draws with `--jf-trim2`.  That second line is transparent
+// under the shipping theme (trim_alpha 0) and brass under Golden Age, which is
+// the first time the `trim` token has been drawn by anything.
+void xmb_draw_divider(void) {
+    divider_rule(XMB_DIVIDER_Y, XMB_HAIRLINE, 255);
+    if (g_theme.trim_alpha)
+        divider_rule(XMB_DIVIDER_Y + UIS_H(4), XMB_TRIM, g_theme.trim_alpha);
 }
 
 // -------------------------------------------------------
@@ -412,18 +454,16 @@ int ps_btn_width(char glyph, int h) {
     return s_ps_w[i] * h / s_ps_h[i];
 }
 
-// Blit one button sprite scaled to height h, vertically centred on cy.
-// bright scales the sprite's RGB (255 = as-authored) so the HUD can dim
-// unfocused controls the way ctrl_color() dims its vector glyphs.
-void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
-    ps_sprites_load();
-    int i = ps_tile_idx(glyph);
-    if (s_ps_state != 1 || i < 0 || !s_ps_px[i] || h <= 0) return;
-    const u32 *m = s_ps_px[i];
-    int mw = s_ps_w[i], mh = s_ps_h[i];
-    int dw = mw * h / mh, dh = h;
-    if (dw <= 0) return;
-    int dx0 = (int)x, dy0 = cy - dh / 2;
+// Blit an ARGB master into the current CPU draw target, scaled to dw x dh with
+// an area-average filter.  bright scales RGB (255 = as-authored) so the HUD can
+// dim unfocused controls the way ctrl_color() dims its vector glyphs.
+//
+// Shared by the button sprites and the brand mark: both are small ARGB images
+// that are authored once at a master size and drawn at whatever the current UI
+// scale asks for, and neither wants a per-size cache for it.
+static void blit_argb_scaled(const u32 *m, int mw, int mh,
+                             int dx0, int dy0, int dw, int dh, u32 bright) {
+    if (!m || mw <= 0 || mh <= 0 || dw <= 0 || dh <= 0) return;
     bool rt  = cpu_rt_on();
     u32  tw_ = cpu_draw_w();
     for (int oy = 0; oy < dh; oy++) {
@@ -464,6 +504,77 @@ void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
             row[sx] = (ro << 16) | (go << 8) | bo;
         }
     }
+}
+
+void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
+    ps_sprites_load();
+    int i = ps_tile_idx(glyph);
+    if (s_ps_state != 1 || i < 0 || !s_ps_px[i] || h <= 0) return;
+    int mw = s_ps_w[i], mh = s_ps_h[i];
+    int dw = mw * h / mh;
+    blit_argb_scaled(s_ps_px[i], mw, mh, (int)x, cy - h / 2, dw, h, bright);
+}
+
+// -------------------------------------------------------
+// Brand mark — the lockup's jellyfish, from gfx/jfmark_png.h
+// -------------------------------------------------------
+// The design's mark is an SVG with a bevel, an edge stroke and a clipped
+// image, so it arrives here already rasterised (see that header for why, and
+// for the geometry constants used below).  Two variants exist because the
+// gradient is baked in; the loaded theme picks between them.
+//
+// Each decodes on first use and stays: 80x80x4 is 25 KB, and a theme that is
+// never selected never costs its variant.
+
+#define JFMARK_COOL 0
+#define JFMARK_GOLD 1
+
+static u32 *s_mark_px[2];
+static int  s_mark_state[2];          // 0 = untried, 1 = ok, -1 = failed
+
+static void mark_load(int v) {
+    if (s_mark_state[v]) return;
+    s_mark_state[v] = -1;
+    int w, h, comp;
+    unsigned char *img = stbi_load_from_memory(
+        v == JFMARK_GOLD ? jfmark_gold_png : jfmark_cool_png,
+        (int)(v == JFMARK_GOLD ? jfmark_gold_png_len : jfmark_cool_png_len),
+        &w, &h, &comp, 4);
+    if (!img) return;
+    if (w != JFMARK_MASTER || h != JFMARK_MASTER) { stbi_image_free(img); return; }
+    u32 *m = (u32 *)malloc((size_t)w * h * 4);
+    if (!m) { stbi_image_free(img); return; }
+    for (int i = 0; i < w * h; i++)
+        m[i] = ((u32)img[i*4+3] << 24) | ((u32)img[i*4] << 16) |
+               ((u32)img[i*4+1] << 8) | img[i*4+2];
+    stbi_image_free(img);
+    s_mark_px[v] = m;
+    s_mark_state[v] = 1;
+}
+
+// Which raster this theme gets.  The ramp is baked in, so the only question a
+// theme can answer is which of the two it is NEARER: a warm mark colour (Golden
+// Age's E8B45C) takes the gold PS logo, a cool one (XMB wave's AA5CC3) takes
+// the soft one.  Red against blue is the whole test -- a hue angle would be
+// more words for the same two answers.
+static int mark_variant(void) {
+    u32 c = XMB_LK_MARK_A;
+    return (((c >> 16) & 0xFF) > (c & 0xFF)) ? JFMARK_GOLD : JFMARK_COOL;
+}
+
+// Draw the mark with its BELL that many pixels wide, its top-left at (x,y).
+// The raster is wider than the bell -- it carries the design's drop shadow in
+// a padded box -- so both the size and the origin are adjusted here rather
+// than at the call site.
+void xmb_draw_mark(int x, int y, int bell_px) {
+    if (bell_px <= 0) return;
+    int v = mark_variant();
+    mark_load(v);
+    if (s_mark_state[v] != 1) return;
+    int box = bell_px * JFMARK_SPAN_U / JFMARK_BELL_U;
+    int off = bell_px * JFMARK_PAD_U  / JFMARK_BELL_U;
+    blit_argb_scaled(s_mark_px[v], JFMARK_MASTER, JFMARK_MASTER,
+                     x - off, y - off, box, box, 255);
 }
 
 // -------------------------------------------------------

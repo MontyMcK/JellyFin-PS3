@@ -152,6 +152,7 @@ void quality_frame_tick(float frame_ms);     /* auto-downgrade watchdog       */
 #define XMB_TRACK         (g_theme.track)
 #define XMB_ICON_IDLE     (g_theme.icon_idle)
 #define XMB_WHITE         (g_theme.white)
+#define XMB_TRIM          (g_theme.trim)   /* with g_theme.trim_alpha */
 #define XMB_KEY_NORMAL    (g_theme.key_normal)
 #define XMB_KEY_SEL       (g_theme.key_sel)
 #define XMB_KEY_LABEL_SEL (g_theme.key_label_sel)
@@ -161,6 +162,19 @@ void quality_frame_tick(float frame_ms);     /* auto-downgrade watchdog       */
  * thing that merely happened to share a colour. */
 #define XMB_FOCUS_RING    (g_theme.focus_ring)
 #define XMB_DETAIL_BAND   (g_theme.detail_band)
+
+/* The lockup ramp (README section 2.1).  The MARK's pair is baked into the
+ * rasters in gfx/jfmark_png.h -- an SVG with a bevel, an edge stroke and a
+ * clipped image is not something this renderer can tint -- so XMB_LK_MARK_A is
+ * read for one purpose here: its warmth picks which of the two rasters a theme
+ * gets.  The WORDMARK ramp is live, sampled per glyph across the word. */
+#define XMB_LK_MARK_A     (g_theme.lk_mark_a)
+#define XMB_LK_MARK_B     (g_theme.lk_mark_b)
+#define XMB_LK_WORD_A     (g_theme.lk_word_a)
+#define XMB_LK_WORD_B     (g_theme.lk_word_b)
+#define XMB_LK_WORD_C     (g_theme.lk_word_c)
+#define XMB_LK_WORD_D     (g_theme.lk_word_d)
+#define XMB_WORDMARK      (g_theme.wordmark)   /* flat, for REDUCED/MINIMAL */
 
 
 #endif /* JF_THEME_H */

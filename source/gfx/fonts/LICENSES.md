@@ -14,8 +14,9 @@ Every font compiled into this app, why it is here, and under what licence.
 | **SCE-PS3 Rodin LATIN** | `--font-system` / `--font-tech`: every string, and the fallback for every other role | **none — Sony system font** | — |
 | **Microgramma** | `--font-eyebrow`: eyebrows and section labels | **none — Linotype/Monotype commercial** | — |
 | **GT America Expanded Bold** | `--font-display`: media titles | **none — Grilli Type commercial** | — |
+| **Mata Bold** | the lockup wordmark, and nothing else | **none — unverified** | — |
 
-## The three in bold cannot be redistributed
+## The four in bold cannot be redistributed
 
 This file used to say, correctly, that Arial/Helvetica/Netflix Sans/Tiresias
 "are all proprietary and cannot ship in a GPLv3 package". Three faces that went
@@ -29,6 +30,10 @@ point of this file:
   `microgramma-web.ttf` is a web-font conversion, which does not change that.
 - **GT America Expanded Bold** is a Grilli Type retail face, bundled as a
   99-glyph subset (see below).
+- **Mata Bold** arrived in the design bundle with no licence statement at all,
+  which is not the same as a permissive one. It draws exactly one string —
+  "JELLYFIN" in the lockup — so it is also the cheapest of the four to
+  substitute: one `face_of()` case and one embed.
 
 They are in the tree because the design specifies them and the owner of this
 build asked for them. That is a legitimate choice for a personal build. It does

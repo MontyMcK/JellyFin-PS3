@@ -424,6 +424,11 @@ void ttf_prewarm_hud(void);
 #define UI_FACE_EYEBROW   6   // Microgramma - eyebrows and section labels
 #define UI_FACE_TAB       7   // Satoshi Bold - tab labels, clock
 #define UI_FACE_TAB_REG   8   // Satoshi Regular - date, cast names
+// The wordmark, and nothing else.  The design gives the lockup its own stack
+// ('Mata','Microgramma','Michroma') because the brand is not body type: it is
+// one eight-letter string drawn once a frame, so it can afford a face that
+// exists purely for it.
+#define UI_FACE_LOCKUP    9   // Mata Bold - the "JELLYFIN" wordmark
 
 int  ttf_text_width(const char *text, float px, bool bold = false);
 int  ttf_text_width_face(const char *text, float px, int face);
@@ -435,6 +440,18 @@ void drawTTF_face(u32 x, u32 y, const char *text, float px, u32 color, int face)
 void drawTTF_tracked(u32 x, u32 y, const char *text, float px, u32 color,
                      int face, float track);
 int  ttf_text_width_tracked(const char *text, float px, int face, float track);
+
+// drawTTF_tracked with a horizontal colour ramp instead of one colour: `stops`
+// are evenly spaced across the run and each glyph takes the ramp at its own
+// centre.  Width is ttf_text_width_tracked -- the ramp costs no space.
+// This exists for the lockup wordmark.  It is not a general gradient-text
+// facility, and it takes the same per-glyph path its tracking does.
+void drawTTF_ramp(u32 x, u32 y, const char *text, float px,
+                  const u32 *stops, int nstops, int face, float track);
+
+// The y that centres a run's INK box (not its em box) on cy, for any face.
+// false = the string has no ink, so draw nothing.
+bool ttf_center_y(const char *text, float px, int face, int cy, int *out_y);
 
 // ASCII-only uppercase, in place.  Safe on the UTF-8 the server sends.
 void ui_upper_ascii(char *s);
@@ -497,6 +514,10 @@ void xmb_cpu_draw_search_results(void);
 void xmb_draw_jumpbar(int tab);
 void draw_hints_bar(const Hint *hints, int n);
 void xmb_draw_topbar(void);         // brand top-left, clock top-right
+// The lockup's mark, with its BELL bell_px wide and its top-left at (x,y).
+// The raster carries the design's drop shadow in a padded box, so it draws
+// slightly larger than bell_px and slightly above/left of (x,y).
+void xmb_draw_mark(int x, int y, int bell_px);
 
 // Section eyebrow: the small uppercase label above a row (--font-eyebrow,
 // 11px, 0.18em tracking).  Returns its advance so a count can follow it.

@@ -168,6 +168,15 @@ int main(void) {
     check_face("Michroma (spec)", p,
                "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .-/·", 12.0f, true);
 
+    // The lockup wordmark.  It draws ONE string, so the sample is that string
+    // -- but check the whole alphabet anyway, because the next revision of the
+    // design could reword the lockup and this is where that would surface.
+    // 14px is the size v1.0 draws it at; a face that goes blank at the only
+    // size it is ever used at is the failure this file exists to catch.
+    snprintf(p, sizeof p, "%sMata-Bold.otf", DS);
+    check_face("Mata Bold (lockup)", p,
+               "JELLYFINABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", 14.0f, true);
+
     printf("\naccented coverage, since Rodin becomes the face for every string:\n");
     snprintf(p, sizeof p, "%sSCE-PS3-RD-R-LATIN.ttf", DS);
     printf("  Rodin LATIN\n");
