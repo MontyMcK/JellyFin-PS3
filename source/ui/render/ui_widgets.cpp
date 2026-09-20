@@ -49,27 +49,85 @@ static int tab_icon(int tab) {
 // Top bar: brand on the left, clock on the right (XMB style)
 // -------------------------------------------------------
 
+// Top bar: lockup left, clock right, both on the same 24px row at y=20
+// (handoff section 8's Phase 2 block).  Scales with UIS_T so it stays
+// proportional inside the chrome band above the tab strip.
+//
+// NOT YET the design's lockup.  Section 3.1 asks for a 24x24 mark with a 16px
+// wordmark in the display face at x=71, and section 3.0 names that face as
+// Microgramma Bold Extended.  Neither the mark nor the three handoff typefaces
+// are embedded in this build yet, so this keeps the text lockup and only fixes
+// its geometry and scale.  The "PS3" tag stays until the mark replaces it --
+// the revision removed it because the new mark carries the PS3 icon itself.
 void xmb_draw_topbar(void) {
     const int oy = XMB_OY;   // shift the top bar down out of the CRT overscan
-    // Brand: "Jellyfin" + accent "PS3" tag on a shared baseline.
-    drawTTF(XMB_ITEM_PAD, (u32)(20 + oy), "Jellyfin", 22, XMB_TEXT, true);
-    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", 22, true) + 8,
-            (u32)(27 + oy), "PS3", 13, XMB_ACCENT, true);
+    const int row_y = oy + UIS_H(20);            // the shared 24px row
 
-    // Clock: "13/6  21:34" right-aligned, date dimmer than time.
+    // Brand lockup.  v1.0 shrank it: the mark 24 -> 21px, the wordmark 16 ->
+    // 14px, the gap 7 -> 6.  The "PS3" tag stays until the mark asset replaces
+    // it -- the design removed it because the new mark carries PS3 itself.
+    const float brand_px = UIS_TF(21.0f);
+    const float tag_px   = UIS_TF(12.0f);
+    drawTTF(XMB_ITEM_PAD, (u32)row_y, "Jellyfin", brand_px, XMB_TEXT, true);
+    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", brand_px, true) + UIS_H(6),
+            (u32)(row_y + UIS_H(7)), "PS3", tag_px, XMB_ACCENT, true);
+
+    // Clock, right-aligned, with the date dimmer beside it.
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     if (!tm) return;
     char t_str[8], d_str[8];
     snprintf(t_str, sizeof(t_str), "%d:%02d", tm->tm_hour, tm->tm_min);
     snprintf(d_str, sizeof(d_str), "%d/%d", tm->tm_mday, tm->tm_mon + 1);
-    int tw = ttf_text_width(t_str, 19);
-    int dw = ttf_text_width(d_str, 13);
+    // v1.0 moved BOTH of these onto --font-tab (Satoshi).  The clock used to be
+    // one of two things the display face was allowed; it is not any more, which
+    // matters now that the display face is a subset with no colon -- a clock on
+    // it would have rendered "1334" and nobody would have known why.
+    const float time_px = UIS_TF(16.0f);         // Satoshi 700
+    const float date_px = UIS_TF(11.0f);         // Satoshi 500
+    int tw = ttf_text_width_face(t_str, time_px, UI_FACE_TAB);
+    int dw = ttf_text_width_face(d_str, date_px, UI_FACE_TAB_REG);
     int tx = (int)display_width - (int)XMB_ITEM_PAD - tw;
-    drawTTF((u32)tx, (u32)(22 + oy), t_str, 19, XMB_TEXT_DIM);
-    drawTTF((u32)(tx - dw - 10), (u32)(27 + oy), d_str, 13, XMB_TEXT_FAINT);
+    drawTTF_face((u32)tx, (u32)(row_y + UIS_H(2)), t_str, time_px,
+                 XMB_TEXT, UI_FACE_TAB);
+    drawTTF_face((u32)(tx - dw - UIS_H(10)), (u32)(row_y + UIS_H(7)),
+                 d_str, date_px, XMB_TEXT_FAINT, UI_FACE_TAB_REG);
 }
 
+
+// Section eyebrow — the small uppercase label above a row.
+//
+// v1.0 gives these their own token, `--font-eyebrow`: Microgramma at 11px,
+// weight 400, UPPERCASE, 0.18em tracking.  In the canvas they are "Continue
+// watching", "Recently added · Movies", "Search library", "Results", "Up next";
+// this client has a few more of its own ("Cast & Crew", "More Like This") and
+// they get the same treatment, because the design's rule is about what the
+// label IS, not which screen it happens to be on.
+//
+// Microgramma carried the DISPLAY role before v1.0 and was already embedded, so
+// the new role costs nothing.  Uppercasing is ASCII-only (ui_upper_ascii) — the
+// text can be a server row title.
+//
+// Returns the advance, so a caller can put a count or a chevron after it.
+int xmb_draw_eyebrow(int x, int y, const char *text, u32 color)
+{
+    char up[96];
+    snprintf(up, sizeof up, "%s", text);
+    ui_upper_ascii(up);
+    const float px    = UIS_TF(11.0f);
+    const float track = px * 0.18f;
+    drawTTF_tracked((u32)x, (u32)y, up, px, color, UI_FACE_EYEBROW, track);
+    return ttf_text_width_tracked(up, px, UI_FACE_EYEBROW, track);
+}
+
+int xmb_eyebrow_width(const char *text)
+{
+    char up[96];
+    snprintf(up, sizeof up, "%s", text);
+    ui_upper_ascii(up);
+    const float px = UIS_TF(11.0f);
+    return ttf_text_width_tracked(up, px, UI_FACE_EYEBROW, px * 0.18f);
+}
 // Faded hairline under the tab bar — bright at the center, dissolving
 // toward the edges instead of a hard full-width line.
 void xmb_draw_divider(void) {
@@ -92,9 +150,36 @@ void xmb_draw_divider(void) {
 // Tab bar
 // -------------------------------------------------------
 
+// Tab strip geometry is MEASURED, from handoff section 3.1 and the Phase 2
+// block at the end of section 8.  The handoff states outright that those
+// numbers win over any revision note, because they were read off the rendered
+// JFChrome frame rather than projected:
+//
+//   7 items, width 70, gap 40, stride 110, row starts x=275
+//   icon 26x26 at y=61 · label y=96 (active only) · underline 2px y=110
+//   divider y=144
+//
+// The "nav band 80->68px" note is NOT a stride and was never one: it describes
+// the flex container holding the row. The row still starts at y=61 and the
+// divider still sits at y=144, so XMB_TABBAR_H stays as it was and nothing
+// below the chrome moves.
+//
+// The numbers are authored at 1280x720 and go through UIS_T, which scales both
+// ways -- see ui_visuals.h.  At 1080p that is 1.5x, which is what keeps the
+// strip proportional and consistent with the hints bar.  The vertical anchors
+// stay RELATIVE to XMB_TOPBAR_H so the strip cannot drift away from the bar
+// above it if that ever changes.
+#define TAB_ICON_PX     26   // uniform; the active tab reads by colour, not size
+#define TAB_ITEM_W      70
+#define TAB_GAP         40
+#define TAB_STRIDE      (TAB_ITEM_W + TAB_GAP)   // 110
+#define TAB_ICON_Y      61   // from the top of the frame, 720p
+#define TAB_LABEL_Y     96
+#define TAB_RULE_Y     110
+#define TAB_RULE_H       2
+
 void xmb_draw_tabs(void) {
-    const int oy      = XMB_OY;                          // overscan shift
-    const int icon_cy = oy + XMB_TOPBAR_H + UIS_H(30);   // icon centerline
+    const int oy = XMB_OY;                       // overscan shift
 
     // Display order (Search, Home, libraries, Settings) — NOT array order,
     // since Settings keeps a low index but renders last.
@@ -102,50 +187,63 @@ void xmb_draw_tabs(void) {
     int n = xmb_tab_order(enabled);
     if (n == 0) return;
 
-    // Spacing has to adapt now that the tab count follows the server's
-    // library count instead of being fixed at 7.  The authored 72px is kept
-    // whenever the row fits; past that it shrinks to whatever divides the
-    // usable width, floored so icons never overlap.  A 720px SD framebuffer
-    // fits 7 tabs at full spacing and ~11 at the floor.
+    // Stride adapts, because the tab count follows the server's library count
+    // rather than the design's fixed 7.  The measured 110 is kept whenever the
+    // row fits; past that it shrinks to whatever divides the usable width,
+    // floored so icons never overlap.
     const int avail = (int)display_width - 2 * XMB_ITEM_PAD;
-    int spacing = 72;
+    int spacing = UIS_H(TAB_STRIDE);
     if (n > 1 && (n - 1) * spacing > avail) {
         spacing = avail / (n - 1);
-        if (spacing < 34) spacing = 34;   // icon width + breathing room
+        const int floor_px = UIS_H(TAB_ICON_PX) + UIS_H(8);
+        if (spacing < floor_px) spacing = floor_px;
     }
 
     const int group_w      = (n - 1) * spacing;
     const int tab_group_x0 = (int)display_width / 2 - group_w / 2;
 
-    // Uniform icon row; the active tab is white with its label and a short
-    // accent underline beneath (no size jump, no L1/R1 chips — the bumpers
-    // still switch tabs, the hints bar can advertise that where relevant).
+    const int icon_px = UIS_H(TAB_ICON_PX);
+    const int icon_y  = oy + UIS_H(TAB_ICON_Y);
+    const int label_y = oy + UIS_H(TAB_LABEL_Y);
+    const int rule_y  = oy + UIS_H(TAB_RULE_Y);
+
+    // Uniform icon row: the active tab reads by COLOUR plus its label and the
+    // accent underline, never by growing.  Section 3.0: "Focused items change
+    // scale, ring and brightness — never weight", and the strip's own table
+    // gives one icon size for every state.
     for (int i = 0; i < n; i++) {
         int  t      = enabled[i];
         int  cx     = tab_group_x0 + i * spacing;
         bool active = (t == g_active_tab);
-        int icon_px = active ? 30 : 26;
-        int icon_x  = cx - icon_px / 2;
-        int icon_y  = icon_cy - icon_px / 2;
 
-        drawIcon((u32)icon_x, (u32)icon_y, tab_icon(t), (float)icon_px,
-                 active ? XMB_WHITE : XMB_ICON_IDLE);
+        drawIcon((u32)(cx - icon_px / 2), (u32)icon_y, tab_icon(t),
+                 (float)icon_px, active ? XMB_WHITE : XMB_ICON_IDLE);
 
         if (active) {
-            // Labels are server library names now, so they can be long and
-            // the active tab can sit at either end of the row.  Centre under
-            // the icon, then clamp into the safe area so a wide name is never
-            // pushed off-screen.
-            int lw = ttf_text_width(g_tabs[t].label, 14);
+            // v1.0: Satoshi Bold 11.5px, UPPERCASE, 0.04em tracking.
+            //
+            // Labels are server library names, so they can be long and the
+            // active tab can sit at either end of the row.  Centre under the
+            // icon, then clamp into the safe area so a wide name is never
+            // pushed off-screen -- measured WITH the tracking, or the clamp
+            // would be computed against a narrower string than gets drawn.
+            const float px    = UIS_TF(11.5f);
+            const float track = px * 0.04f;      // 0.04em
+            char label[sizeof(g_tabs[t].label)];
+            snprintf(label, sizeof label, "%s", g_tabs[t].label);
+            ui_upper_ascii(label);
+
+            int lw = ttf_text_width_tracked(label, px, UI_FACE_TAB, track);
             int lx = cx - lw / 2;
             int lo = XMB_ITEM_PAD;
             int hi = (int)display_width - XMB_ITEM_PAD - lw;
             if (lx < lo) lx = lo;
             if (hi >= lo && lx > hi) lx = hi;
-            drawTTF((u32)lx, (u32)(oy + XMB_TOPBAR_H + UIS_H(52)),
-                    g_tabs[t].label, 14, XMB_TEXT);
-            drawRect((u32)(cx - 13), (u32)(oy + XMB_TOPBAR_H + UIS_H(74)), 26, 3,
-                     XMB_ACCENT);
+            drawTTF_tracked((u32)lx, (u32)label_y, label, px, XMB_TEXT,
+                            UI_FACE_TAB, track);
+            const int rw = UIS_H(TAB_ICON_PX);   // underline matches the icon
+            drawRect((u32)(cx - rw / 2), (u32)rule_y,
+                     (u32)rw, (u32)UIS_H(TAB_RULE_H), XMB_ACCENT);
         }
     }
 }
@@ -162,13 +260,27 @@ void xmb_draw_jumpbar(int tab) {
     int bar_h   = bar_bot - bar_top;
     int jbar_x  = gg.x0 - JBAR_GAP * 3 - JBAR_W;
     if (jbar_x < 0) jbar_x = 0;
-
-    // Step height evenly divides the bar; font fills each slot (1.2× gives glyph ascender
-    // room without adjacent letters visually overlapping on TV at viewing distance).
+    // Step height evenly divides the bar; the font fills each slot (1.2x gives
+    // glyph ascender room without adjacent letters visually overlapping on a TV
+    // at viewing distance).
     float entry_h = (float)bar_h / (float)JBAR_ENTRIES;
     float font_px = entry_h * 1.2f;
-    if (font_px < 12.0f) font_px = 12.0f;
-    if (font_px > 28.0f) font_px = 28.0f;
+    if (font_px < UIS_TF(12)) font_px = UIS_TF(12);
+    if (font_px > UIS_TF(28)) font_px = UIS_TF(28);
+
+    // THE COLUMN IS THE HARD CONSTRAINT, and it wins over both clamps above.
+    //
+    // The size above comes from the GRID's height, but the letters are drawn
+    // into a JBAR_W-wide strip, and nothing tied the two together: when the
+    // chrome band was rescaled the grid moved, font_px went to its cap, and the
+    // A-Z strip drew far too large in a column that had not changed at all.
+    //
+    // Measured rather than guessed at a ratio -- "W" is the widest label, the
+    // advance scales linearly with px so one division is exact, and the system
+    // face is Rodin now, whose proportions are not the ones the old 1.2x was
+    // eyeballed against.
+    float wide = (float)ttf_text_width("W", font_px, false);
+    if (wide > (float)JBAR_W) font_px *= (float)JBAR_W / wide;
 
     static const char * const jbar_labels[JBAR_ENTRIES] = {
         "#","A","B","C","D","E","F","G","H","I","J","K","L","M",
@@ -183,7 +295,7 @@ void xmb_draw_jumpbar(int tab) {
         bool sel = g_jumpbar_active && (i == g_jumpbar_sel);
         u32 color = sel ? XMB_WHITE
                   : g_jumpbar_active ? XMB_ICON_IDLE
-                  : 0x00363D63UL;
+                  : XMB_HAIRLINE;
         drawTTF((u32)jbar_x, (u32)ty, jbar_labels[i], font_px, color, sel);
     }
 }
@@ -195,7 +307,7 @@ void xmb_draw_jumpbar(int tab) {
 void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
     static const char *labels[MUSIC_ST_COUNT] =
         { "Albums", "Artists", "Playlists", "Genres", "Songs" };
-    const float px = 16.0f;
+    const float px = UIS_TF(16.0f);
     for (int i = 0; i < MUSIC_ST_COUNT; i++) {
         bool is_active = (i == active);
         u32 color = is_active ? (focused ? XMB_WHITE : XMB_TEXT)
@@ -203,7 +315,7 @@ void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
         drawTTF((u32)x, (u32)y, labels[i], px, color, is_active);
         int w = ttf_text_width(labels[i], px, is_active);
         if (is_active)
-            drawRect((u32)x, (u32)(y + 24), (u32)w, 3,
+            drawRect((u32)x, (u32)(y + UIS_H(24)), (u32)w, UIS_H(3),
                      focused ? XMB_KEY_SEL : XMB_ACCENT);
         x += w + 34;
     }
@@ -358,36 +470,109 @@ void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
 // Controller-hints bar — sprite buttons + labels, bottom-right
 // -------------------------------------------------------
 
+// Shoulder-button badge — handoff section 3.1: "26x22 rounded rects (radius 6,
+// 1.5px text_dim border, mono 10.5 label)".
+//
+// Outline only, drawn as four OPAQUE rects.  A real radius-6 corner needs
+// coverage blending, and blended CPU rects read video memory at ~700ns/pixel
+// (see UI-BRIEF.md) -- one hint bar of them would cost more than the entire
+// frame budget.  Instead each edge is inset by the corner radius so the four
+// strokes stop short of meeting, which reads as a rounded box at TV distance
+// and costs nothing but writes.  bpx stays 0.
+#define HINT_BADGE_W    26
+#define HINT_BADGE_H    22
+#define HINT_BADGE_R     3   // corner inset, px at 720p (visual radius ~6)
+
+// The whole bar scales with UIS_T rather than UIS_W/UIS_H: it is a text-led
+// cluster, and at 1080p the pass-through forms left the badges and their labels
+// at two-thirds the handoff's intended size.  Scaling only the type would leave
+// 19px labels inside a 26px box, so icons, badges, gaps and text all move
+// together and the bar keeps the proportions section 3.1 draws.
+static int hint_badge_w(void) { return UIS_H(HINT_BADGE_W); }
+
+static void draw_hint_badge(int x, int cy, const char *label) {
+    const int w = UIS_H(HINT_BADGE_W);
+    const int h = UIS_H(HINT_BADGE_H);
+    const int t = UIS_H(2) < 1 ? 1 : UIS_H(2);   // 1.5px spec, on the pixel grid
+    const int r = UIS_H(HINT_BADGE_R);
+    const int y = cy - h / 2;
+
+    if (x < 0 || y < 0 || (u32)(x + w) > display_width ||
+        (u32)(y + h) > display_height) return;
+
+    const u32 c = XMB_TEXT_DIM;
+    drawRect((u32)(x + r),         (u32)y,               (u32)(w - 2 * r), (u32)t, c);
+    drawRect((u32)(x + r),         (u32)(y + h - t),     (u32)(w - 2 * r), (u32)t, c);
+    drawRect((u32)x,               (u32)(y + r),         (u32)t, (u32)(h - 2 * r), c);
+    drawRect((u32)(x + w - t),     (u32)(y + r),         (u32)t, (u32)(h - 2 * r), c);
+
+    // Centred label.  The design asks for a mono face; this build has none
+    // (UI_FACE_REGULAR/BOLD/NOTO/ROBOCOND), so regular stands in at the spec
+    // size -- "L1"/"R1" are two glyphs and do not need the alignment a mono
+    // face buys for the date and the tech strip.
+    const float px = UIS_TF(10.5f);      // section 3.1: mono 10.5 badge label
+    const int   tw = ttf_text_width(label, px);
+    drawTTF((u32)(x + (w - tw) / 2), (u32)(cy - (int)(px * 0.55f)), label, px, c);
+}
+
+// A hint is a shoulder badge when its glyph is lowercase 'l'/'r' (L1/R1).
+// Uppercase 'L'/'R' stay the L2/R2 sprites the sheet already carries.
+static bool hint_is_shoulder(char g) { return g == 'l' || g == 'r'; }
+
 void draw_hints_bar(const Hint *hints, int n) {
     if (n <= 0) return;
     ps_sprites_load();
     if (s_ps_state != 1) return;
 
     const int   icon_h  = UIS_H(24);
-    const float text_px = (float)UIS_H(15);
-    const int   gap_it  = UIS_W(8);    // icon to its label
-    const int   gap_sep = UIS_W(26);   // between hint pairs
+    const float text_px = UIS_TF(12.5f);      // section 3.1: 12.5px label
+    const int   gap_it  = UIS_H(8);           // icon to its label
+    const int   gap_sep = UIS_H(22);          // section 3.1: items gap 22
+
+    // An EMPTY label pairs a hint with the one after it, so "L1/R1 Tab" is a
+    // single cluster ({'l',""},{'r',"Tab"}) rather than two hints with a full
+    // separator between them.
+    const int gap_pair = UIS_H(4);
 
     int total_w = 0;
     for (int i = 0; i < n; i++) {
-        total_w += ps_btn_width(hints[i].glyph, icon_h);
-        total_w += gap_it;
-        total_w += ttf_text_width(hints[i].label, text_px);
-        if (i < n - 1) total_w += gap_sep;
+        total_w += hint_is_shoulder(hints[i].glyph)
+                     ? hint_badge_w()
+                     : ps_btn_width(hints[i].glyph, icon_h);
+        if (hints[i].label && hints[i].label[0]) {
+            total_w += gap_it + ttf_text_width(hints[i].label, text_px);
+            if (i < n - 1) total_w += gap_sep;
+        } else {
+            total_w += gap_pair;
+        }
     }
 
     int x = (int)display_width - XMB_ITEM_PAD - total_w;
     if (x < (int)XMB_ITEM_PAD) x = (int)XMB_ITEM_PAD;
-    int cy = (int)display_height - XMB_BOTTOM_PAD + UIS_H(34);
+
+    // Section 3.1 puts the hint baseline at y=698 of the 720-tall canvas.  The
+    // overscan inset stays folded in on top of that, so a calibrated CRT still
+    // lifts the whole bar clear of the bezel.
+    int cy = (int)display_height - XMB_OY - UIS_H(22);
     if (cy < 0 || (u32)cy >= display_height) return;
 
     for (int i = 0; i < n; i++) {
-        draw_ps_button_vcentered((u32)x, cy, hints[i].glyph, icon_h, 255);
-        x += ps_btn_width(hints[i].glyph, icon_h) + gap_it;
-        drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), hints[i].label,
-                text_px, XMB_TEXT_DIM);
-        x += ttf_text_width(hints[i].label, text_px);
-        if (i < n - 1) x += gap_sep;
+        if (hint_is_shoulder(hints[i].glyph)) {
+            draw_hint_badge(x, cy, hints[i].glyph == 'l' ? "L1" : "R1");
+            x += hint_badge_w();
+        } else {
+            draw_ps_button_vcentered((u32)x, cy, hints[i].glyph, icon_h, 255);
+            x += ps_btn_width(hints[i].glyph, icon_h);
+        }
+        if (hints[i].label && hints[i].label[0]) {
+            x += gap_it;
+            drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), hints[i].label,
+                    text_px, XMB_TEXT_DIM);
+            x += ttf_text_width(hints[i].label, text_px);
+            if (i < n - 1) x += gap_sep;
+        } else {
+            x += gap_pair;
+        }
     }
 }
 
@@ -397,12 +582,12 @@ void draw_hints_bar(const Hint *hints, int n) {
 
 void xmb_draw_empty_state(int tab, const char *msg) {
     int cx = (int)display_width / 2;
-    int cy = (XMB_CONTENT_Y + (int)display_height - XMB_BOTTOM_PAD) / 2 - 30;
-    const float icon_px = 48.0f;
+    int cy = (XMB_CONTENT_Y + (int)display_height - XMB_BOTTOM_PAD) / 2 - UIS_H(30);
+    const float icon_px = UIS_TF(48.0f);
     drawIcon((u32)(cx - (int)icon_px / 2), (u32)(cy - (int)icon_px),
-             tab_icon(tab), icon_px, 0x002E3458UL);
-    int tw = ttf_text_width(msg, 17);
-    drawTTF((u32)(cx - tw / 2), (u32)(cy + 8), msg, 17, XMB_TEXT_FAINT);
+             tab_icon(tab), icon_px, XMB_HAIRLINE);
+    int tw = ttf_text_width(msg, UIS_TF(17));
+    drawTTF((u32)(cx - tw / 2), (u32)(cy + UIS_H(8)), msg, UIS_TF(17), XMB_TEXT_FAINT);
 }
 
 // -------------------------------------------------------
@@ -411,20 +596,20 @@ void xmb_draw_empty_state(int tab, const char *msg) {
 
 void xmb_draw_breadcrumb(int x, int y, const char *a, const char *b,
                          const char *leaf) {
-    const float px = 15.0f;
+    const float px = UIS_TF(15.0f);
     const char *parts[3] = { a, b, leaf };
     for (int i = 0; i < 3; i++) {
         if (!parts[i]) continue;
         bool is_leaf = (i == 2) || (i == 1 && !parts[2]) || (i == 0 && !parts[1] && !parts[2]);
         drawTTF((u32)x, (u32)y, parts[i], px,
-                is_leaf ? 0x00C5CBE3UL : XMB_TEXT_FAINT);
+                is_leaf ? XMB_TEXT : XMB_TEXT_FAINT);
         x += ttf_text_width(parts[i], px);
         // Chevron between segments.
         bool more = (i < 2) && parts[i + 1];
         if (more) {
-            drawIcon((u32)(x + 4), (u32)(y - 1), ICON_CHEVRON_RIGHT, 16.0f,
+            drawIcon((u32)(x + UIS_W(4)), (u32)(y - 1), ICON_CHEVRON_RIGHT, UIS_TF(16.0f),
                      XMB_TEXT_FAINT);
-            x += 24;
+            x += UIS_W(24);
         }
     }
 }

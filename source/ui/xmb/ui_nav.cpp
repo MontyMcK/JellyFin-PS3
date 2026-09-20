@@ -174,8 +174,10 @@ static bool xmb_input_settings(void) {
             subfont_cycle();     // Open Sans -> Noto Sans -> Roboto Cond.
         if (g_settings_sel == 7)                                        // Subtitle Colour
             subcolor_cycle();    // White -> Soft Yellow -> Soft Grey
+        if (g_settings_sel == 8)                                        // Theme
+            theme_cycle();       // XMB wave -> Golden Age -> any USRDIR/tmp .ini
 #if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 8)                                        // Player Stats Overlay
+        if (g_settings_sel == 9)                                        // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());
 #endif
     }

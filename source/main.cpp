@@ -12,6 +12,7 @@
 #include "rsxutil.h"
 #include "ui.h"
 #include "ui_visuals.h"
+#include "ui_wave.h"   // wave_init() -- called here, not from ui_init()
 #include "http.h"
 #include "update_check.h"
 #include <unistd.h>   // usleep
@@ -22,6 +23,7 @@
 #include "plog.h"
 #include "audio/audio_out.h"   // audio_out_log_capabilities()
 #include "overscan.h"
+#include "ui/ui_scale.h"
 #include "hd1080.h"
 #include "vquality.h"
 #include "surround.h"
@@ -34,6 +36,9 @@
 #include "video.h"
 #include "player_hud.h"
 #include "slog.h"
+#include "jf_spu.h"
+#include "ui_card_gpu.h"
+#include "ui_text_gpu.h"
 
 SYS_PROCESS_PARAM(1001, 0x8000000);
 
@@ -106,6 +111,31 @@ int main(int argc, const char *argv[]) {
     crash_log("6 ui_init");
     ui_init();
     plog_load_setting();   // starts logging only if the user enabled it
+    // Theme, first of the restores and deliberately right after the logger:
+    // g_theme is already built-in 0 via its static initialiser (so the boot
+    // frames above were themed), and this applies the user's saved choice.
+    // It logs which theme is live and why, which is exactly the kind of line
+    // ui_init() would have thrown away.
+    crash_log("6.3 theme_load_setting");
+    theme_load_setting();
+    // AFTER plog is up, deliberately: this decides whether card images go
+    // through the RSX or the CPU blit, and which one is live has to be
+    // visible in the log.  Called from ui_init() it ran before the logger
+    // existed and said nothing at all.  Needs only RSX, which init_screen()
+    // brought up at step 2.
+    crash_log("6.4b card_gpu_init");
+    ui_card_gpu_init();
+    // Same reasoning, same stage: needs RSX and wants its "which path is live"
+    // line in the log, so it cannot run from ui_init() either.
+    crash_log("6.4c text_gpu_init");
+    ui_text_gpu_init();
+    // Third one for the same reason.  wave_init() reads jellyfin_gpuwave.txt
+    // and reports which of the three submission paths is live; from ui_init()
+    // that line went nowhere, which cost a measurement session.  Nothing draws
+    // between ui_init() and here, and wave_draw() no-ops until this runs.
+    crash_log("6.4d wave_init");
+    wave_init();
+    ui_scale_load();       // how 1280x720 authored numbers map to this screen
     overscan_load();       // restore the user's CRT overscan calibration
     hd1080_load();         // restore the 1080p playback (Alpha) toggle
     vquality_load();       // restore the video quality choice (info screen)
@@ -149,6 +179,10 @@ int main(int argc, const char *argv[]) {
     // Opt-in diagnostic, before anything else touches the network.  Does
     // nothing unless jellyfin_nettest.txt exists -- see net_selftest.h.
     net_selftest_run();
+    // Opt-in SPU pool check (jellyfin_sputest.txt).  Runs here, while the heap
+    // is still pristine and before vdec_reserve_mem() takes its 96MB -- and
+    // crucially before anything could want the SPUs cellVdec will claim.
+    jf_spu_selftest();
 
     crash_log("9 running=1");
     running = 1;
