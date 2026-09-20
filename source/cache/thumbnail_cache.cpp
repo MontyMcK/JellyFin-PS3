@@ -70,6 +70,19 @@ typedef struct {
     SlotState state;
     u32       last_touch;     // s_frame when something on screen last wanted it
     u8        img;            // ThumbImg — part of the identity, not just the URL
+
+    // VRAM mirror the RSX samples (ui/render/ui_card_gpu.cpp).
+    //
+    // bmp.pixels stays in MAIN memory and is still the truth: the decoder
+    // writes it, and cpu_blit_bitmap_scaled() and the letter-tile path read
+    // it.  Moving it into video memory would make those CPU *reads* run at
+    // the 7.7 MB/s this hardware manages there, which is far worse than the
+    // copy it would save.  So the slot keeps both, and the copy happens once
+    // per decode rather than once per frame per visible card.
+    u32      *vram;           // rsxMemalign'd, s_vram_bytes
+    u32       vram_off;       // RSX offset for rsxLoadTexture
+    u32       vram_pitch;     // BYTES per row -- 64-byte aligned, see below
+    bool      vram_valid;     // mirror matches bmp for the CURRENT contents
 } ThumbSlot;
 
 // Path segment for each ThumbImg.
@@ -84,6 +97,11 @@ static volatile int     s_lock       = 0;
 static sys_ppu_thread_t s_thread     = 0;
 static volatile bool    s_running    = false;
 static size_t           s_max_px     = 0;            // pixel capacity per slot
+static size_t           s_vram_bytes = 0;            // padded capacity of a VRAM mirror
+
+// Row pitch in bytes for a w-pixel-wide ARGB texture, rounded up to the
+// RSX's 64-byte linear-texture requirement.
+#define VRAM_PITCH(w) ((((u32)(w) * 4u) + 63u) & ~63u)
 static uint8_t          s_fetch_buf[FETCH_BUF_SIZE];
 
 static void lock_acquire(void) { while (!__sync_bool_compare_and_swap(&s_lock, 0, 1)) ; }
@@ -303,7 +321,15 @@ static void fetch_thread_fn(void *arg) {
         lock_acquire();
         bool published = (strncmp(s_slots[si].item_id, item_id, 64) == 0 &&
                           s_slots[si].img == img);
-        if (published) s_slots[si].state = SLOT_READY;
+        if (published) {
+            s_slots[si].state = SLOT_READY;
+            // The decode just rewrote bmp; the mirror is stale until
+            // thumb_gpu_sync() copies it on the render thread.  Uploading
+            // here would be a main->VRAM write from the FETCH thread while
+            // the render thread may be mid-frame, and the RSX could sample a
+            // half-written texture.
+            s_slots[si].vram_valid = false;
+        }
         lock_release();
 
         d_fetch_ok++;
@@ -344,10 +370,25 @@ void thumb_cache_init(void) {
     size_t pp = (size_t)gp.card_w * gp.card_h;
     size_t pl = (size_t)gl.card_w * gl.card_h;
     s_max_px  = (pp > pl) ? pp : pl;
+
+    // The VRAM mirror is a TEXTURE, and the RSX requires a linear texture's
+    // pitch to be 64-byte aligned.  A card is 230 px wide at 1080p, so its
+    // natural pitch is 920 bytes -- not a multiple of 64, and binding it that
+    // way gives a skewed or garbage image.  So each mirror row is padded to
+    // the next 64-byte boundary and the copy goes row by row.
+    //
+    // Size for the worse of the two orientations rather than assuming which
+    // one is bigger: portrait is taller, landscape is wider, and which needs
+    // more padded bytes depends on the resolution.
+    {
+        size_t bp = (size_t)VRAM_PITCH(gp.card_w) * gp.card_h;
+        size_t bl = (size_t)VRAM_PITCH(gl.card_w) * gl.card_h;
+        s_vram_bytes = (bp > bl) ? bp : bl;
+    }
     // Pixels live in MAIN memory (not RSX local): the UI blits cards with
     // the CPU every frame, and CPU reads of RSX-local memory are far too
     // slow (and the GPU transfer engine proved freeze-prone for this).
-    int failed = 0;
+    int failed = 0, vram_failed = 0;
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         Bitmap *b = &s_slots[i].bmp;
         b->width  = 0;
@@ -355,10 +396,31 @@ void thumb_cache_init(void) {
         if (!b->pixels) b->pixels = (u32*)memalign(16, s_max_px * 4);
         if (!b->pixels) failed++;
         b->offset = 0;
+        // VRAM mirror.  32 slots x ~455 KB is ~14.6 MB of the 256 MB of RSX
+        // local memory, against ~41 MB already in use -- affordable, and it
+        // buys back 6.4 ms of every Home frame.  A failure here is not fatal:
+        // vram stays NULL, the card falls back to its CPU blit, and the UI
+        // looks identical.
+        if (!s_slots[i].vram) {
+            s_slots[i].vram = (u32*)rsxMemalign(128, s_vram_bytes);
+            if (s_slots[i].vram)
+                rsxAddressToOffset(s_slots[i].vram, &s_slots[i].vram_off);
+            else
+                vram_failed++;
+        }
+        s_slots[i].vram_pitch = 0;
+        s_slots[i].vram_valid = false;
     }
     if (failed) {
         char buf[64];
         snprintf(buf, sizeof(buf), "thumb_cache: %d of %d slots FAILED", failed, THUMB_CACHE_SIZE);
+        plog(buf);
+    }
+    if (vram_failed) {
+        char buf[80];
+        snprintf(buf, sizeof(buf),
+                 "thumb_cache: %d of %d VRAM mirrors FAILED (those cards use the CPU blit)",
+                 vram_failed, THUMB_CACHE_SIZE);
         plog(buf);
     }
     s_running = true;
@@ -477,6 +539,53 @@ void thumb_cache_retarget(void) {
     s_fetch_hold = s_frame + THUMB_SWITCH_COOLDOWN;
     lock_release();
     glogf("RETARGET frame=%u -> hold=%u", s_frame, s_fetch_hold);
+}
+
+bool thumb_gpu_texture(const char *item_id, int w, int h,
+                       u32 *out_offset, u32 *out_pitch, ThumbImg img)
+{
+    if (!item_id || !out_offset || !out_pitch || w <= 0 || h <= 0) return false;
+
+    lock_acquire();
+    int si = find_slot(item_id, w, h, (u8)img);
+    if (si < 0 || s_slots[si].state != SLOT_READY || !s_slots[si].vram) {
+        lock_release();
+        return false;
+    }
+    s_slots[si].last_touch = s_frame;
+    bool need_copy = !s_slots[si].vram_valid;
+    u32 *src   = s_slots[si].bmp.pixels;
+    u32 *dst   = s_slots[si].vram;
+    u32  bw    = s_slots[si].bmp.width;
+    u32  bh    = s_slots[si].bmp.height;
+    u32  pitch = VRAM_PITCH(bw);
+    u32  off   = s_slots[si].vram_off;
+    s_slots[si].vram_pitch = pitch;
+    lock_release();
+
+    // Outside the lock: the copy is the slow part and the fetch thread must
+    // not be blocked behind it.  Racing a re-fetch of this same slot can only
+    // mean the mirror gets the newer pixels or is marked stale again and
+    // re-copied next frame -- never a torn *card*, because a slot is only
+    // reused after its identity changes and that path clears vram_valid.
+    if (need_copy) {
+        // Row by row: the destination rows are padded to pitch, the source
+        // rows are not.  Writing main->VRAM runs at ~767 MB/s on this
+        // hardware, so a 455 KB card costs about 0.6 ms -- once, when it
+        // decodes, not once per frame per visible card.
+        const u8 *sp = (const u8 *)src;
+        u8       *dp = (u8 *)dst;
+        for (u32 row = 0; row < bh; row++)
+            memcpy(dp + (size_t)row * pitch, sp + (size_t)row * bw * 4, bw * 4);
+        lock_acquire();
+        if (find_slot(item_id, w, h, (u8)img) == si)
+            s_slots[si].vram_valid = true;
+        lock_release();
+    }
+
+    *out_offset = off;
+    *out_pitch  = pitch;
+    return true;
 }
 
 void thumb_cache_tick(void) {
