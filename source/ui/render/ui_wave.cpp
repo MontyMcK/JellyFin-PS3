@@ -1069,41 +1069,24 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 14 proved the generated projection can contain coordinates
-            // large enough to wedge the RSX rasterizer.  Keep the real geometry,
-            // but sanitize every generated vertex before submission.  This is
-            // deliberately done at the final WaveVert boundary so the CPU-side
-            // JellyWave math remains untouched and the GPU never sees NaN/Inf or
-            // an extreme clip coordinate.
-            const u32 jelly_end = (u32)n;
-            for (u32 k = 4; k < jelly_end; k++) {
-                float x = v[k].x;
-                float y = v[k].y;
-                if (!(x == x)) x = 0.0f;
-                else if (x > 2.0f) x = 2.0f;
-                else if (x < -2.0f) x = -2.0f;
-                if (!(y == y)) y = 0.0f;
-                else if (y > 2.0f) y = 2.0f;
-                else if (y < -2.0f) y = -2.0f;
-                v[k].x = x;
-                v[k].y = y;
-                v[k].z = 0.0f;
-                v[k].w = 1.0f;
-            }
-            __asm__ __volatile__("sync" ::: "memory");
-            for (int slot = 0; slot < JW_LAYERS; slot++) {
-                if (s_jw_cnt[slot][0]) {
-                    rsxInvalidateVertexCache(context);
-                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                       s_jw_off[slot][0], s_jw_cnt[slot][0]);
+            // TEST 15: one real generated body section, with the same finite
+            // coordinate sanitization that made TEST 14 stable.  Keep this to
+            // section 2 so we can distinguish bad coordinates from a specific
+            // generated section/topology.
+            if (s_jw_cnt[0][0] >= (u32)(4 * JW_STATIONS)) {
+                const u32 section_v = (u32)(2 * JW_STATIONS);
+                WaveVert *tv = v + s_jw_off[0][0] + section_v;
+                for (u32 k = 0; k < section_v; k++) {
+                    float x = tv[k].x, y = tv[k].y;
+                    if (!(x == x)) x = 0.0f; else if (x > 2.0f) x = 2.0f; else if (x < -2.0f) x = -2.0f;
+                    if (!(y == y)) y = 0.0f; else if (y > 2.0f) y = 2.0f; else if (y < -2.0f) y = -2.0f;
+                    tv[k].x=x; tv[k].y=y; tv[k].z=0.0f; tv[k].w=1.0f;
                 }
-                if (s_jw_cnt[slot][1]) {
-                    rsxInvalidateVertexCache(context);
-                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                       s_jw_off[slot][1], s_jw_cnt[slot][1]);
-                }
+                __asm__ __volatile__("sync" ::: "memory");
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, s_jw_off[0][0] + section_v, section_v);
             }
-        } else {
+        } else {{
             const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
             for (int s = 0; s < nstrips; s++) {
