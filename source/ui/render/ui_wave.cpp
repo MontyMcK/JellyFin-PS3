@@ -1076,9 +1076,13 @@ void wave_draw(void) {
             // vertices, lighting, geometry and blend state unchanged.
             // No rim and no other layers.
             if (s_jw_cnt[0][0] >= (u32)(JW_SECTION * 2 * JW_STATIONS)) {
+                // TEST 8: first half of the independently submitted sections
+                // only. Test 6 proved the section-to-section degenerate joins
+                // are not required to reproduce the strobe; Test 7 ruled out
+                // RGB/lighting values. This bisects the actual section geometry.
                 const u32 section_v = (u32)(2 * JW_STATIONS);
                 const u32 join_v = section_v + 2;
-                for (int js = 0; js < JW_SECTION; js++) {
+                for (int js = 0; js < JW_SECTION / 2; js++) {
                     const u32 section_off =
                         s_jw_off[0][0] + (u32)js * join_v;
                     rsxInvalidateVertexCache(context);
