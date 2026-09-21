@@ -1069,26 +1069,25 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 15: one real generated body section, with the same finite
-            // coordinate sanitization that made TEST 14 stable.  Keep this to
-            // section 2 so we can distinguish bad coordinates from a specific
-            // generated section/topology.
+            // TEST 16: submit the same section 2 geometry, but collapse every
+            // vertex to the first generated vertex. This preserves the exact
+            // buffer offset/count and RSX state while removing all generated
+            // X/Y variation and triangle shape from the test.
             if (s_jw_cnt[0][0] >= (u32)(4 * JW_STATIONS)) {
                 const u32 section_v = (u32)(2 * JW_STATIONS);
                 WaveVert *tv = v + s_jw_off[0][0] + section_v;
+                float sx = tv[0].x, sy = tv[0].y;
+                if (!(sx == sx)) sx = 0.0f; else if (sx > 2.0f) sx = 2.0f; else if (sx < -2.0f) sx = -2.0f;
+                if (!(sy == sy)) sy = 0.0f; else if (sy > 2.0f) sy = 2.0f; else if (sy < -2.0f) sy = -2.0f;
                 for (u32 k = 0; k < section_v; k++) {
-                    float x = tv[k].x, y = tv[k].y;
-                    if (!(x == x)) x = 0.0f; else if (x > 2.0f) x = 2.0f; else if (x < -2.0f) x = -2.0f;
-                    if (!(y == y)) y = 0.0f; else if (y > 2.0f) y = 2.0f; else if (y < -2.0f) y = -2.0f;
-                    tv[k].x=x; tv[k].y=y; tv[k].z=0.0f; tv[k].w=1.0f;
+                    tv[k].x=sx; tv[k].y=sy; tv[k].z=0.0f; tv[k].w=1.0f;
                 }
                 __asm__ __volatile__("sync" ::: "memory");
                 rsxInvalidateVertexCache(context);
                 rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, s_jw_off[0][0] + section_v, section_v);
             }
         }
-        else {
-            const u32 stripv  = (u32)(ncols * 2);
+    }           const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
             for (int s = 0; s < nstrips; s++) {
                 rsxInvalidateVertexCache(context);
