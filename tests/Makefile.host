@@ -58,7 +58,8 @@ all: test_ac3_map test_ac3_decode test_media_sources test_subtitles \
      test_truehd_map test_truehd_decode \
      test_dts_hd test_dts_xll_dump test_text_runs test_utf8 test_theme test_layout test_circle_blit \
      test_wave_kernel test_wave_spline test_wave_ribbon test_wave_field \
-     test_wave_audio test_wave_motion test_wave_layers
+     test_wave_audio test_wave_motion test_wave_layers test_bg_gradient test_month_bg \
+     test_wave_cam test_wave_light test_wave_gel
 
 test_ac3_map: test_ac3_map.c $(MAP_SRC)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
@@ -245,6 +246,11 @@ check: all tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 	./test_wave_audio
 	./test_wave_motion
 	./test_wave_layers
+	./test_bg_gradient
+	./test_month_bg
+	./test_wave_cam
+	./test_wave_light
+	./test_wave_gel
 
 clean:
 	rm -f test_ac3_map test_ac3_decode test_media_sources test_subtitles \
@@ -253,7 +259,8 @@ clean:
 	      test_truehd_map test_truehd_decode test_dts_hd test_dts_xll_dump \
 	      test_text_runs test_utf8 test_theme test_layout test_circle_blit \
 	      test_wave_kernel test_wave_spline test_wave_ribbon test_wave_field \
-	      test_wave_audio test_wave_motion test_wave_layers \
+	      test_wave_audio test_wave_motion test_wave_layers test_bg_gradient \
+	      test_wave_cam test_wave_light test_wave_gel \
 	      tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 
 .PHONY: all check clean
@@ -333,12 +340,75 @@ test_wave_spline: test_wave_spline.c ../source/ui/render/wave_kernel.h \
 test_wave_ribbon: test_wave_ribbon.c $(WAVE_HDRS)
 	$(CC) $(CFLAGS) -o $@ test_wave_ribbon.c -lm
 
+# The background: four-corner gradient, day/night crossfade, ordered dither.
+# Its first job is to prove the OLD two-stop ramp still comes out unchanged,
+# so this runs on every build rather than only when the header moves.
+test_bg_gradient: test_bg_gradient.c ../source/ui/render/bg_gradient.h
+	$(CC) $(CFLAGS) -o $@ test_bg_gradient.c -lm
+
+# The month table's parser and selection.  Also parses the generated
+# outputs/jellyfin_months.ini when it is present, so the format the generator
+# writes and the format the client reads cannot drift apart unnoticed.
+test_month_bg: test_month_bg.c ../source/ui/render/month_bg_table.h ../source/ui/render/bg_gradient.h
+	$(CC) $(CFLAGS) -o $@ test_month_bg.c -lm
+
 # The seam itself: three chains through one adapter.  This is the only wave
 # test that exercises the COMBINATION -- bounded together, distinct from each
 # other, pinned at the screen edges, reproducible from a seed -- which is what
 # the renderer actually depends on and what no single stage test can see.
 test_wave_field: test_wave_field.c $(WAVE_HDRS)
 	$(CC) $(CFLAGS) -o $@ test_wave_field.c -lm
+
+# ---------------------------------------------------------------------------
+# JellyWave -- the approved translucent-gel design, three more header-only
+# scalar kernels and three tests.
+#
+#   wave_cam.h    world -> clip, through ONE fixed camera
+#   wave_light.h  one shared light, two LUTs, ACES tone map
+#   wave_gel.h    the stadium section lofted along the solver's spine
+#
+# These SIT ON TOP of the geometry pipeline rather than replacing any of it:
+# wave_kernel.h, wave_spline.h, wave_field.h and wave_ribbon.h are all
+# untouched, and wave_gel.h consumes wf_field's sy[] exactly as ui_wave.cpp's
+# existing path does.  The design's own undulation term is what the solver
+# replaces; everything else about the silhouette is the design's.
+#
+# Why each test exists, in one line each:
+#
+#   test_wave_cam    the basis is nine hard-coded numbers that were solved
+#                    offline, and one wrong digit skews every vertex in a way
+#                    that looks like broken geometry rather than a bad camera.
+#                    It is re-derived here from its own definition.
+#
+#   test_wave_light  both LUTs are literal tables (a generated one would be
+#                    file-scope dynamic initialisation, which this target does
+#                    not want), so they are re-derived from their documented
+#                    formulas -- and the SHAPES are asserted separately,
+#                    because a flat-topped rim and a narrow specular core are
+#                    the two things a pow() cannot give and the whole reason
+#                    the tables exist.
+#
+#   test_wave_gel    runs the REAL solver into the REAL loft and checks the
+#                    four things that cannot be seen in source: the section is
+#                    convex (which is what makes the painter's sort EXACT with
+#                    no depth buffer), the band lands low and diagonal instead
+#                    of across the card grid, it overruns both screen edges at
+#                    16:9 and 4:3, and the rolled edge keeps real on-screen
+#                    thickness -- without which this is a flat ribbon with
+#                    expensive colours on it.
+JW_HDRS = ../source/ui/render/wave_cam.h \
+          ../source/ui/render/wave_light.h \
+          ../source/ui/render/wave_gel.h
+
+test_wave_cam: test_wave_cam.c ../source/ui/render/wave_cam.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_cam.c -lm
+
+test_wave_light: test_wave_light.c ../source/ui/render/wave_light.h \
+                 ../source/ui/render/wave_cam.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_light.c -lm
+
+test_wave_gel: test_wave_gel.c $(JW_HDRS) $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_gel.c -lm
 
 # ---------------------------------------------------------------------------
 # Audio-reactive wave -- three more header-only scalar kernels, three tests.

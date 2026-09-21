@@ -156,9 +156,21 @@ typedef struct {
 // ak_sinf keeps its coefficients because the PPU-vs-SPU benchmark it serves
 // has to run identical arithmetic on both sides to be a fair race.  Nothing
 // races the wave kernel, so accuracy wins instead.
+// Test-only call counter, for measuring the JellyWave perf refactor's actual
+// effect on trig call count.  Only exists under JW_PROFILE (a test build
+// define -- see tests/test_wave_gel.c); the counter's STORAGE is owned by
+// whichever test defines JW_PROFILE, not by this header, so the shipped
+// (non-JW_PROFILE) build stays global-free per house rule 7.
+#ifdef JW_PROFILE
+extern unsigned long g_wk_sinf_calls;
+#endif
+
 static inline float wk_sinf(float x)
 {
     float k, r, x2;
+#ifdef JW_PROFILE
+    g_wk_sinf_calls++;
+#endif
     if (!(x > -WK_SIN_MAX && x < WK_SIN_MAX)) return 0.0f;   // also catches NaN
     k = x * WK_INV_TWO_PI;
     r = (k >= 0.0f) ? (float)(int)(k + 0.5f) : (float)(int)(k - 0.5f);

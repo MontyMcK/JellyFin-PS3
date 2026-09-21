@@ -7,6 +7,10 @@
 #include "rsxutil.h"
 #include "wave_shaders.h"
 #include "wave_field.h"
+#include "wave_gel.h"          /* JellyWave: pulls wave_cam.h + wave_light.h */
+#include "bg_gradient.h"
+#include "timing.h"
+#include "month_bg.h"
 #include "ui_wave_audio.h"
 #include "ui_wave.h"
 #include "ui_visuals.h"
@@ -145,17 +149,41 @@ static inline float wave_field_px(int li, float fx, float W) {
 // 0.0081 rad per frame against the old WAVE_DPHASE[0] of 0.008 -- within 2%.
 #define WAVE_FIELD_DT    1.25f
 
-// Sample the background gradient (XMB_BG_TOP -> XMB_BG_BOT, top to bottom) at
-// screen-space y in [0,H], returning the three 8-bit channels.  Mirrors the
-// gradient quad and tools/ui_preview/preview.c exactly.
-static inline void grad_sample(float y, float H, u8 *r, u8 *g, u8 *b) {
-    float t = (H > 1.0f) ? (y / (H - 1.0f)) : 0.0f;
-    if (t < 0.0f) t = 0.0f; else if (t > 1.0f) t = 1.0f;
-    int tr=(XMB_BG_TOP>>16)&0xFF, tg=(XMB_BG_TOP>>8)&0xFF, tb=XMB_BG_TOP&0xFF;
-    int br=(XMB_BG_BOT>>16)&0xFF, bg=(XMB_BG_BOT>>8)&0xFF, bb=XMB_BG_BOT&0xFF;
-    *r = (u8)(tr + (int)((br - tr) * t));
-    *g = (u8)(tg + (int)((bg - tg) * t));
-    *b = (u8)(tb + (int)((bb - tb) * t));
+// The background, as four corners rather than a top and a bottom.  See
+// source/ui/render/bg_gradient.h for why, and tests/test_bg_gradient.c for the
+// proof that a two-stop quad still comes out of the bilinear sampler as the
+// same vertical ramp this file drew before.
+//
+// REBUILT AT THE TOP OF EVERY DRAW, NOT CACHED.  It is two reads of g_theme and
+// a struct copy.  Caching would need an invalidation hook on theme_cycle() --
+// and on the day/night clock once a month table exists -- and a stale
+// background is a bug that survives a theme change and looks for all the world
+// like the theme picker is broken.  The static initialiser is only so that a
+// caller arriving before the first refresh gets black rather than garbage.
+static bg_quad s_bg = { { 0, 0, 0, 0 } };
+
+static inline void wave_bg_refresh(void) {
+    // month_bg_current() hands back exactly bg_from_two(top, bot) when no month
+    // table is present, which is the shipping configuration -- so this is a
+    // no-op change to the picture until somebody puts jellyfin_months.ini on
+    // the console.  See source/ui/render/month_bg.h for why the numbers are not
+    // in the build.
+    s_bg = month_bg_current(XMB_BG_TOP, XMB_BG_BOT);
+}
+
+// Sample the background gradient at screen-space (u in [0,1], y in [0,H]),
+// returning the three 8-bit channels.  Mirrors the gradient quad and
+// tools/ui_preview/preview.c exactly.
+//
+// UNDITHERED ON PURPOSE.  This feeds the ribbon compositing, where the result
+// is an INPUT to an alpha blend rather than a pixel.  Dithering here would put
+// the noise through the blend and then dither the result again, which doubles
+// it in exactly the region -- under the ribbons -- where the eye is already
+// being given something to look at.  The dither goes on at the point the
+// gradient becomes a pixel; see wave_draw_cpu().
+static inline void grad_sample(float u, float y, float H, u8 *r, u8 *g, u8 *b) {
+    float v = (H > 1.0f) ? (y / (H - 1.0f)) : 0.0f;
+    bg_sample(&s_bg, u, v, r, g, b);
 }
 
 // src over dst with 8-bit alpha: result = (src*a + dst*(255-a)) / 255.
@@ -233,7 +261,32 @@ typedef struct { float x, y, z, w; u32 rgba; }
 
 // Gradient quad (4) plus one strip per ribbon-slice, each two vertices per
 // column.  This is the worst case; a 720p frame uses ~65 columns of it.
-#define WAVE_MAX_VERTS  (4 + 3 * WAVE_NS * WAVE_MAX_COLS * 2)
+#define WAVE_LEGACY_VERTS  (4 + 3 * WAVE_NS * WAVE_MAX_COLS * 2)
+
+// --- JellyWave's budget (mode 3) -----------------------------------------
+//
+// Each layer is emitted as ONE triangle strip covering all JW_SECTION strips
+// of the lofted section, joined by degenerate pairs -- see the emit loop in
+// wave_draw() for why that is safe here.  So per layer:
+//
+//   body  JW_SECTION strips * 2 * JW_STATIONS, plus 2 vertices per join
+//   rim   6 strips (the ones carrying the rolled edge) on the same plan
+//
+// At JW_SECTION 12 and JW_STATIONS 80 that is 1,942 + 970 = 2,912 vertices and
+// TWO draw calls per layer, so 8,740 vertices and 7 draws for the whole
+// background including the gradient.  Against the legacy baked path's 4,708
+// vertices and 25 draws that is 1.9x the geometry for 3.5x FEWER draw calls,
+// which is the trade the degenerate joins buy.
+//
+// The buffer is sized for the larger of the two paths because both are
+// compiled in and the gate picks between them at runtime.
+#define JW_BODY_VERTS   (JW_SECTION * 2 * JW_STATIONS + (JW_SECTION - 1) * 2)
+#define JW_RIM_STRIPS   6
+#define JW_RIM_VERTS    (JW_RIM_STRIPS * 2 * JW_STATIONS + (JW_RIM_STRIPS - 1) * 2)
+#define JW_TOTAL_VERTS  (4 + JW_LAYERS * (JW_BODY_VERTS + JW_RIM_VERTS))
+
+#define WAVE_MAX_VERTS  ((WAVE_LEGACY_VERTS > JW_TOTAL_VERTS) \
+                         ? WAVE_LEGACY_VERTS : JW_TOTAL_VERTS)
 
 // Two buffers, alternated on every call.  The RSX fetches the array
 // asynchronously, so rebuilding the memory a queued draw has not consumed yet
@@ -250,6 +303,120 @@ static u32       s_wave_vbuf_off[2] = { 0, 0 };
 static int       s_wave_vbuf_turn   = 0;
 static bool      s_wave_varray      = false;
 static bool      s_wave_blend       = false;   // mode 2
+static bool      s_wave_jelly       = false;   // mode 3
+
+// JellyWave's CPU-side scratch: ONE layer's finished vertices, reused for each
+// of the three.  It is plain main memory, not the RSX buffer -- jw_vert is not
+// WaveVert and deliberately never goes near video memory, so the one dangerous
+// layout stays in the one file that documents why it is dangerous.
+static jw_vert   s_jw[JW_VERTS];
+
+// Rolling cost, logged once a second.  The xmb: frame line's `gpu` bucket
+// measures SUBMISSION, not RSX work, so the only honest things to report from
+// here are what the PPU spent building the geometry and how much of it there
+// was; the GPU's own cost shows up as `vsync` shrinking, which is read on the
+// far side.
+static u64 s_jw_gen_us   = 0;
+static u32 s_jw_frames   = 0;
+static u32 s_jw_rebuilds = 0;
+static u32 s_jw_verts    = 0;
+static u32 s_jw_draws    = 0;
+
+// The draw ranges of whatever is CURRENTLY in the vertex buffer: [slot][0] is
+// the body, [slot][1] the rim, slot 0 the furthest layer.  These are file
+// scope rather than locals because a reuse frame draws last build's ranges --
+// see JW_REBUILD below.
+static u32 s_jw_off[JW_LAYERS][2];
+static u32 s_jw_cnt[JW_LAYERS][2];
+static int s_jw_have_geom = 0;     // 0 until the first build lands
+
+// --- measured on hardware, 2026-09-21 -------------------------------------
+//
+// The first hardware run said the geometry costs 7,411 us of PPU per call to
+// build -- 848 ns for each of its 8,740 vertices -- against an estimate of
+// 400-700 us.  The frame went 16.68 ms to 21.3 ms and lost its 60 Hz lock.
+//
+// THE GPU WAS NOT THE PROBLEM, and the log says so unambiguously: `sync`, the
+// bucket where the PPU stalls on the RSX fence, FELL from 4,135 us to 3,375.
+// Had rasterisation become expensive it would have risen. It fell because the
+// PPU now takes so much longer that the GPU gains slack. 8,740 vertices, 7
+// draws and the extra blended fill cost the RSX nothing measurable.
+//
+// So the cost to attack is the per-vertex arithmetic, and the cheapest way to
+// attack it is not to do it as often.
+
+// --- speed ----------------------------------------------------------------
+//
+// A JellyWave-only multiplier on wf_step's dt, as a percentage.
+//
+// It exists because the old ribbons moved +/-30 px and this band moves about
+// +/-320, so the SAME angular drift rate reads as far more agitated -- the
+// wave looked too fast on a TV at a rate that was correct for the geometry it
+// replaced.  WAVE_FIELD_DT itself is not touched: it is calibrated against the
+// drift the original sine had, the legacy modes still run on it, and changing
+// it would silently re-time mode 2 as well.
+//
+// Slowing down also calms the texture for free, which is the other half of
+// what the wave needed.  wave_kernel.h injects its perturbation scaled by
+// sqrt(h), so a smaller dt puts in proportionally less broadband noise per
+// frame as well as advancing the travelling waves less.
+//
+// 50 (half speed) is the default rather than 100 because 100 is the rate that
+// was judged too fast on hardware. Override in /dev_hdd0/tmp/ without a
+// rebuild -- the whole point of the file is that "elegant" is a judgement made
+// on a TV, not at a compiler.
+#define JWSPEED_FILE  "jellyfin_jwspeed.txt"
+#define JW_SPEED_DEF  50
+static float s_jw_speed = JW_SPEED_DEF / 100.0f;
+
+static int jwspeed_setting(void) {
+    FILE *f = fopen(jf_data_path(JWSPEED_FILE), "r");
+    if (!f) return JW_SPEED_DEF;
+    int v = JW_SPEED_DEF;
+    if (fscanf(f, "%d", &v) != 1) v = JW_SPEED_DEF;
+    fclose(f);
+    if (v < 1)   v = 1;          // 0 would freeze the wave entirely
+    if (v > 400) v = 400;
+    return v;
+}
+
+// --- rebuild cadence ------------------------------------------------------
+//
+// Rebuild the geometry every Nth call and let the RSX re-draw the buffer it
+// already has in between.  At N = 3 the 7,411 us build amortises to about
+// 2,470 us a frame, which is what buys the 60 Hz lock back.
+//
+// THIS IS SAFE WITH THE DOUBLE BUFFER, and in fact safer than what it
+// replaces.  The two buffers exist because the RSX fetches asynchronously, so
+// rewriting memory a queued draw has not consumed yet would tear the geometry.
+// Today every call flips and rewrites, so a buffer is reused after ONE
+// intervening frame.  With a cadence the flip happens only on a rebuild, so
+// the buffer being written was last read N frames ago -- longer, not shorter.
+// A reuse frame writes nothing at all and needs no `sync` barrier.
+//
+// IT IS ONLY DEFENSIBLE BECAUSE THE WAVE IS SLOW.  Sampling a slow curve at
+// 20 Hz and holding each sample for three frames is invisible; doing it to
+// something with fast detail would judder. The two settings are therefore
+// related, and lowering JW_SPEED is what makes a higher N free.
+//
+// The gradient quad lives in the same buffer and is rebuilt with it, so a
+// theme change takes up to N calls to appear -- 50 ms at N = 3. That is the
+// one visible cost and it is well under a frame of human latency.
+#define JWREBUILD_FILE  "jellyfin_jwrebuild.txt"
+#define JW_REBUILD_DEF  3
+static int s_jw_rebuild_every = JW_REBUILD_DEF;
+static int s_jw_rebuild_phase = 0;
+
+static int jwrebuild_setting(void) {
+    FILE *f = fopen(jf_data_path(JWREBUILD_FILE), "r");
+    if (!f) return JW_REBUILD_DEF;
+    int v = JW_REBUILD_DEF;
+    if (fscanf(f, "%d", &v) != 1) v = JW_REBUILD_DEF;
+    fclose(f);
+    if (v < 1) v = 1;            // 1 = rebuild every call, the old behaviour
+    if (v > 8) v = 8;            // beyond this the motion visibly steps
+    return v;
+}
 
 // Gate, with a mode rather than a second file so both can be flipped over FTP
 // without another lookup:
@@ -266,6 +433,36 @@ static bool      s_wave_blend       = false;   // mode 2
 // alpha rides through untouched.  What was actually missing is that this
 // function disables blending immediately before drawing the ribbons, so the
 // alpha had nowhere to go and every ribbon came out solid.
+// The background dither gate.  Separate file from the wave's, so the two can
+// be flipped independently over FTP: the dither is a global RSX state change
+// and the wave's submission path is not, so they fail in different ways and
+// bisecting them together would be guesswork.
+//
+// Default is ON.  Unlike the wave gates, this binds no buffer and changes no
+// binding -- it sets one register that is turned off again a few draws later
+// -- so its failure mode is "the gradient looks slightly different", not a
+// wedged GPU.  Write 0 to the file to disable it.
+#define BGDITHER_FILE "jellyfin_bgdither.txt"
+static int s_bg_dither = 1;
+
+static int bgdither_setting(void) {
+    FILE *f = fopen(jf_data_path(BGDITHER_FILE), "r");
+    if (!f) return 1;                       // absent = on
+    int v = 1;
+    if (fscanf(f, "%d", &v) != 1) v = 1;
+    fclose(f);
+    return v ? 1 : 0;
+}
+
+// Mode 3 is JellyWave: the approved translucent-gel design, lofted in 3-D on
+// the PPU and projected through wave_cam.h's fixed camera.  It reuses this
+// file's proven vertex-array machinery unchanged -- same WaveVert, same
+// bindings, same sync barrier, same teardown -- and adds exactly one piece of
+// RSX state the other modes do not use: an additive blend function for the
+// rim pass, set and put back between draws.
+//
+// It shares the gate file rather than taking a new one so a bad frame is one
+// character away from mode 2 over FTP, with no reflash.
 #define GPUWAVE_FILE "jellyfin_gpuwave.txt"
 static int gpuwave_mode(void) {
     FILE *f = fopen(jf_data_path(GPUWAVE_FILE), "r");
@@ -273,7 +470,7 @@ static int gpuwave_mode(void) {
     int v = 0;
     if (fscanf(f, "%d", &v) != 1) v = 0;
     fclose(f);
-    return (v == 1 || v == 2) ? v : 0;
+    return (v >= 1 && v <= 3) ? v : 0;
 }
 
 // Crest height (screen-space y) of ribbon li at horizontal position fx.
@@ -293,9 +490,9 @@ static inline float wave_crest(int li, float fx, float W, float H) {
 // Background colour at (column ci, screen y): the gradient with ribbons
 // [0..upto) already composited in, matching tools/ui_preview/preview.c's
 // cumulative per-pixel blend.  crest[j][ci] is ribbon j's crest at column ci.
-static void wave_bg(int upto, int ci, float y, float H,
+static void wave_bg(int upto, int ci, float u, float y, float H,
                     const float crest[3][WAVE_MAX_COLS], u8 *r, u8 *g, u8 *b) {
-    grad_sample(y, H, r, g, b);
+    grad_sample(u, y, H, r, g, b);
     for (int j = 0; j < upto; j++) {
         float cj = crest[j][ci];
         if (y < cj || cj >= H) continue;
@@ -325,6 +522,14 @@ void wave_init(void) {
     // animated normally.  It costs one warm-up, once, at startup.
     wf_init(&s_field, 0);
 
+    // Also before the early returns: the gradient quad is drawn on the
+    // immediate-mode path too, so reading this only after the mode-0 return
+    // would leave the dither off in exactly the configuration the client
+    // ships with the gate file absent.
+    s_bg_dither = bgdither_setting();
+    month_bg_load();
+    wave_bg_refresh();
+
     rsxFragmentProgram *fpo = (rsxFragmentProgram*)wave_fp_data;
     void *fp_ucode; u32 fp_size;
     rsxFragmentProgramGetUCode(fpo, &fp_ucode, &fp_size);
@@ -339,7 +544,8 @@ void wave_init(void) {
         crash_log("wave: OFF (immediate mode)");
         return;
     }
-    s_wave_blend = (mode == 2);
+    s_wave_blend = (mode == 2 || mode == 3);
+    s_wave_jelly = (mode == 3);
     // Either both buffers allocate or the feature stays off; a half-allocated
     // pair would give one framebuffer a working path and the other a null one.
     for (int i = 0; i < 2; i++) {
@@ -352,10 +558,34 @@ void wave_init(void) {
     }
     s_wave_varray = true;
     {
-        char msg[112];
-        snprintf(msg, sizeof(msg), "wave: vertex arrays ON, mode %d (%s), %d verts max",
-                 mode, s_wave_blend ? "GPU blending" : "baked opaque",
-                 s_wave_blend ? (4 + 3 * WAVE_MAX_COLS * 2) : (int)WAVE_MAX_VERTS);
+        char msg[144];
+        const char *what = s_wave_jelly ? "JellyWave 3D"
+                         : s_wave_blend ? "GPU blending" : "baked opaque";
+        int verts = s_wave_jelly ? (int)JW_TOTAL_VERTS
+                  : s_wave_blend ? (4 + 3 * WAVE_MAX_COLS * 2)
+                                 : (int)WAVE_LEGACY_VERTS;
+        snprintf(msg, sizeof(msg), "wave: vertex arrays ON, mode %d (%s), %d verts",
+                 mode, what, verts);
+        plog(msg);
+    }
+    if (s_wave_jelly) {
+        char msg[192];
+        int  sp = jwspeed_setting();
+        s_jw_speed         = (float)sp / 100.0f;
+        s_jw_rebuild_every = jwrebuild_setting();
+        s_jw_rebuild_phase = 0;
+        s_jw_have_geom     = 0;
+        snprintf(msg, sizeof(msg),
+                 "wave: JellyWave %d stations x %d section, %d verts/layer, "
+                 "%d layers, %d draws",
+                 JW_STATIONS, JW_SECTION, JW_BODY_VERTS + JW_RIM_VERTS,
+                 JW_LAYERS, 1 + JW_LAYERS * 2);
+        plog(msg);
+        snprintf(msg, sizeof(msg),
+                 "wave: JellyWave speed=%d%% rebuild=every %d call%s "
+                 "(%s / %s)",
+                 sp, s_jw_rebuild_every, s_jw_rebuild_every == 1 ? "" : "s",
+                 JWSPEED_FILE, JWREBUILD_FILE);
         plog(msg);
     }
     // Synchronous breadcrumb, and the ONLY one that survives: wave_init() runs
@@ -363,7 +593,8 @@ void wave_init(void) {
     // the plog line above is discarded on a cold boot.  ui_card_gpu_init() and
     // ui_text_gpu_init() were both moved out of ui_init() for exactly this;
     // until wave_init() follows them, crash_log is the instrument.
-    crash_log(s_wave_blend ? "wave: ON (vertex arrays + GPU blend)"
+    crash_log(s_wave_jelly ? "wave: ON (JellyWave 3D)"
+            : s_wave_blend ? "wave: ON (vertex arrays + GPU blend)"
                            : "wave: ON (vertex arrays, baked)");
 }
 
@@ -378,13 +609,43 @@ static void wave_draw_cpu(void) {
     const int W = (int)display_width;
     const int H = (int)display_height;
 
-    // Vertical gradient: one colour per row, then a flat row fill (fast).
+    wave_bg_refresh();
+
+    // Four-corner gradient with an ordered dither, per pixel.
+    //
+    // WHAT THIS REPLACED, AND WHY.  It used to be one grad_sample() per row
+    // and a flat fill across it.  That was fast, and it was also the worst
+    // possible shape for the artefact: with one colour per row, every 8-bit
+    // quantisation boundary in a smooth full-screen ramp becomes a
+    // dead-straight horizontal line all the way across the screen.  The
+    // reference dithers here too -- its HDR block carries DITHER = 1/255,
+    // exactly one output code.
+    //
+    // THE COST IS THREE ADDS A PIXEL, not a bilinear evaluation.  For a fixed
+    // row the field is affine in u, so the two edge colours are the only
+    // samples needed and everything between them is a running sum.  The dither
+    // itself is one table lookup and one compare per channel.
+    //
+    // This path runs only under BUILD_FOR_RPCS3 (see ui_cpu_bg), where the
+    // framebuffer is ordinary host memory -- it is not on the hardware frame
+    // budget, where the RSX draws the same gradient as a gouraud quad.
     for (int y = 0; y < H; y++) {
-        u8 r, g, b;
-        grad_sample((float)y, (float)H, &r, &g, &b);
-        u32 c = ((u32)r << 16) | ((u32)g << 8) | (u32)b;
+        const float v = (H > 1) ? ((float)y / (float)(H - 1)) : 0.0f;
+        float lr, lg, lb, rr, rg, rb, dr, dg, db;
         u32 *row = fb + (u32)y * W;
-        for (int x = 0; x < W; x++) row[x] = c;
+
+        bg_sample_f(&s_bg, 0.0f, v, &lr, &lg, &lb);
+        bg_sample_f(&s_bg, 1.0f, v, &rr, &rg, &rb);
+        dr = (W > 1) ? (rr - lr) / (float)(W - 1) : 0.0f;
+        dg = (W > 1) ? (rg - lg) / (float)(W - 1) : 0.0f;
+        db = (W > 1) ? (rb - lb) / (float)(W - 1) : 0.0f;
+
+        for (int x = 0; x < W; x++) {
+            row[x] = ((u32)bg_dither_channel(lr, x, y) << 16)
+                   | ((u32)bg_dither_channel(lg, x, y) <<  8)
+                   |  (u32)bg_dither_channel(lb, x, y);
+            lr += dr; lg += dg; lb += db;
+        }
     }
 
     // Advance the animation exactly like the GPU path.
@@ -452,7 +713,11 @@ static inline void wave_node(int li, int ci, float fy, u8 alpha,
     float cy = crest[li][ci];
     float y  = cy + (H - cy) * fy;
     u8 br_, bg_, bb_;
-    wave_bg(li, ci, y, H, crest, &br_, &bg_, &bb_);
+    // The column's horizontal position, which the background now depends on:
+    // colx[] is in pixels and the sampler wants [0,1].  W is never zero here --
+    // wave_draw() returns early on a degenerate display size before building
+    // colx at all.
+    wave_bg(li, ci, colx[ci] / W, y, H, crest, &br_, &bg_, &bb_);
     *out_x = (2.0f * colx[ci] / W) - 1.0f;
     *out_y = 1.0f - (2.0f * y / H);
     *out_r = over8(cr, br_, alpha);
@@ -488,8 +753,27 @@ void wave_draw(void) {
     // ribbons once the gradient has landed.
     rsxSetBlendEnable(context, GCM_FALSE);
 
+    // The RSX's own dither unit, which is what the CPU path emulates in
+    // software (see wave_draw_cpu).  The gradient quad is the one thing this
+    // client draws that is large, smooth and low-contrast enough to band, and
+    // the hardware will dither the gouraud interpolator's output into the
+    // framebuffer for free if it is asked to.
+    //
+    // GATED, because it is a global piece of RSX state and everything the UI
+    // draws afterwards inherits it -- text and card blits included, where a
+    // dither is not wanted.  It is therefore turned off again below, before
+    // this function returns, rather than left on.  Delete
+    // jellyfin_bgdither.txt to get the previous behaviour back with no
+    // reflash, in the same spirit as the wave's own gate.  Read once at
+    // startup, not per frame -- gpuwave_mode() is handled the same way and for
+    // the same reason: this runs six times a frame across the XMB.
+    if (s_bg_dither) rsxSetDitherEnable(context, GCM_TRUE);
+
     float W = (float)display_width;
     float H = (float)display_height;
+
+    // The background's four corners, read fresh from the theme every frame.
+    wave_bg_refresh();
 
     // One step per wave_draw() call, which is where the phase advance used to
     // be and therefore keeps the animation rate exactly as it was -- including
@@ -509,10 +793,22 @@ void wave_draw(void) {
     // wave_audio_frame() is safe to call twice in one frame; it is time-based
     // and the second call is a no-op that returns the same numbers, which is
     // what keeps the double-composited screens behaving as they always did.
+    //
+    // s_jw_speed applies ONLY in mode 3 and is exactly 1.0 everywhere else, so
+    // the legacy modes keep the drift rate WAVE_FIELD_DT was calibrated for.
+    // See the JW_SPEED block for why JellyWave wants its own.
+    //
+    // The solver still steps on EVERY call even when the geometry is rebuilt
+    // less often.  That is deliberate: the chain stays continuous and the
+    // audio analyser keeps its cadence; only the SAMPLING of the curve drops
+    // to the rebuild rate.  Stepping it in bigger jumps instead would change
+    // the physics rather than the sampling.
     {
         float ts, pert, drv;
         wave_audio_frame(&ts, &pert, &drv);
-        wf_step(&s_field, WAVE_FIELD_DT * ts, pert, drv);
+        wf_step(&s_field,
+                WAVE_FIELD_DT * ts * (s_wave_jelly ? s_jw_speed : 1.0f),
+                pert, drv);
     }
 
     // Column positions across the screen (x in px, clamped to WAVE_MAX_COLS).
@@ -526,20 +822,55 @@ void wave_draw(void) {
 
     // Precompute every ribbon's crest per column up front; wave_bg needs the
     // earlier ribbons' crests to composite them under the current one.
+    //
+    // JellyWave does not use crests at all -- it lofts a 3-D section along the
+    // spine instead of stroking a 2-D curve -- so this is skipped there.  It
+    // is 294 wave_field_px() calls a frame at 1080p, each carrying a divide,
+    // and computing them for a path that will not read them is the kind of
+    // cost that is invisible in a profile because it is spread over three
+    // loops.
     static float crest[3][WAVE_MAX_COLS];
-    for (int li = 0; li < 3; li++)
-        for (int ci = 0; ci < ncols; ci++)
-            crest[li][ci] = wave_crest(li, colx[ci], W, H);
+    if (!s_wave_jelly) {
+        for (int li = 0; li < 3; li++)
+            for (int ci = 0; ci < ncols; ci++)
+                crest[li][ci] = wave_crest(li, colx[ci], W, H);
+    }
 
-    const u32 bgtop = XMB_BG_TOP, bgbot = XMB_BG_BOT;
-    const u8 gtr=(bgtop>>16)&0xFF, gtg=(bgtop>>8)&0xFF, gtb=bgtop&0xFF;
-    const u8 gbr=(bgbot>>16)&0xFF, gbg=(bgbot>>8)&0xFF, gbb=bgbot&0xFF;
+    // The background quad's four corners.
+    //
+    // This used to be a top colour and a bottom colour, each written to two
+    // vertices.  It is four independent corners now, which costs the RSX
+    // nothing whatsoever -- the quad already emitted four vertices and the
+    // gouraud interpolator already had to interpolate between them; it was
+    // simply being handed the same colour twice.  With a two-stop theme
+    // bg_from_two() puts the old values back in that arrangement and the
+    // output is unchanged.
+    const u8 gtlr=(s_bg.c[BG_TL]>>16)&0xFF, gtlg=(s_bg.c[BG_TL]>>8)&0xFF, gtlb=s_bg.c[BG_TL]&0xFF;
+    const u8 gtrr=(s_bg.c[BG_TR]>>16)&0xFF, gtrg=(s_bg.c[BG_TR]>>8)&0xFF, gtrb=s_bg.c[BG_TR]&0xFF;
+    const u8 gblr=(s_bg.c[BG_BL]>>16)&0xFF, gblg=(s_bg.c[BG_BL]>>8)&0xFF, gblb=s_bg.c[BG_BL]&0xFF;
+    const u8 gbrr=(s_bg.c[BG_BR]>>16)&0xFF, gbrg=(s_bg.c[BG_BR]>>8)&0xFF, gbrb=s_bg.c[BG_BR]&0xFF;
 
     // Slice k spans the fraction [k/NS, (k+1)/NS] of the distance from this
     // column's crest down to the screen bottom.  One triangle strip per
     // (ribbon, slice), back-to-front, fully opaque.
     if (s_wave_varray) {
-        s_wave_vbuf_turn ^= 1;
+        // Rebuild, or re-draw what is already in the buffer?  Only JellyWave
+        // has a cadence; every other mode rebuilds on every call exactly as it
+        // always did.  The first call after init must build whatever the
+        // cadence says, or the first frames would draw an empty buffer.
+        bool jw_rebuild = true;
+        if (s_wave_jelly && s_jw_rebuild_every > 1 && s_jw_have_geom) {
+            jw_rebuild = (s_jw_rebuild_phase == 0);
+            if (++s_jw_rebuild_phase >= s_jw_rebuild_every)
+                s_jw_rebuild_phase = 0;
+        }
+
+        // The flip happens ONLY on a rebuild.  A reuse frame must draw from
+        // the same buffer it drew from last time -- flipping without writing
+        // would point the RSX at the previous build's geometry, which is one
+        // rebuild interval stale and would show as a visible stutter.
+        if (jw_rebuild) s_wave_vbuf_turn ^= 1;
+
         WaveVert *v  = s_wave_vbuf[s_wave_vbuf_turn];
         u32       vo = s_wave_vbuf_off[s_wave_vbuf_turn];
         int       n  = 0;
@@ -552,12 +883,107 @@ void wave_draw(void) {
             n++;                                                \
         } while (0)
 
-        WV_PUT(-1.0f,  1.0f, gtr, gtg, gtb, 255);   // top-left
-        WV_PUT(-1.0f, -1.0f, gbr, gbg, gbb, 255);   // bottom-left
-        WV_PUT( 1.0f,  1.0f, gtr, gtg, gtb, 255);   // top-right
-        WV_PUT( 1.0f, -1.0f, gbr, gbg, gbb, 255);   // bottom-right
+        // The gradient shares the buffer with the ribbons, so on a reuse frame
+        // it is held along with them.  That is what costs a theme change up to
+        // one rebuild interval to appear -- 50 ms at the default cadence.
+        if (jw_rebuild) {
+            WV_PUT(-1.0f,  1.0f, gtlr, gtlg, gtlb, 255);   // top-left
+            WV_PUT(-1.0f, -1.0f, gblr, gblg, gblb, 255);   // bottom-left
+            WV_PUT( 1.0f,  1.0f, gtrr, gtrg, gtrb, 255);   // top-right
+            WV_PUT( 1.0f, -1.0f, gbrr, gbrg, gbrb, 255);   // bottom-right
+        }
 
-        if (s_wave_blend) {
+        if (s_wave_jelly && jw_rebuild) {
+            u64 jw_t0;
+            // --- JellyWave -----------------------------------------------
+            //
+            // Three lofted layers, each emitted as TWO merged triangle strips:
+            // the translucent body and the additive rolled edge.
+            //
+            // THE JOINS ARE DEGENERATE PAIRS, and that is what makes this two
+            // draw calls a layer instead of eighteen.  Between one section
+            // strip and the next, the previous strip's last vertex is repeated
+            // and the next strip's first vertex is emitted early; the
+            // triangles spanning the seam then have zero area and rasterise no
+            // pixels.  Two vertices a join, eleven joins for the body.
+            //
+            // This is only safe because BACKFACE CULLING IS NEVER ENABLED in
+            // this client -- nothing in source/ sets it and the gcm default is
+            // off -- so the winding parity the joins disturb does not matter.
+            // If culling is ever turned on globally, this needs a third vertex
+            // per join and a comment saying so.
+            //
+            // Strips go out in jw_strip_order()'s furthest-first order, which
+            // is a painter's algorithm and is EXACT here rather than a
+            // heuristic: the swept section is convex, so no two strips can
+            // mutually overlap in depth.  See wave_gel.h.
+            jw_t0 = timing_get_us();
+
+            #define JW_EMIT(Q, A, USE_RIM) do {                            \
+                const jw_vert *q_ = (Q);                                   \
+                v[n].x = q_->x; v[n].y = q_->y;                            \
+                v[n].z = 0.0f;  v[n].w = 1.0f;                             \
+                v[n].rgba = (USE_RIM)                                      \
+                    ? WAVE_RGBA(q_->rr, q_->rg, q_->rb, 255)               \
+                    : WAVE_RGBA(q_->r,  q_->g,  q_->b,  (A));              \
+                n++;                                                       \
+            } while (0)
+
+            for (int slot = 0; slot < JW_LAYERS; slot++) {
+                // slot 0 draws first and must be the furthest layer, so walk
+                // JW_LAYER (which is authored near-to-far) backwards.
+                const int       li = JW_LAYERS - 1 - slot;
+                const jw_layer *L  = &JW_LAYER[li];
+                int   order[JW_SECTION];
+                int   pass, s, i;
+
+                s_jw_cnt[slot][0] = s_jw_cnt[slot][1] = 0;
+                s_jw_off[slot][0] = s_jw_off[slot][1] = 0;
+
+                if (!jw_build_layer(L, s_field.sy[li], WF_SAMPLES,
+                                    W / H, s_jw, JW_VERTS))
+                    continue;
+                jw_strip_order(s_jw, order);
+
+                // pass 0 = body (every strip), pass 1 = rim (the six that
+                // carry the rolled edge; the other six would add exactly zero
+                // and cost their fill anyway).
+                for (pass = 0; pass < 2; pass++) {
+                    int started = 0;
+                    s_jw_off[slot][pass] = (u32)n;
+
+                    for (s = 0; s < JW_SECTION; s++) {
+                        const int j  = order[s];
+                        const int j2 = (j + 1) % JW_SECTION;
+
+                        if (pass == 1 && !jw_strip_has_rim(j)) continue;
+                        if (n + 2 * JW_STATIONS + 2 > WAVE_MAX_VERTS) break;
+
+                        if (started) {
+                            // Degenerate join: repeat the last vertex, then
+                            // emit this strip's first one early.  The strip
+                            // loop below emits it again, which is the point.
+                            v[n] = v[n - 1]; n++;
+                            JW_EMIT(&s_jw[0 * JW_SECTION + j], L->alpha, pass);
+                        }
+                        started = 1;
+
+                        for (i = 0; i < JW_STATIONS; i++) {
+                            JW_EMIT(&s_jw[i * JW_SECTION + j],  L->alpha, pass);
+                            JW_EMIT(&s_jw[i * JW_SECTION + j2], L->alpha, pass);
+                        }
+                    }
+                    s_jw_cnt[slot][pass] = (u32)n - s_jw_off[slot][pass];
+                }
+            }
+            #undef JW_EMIT
+
+            s_jw_gen_us += timing_get_us() - jw_t0;
+            s_jw_rebuilds++;
+            s_jw_verts     = (u32)n;
+            s_jw_draws     = 1 + JW_LAYERS * 2;
+            s_jw_have_geom = 1;
+        } else if (s_wave_blend) {
             // One quad per ribbon: constant tint, alpha ramping from the
             // crest opacity down to zero at the screen bottom.  The GPU
             // interpolates that ramp, which is why the WAVE_NS slicing is not
@@ -616,7 +1042,14 @@ void wave_draw(void) {
         //
         // The store widths and the values were identical either way; only the
         // scheduling moved.  Do not remove this because "it works without it".
-        __asm__ __volatile__ ("sync" ::: "memory");
+        //
+        // Skipped on a JellyWave REUSE call only, and only because nothing was
+        // written: there are no stores in the gather buffer to drain, and the
+        // barrier that made those stores visible ran on the build that put the
+        // geometry there.  Every call that writes a single vertex still takes
+        // it.
+        if (jw_rebuild)
+            __asm__ __volatile__ ("sync" ::: "memory");
 
         // One binding for every draw below.  TEX0 is explicitly disabled
         // (stride 0, 0 elements) rather than left as whatever the last
@@ -644,12 +1077,49 @@ void wave_draw(void) {
             rsxSetBlendEnable(context, GCM_TRUE);
         }
 
-        const u32 stripv  = (u32)(ncols * 2);
-        const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
-        for (int s = 0; s < nstrips; s++) {
-            rsxInvalidateVertexCache(context);
-            rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                               4 + (u32)s * stripv, stripv);
+        if (s_wave_jelly) {
+            // Body then rim, layer by layer, furthest first.
+            //
+            // The rim is drawn immediately after ITS OWN body rather than all
+            // six passes being grouped, because there is no depth buffer: a
+            // nearer layer has to be able to cover a further layer's rolled
+            // edge, and grouping the additive passes at the end would let the
+            // far ribbon's highlight show through the near one.
+            //
+            // The blend function therefore alternates.  That is six register
+            // writes a frame, which is nothing, and it is the ONLY piece of
+            // RSX state this mode uses that the others do not.  It is put back
+            // to the UI's standard function at the end of this function, where
+            // it always was.
+            for (int slot = 0; slot < JW_LAYERS; slot++) {
+                if (s_jw_cnt[slot][0]) {
+                    rsxSetBlendFunc(context,
+                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
+                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
+                    rsxInvalidateVertexCache(context);
+                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
+                                       s_jw_off[slot][0], s_jw_cnt[slot][0]);
+                }
+                if (s_jw_cnt[slot][1]) {
+                    // Additive: src*a + dst.  The rim colours already carry
+                    // their own intensity, so alpha rides at 255 and the pass
+                    // adds exactly what wave_gel.h's rimColor computed.
+                    rsxSetBlendFunc(context,
+                        GCM_SRC_ALPHA, GCM_ONE,
+                        GCM_SRC_ALPHA, GCM_ONE);
+                    rsxInvalidateVertexCache(context);
+                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
+                                       s_jw_off[slot][1], s_jw_cnt[slot][1]);
+                }
+            }
+        } else {
+            const u32 stripv  = (u32)(ncols * 2);
+            const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
+            for (int s = 0; s < nstrips; s++) {
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
+                                   4 + (u32)s * stripv, stripv);
+            }
         }
 
         // Release the colour array.  Everything the UI draws after the
@@ -666,10 +1136,10 @@ void wave_draw(void) {
     } else {
         // Background-gradient quad (XMB_BG_TOP -> XMB_BG_BOT), streamed inline.
         rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
-        wave_vtx(-1.0f,  1.0f, gtr, gtg, gtb);   // top-left
-        wave_vtx(-1.0f, -1.0f, gbr, gbg, gbb);   // bottom-left
-        wave_vtx( 1.0f,  1.0f, gtr, gtg, gtb);   // top-right
-        wave_vtx( 1.0f, -1.0f, gbr, gbg, gbb);   // bottom-right
+        wave_vtx(-1.0f,  1.0f, gtlr, gtlg, gtlb);   // top-left
+        wave_vtx(-1.0f, -1.0f, gblr, gblg, gblb);   // bottom-left
+        wave_vtx( 1.0f,  1.0f, gtrr, gtrg, gtrb);   // top-right
+        wave_vtx( 1.0f, -1.0f, gbrr, gbrg, gbrb);   // bottom-right
         rsxDrawVertexEnd(context);
 
         for (int li = 0; li < 3; li++) {
@@ -698,6 +1168,49 @@ void wave_draw(void) {
         GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
     rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
     rsxSetBlendEnable(context, GCM_TRUE);
+
+    // And put the dither back the way everything downstream expects to find
+    // it.  Leaving it on would silently apply it to every card blit, glyph and
+    // chrome quad drawn after the background -- the same class of mistake as
+    // leaving a vertex-array binding live, which is what the "unreliable
+    // fetch" folklore in this file actually was.
+    if (s_bg_dither) rsxSetDitherEnable(context, GCM_FALSE);
+
+    // JellyWave's own cost line, once a second.
+    //
+    // WHAT THIS CAN AND CANNOT TELL YOU.  `gen` is real: the PPU microseconds
+    // spent lofting, lighting and projecting the three layers, measured around
+    // the build loop.  `verts` and `draws` are exact.  THE RSX's OWN COST IS
+    // NOT HERE and cannot be -- the xmb: frame line's `gpu` bucket measures
+    // submission, not rasterisation, and this client has no GPU timer.  Read
+    // the RSX side from `vsync` in that line instead: vsync is the part of the
+    // 60 Hz budget the frame did NOT use, so if JellyWave costs the GPU real
+    // time, vsync shrinks by it.  Compare a mode 2 capture against a mode 3
+    // one on the same screen.
+    //
+    // COUNTED PER CALL, NOT PER FRAME.  wave_draw() has six call sites and the
+    // screens that composite the background twice call it twice, exactly as
+    // they always did; `gen` is therefore the cost of ONE build, and a screen
+    // that draws the background twice pays it twice.  That is the same
+    // behaviour the legacy path has -- it rebuilds every vertex on each call
+    // too -- but it is worth knowing when reading the number against a frame
+    // budget.
+    if (s_wave_jelly && ++s_jw_frames >= 60) {
+        char msg[192];
+        u32  nb = s_jw_rebuilds ? s_jw_rebuilds : 1;
+        snprintf(msg, sizeof(msg),
+                 "jellywave: gen=%lluus/build amort=%lluus/call verts=%u "
+                 "draws=%u rebuild=1/%d speed=%d%% (%d calls, %d builds)",
+                 (unsigned long long)(s_jw_gen_us / nb),
+                 (unsigned long long)(s_jw_gen_us / s_jw_frames),
+                 s_jw_verts, s_jw_draws, s_jw_rebuild_every,
+                 (int)(s_jw_speed * 100.0f + 0.5f),
+                 (int)s_jw_frames, (int)s_jw_rebuilds);
+        plog(msg);
+        s_jw_gen_us   = 0;
+        s_jw_frames   = 0;
+        s_jw_rebuilds = 0;
+    }
 }
 
 bool wave_gpu_blend_ready(void) { return s_wave_varray && s_wave_blend; }
