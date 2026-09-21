@@ -188,12 +188,25 @@ static int s_u_sel    = 0;   // QUEUE zone: selected play-order position
 static int s_u_scroll = 0;   // QUEUE zone: first visible position
 static bool s_swallow_left = false;   // eat the held LEFT that exited QUEUE
 
-// Rows that fit the Up Next list (54 px per entry, stopping above the
+// Up Next row metrics.
+//
+// The cover is MQ_ART square and the row pitch is that plus MQ_ROW_GAP, so the
+// artworks are always separated by the gap and never by whatever is left over.
+// They used to be: the pitch was a RAW 54 while the cover was UIS_H(40), so at
+// 1080p the cover grew to 60 and the pitch did not -- the artworks overlapped
+// by 6px and the column read as one continuous block. The scrollbar was worse
+// again, sized from UIS_H(54) while the rows advanced by the raw one, so the
+// two disagreed about how tall the list was.
+#define MQ_ART      UIS_H(40)
+#define MQ_ROW_GAP  UIS_H(6)
+#define MQ_ROW_H    (MQ_ART + MQ_ROW_GAP)
+
+// Rows that fit the Up Next list (MQ_ROW_H per entry, stopping above the
 // seek bar's time labels).
 static int uq_vis_rows(void) {
     int ey0 = (int)(display_height * 0.18f) + UIS_H(34);
     int bot = (int)(display_height * 0.895f) - UIS_H(16);
-    int n   = (bot - ey0) / 54;
+    int n   = (bot - ey0) / MQ_ROW_H;
     return n < 1 ? 1 : n;
 }
 
@@ -399,15 +412,19 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
                              ctx->title[0] ? ctx->title : t->name,
                              ax, ay, A);
     {
-        const int T = 2, G = 2, O = G + T;
-        drawRect((u32)(ax - O), (u32)(ay - O), (u32)(A + 2*O), T, XMB_ACCENT);
-        drawRect((u32)(ax - O), (u32)(ay + A + G), (u32)(A + 2*O), T, XMB_ACCENT);
-        drawRect((u32)(ax - O), (u32)(ay - G), T, (u32)(A + 2*G), XMB_ACCENT);
-        drawRect((u32)(ax + A + G), (u32)(ay - G), T, (u32)(A + 2*G), XMB_ACCENT);
-        drawRectBlend((u32)(ax - O - 1), (u32)(ay - O - 1), (u32)(A + 2*O + UIS_W(2)), 1, XMB_ACCENT, 80);
-        drawRectBlend((u32)(ax - O - 1), (u32)(ay + A + O), (u32)(A + 2*O + UIS_W(2)), 1, XMB_ACCENT, 80);
-        drawRectBlend((u32)(ax - O - 1), (u32)(ay - O), 1, (u32)(A + 2*O), XMB_ACCENT, 80);
-        drawRectBlend((u32)(ax + A + O), (u32)(ay - O), 1, (u32)(A + 2*O), XMB_ACCENT, 80);
+        // The artwork sits IN the layout, not in a frame.
+        //
+        // This was a 2px solid accent border on all four sides plus a second
+        // 1px pass at alpha 80, with a 2px gap -- a card, and at 1080p a loud
+        // one. What is left is a single hairline at alpha 32 (12.5%), drawn
+        // tight against the art: enough to stop a dark album cover dissolving
+        // into a dark background, not enough to read as an edge. Deliberately
+        // NOT replaced with a shadow or a glow.
+        const u8 EDGE_A = 32;
+        drawRectBlend((u32)(ax - 1),     (u32)(ay - 1),     (u32)(A + 2), 1, XMB_ACCENT, EDGE_A);
+        drawRectBlend((u32)(ax - 1),     (u32)(ay + A),     (u32)(A + 2), 1, XMB_ACCENT, EDGE_A);
+        drawRectBlend((u32)(ax - 1),     (u32)(ay - 1),     1, (u32)(A + 2), XMB_ACCENT, EDGE_A);
+        drawRectBlend((u32)(ax + A),     (u32)(ay - 1),     1, (u32)(A + 2), XMB_ACCENT, EDGE_A);
     }
 
     // ---- text column: visualizer, title, artist, album, meta ----
@@ -477,21 +494,21 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
                 const MusicTrack *u = &tracks[orig];
                 bool selq = (s_fzone == FZ_QUEUE && p == s_u_sel);
                 if (selq)
-                    drawRect((u32)(up_x - UIS_W(8)), (u32)(ey - UIS_H(4)),
-                             (u32)(W - UIS_W(34) - (up_x - UIS_W(8))), UIS_H(48), XMB_PANEL_HI);
-                if (!xmb_cpu_blit_thumb(u->art_id, up_x, ey, UIS_W(40), UIS_H(40)))
-                    xmb_draw_letter_tile(u->id, u->name, up_x, ey, UIS_H(40));
+                    drawRect((u32)(up_x - UIS_W(8)), (u32)(ey - MQ_ROW_GAP / 2),
+                             (u32)(W - UIS_W(34) - (up_x - UIS_W(8))), MQ_ROW_H, XMB_PANEL_HI);
+                if (!xmb_cpu_blit_thumb(u->art_id, up_x, ey, MQ_ART, MQ_ART))
+                    xmb_draw_letter_tile(u->id, u->name, up_x, ey, MQ_ART);
                 draw_clipped((u32)(up_x + UIS_W(56)), (u32)(ey + 1), u->name, UIS_TF(15),
                              selq ? XMB_WHITE : XMB_TEXT, text_w, selq);
                 if (u->artist[0])
                     draw_clipped((u32)(up_x + UIS_W(56)), (u32)(ey + UIS_H(22)), u->artist,
                                  UIS_TF(12), XMB_TEXT_FAINT, text_w);
-                ey += 54;
+                ey += MQ_ROW_H;
             }
 
             if (n_up > n_vis) {
                 int bar_x   = W - UIS_W(26);
-                int track_h = n_vis * UIS_H(54) - UIS_H(14);
+                int track_h = n_vis * MQ_ROW_H - MQ_ROW_GAP;
                 drawRect((u32)bar_x, (u32)ey0, UIS_W(3), (u32)track_h, XMB_TRACK);
                 int th = track_h * n_vis / n_up;
                 if (th < 18) th = 18;

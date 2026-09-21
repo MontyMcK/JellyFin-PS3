@@ -28,6 +28,7 @@
 #include "audio.h"
 #include "stream.h"
 #include "plog.h"
+extern void crash_log(const char *msg);   // survives a death plog does not
 #include "timing.h"
 #include "jellyfin_api.h"
 #include "ui_internal.h"        // xmb_json_* helpers for the track fetch
@@ -365,9 +366,21 @@ static int play_one_track(u32 start_secs) {
     }
     if (ret == MCMD_NONE) ret = MCMD_STOP;     // app quit / engine stop
 
+    // CRASH MARKERS, not plog: plog queues into a ring that a writer thread
+    // drains, so the last lines before a death are exactly the ones that never
+    // reach the file -- which is why the last crash could be narrowed to "in
+    // here somewhere" and no further. crash_log() writes immediately.
+    //
+    // This is the sequence a seek runs too, four blocking HTTP calls deep,
+    // which is where the app died with a "stopped" report already delivered
+    // and no line after it.
+    crash_log("m1 track end: netClose");
     netClose(sock);
+    crash_log("m2 report_stopped");
     jellyfin_report_stopped(t->id, s_session_id, elapsed_ticks());
+    crash_log("m3 stop_transcode");
     jellyfin_stop_transcode(s_session_id);
+    crash_log("m4 track end done");
     return ret;
 }
 

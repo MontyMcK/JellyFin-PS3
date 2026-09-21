@@ -382,8 +382,15 @@ void jellyfin_stop_transcode(const char *session_id) {
     snprintf(url, sizeof(url),
         "%s/Videos/ActiveEncodings?deviceId=%s&playSessionId=%s",
         g_server, device_id, session_id);
+    // A LOCAL buffer, not the shared responseBuffer.  This runs on the music
+    // stream thread -- at every track end AND every seek -- while the UI
+    // thread browses into that same global.  http_request's mutex serialises
+    // the calls but says nothing about what the callers do with the buffer
+    // afterwards, so the two can shred each other's results.  The response
+    // here is a 204 with no body; 128 bytes is generous.
+    char resp[128];
     int status = http_request(HTTP_DELETE, url, NULL, g_token,
-                              responseBuffer, RESPONSE_SIZE);
+                              resp, sizeof resp);
     char buf[80];
     snprintf(buf, sizeof(buf), "stop_transcode: http %d session=%s", status, session_id);
     plog(buf);

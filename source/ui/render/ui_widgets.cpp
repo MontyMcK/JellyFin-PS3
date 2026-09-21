@@ -302,13 +302,23 @@ void xmb_draw_jumpbar(int tab) {
     int bar_h   = bar_bot - bar_top;
     int jbar_x  = gg.x0 - JBAR_GAP * 3 - JBAR_W;
     if (jbar_x < 0) jbar_x = 0;
-    // Step height evenly divides the bar; the font fills each slot (1.2x gives
-    // glyph ascender room without adjacent letters visually overlapping on a TV
-    // at viewing distance).
+    // Step height evenly divides the bar.  The LETTERS, though, are type, and
+    // type is sized from the type scale -- not from however tall the grid
+    // happens to be.
+    //
+    // They used to be entry_h * 1.2, i.e. "fill the slot": 27 slots spread down
+    // a 1080p grid gave 40px+ letters, clamped back to the 28px cap and then
+    // squeezed again by the column width. The result was a rail of huge
+    // letters next to the posters, which is not what an alphabetical index is
+    // -- it is a quiet scale you glance at, at the same size as every other
+    // small label on the screen.
+    //
+    // So: the design's small-label size, and only smaller if a short bar makes
+    // even that overlap.
     float entry_h = (float)bar_h / (float)JBAR_ENTRIES;
-    float font_px = entry_h * 1.2f;
-    if (font_px < UIS_TF(12)) font_px = UIS_TF(12);
-    if (font_px > UIS_TF(28)) font_px = UIS_TF(28);
+    float font_px = UIS_TF(12);
+    if (font_px > entry_h * 0.9f) font_px = entry_h * 0.9f;
+    if (font_px < UIS_TF(8)) font_px = UIS_TF(8);
 
     // THE COLUMN IS THE HARD CONSTRAINT, and it wins over both clamps above.
     //
