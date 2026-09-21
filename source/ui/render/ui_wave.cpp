@@ -1069,19 +1069,25 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 13: use the JellyWave vertex-array path/state, but overwrite
-            // the submitted section with a completely fixed, finite clip-space
-            // triangle strip. This isolates generated x/y geometry from the RSX state.
+            // TEST 14: submit one real generated body section, but clamp its
+            // generated clip coordinates to a finite safe range. This tests
+            // whether extreme projection coordinates are what wedges the RSX.
             if (s_jw_cnt[0][0] >= (u32)(2 * JW_STATIONS)) {
-                WaveVert *tv = v + s_jw_off[0][0];
                 const u32 section_v = (u32)(2 * JW_STATIONS);
+                WaveVert *tv = v + s_jw_off[0][0];
                 for (u32 k = 0; k < section_v; k++) {
-                    const float t = (float)(k & 1);
-                    tv[k].x = -1.0f + 2.0f * t;
-                    tv[k].y = 0.25f;
+                    float x = tv[k].x;
+                    float y = tv[k].y;
+                    if (!(x == x) || x > 2.0f || x < -2.0f) {
+                        x = (x == x) ? (x > 0.0f ? 2.0f : -2.0f) : 0.0f;
+                    }
+                    if (!(y == y) || y > 2.0f || y < -2.0f) {
+                        y = (y == y) ? (y > 0.0f ? 2.0f : -2.0f) : 0.0f;
+                    }
+                    tv[k].x = x;
+                    tv[k].y = y;
                     tv[k].z = 0.0f;
                     tv[k].w = 1.0f;
-                    tv[k].rgba = WAVE_RGBA(128, 128, 128, 255);
                 }
                 __asm__ __volatile__("sync" ::: "memory");
                 rsxInvalidateVertexCache(context);
