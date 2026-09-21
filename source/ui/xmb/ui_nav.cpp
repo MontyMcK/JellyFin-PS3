@@ -13,6 +13,8 @@
 #include "plog.h"
 #include "timing.h"
 #include "hd1080.h"
+#include "surround.h"
+#include "centermix.h"
 #include "statsovl.h"
 
 // -------------------------------------------------------
@@ -78,12 +80,13 @@ int xmb_next_enabled(int start, int dir) {
 
 // Launch the player for one list item, mapping XMBItem -> JFItem.
 // resume_secs > 0 starts playback at that position (Continue Watching).
-void xmb_play_item(const XMBItem *it, u32 resume_secs) {
+void xmb_play_item(const XMBItem *it, u32 resume_secs,
+                   const char *media_source_id) {
     JFItem jf; memset(&jf, 0, sizeof(jf));
     strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
     strncpy(jf.name, it->name, sizeof(jf.name)-1);
     strncpy(jf.type, it->type, sizeof(jf.type)-1);
-    show_player(&jf, resume_secs);
+    show_player(&jf, resume_secs, media_source_id);
 }
 
 // Play items[idx] and keep advancing through the list while the user
@@ -104,7 +107,8 @@ static void xmb_play_list_with_next(const XMBItem *items, int count, int idx,
 // (or the end-of-episode countdown fires).  The follower is resolved from
 // the server before each playback, so this works no matter where the episode
 // was launched from and keeps going across season boundaries.
-void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs) {
+void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs,
+                                const char *media_source_id) {
     XMBItem cur = *first;
     u32 resume = resume_secs;
     for (;;) {
@@ -112,10 +116,13 @@ void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs) {
         bool have = xmb_fetch_next_episode(cur.id, &next);
         if (have)
             player_arm_next("NEXT EPISODE", "Press SELECT for next episode");
-        xmb_play_item(&cur, resume);
+        // A source chosen from the info screen applies to this title only.
+        // Auto-advanced followers negotiate their own default source.
+        xmb_play_item(&cur, resume, media_source_id);
         if (!have || !player_take_next_request()) break;
         cur    = next;
         resume = 0;
+        media_source_id = NULL;
     }
 }
 
@@ -157,12 +164,33 @@ static bool xmb_input_settings(void) {
         }
         if (g_settings_sel == 3)                                        // 1080p (Alpha)
             hd1080_set_enabled(!hd1080_enabled());
+        if (g_settings_sel == 4)                                        // Audio Output
+            surround_cycle();    // Stereo -> 5.1 -> [7.1 where offered]
+        if (g_settings_sel == 5)                                        // Dialogue Boost
+            centermix_cycle();   // Off -> +3 -> +6 -> +10
 #if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 4)                                        // Player Stats Overlay
+        if (g_settings_sel == 6)                                        // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());
 #endif
     }
     return false;
+}
+
+// See ui_internal.h.  The one place that opens a Series.
+bool xmb_open_series(const XMBItem *it) {
+    if (!it) return false;
+    int tvt = xmb_tab_of_kind(TABKIND_TV);
+    if (tvt < 0) return false;          // no TV tab on this server/profile
+    g_active_tab = tvt;
+    strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id) - 1);
+    strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name) - 1);
+    g_tv_series_id[sizeof(g_tv_series_id) - 1]     = ' ';
+    g_tv_series_name[sizeof(g_tv_series_name) - 1] = ' ';
+    g_tv_sub_start = 0; g_tv_sub_total = 0;
+    g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items,
+                                       XMB_ITEMS_MAX, 0, &g_tv_sub_total);
+    g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+    return true;
 }
 
 // TV sub-screen (Series -> Seasons -> Episodes) — card grid.
@@ -214,6 +242,17 @@ static void xmb_input_tv_sub(void) {
     }
     if (BTN_REPEAT(left)) {
         if ((g_tv_sub_sel % C) > 0) g_tv_sub_sel--;
+    }
+    // Triangle opens the info screen for an EPISODE, the same as it does for a
+    // movie in the library grid — which is where the Version and Quality rows
+    // live, so without this an episode could not be played from a chosen
+    // source at all.  Seasons (depth 1) have nothing playable behind them and
+    // are left alone.
+    if (BTN_PRESSED(triangle) && g_tv_depth == 2 && g_tv_sub_count > 0 &&
+        g_tv_sub_sel < g_tv_sub_count &&
+        timing_get_us() >= g_info_cooldown_until) {
+        xmb_show_item_info(&g_tv_sub_items[g_tv_sub_sel]);
+        return;
     }
     if (BTN_PRESSED(cross) && g_tv_sub_count > 0 && g_tv_sub_sel < g_tv_sub_count) {
         const XMBItem *it = &g_tv_sub_items[g_tv_sub_sel];
@@ -288,6 +327,14 @@ static void xmb_input_col_sub(void) {
     }
     if (BTN_REPEAT(left)) {
         if ((g_col_sub_sel % C) > 0) g_col_sub_sel--;
+    }
+    // Same as the TV episode grid: Triangle reaches the info screen, and with
+    // it the Version and Quality rows.
+    if (BTN_PRESSED(triangle) && g_col_sub_count > 0 &&
+        g_col_sub_sel < g_col_sub_count &&
+        timing_get_us() >= g_info_cooldown_until) {
+        xmb_show_item_info(&g_col_sub_items[g_col_sub_sel]);
+        return;
     }
     if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
         xmb_play_list_with_next(g_col_sub_items, g_col_sub_count,
@@ -520,12 +567,7 @@ bool xmb_handle_input_browse(void) {
         // Keying this off the tab meant only a "tvshows" library could drill
         // in, and everywhere else X fell through to the video player.
         if (strcmp(ty, "Series") == 0) {
-            strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
-            strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
-            g_tv_sub_start = 0; g_tv_sub_total = 0;
-            g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items, XMB_ITEMS_MAX,
-                                                0, &g_tv_sub_total);
-            g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
+            xmb_open_series(it);
         } else if (strcmp(ty, "BoxSet") == 0) {
             strncpy(g_col_id,   it->id,   sizeof(g_col_id)-1);
             strncpy(g_col_name, it->name, sizeof(g_col_name)-1);
@@ -610,7 +652,12 @@ bool xmb_handle_input_browse(void) {
     u64 now_us = timing_get_us();
     if (BTN_PRESSED(triangle) && count > 0 && g_sel < count
         && now_us >= g_info_cooldown_until) {
-        xmb_show_item_info(&g_items[tab][g_sel]);
+        const XMBItem *sel = &g_items[tab][g_sel];
+        // A Series has no version to choose, so the overlay would only ever
+        // offer "Play" on something that is not playable.  Browse it instead;
+        // Triangle on an EPISODE still gets the version picker.
+        if (strcmp(sel->type, "Series") == 0) xmb_open_series(sel);
+        else                                  xmb_show_item_info(sel);
     }
     return false;
 }

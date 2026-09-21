@@ -7,8 +7,31 @@ build/
 *.d
 *.pkg
 *.gnpdrm.pkg
+
+# ...but the PUBLISHED build is not a build artifact, it is the download the
+# README points at.  Without this negation `git add release` silently took the
+# README and skipped the .pkg -- no error, and every download link on GitHub
+# pointed at a file that was never pushed.
+!release/*.pkg
 *.self
 *.elf
 *.map
 obj/
 tools/ui_preview/preview
+
+# Host-side test artifacts (tests/Makefile.host)
+tests/test_ac3_map
+tests/test_ac3_decode
+tests/test_media_sources
+tests/tones51.ac3
+tests/decoded.f32
+tests/test_dts_map
+tests/test_dts_decode
+tests/test_dts_stream
+tests/test_dts_exss
+tests/test_track_codec
+tests/tones51.dts
+tests/test_truehd_map
+tests/test_truehd_decode
+tests/tones51.thd
+tests/tones51.thd.ref

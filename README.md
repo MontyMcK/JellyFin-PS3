@@ -9,12 +9,96 @@
   It's built to feel like it belongs on the console instead of a web page squeezed
   onto a TV.
 
-  [![Latest release](https://img.shields.io/github/v/release/MontyMcK/JellyFin-PS3?include_prereleases&sort=semver&label=release&color=8b5cf6)](../../releases/latest)
+  [![Latest release](https://img.shields.io/github/v/release/vortigauntlet/JellyFin-PS3-LosslessAudio?label=release&color=8b5cf6)](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)
   [![License: GPLv3](https://img.shields.io/badge/license-GPLv3-8b5cf6)](LICENSE)
 
   C/C++ · PSL1GHT · Evilnat CFW / HEN
 
 </div>
+
+---
+
+> ### This is the Lossless Audio fork
+>
+> A fork of [MontyMcK/JellyFin-PS3](https://github.com/MontyMcK/JellyFin-PS3)
+> that adds **lossless HD audio** and fixes 1080p playback.
+>
+> | | upstream | this fork |
+> |---|---|---|
+> | **TrueHD / Atmos** | not decoded | **lossless** 5.1 / 7.1 |
+> | **DTS-HD MA** | not decoded | **lossless** (bit-exact vs ffmpeg) |
+> | **DTS / DTS:X / DTS-ES** | not decoded | 5.1 core, up to 1509 kbps |
+> | **AC-3 5.1** | — | yes, server-transcoded |
+> | **1080p** | stalls on big files | stable to **25 Mbps** |
+>
+> ### [⬇ Download the latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)
+>
+> One click, straight to the file. Copy it to a USB stick and install it from
+> the XMB, or drop it in `/dev_hdd0/packages/` over FTP and use webMAN's
+> Package Manager.
+>
+> **Then read [Recommended settings](#recommended-settings).** Two settings do
+> almost all the work.
+
+---
+
+## Recommended settings
+
+Defaults are safe but conservative. For a Blu-ray remux on a wired console:
+
+| Setting | Where | Set it to |
+|---|---|---|
+| **Quality** | Triangle on a title → Quality row | **Max** |
+| **Audio Output** | Settings → Audio Output | **5.1** |
+
+**Audio Output** is Stereo / 5.1 / 7.1, and 7.1 appears only where the chain
+reports that it takes eight channels of LPCM — the app queries the connected
+display rather than assuming. A surround mode asks the server to stream-copy
+the source's own HD audio track and decodes it here; when a source has no HD
+track it falls back to an AC-3 5.1 transcode automatically, which is why there
+is no separate AC-3 option to pick.
+
+On 5.1 the app also applies a **routing fix**, because the cellAudio port is 8
+channels wide while the HDMI output is 6, so the console folds 8→6 on the way
+out — and on some receivers that fold loses the centre channel, taking the
+dialogue with it. The app's own per-channel meter showed the centre leaving hot
+(loudest of the three fronts in 59% of heartbeats, never silent) while nothing
+reached the speaker, so the loss is downstream of us. Asking the console to
+treat the output as 5.1 corrects it. **The wire stays uncompressed LPCM** —
+verified with `audioOutGetState` — so lossless TrueHD and DTS-HD MA arrive
+intact, and if a receiver ever does accept the request for real the app detects
+that and reverts rather than let your audio be silently compressed. It is not a
+setting, because there is nothing for a listener to decide; 7.1 skips it,
+having no 8→6 fold to correct.
+
+**Dialogue Boost** (Off / +3 / +6 / +10 dB) is a separate row and is about
+level, not routing: none of these decoders applies dynamic range compression,
+so full cinema range can leave dialogue well below effects on a compact system.
+
+The Quality row runs 360p → 480p → 720p → **High** (10 Mbps) → **Very High**
+(20) → **Max** (25), and prints the bitrate beside the name.
+
+**Why Max stops at 25 Mbps.** The console can only *receive* about 25 Mbps
+sustained. That is measured, not guessed, and it is the server that proves it:
+the same Jellyfin endpoint hands a PC on the same LAN 537 Mbps. Back to back on
+the same film, on an otherwise identical build:
+
+| setting | throughput | frames on time | buffer ran empty |
+|---|---|---|---|
+| **25 Mbps** | 30.1 Mbps | **98%** | **never** |
+| 30 Mbps | 25.0 Mbps | 30% | 68% of samples |
+
+Note which way the throughput goes. Asking for 30 delivers *less* than asking
+for 25, because the 30.1 is the buffer being topped up in bursts against a
+demand of only 25 — it is fill rate with headroom, not a sustained rate. Ask
+for 30 sustained and you get 25. A buffer bridges a spike; it cannot bridge a
+permanent shortfall, so steps above 25 were removed rather than left in to
+disappoint.
+
+The quality you pick is remembered **per title**, so a heavy remux and a light
+episode can each keep their own.
+
+If playback stutters, drop to **Very High** before anything else.
 
 ---
 
@@ -52,6 +136,8 @@
   Continue Watching everywhere else. The next episode auto-advances, too.
 - **An in-player HUD** with a seek bar, transport controls, and audio/subtitle
   track menus. Subtitles are burned in on the server side.
+- **Pre-play version selection** on the Triangle item-info screen for local
+  multi-version files and MediaSources supplied by Gelato/AIOStreams.
 - **Seek, skip and scrub.** Tap to jump 10 seconds, or hold to scrub the bar.
 - **A full music player.** Albums, Artists, Playlists, Genres and Songs, a play
   queue with shuffle, and a Now Playing screen whose 28-band spectrum visualizer
@@ -59,6 +145,61 @@
 - **Live search**, an on-screen keyboard, item info overlays, and a thumbnail cache
   that keeps browsing quick.
 - **An update check at launch** that pops up quietly when a newer release is out.
+
+---
+
+## Surround 5.1 (Alpha)
+
+Movies can play with **5.1 surround sound**: the app decodes the audio on the
+PS3 and plays it as 6-channel LPCM through an 8-channel audio port. It is
+**off by default** — **Settings → Surround 5.1 (Alpha)** cycles through three
+states:
+
+| Setting | What it asks the server for |
+|---|---|
+| **Off**   | Stereo MP3 — the shipped path, untouched. |
+| **AC-3**  | Transcode the audio to AC-3 (Dolby Digital) 5.1 at 640 kbps. Works with any source. |
+| **HD**    | Send the source's own HD audio track untouched (no audio transcode) and decode it on the PS3. **TrueHD / Dolby Atmos** plays **losslessly** in 5.1 or 7.1. **DTS-HD MA** also plays **losslessly** — its XLL extension is decoded, verified bit-exact against ffmpeg on both x86 and the PPU's own big-endian PowerPC. **DTS, DTS-HD HRA, DTS-ES and DTS:X** play from their 5.1 core at up to 1509 kbps (no free decoder exists for those extensions). Anything else — including Dolby Digital Plus — falls back to the AC-3 request, so HD never plays worse than AC-3. |
+
+For actual surround output you must also tell the PS3 your setup can take it:
+
+> **XMB → Settings → Sound Settings → Audio Output Settings** — select your
+> connector (HDMI/optical) and tick **Linear PCM 5.1 Ch. 44.1/48 kHz** (or your
+> receiver's equivalent). Without this the PS3 silently mixes the 8-channel port
+> down to stereo — the app cannot tell the difference, so check this first if
+> everything plays but nothing comes out of the rears.
+
+Notes and limitations:
+
+- In AC-3 mode the audio stream is AC-3 at 640 kbps. If the server refuses AC-3
+  (old ffmpeg, transcode settings), playback falls back to the shipped stereo
+  MP3 path.
+- Stereo-only sources still play in stereo (front speakers), as they should.
+- There is **no bitstream passthrough** on this platform — nothing in PSL1GHT
+  can hand a receiver an encoded stream — so everything is decoded on the PS3
+  and sent out as LPCM. That sets what each format can be:
+  - **TrueHD / Dolby Atmos: lossless.** The full 5.1 or 7.1 bed plays, bit for
+    bit. Atmos *objects* are not rendered (no free renderer exists, and the
+    app cannot know your speaker layout), so an Atmos track plays as its bed.
+    See [docs/dolby-truehd.md](docs/dolby-truehd.md).
+  - **DTS-HD MA: lossless.** The XLL extension is decoded, not just the
+    backward-compatible core — verified bit-exact against ffmpeg on x86 and on
+    the PPU's own big-endian PowerPC. **DTS:X** plays its 5.1 bed; the object
+    data is not rendered, for the same reason as Atmos. **DTS-HD HRA and
+    DTS-ES** play from their core, at up to 1509 kbps.
+    See [docs/dts-hd.md](docs/dts-hd.md).
+  - **Dolby Digital Plus (E-AC-3), including DD+ Atmos: unchanged.** Nothing
+    here decodes it; the server transcodes it to AC-3 5.1 as before.
+- HD mode streams the original audio track over your network instead of a
+  640 kbps transcode — a TrueHD or DTS-HD MA track can be several Mbps on top
+  of the video. That is fine on a LAN and a bad idea over the internet.
+- 7.1 output needs **Linear PCM 7.1 Ch.** ticked in the PS3's Sound Settings,
+  the same way 5.1 does.
+- Music playback is stereo by design and ignores this switch.
+- The **Player Stats Overlay** shows the negotiated result while playing:
+  `truehd 8/8` is a lossless 7.1 bed, `truehd 6/8` a lossless 5.1 one,
+  `ac3 6/8` is a working AC-3 5.1 transcode, `dts-hd 6/8` a DTS-HD/DTS:X track
+  playing from its core, and `mp3 2/2` means the server fell back to stereo.
 
 ---
 
@@ -75,9 +216,20 @@
 
 ## Install
 
-Grab `JellyFin---PS3.pkg` from the [latest release](../../releases/latest) and
-install it. If you'd rather run the `.self` directly, copy it over FTP or USB and
-launch it through webMAN or multiMAN.
+**[⬇ JellyFin-PS3.pkg — latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)**
+
+Direct link to the current build: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/download/v1.0/JellyFin-PS3.pkg).  
+The same file is mirrored in [`release/`](release/) in the repo.
+
+Then either:
+
+- **USB:** copy the `.pkg` to the root of a USB stick, plug it into the console,
+  and install it from the XMB (Game → Package Manager → Install Package Files), or
+- **FTP:** drop it in `/dev_hdd0/packages/` and install it from webMAN MOD →
+  Package Manager, no USB needed.
+
+Installing over an existing copy is fine — your login and settings live outside
+the app and are kept.
 
 ## Build from source
 
@@ -131,7 +283,7 @@ and `△` to toggle caps.
 | Button          | Action                                                            |
 |-----------------|-------------------------------------------------------------------|
 | Start           | Stop / exit player                                                |
-| Left / Right    | Move focus across the control row (Rew · Play/Pause · FF · AUDIO · CC) |
+| Left / Right    | Move focus across the control row (Rew · Play/Pause · FF · AUDIO · Volume · CC) |
 | X               | Activate the focused control                                      |
 | R2 / L2 (tap)   | Skip +10 s / -10 s (taps within 1 s batch into one seek)          |
 | R2 / L2 (hold)  | Pause and scrub the seek bar; seek fires once on release          |
@@ -275,6 +427,16 @@ front-loads several seconds of audio while the subtitle-burning encoder warms up
 256-slot PES queue holds that burst compressed and the decoder back-pressures on the
 PCM highwater, so nothing gets dropped and playback stays in sync. It used to skip
 about 10 seconds ahead on real hardware before this fix.
+
+### Version / MediaSource selection
+
+Press Triangle on a playable title before starting it. When Jellyfin exposes
+more than one source, the info page shows a **Version** row beneath Play. Focus
+that row and press X for a scrollable list (up to 32 entries), or cycle it with
+Left/Right. The chosen `MediaSourceId` is negotiated when Play is pressed, along
+with that source's own audio/subtitle tracks. The version list is not retained
+by the player and cannot be switched mid-stream. This covers normal Jellyfin
+multi-version movies and plugin-provided alternatives such as Gelato/AIOStreams.
 
 ### Threading model
 

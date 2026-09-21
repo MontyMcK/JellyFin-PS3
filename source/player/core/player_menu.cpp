@@ -71,6 +71,7 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
             else
                 slog_state("SUB_TRACK sel=-1 off=1");
         }
+        ps->menu_kind = PLAYER_MENU_NONE;
     }
     return act;
 }

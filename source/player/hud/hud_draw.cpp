@@ -44,6 +44,7 @@ static int  s_ovl_y0 = 0, s_ovl_y1 = 0;            // rows drawn by this compose
 struct OvlKey {
     u32  elapsed_secs;
     u32  total_secs;
+    u32  menu_epoch;
     s32  focus, incr_idx;
     s32  menu_sel, menu_cur, menu_n;
     s32  vol_pct;
@@ -233,10 +234,19 @@ static void draw_menu(int dw, int dh) {
     int ox  = overscan_x();
     int mw = max_w + 2 * MENU_PAD;
     if (mw > dw - 2 * (RIGHT_PAD + ox)) mw = dw - 2 * (RIGHT_PAD + ox);
-    int mh  = MENU_TITLE_H + g_hud.menu_n * MENU_ROW_H + MENU_PAD;
     int mx1 = dw - RIGHT_PAD - ox;
     int mx0 = mx1 - mw;
     int my1 = dh - HUD_STRIP_H - 6;
+    int max_rows = (my1 - 6 - MENU_TITLE_H - MENU_PAD) / MENU_ROW_H;
+    if (max_rows < 1) max_rows = 1;
+    int shown = g_hud.menu_n < max_rows ? g_hud.menu_n : max_rows;
+    int first = 0;
+    if (g_hud.menu_n > shown) {
+        first = g_hud.menu_sel - shown / 2;
+        if (first < 0) first = 0;
+        if (first > g_hud.menu_n - shown) first = g_hud.menu_n - shown;
+    }
+    int mh  = MENU_TITLE_H + shown * MENU_ROW_H + MENU_PAD;
     int my0 = my1 - mh;
     if (my0 < 6) my0 = 6;
 
@@ -246,8 +256,18 @@ static void draw_menu(int dw, int dh) {
             (u32)(my0 + (MENU_TITLE_H - (int)MENU_TITLE_PX) / 2),
             g_hud.menu_title, MENU_TITLE_PX, HUD_ACCENT, /*bold=*/true);
 
-    for (int i = 0; i < g_hud.menu_n; i++) {
-        int row_y0 = my0 + MENU_TITLE_H + i * MENU_ROW_H;
+    if (g_hud.menu_n > shown) {
+        char page[20];
+        snprintf(page, sizeof(page), "%d/%d", g_hud.menu_sel + 1, g_hud.menu_n);
+        int pw = ttf_text_width(page, ROW_TEXT_PX);
+        drawTTF((u32)(mx1 - MENU_PAD - pw),
+                (u32)(my0 + (MENU_TITLE_H - (int)ROW_TEXT_PX) / 2),
+                page, ROW_TEXT_PX, HUD_DIMMED);
+    }
+
+    for (int row = 0; row < shown; row++) {
+        int i = first + row;
+        int row_y0 = my0 + MENU_TITLE_H + row * MENU_ROW_H;
         int row_cy = row_y0 + MENU_ROW_H / 2;
         if (i == g_hud.menu_sel)
             drawRect((u32)(mx0 + 4), (u32)row_y0,
@@ -466,6 +486,7 @@ void hud_draw(u64 elapsed_us, bool paused) {
     memset(&key, 0, sizeof(key));
     key.elapsed_secs = (u32)(elapsed_us / 1000000ULL);
     key.total_secs   = g_hud.total_secs;
+    key.menu_epoch   = g_hud.menu_epoch;
     key.focus        = g_hud.focus;
     key.incr_idx     = g_hud.incr_idx;
     key.menu_sel     = g_hud.menu_sel;

@@ -1,9 +1,12 @@
 #include "video.h"
 #include "video_internal.h"
+#include "ts_demux.h"   // TS_VPES_AU_MAX — one shared AU ceiling
 #include "plog.h"
 #include "timing.h"
 #include "meminfo.h"
 #include "hd1080.h"
+#include "vquality.h"
+#include "jellyfin_api.h"   // g_source_fps_milli — server-reported frame rate
 
 #include <stdio.h>
 #include <string.h>
@@ -20,7 +23,13 @@ extern void crash_log(const char *msg);
 // VDEC — video decoder
 // -------------------------------------------------------
 
-#define AU_BUF_SIZE  (512 * 1024)
+// One access unit.  Must match the demuxer's ceiling: at 512 KB a 53 Mbps
+// 1080p remux had its I-frames truncated upstream and handed here as corrupt
+// AUs that passed this size check, so the drop below never fired and the
+// decoder simply stopped producing frames.  TS_VPES_AU_MAX is the H.264
+// Level 4.1 maximum coded frame size (MaxFS * 384 / MinCR = 1,572,864), so a
+// conforming stream at the level these remuxes use always fits.
+#define AU_BUF_SIZE  TS_VPES_AU_MAX
 #define AU_BUF_COUNT 4
 
 static u32  s_vdec     = 0;
@@ -59,6 +68,27 @@ static u32 vdec_cb(u32 handle, u32 msgtype, u32 msgdata, u32 arg) {
     return 0;
 }
 
+
+// Is this playback 1080p-class?
+//
+// Everything below used to ask hd1080_enabled() directly, which predates the
+// quality row on the info screen.  Once that row could select 1080p (or
+// Original) independently of the toggle, the toggle stopped being the truth:
+// with it OFF and 1080p picked, VDEC was configured for LEVEL 3.1 and then
+// fed a level-4.1/4.2 stream, and the arena was sized for 720p.  Resolving
+// through vquality_params() is the same call the stream URL and the jitter
+// buffer already use, so all four agree on the frame size by construction.
+//
+// VQ_AUTO still resolves via the toggle, so an install that never touches the
+// quality row behaves exactly as before.
+static bool vdec_wants_hd(void)
+{
+    u32 w = 0, h = 0;
+    vquality_params(vquality_get(), hd1080_enabled(), 0, 0, &w, &h,
+                    NULL, NULL, NULL);
+    return w >= 1920 || h >= 1080;
+}
+
 bool vdec_open(void) {
     crash_log("v1 vdec_open enter");
     crash_log("v2 sysModuleLoad VDEC");
@@ -71,10 +101,12 @@ bool vdec_open(void) {
 
     vdecType codec;
     codec.codec_type    = VDEC_CODEC_TYPE_H264;
-    // 1080p (Alpha) needs H.264 level 4.2 (1920×1080); the shipped 720p path
-    // uses level 3.1.  queryAttr sizes the SPU arena from this, so the level
-    // drives how much memory vdec_reserve_mem()/vdec_open() must grab.
-    codec.profile_level = hd1080_enabled() ? 42 : 31;
+    // 1080p needs H.264 level 4.2 (1920×1080); the 720p path uses level 3.1.
+    // queryAttr sizes the SPU arena from this, so the level drives how much
+    // memory vdec_reserve_mem()/vdec_open() must grab.  Level 4.2 also covers
+    // the 4.1 that Blu-ray H.264 actually uses, which is what makes the
+    // "Original" direct-play setting decodable at all.
+    codec.profile_level = vdec_wants_hd() ? 42 : 31;
 
     crash_log("v4 queryAttr");
     plog("vdec_open: queryAttr");
@@ -95,7 +127,7 @@ bool vdec_open(void) {
     // arena at exactly the queryAttr requirement; num_spus stays 3 for decode
     // throughput (SPU count and work-area size are independent cellVdec params).
     // Gated: the 720p ship path keeps the proven 3× arena unchanged.
-    const u32 arena_mult = hd1080_enabled() ? 1u : NUM_SPUS;
+    const u32 arena_mult = vdec_wants_hd() ? 1u : NUM_SPUS;
     u32 mem_size_aligned = ((attr.mem_size * arena_mult) + (1024*1024-1))
                            & ~(u32)(1024*1024-1);
     // The arena is CACHED across vdec_close/vdec_open (seek reopens the
@@ -220,7 +252,7 @@ void vdec_reserve_mem(void) {
     // see vdec_open), so 64MB is enough and leaves the heap for the bigger
     // jitter-buffer slots.  Reserving up front keeps it off the UI-fragmented
     // heap; vdec_open re-allocates if the real queryAttr comes back larger.
-    const u32 RESERVE = hd1080_enabled() ? 64u * 1024 * 1024
+    const u32 RESERVE = vdec_wants_hd() ? 64u * 1024 * 1024
                                          : 96u * 1024 * 1024;
     if (!s_vdec_mem) {
         s_vdec_mem = (u8*)memalign(1024*1024, RESERVE);
@@ -397,8 +429,35 @@ static void fps_from_frc(int frc, int *num, int *den) {
         case 7: *num = 60000; *den = 1001; break;  /* 59.94fps  */
         case 8: *num = 60;    *den = 1;    break;  /* 60fps     */
         default:
-            plog("fps_detect: unknown frc, defaulting to 30fps");
-            *num = 30; *den = 1; break;
+            // VDEC gave us no frame-rate code.  A TRANSCODE always has one
+            // (ffmpeg writes a clean SPS); a STREAM COPY of a Blu-ray remux
+            // frequently does not, and this used to fall through to 30 fps.
+            // Pacing 23.976 fps film at 30 judders permanently however full
+            // the buffer is -- which is exactly what "Original always
+            // judders" was.  Prefer the rate the server reported.
+            if (g_source_fps_milli > 1000) {
+                // Snap the common broadcast rates to their EXACT fractions.
+                // The server reports 23.976, which as 23976/1000 is not quite
+                // 24000/1001 -- and 59.94Hz / (24000/1001) is exactly 2.5, the
+                // clean 3:2 pulldown ratio, while 59.94 / 23.976 is not.  The
+                // transcode path gets the exact fraction from the frame-rate
+                // code, so snapping here makes the stream-copy path identical
+                // rather than merely close.
+                int m = g_source_fps_milli;
+                if      (m >= 23950 && m <= 23990) { *num = 24000; *den = 1001; }
+                else if (m >= 29950 && m <= 29990) { *num = 30000; *den = 1001; }
+                else if (m >= 59900 && m <= 59980) { *num = 60000; *den = 1001; }
+                else { *num = m; *den = 1000; }
+                char b[80];
+                snprintf(b, sizeof(b),
+                         "fps_detect: no frc, using server rate %d.%03d",
+                         g_source_fps_milli / 1000, g_source_fps_milli % 1000);
+                plog(b);
+            } else {
+                plog("fps_detect: no frc and no server rate, defaulting to 30fps");
+                *num = 30; *den = 1;
+            }
+            break;
     }
 }
 
@@ -413,7 +472,12 @@ static s64 dur_from_frc(int frc) {
         case 6: return 20000;   /* 50 fps     */
         case 7: return 16683;   /* 59.94 fps  */
         case 8: return 16667;   /* 60 fps     */
-        default: return 40000;
+        default:
+            // Same fallback as fps_from_frc(): the server rate beats a
+            // hardcoded 25 fps guess when VDEC reports no code.
+            if (g_source_fps_milli > 1000)
+                return (s64)(1000000000LL / g_source_fps_milli);
+            return 40000;
     }
 }
 

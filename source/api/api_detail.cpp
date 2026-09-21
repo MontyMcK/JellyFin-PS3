@@ -8,6 +8,7 @@
 #include "jellyfin_api.h"
 #include "plog.h"
 #include "hd1080.h"
+#include "surround.h"
 
 // Defined in jellyfin_api.cpp
 int json_get_in_range(const char *start, int len,
@@ -376,9 +377,11 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out) {
 void jellyfin_stop_transcode(const char *session_id) {
     if (!g_server[0] || !session_id || !session_id[0]) return;
     char url[512];
+    char device_id[192];
+    url_encode_query(jf_device_id(), device_id, sizeof(device_id));
     snprintf(url, sizeof(url),
-        "%s/Videos/ActiveEncodings?deviceId=ps3&playSessionId=%s",
-        g_server, session_id);
+        "%s/Videos/ActiveEncodings?deviceId=%s&playSessionId=%s",
+        g_server, device_id, session_id);
     int status = http_request(HTTP_DELETE, url, NULL, g_token,
                               responseBuffer, RESPONSE_SIZE);
     char buf[80];
@@ -386,10 +389,16 @@ void jellyfin_stop_transcode(const char *session_id) {
     plog(buf);
 }
 
-bool jellyfin_get_play_session_id(const char *item_id,
-                                   char *out_session_id, int out_len,
-                                   unsigned *out_total_secs) {
+bool jellyfin_get_playback_info(const char *item_id,
+                                const char *media_source_id,
+                                char *out_session_id, int out_len,
+                                unsigned *out_total_secs,
+                                JFMediaSources *out_sources,
+                                JFMediaSource *out_selected,
+                                bool auto_open_live_stream) {
     if (out_total_secs) *out_total_secs = 0;
+    if (out_sources) memset(out_sources, 0, sizeof(*out_sources));
+    if (out_selected) memset(out_selected, 0, sizeof(*out_selected));
     if (!g_server[0] || !g_userid[0] || !g_token[0]) {
         plog("playbackinfo: missing server/user/token");
         return false;
@@ -400,15 +409,32 @@ bool jellyfin_get_play_session_id(const char *item_id,
     // baseline regardless of the stream URL.  Gated — OFF sends the exact
     // shipped 720p profile below.
     const bool hd = hd1080_enabled();
+    // Surround 5.1 (Alpha): same story for audio — the profile must advertise
+    // AC-3 and 6 channels or the server silently downgrades to stereo MP3.
+    // Gated — OFF sends the exact shipped stereo blobs.  In "DTS" mode the
+    // profile additionally advertises dts, which is what lets the server
+    // stream-copy a DTS / DTS-HD / DTS:X track (see the body_*_dts blobs).
+    const bool surround = surround_enabled();
+    const bool hd_pref = surround_hd_preferred();
 
-    char url[768];
+    char source_param[320] = "";
+    if (media_source_id && media_source_id[0]) {
+        char encoded[288];
+        url_encode_query(media_source_id, encoded, sizeof(encoded));
+        snprintf(source_param, sizeof(source_param), "&MediaSourceId=%s", encoded);
+    }
+
+    char url[1024];
     snprintf(url, sizeof(url),
         "%s/Items/%s/PlaybackInfo"
         "?UserId=%s"
         "&MaxStreamingBitrate=%u"
         "&StartTimeTicks=0"
-        "&AutoOpenLiveStream=true",
-        g_server, item_id, g_userid, hd ? 10000000u : 8000000u);
+        "&AutoOpenLiveStream=%s"
+        "%s",
+        g_server, item_id, g_userid, hd ? 10000000u : 8000000u,
+        auto_open_live_stream ? "true" : "false",
+        source_param);
 
     // Stored in read-only data — avoids putting ~700 bytes on the stack.
     static const char body_sd[] =
@@ -522,7 +548,293 @@ bool jellyfin_get_play_session_id(const char *item_id,
           "]"
         "}}";
 
-    const char *body = hd ? body_hd : body_sd;
+    // Surround 5.1 (Alpha) blobs: byte-identical to body_sd/body_hd except
+    // the audio negotiation — "AudioCodec":"ac3,mp3" (AC-3 preferred, server
+    // may still fall back to MP3), MaxAudioChannels 6, and a VideoAudio
+    // CodecProfile for ac3 (<= 6 ch) added ahead of the shipped mp3 entry.
+    static const char body_sd_51[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":8000000,"
+          "\"MaxStaticBitrate\":8000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"6\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"31\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1280\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"720\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"4000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    static const char body_hd_51[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":10000000,"
+          "\"MaxStaticBitrate\":10000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"6\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"high|main|baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"42\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1920\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"1080\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"10000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    // Surround "HD" mode blobs: byte-identical to body_sd_51/body_hd_51
+    // except that the profile also ADVERTISES dts and truehd, which is what
+    // makes the server willing to stream-COPY a DTS / DTS-HD MA / DTS:X or a
+    // TrueHD / Atmos track instead of transcoding it (docs/dts-hd.md §5,
+    // docs/dolby-truehd.md §4).  Two deliberate details:
+    //   * the HD codecs are listed LAST in the transcoding AudioCodec list.
+    //     Copy eligibility only asks whether the codec is in the list, but if
+    //     the server does decide to transcode, first-listed is what it reaches
+    //     for — and ac3 is the one that must win there: ffmpeg's dts
+    //     ENcoder is experimental and its truehd encoder cannot do 7.1.
+    //   * the channel ceiling is 8, not 6 — both in the HD CodecProfile and
+    //     in the transcoding profile.  DTS-HD MA, DTS:X and TrueHD tracks are
+    //     routinely 7.1, and a 6-channel ceiling would refuse to copy them;
+    //     copying them is right, because TrueHD then plays as a real 7.1
+    //     program and what this app decodes out of a DTS-HD track is its 5.1
+    //     core whatever the extension carries.  The stream URL raises its own
+    //     MaxAudioChannels to match (player_session.cpp).
+    static const char body_sd_hd[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":8000000,"
+          "\"MaxStaticBitrate\":8000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3,dts,truehd\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"8\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"31\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1280\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"720\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"4000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"dts,truehd\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"8\",\"IsRequired\":false}"
+            "]"
+          "},{"
+          "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    static const char body_hd_hd[] =
+        "{\"DeviceProfile\":{"
+          "\"Name\":\"PS3\","
+          "\"MaxStreamingBitrate\":10000000,"
+          "\"MaxStaticBitrate\":10000000,"
+          "\"MusicStreamingTranscodingBitrate\":192000,"
+          "\"DirectPlayProfiles\":[],"
+          "\"TranscodingProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Container\":\"ts\","
+            "\"VideoCodec\":\"h264\","
+            "\"AudioCodec\":\"ac3,mp3,dts,truehd\","
+            "\"Protocol\":\"http\","
+            "\"Context\":\"Streaming\","
+            "\"MaxAudioChannels\":\"8\""
+          "}],"
+          "\"CodecProfiles\":[{"
+            "\"Type\":\"Video\","
+            "\"Codec\":\"h264\","
+            "\"Conditions\":["
+              "{\"Condition\":\"EqualsAny\",\"Property\":\"VideoProfile\","
+               "\"Value\":\"high|main|baseline\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoLevel\","
+               "\"Value\":\"42\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Width\","
+               "\"Value\":\"1920\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"Height\","
+               "\"Value\":\"1080\",\"IsRequired\":true},"
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"VideoBitrate\","
+               "\"Value\":\"10000000\",\"IsRequired\":true}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"dts,truehd\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"8\",\"IsRequired\":false}"
+            "]"
+          "},{"
+          "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"ac3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"6\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "},{"
+            "\"Type\":\"VideoAudio\","
+            "\"Codec\":\"mp3\","
+            "\"Conditions\":["
+              "{\"Condition\":\"LessThanEqual\",\"Property\":\"AudioChannels\","
+               "\"Value\":\"2\",\"IsRequired\":false},"
+              "{\"Condition\":\"Equals\",\"Property\":\"AudioSampleRate\","
+               "\"Value\":\"48000\",\"IsRequired\":false}"
+            "]"
+          "}],"
+          "\"ContainerProfiles\":[],"
+          "\"SubtitleProfiles\":["
+            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+          "]"
+        "}}";
+
+    const char *body;
+    if (surround && hd_pref) body = hd ? body_hd_hd : body_sd_hd;
+    else if (surround)        body = hd ? body_hd_51  : body_sd_51;
+    else                      body = hd ? body_hd     : body_sd;
 
     int status = http_request(1, url, body, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) {
@@ -536,9 +848,23 @@ bool jellyfin_get_play_session_id(const char *item_id,
     }
 
     // Media duration (RunTimeTicks is in 100-ns units → 10,000,000 ticks/sec).
+    if (out_sources)
+        jellyfin_parse_media_sources(responseBuffer, out_sources);
+
+    JFMediaSource selected;
+    bool have_selected = jellyfin_parse_selected_media_source(
+        responseBuffer, media_source_id, &selected);
+    if (out_selected && have_selected) *out_selected = selected;
+
     if (out_total_secs) {
-        double ticks = json_get_double(responseBuffer, "RunTimeTicks", 0.0);
-        if (ticks > 0.0) *out_total_secs = (unsigned)(ticks / 10000000.0);
+        // A top-level search sees the first source's RunTimeTicks.  Prefer the
+        // requested/opened source so switching versions also switches runtime.
+        if (have_selected && selected.runtime_secs > 0)
+            *out_total_secs = selected.runtime_secs;
+        else {
+            double ticks = json_get_double(responseBuffer, "RunTimeTicks", 0.0);
+            if (ticks > 0.0) *out_total_secs = (unsigned)(ticks / 10000000.0);
+        }
         char buf[64];
         snprintf(buf, sizeof(buf), "playbackinfo: runtime=%us", *out_total_secs);
         plog(buf);
@@ -553,4 +879,45 @@ bool jellyfin_get_play_session_id(const char *item_id,
     snprintf(buf, sizeof(buf), "playbackinfo: session=%s", out_session_id);
     plog(buf);
     return true;
+}
+
+bool jellyfin_get_play_session_id(const char *item_id,
+                                   char *out_session_id, int out_len,
+                                   unsigned *out_total_secs) {
+    return jellyfin_get_playback_info(item_id, NULL,
+                                      out_session_id, out_len,
+                                      out_total_secs, NULL, NULL, true);
+}
+
+bool jellyfin_fetch_media_sources(const char *item_id, JFMediaSources *out) {
+    if (!out) return false;
+    memset(out, 0, sizeof(*out));
+    if (!g_server[0] || !g_userid[0] || !g_token[0]) return false;
+
+    char url[768];
+    snprintf(url, sizeof(url),
+             "%s/Users/%s/Items/%s?Fields=MediaSources,MediaStreams",
+             g_server, g_userid, item_id);
+    int status = http_request(HTTP_GET, url, NULL, g_token,
+                              responseBuffer, RESPONSE_SIZE);
+    if (status == 200 && jellyfin_parse_media_sources(responseBuffer, out) > 0) {
+        char b[72];
+        snprintf(b, sizeof(b), "media_sources: item dto count=%d",
+                 out->n_sources);
+        plog(b);
+        return true;
+    }
+
+    // Some older servers omit MediaSources from BaseItemDto even when asked.
+    // Listing does not need to resolve/open a remote source, so keep auto-open
+    // false and avoid holding a plugin stream while the user reads the page.
+    char session[64] = "";
+    bool ok = jellyfin_get_playback_info(item_id, NULL, session,
+                                         sizeof(session), NULL, out, NULL,
+                                         false);
+    char b[80];
+    snprintf(b, sizeof(b), "media_sources: playback fallback count=%d ok=%d",
+             out->n_sources, ok ? 1 : 0);
+    plog(b);
+    return ok && out->n_sources > 0;
 }

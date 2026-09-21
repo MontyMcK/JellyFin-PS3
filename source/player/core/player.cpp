@@ -15,9 +15,13 @@
 
 #include "plog.h"
 #include "hd1080.h"
+#include "vquality.h"
+#include "surround.h"
 #include "stream.h"
 #include "audio.h"
 #include "adec.h"
+#include "adec_dts.h"
+#include "adec_truehd.h"
 #include "video.h"
 #include "timing.h"
 #include "player.h"
@@ -29,6 +33,7 @@
 #include "jellyfin_api.h"
 #include "rsxutil.h"
 #include "thumbnail_cache.h"
+#include "meminfo.h"   // read-ahead ring sizing
 #include "slog.h"
 
 extern void crash_log(const char *msg);
@@ -135,7 +140,29 @@ static void player_draw_next_popup(int auto_secs) {
             XMB_TEXT_DIM);
 }
 
-void show_player(const JFItem *item, u32 resume_secs) {
+// Drawn while stream_open() waits for the server's response headers.
+//
+// Switching quality makes Jellyfin start a fresh transcode, and a cold start
+// can take tens of seconds.  Previously nothing was drawn and no button was
+// read for that whole time, so the app looked hung and got force-quit --
+// reported, reasonably, as a crash.  Now it says what it is waiting for,
+// counts, and takes Circle for an answer.
+static const char *s_wait_title = "";
+static bool player_stream_wait(unsigned elapsed_ms)
+{
+    poll_buttons();                          // refresh btn_cur/btn_prev
+    if (BTN_PRESSED(circle)) return false;   // user gave up: abort the open
+
+    char msg[96];
+    snprintf(msg, sizeof(msg),
+             "Waiting for the server... %us   (Circle to cancel)",
+             elapsed_ms / 1000u);
+    player_status_screen(s_wait_title, msg);
+    return true;
+}
+
+void show_player(const JFItem *item, u32 resume_secs,
+                 const char *media_source_id) {
     crash_log("p1 enter");
     plog("show_player: enter");
     plog("show_player: BUILD=seek-diag-1");
@@ -192,22 +219,36 @@ void show_player(const JFItem *item, u32 resume_secs) {
     // the server for a full 1920×1080 High-profile transcode instead — flat,
     // not capped to the display mode, so the frame is decoded at full res and
     // downscaled at present.  Gated: OFF => the exact 720p ship path.
-    if (hd1080_enabled()) {
-        ps.req_w = 1920;
-        ps.req_h = 1080;
-    } else {
-        ps.req_w = display_width  < 1280 ? display_width  : 1280;
-        ps.req_h = display_height < 720  ? display_height : 720;
-    }
+    // The quality row on the info screen overrides both; at its default
+    // (Auto) vquality_params() resolves to exactly the two cases above, so
+    // an install that never touches it requests what it always did.
+    vquality_params(vquality_get(), hd1080_enabled(),
+                    display_width, display_height,
+                    &ps.req_w, &ps.req_h, NULL, NULL, NULL);
 
-    if (!jellyfin_get_play_session_id(item->id, ps.session_id,
-                                      sizeof(ps.session_id), &ps.total_secs)) {
+    if (!jellyfin_get_playback_info(item->id, media_source_id, ps.session_id,
+                                    sizeof(ps.session_id), &ps.total_secs,
+                                    NULL, &ps.source, true)) {
         plog("show_player: PlaybackInfo failed, streaming without PlaySessionId");
         ps.session_id[0] = '\0';
     }
 
-    // Selectable audio/subtitle tracks (HUD AUDIO + CC buttons cycle these).
-    ps.have_tracks = jellyfin_fetch_tracks(item->id, &ps.tracks);
+    // Only the version chosen on the info screen enters the player.  Its own
+    // tracks come from the same source-aware PlaybackInfo response.
+    if (ps.source.id[0]) {
+        ps.tracks      = ps.source.tracks;
+        ps.have_tracks = true;
+        if (ps.source.runtime_secs > 0)
+            ps.total_secs = ps.source.runtime_secs;
+    } else {
+        snprintf(ps.source.id, sizeof(ps.source.id), "%s",
+                 (media_source_id && media_source_id[0])
+                    ? media_source_id : item->id);
+        snprintf(ps.source.label, sizeof(ps.source.label), "Default");
+        ps.have_tracks = jellyfin_fetch_tracks(item->id, &ps.tracks);
+        ps.source.tracks = ps.tracks;
+        ps.source.runtime_secs = ps.total_secs;
+    }
     if (ps.have_tracks && ps.tracks.n_audio > 0)
         ps.cur_audio = ps.tracks.default_audio;
 
@@ -258,7 +299,10 @@ void show_player(const JFItem *item, u32 resume_secs) {
 
     crash_log("p4 audio_open begin");
     plog("show_player: audio_open");
-    audio_open();
+    // A new title gets a fresh shot at DTS: any session veto from the
+    // previous one (a coreless track, below) does not carry over.
+    surround_hd_session_reset();
+    audio_open(surround_enabled() ? 8 : 2);
     adec_init();
     adec_start();
     plog("show_player: audio_open done");
@@ -268,14 +312,17 @@ void show_player(const JFItem *item, u32 resume_secs) {
 
     crash_log("p6 stream_open begin");
     plog("show_player: stream_open");
+    s_wait_title = item->name;
+    stream_set_wait_cb(player_stream_wait);
     ps.sock = stream_open(url);
+    stream_set_wait_cb(NULL);
     if (ps.sock < 0) {
         plog("show_player: stream_open FAILED");
         adec_stop();
         audio_close();
         vdec_close();
         thumb_cache_init();
-        show_error("Stream connection failed.", url);
+        show_error(stream_last_error(), url);
         ui_restore_rsx_state();
         return;
     }
@@ -315,6 +362,23 @@ void show_player(const JFItem *item, u32 resume_secs) {
     }
     crash_log("p8 jbuf alloc OK");
 
+    // ---- Compressed read-ahead ring ----
+    // Claimed after the jitter buffer, from whatever is left: this is the
+    // buffer that decides whether a server delivering its transcode unevenly
+    // stutters or not, and compressed seconds are ~75x cheaper per second
+    // than decoded ones.  Half of free memory, leaving the rest for the UI,
+    // the HUD and the decode path; the ring clamps itself to its own bounds
+    // and halves down if the heap cannot manage the ask.
+    {
+        u32 total = 0, avail = 0;
+        u32 want = 6u * 1024u * 1024u;          // if meminfo is unavailable
+        // Three quarters, not half: the jitter buffer handed ~18 MB back
+        // and this is where it does the most good.  Bounded by
+        // RING_BYTES_MAX and halved down on allocation failure.
+        if (meminfo_get(&total, &avail)) want = (avail / 4u) * 3u;
+        decode_ring_alloc(want);
+    }
+
     // Video GPU blit init — allocate RSX buffers once per session
     vid_gpu_init(jbuf_fw(), jbuf_fh());
 
@@ -336,6 +400,7 @@ void show_player(const JFItem *item, u32 resume_secs) {
 
     if (!ps.playing) {
         vid_gpu_free();
+        decode_ring_free();
         jbuf_free();
         netClose(ps.sock);
         adec_stop();
@@ -350,6 +415,65 @@ void show_player(const JFItem *item, u32 resume_secs) {
 
     // ---- Spawn decode thread ----
     player_spawn_decode(&ps);
+
+    // ---- Pre-roll: fill the read-ahead ring before the picture starts ----
+    //
+    // The jitter buffer is full by now, which is only ~0.5 s at 1080p.  The
+    // decode thread keeps reading past that into the compressed ring, and
+    // starting playback before that ring has something in it throws away the
+    // whole point of having one: the first hard scene arrives with no reserve
+    // and stutters, exactly as it did before the ring existed.
+    //
+    // So wait for it here.  Waiting a few seconds up front to play a film
+    // through without stalling is a trade worth making, and the wait is
+    // bounded: it gives up at the deadline, on Circle, or the moment the
+    // stream ends.  Nothing is lost by the timeout — playback simply starts
+    // with whatever was buffered.
+    if (ps.playing && decode_ring_cap() > 0) {
+        // 90%, was 75%.  The ring is the only thing standing between a slow
+        // patch and a stall, so fill it as far as it will go before starting.
+        // The wait stays bounded by the deadline below and by Circle-to-skip.
+        const int target   = (decode_ring_cap() * 9) / 10;  // 90% full
+        const u64 deadline = timing_get_us() + 90000000ULL; // 90 s ceiling
+        u64 last_draw_us   = 0;
+        int last_pct       = -1;
+        plog("preroll: filling read-ahead ring");
+        init_btns();
+        while (running && ps.playing && decode_ring_fill() < target &&
+               timing_get_us() < deadline) {
+            sysUtilCheckCallback();
+            poll_buttons();
+            if (BTN_PRESSED(circle)) { plog("preroll: skipped by user"); break; }
+            // The audio queue can fill before the ring does (HD audio is
+            // several Mbps), and the decode thread stops reading when it
+            // does.  Waiting past that point achieves nothing.
+            if (!adec_pes_queue_hungry()) {
+                plog("preroll: audio queue full, starting");
+                break;
+            }
+
+            // Redraw at ~4 Hz: the decode thread owns the socket, so this
+            // loop is doing nothing but showing progress.
+            u64 now = timing_get_us();
+            int pct = decode_ring_fill() * 100 / (decode_ring_cap() ? decode_ring_cap() : 1);
+            if (pct != last_pct && now - last_draw_us > 250000ULL) {
+                last_draw_us = now;
+                last_pct     = pct;
+                char msg[64];
+                snprintf(msg, sizeof(msg), "Buffering... %d%%   (O: start now)",
+                         pct * 100 / 90 > 100 ? 100 : pct * 100 / 90);
+                player_status_screen(item->name, msg);
+            }
+            usleep(20000);
+        }
+        {
+            char b[80];
+            snprintf(b, sizeof(b), "preroll: done ring=%d/%d packets",
+                     decode_ring_fill(), decode_ring_cap());
+            plog(b);
+        }
+        init_btns();
+    }
 
     // ---- Spawn audio thread ----
     AudioCtx         aud_ctx = { &ps.playing, &ps.paused };
@@ -476,6 +600,25 @@ void show_player(const JFItem *item, u32 resume_secs) {
         // AUDIO / CC popup menus; a track change comes back as a 0-delta
         // HUD_ACTION_SEEK — the reopen applies the new track.
         act = player_handle_menu_action(&ps, act);
+
+        // HD mode, undecodable copied track: either a DTS-HD MA / DTS:X track
+        // with no backward-compatible core (legal, and nothing on this
+        // platform decodes the extension substreams), or a TrueHD track the
+        // decoder cannot make sense of at all.  Either way no audio is coming
+        // out.  Veto the copy path for the rest of the session and reopen at
+        // the current position — the same 0-delta reopen a track change uses
+        // — which re-negotiates the stream as an AC-3 5.1 transcode.  Silence
+        // is not an acceptable resting state.
+        if (act == HUD_ACTION_NONE && surround_hd_preferred() &&
+            (adec_dts_no_core() || adec_truehd_no_audio())) {
+            const bool dts = adec_dts_no_core();
+            plog(dts ? "dts: no core substream in this track, falling back to AC-3"
+                     : "truehd: no decodable audio in this track, falling back to AC-3");
+            slog_state("HD_UNDECODABLE codec=%s fallback=ac3",
+                       dts ? "dts" : "truehd");
+            surround_hd_session_disable();
+            act = HUD_ACTION_SEEK;      // 0-delta reopen applies the fallback
+        }
 
         // R2/L2 tap/hold machine + commit gate.
         act = player_seek_input_update(&ps, act);
@@ -608,10 +751,20 @@ void show_player(const JFItem *item, u32 resume_secs) {
     // Tell the server where we stopped (also finalizes Continue Watching).
     jellyfin_report_stopped(item->id, ps.session_id, final_pos_ticks);
 
+    // Kill the server-side transcode for this session.  Without this the job
+    // is left running when playback ends, and starting the SAME item and
+    // version again collides with the orphan — the new stream request comes
+    // back HTTP 500.  Picking a different version appeared to "fix" it only
+    // because a different MediaSourceId is a different job.  Seeks already do
+    // this (player_seek.cpp) for the same reason; ending playback did not.
+    if (ps.session_id[0])
+        jellyfin_stop_transcode(ps.session_id);
+
     // Free video GPU blit resources before releasing the jitter buffer
     vid_gpu_free();
 
     crash_log("p17 jbuf_free begin");
+    decode_ring_free();
     jbuf_free();
     crash_log("p18 jbuf_free OK");
     netClose(ps.sock);

@@ -20,8 +20,12 @@
 #include "img_arena.h"
 #include "meminfo.h"
 #include "plog.h"
+#include "audio/audio_out.h"   // audio_out_log_capabilities()
 #include "overscan.h"
 #include "hd1080.h"
+#include "vquality.h"
+#include "surround.h"
+#include "centermix.h"
 #include "statsovl.h"
 #include "audio.h"
 #include "video.h"
@@ -101,8 +105,13 @@ int main(int argc, const char *argv[]) {
     plog_load_setting();   // starts logging only if the user enabled it
     overscan_load();       // restore the user's CRT overscan calibration
     hd1080_load();         // restore the 1080p playback (Alpha) toggle
+    vquality_load();       // restore the video quality choice (info screen)
+    surround_load();       // restore the surround 5.1 (Alpha) toggle
+    centermix_load();      // restore the dialogue / centre-channel mode
     statsovl_load();       // restore the player stats overlay toggle
     audio_volume_load();   // restore the saved master volume
+    video_log_capabilities();   // what refresh rates does this panel offer?
+    audio_out_log_capabilities();  // ...and will this chain take a bitstream?
 
     crash_log("7 splash drawHeader");
     drawHeader();
@@ -160,13 +169,13 @@ int main(int argc, const char *argv[]) {
         // display mode.  Reserved up front, before the UI fragments the heap:
         // 24 x 1.32MB at 720p, 16 x 3.13MB on the 1080p (Alpha) path.  If the
         // toggle changes at runtime, jbuf_reserve() re-grabs on next play.
+        // Resolved through the same call the player uses, so the reservation
+        // matches the frame size that will actually be requested — including
+        // when the info screen's quality row overrides the 1080p toggle.
         u32 rw, rh;
-        if (hd1080_enabled()) {
-            rw = 1920; rh = 1080;
-        } else {
-            rw = display_width  < 1280 ? display_width  : 1280;
-            rh = display_height < 720  ? display_height : 720;
-        }
+        vquality_params(vquality_get(), hd1080_enabled(),
+                        display_width, display_height, &rw, &rh,
+                        NULL, NULL, NULL);
         if (!jbuf_reserve(rw, rh)) crash_log("7e jbuf_reserve FAILED");
     }
     // The image decoder gets a reserved home too.  Thumbnail SLOTS were already
@@ -229,6 +238,16 @@ int main(int argc, const char *argv[]) {
         // If the menu returned with no token, the user logged out. Keep the
         // server URL (jellyfin_logout preserves it) so the loop goes straight
         // back to the login screen rather than asking for the server again.
+        //
+        // It can also return because the server revoked the saved token
+        // mid-session, which looks like an empty library rather than an
+        // error; jellyfin_session_expired() explains that and clears the
+        // saved login so the loop below asks for credentials again.
+        if (g_auth_expired) {
+            crash_log("13z session expired");
+            slog_state("SESSION_EXPIRED");
+            jellyfin_session_expired();
+        }
     }
 
     crash_log("14 done");

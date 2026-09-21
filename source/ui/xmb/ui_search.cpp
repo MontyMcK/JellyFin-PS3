@@ -7,6 +7,29 @@
 #include "jellyfin_api.h"
 #include "player.h"
 #include "plog.h"
+#include "timing.h"
+
+// Search is a BLOCKING http_request on the UI thread, and it used to run on
+// every single keystroke: type "matrix" and that is six round trips, each one
+// freezing the OSK until the server answers.  On top of feeling broken, the
+// one-and-two-character queries in that sequence are the worst ones to send —
+// Jellyfin matches them loosely, so results appeared, vanished and reappeared
+// as the term grew, which is the "sometimes results, sometimes none" part.
+//
+// So: wait until typing PAUSES, then send one query, and never send a term
+// too short to mean anything.  The pause is checked in the per-frame input
+// handler, which is already called every frame.
+// The wait is measured from the last PAD ACTIVITY, not the last letter.
+// Timing it from the letter is why it still fired mid-word: picking the next
+// key on an on-screen keyboard takes several d-pad presses, and none of those
+// pushed the deadline back, so the query went out — and froze the UI — while
+// the user was still walking to the next letter.  Any button activity now
+// counts as "still typing".
+#define SEARCH_DEBOUNCE_US 900000   // idle pause before the query fires
+#define SEARCH_MIN_CHARS   2        // shorter terms are noise, not a search
+
+static u64  s_search_edit_us = 0;   // when the term last changed
+static bool s_search_pending = false;
 
 // Search OSK state
 const char *OSK_LETTERS[OSK_ROWS_N] = {
@@ -172,8 +195,38 @@ bool xmb_handle_input_search(void) {
                     g_search_scroll = g_search_sel - vis + 1;
             }
         }
+        // Triangle opens the info screen for a search hit, the same as it does
+        // in the library grid — so a title found by search can be played from
+        // a chosen version and quality instead of only the server's default.
+        if (BTN_PRESSED(triangle) && g_search_sel < g_search_results_count &&
+            timing_get_us() >= g_info_cooldown_until) {
+            const XMBItem *it = &g_search_results[g_search_sel];
+            if (strcmp(it->type, "Series") == 0) {
+                // Same rule as everywhere else: browse a show rather than
+                // offer it a version overlay it has no versions for.
+                if (xmb_open_series(it)) {
+                    g_search_focus_results = false;
+                    init_btns();
+                }
+            } else {
+                xmb_show_item_info(it);
+            }
+            return false;
+        }
         if (BTN_PRESSED(cross) && g_search_sel < g_search_results_count) {
             const XMBItem *it = &g_search_results[g_search_sel];
+            // A SERIES is not playable — it is a folder.  X used to hand it
+            // to the video player anyway, which is why picking a show from
+            // search dropped straight into something instead of letting you
+            // choose.  Open the Seasons -> Episodes browser the TV tab and
+            // the Home rows already use.
+            if (strcmp(it->type, "Series") == 0) {
+                if (xmb_open_series(it)) {
+                    g_search_focus_results = false;
+                    init_btns();
+                }
+                return false;
+            }
             if (strcmp(it->type, "Episode") == 0)
                 xmb_play_episode_with_next(it, 0);
             else
@@ -216,8 +269,34 @@ bool xmb_handle_input_search(void) {
 
     if (strcmp(prev_buf, g_search_buf) != 0) {
         if (g_search_buf[0]) {
+            // Queue it; the query goes out once typing stops (see the note at
+            // the top of this file).
+            s_search_pending = true;
+            s_search_edit_us = timing_get_us();
+        } else {
+            s_search_pending       = false;
+            g_search_results_count = 0;
+            g_search_focus_results = false;
+        }
+    }
+
+    // Still working the keyboard — moving between keys, holding a direction,
+    // deleting — so push the query back.  Held buttons count, which is what
+    // keeps a long d-pad run from being read as a pause.
+    if (s_search_pending &&
+        (btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right ||
+         btn_cur.cross || btn_cur.circle || btn_cur.square ||
+         btn_cur.triangle || btn_cur.l1 || btn_cur.r1))
+        s_search_edit_us = timing_get_us();
+
+    if (s_search_pending &&
+        timing_get_us() - s_search_edit_us >= SEARCH_DEBOUNCE_US) {
+        s_search_pending = false;
+        if ((int)strlen(g_search_buf) >= SEARCH_MIN_CHARS) {
             xmb_do_search();
         } else {
+            // Too short to search on: show nothing rather than whatever a
+            // one-letter query happens to match.
             g_search_results_count = 0;
             g_search_focus_results = false;
         }

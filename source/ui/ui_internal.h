@@ -26,6 +26,9 @@ void xmb_switch_tab(int new_tab);
 int  xmb_next_enabled(int start, int dir);
 
 void xmb_detect_tabs(void);
+// One attempt only — for the XMB's background retry, which must not block
+// the render loop inside the full retry set.
+bool xmb_detect_tabs_once(void);
 void xmb_fetch_tab_items(int tab);
 int  xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
                        int start_index, int *out_total);
@@ -66,15 +69,26 @@ bool xmb_handle_input_home(void);
 
 // Launch the player for one list item (xmb/ui_nav.cpp).  resume_secs > 0
 // starts playback at that saved position.
-void xmb_play_item(const XMBItem *it, u32 resume_secs);
+void xmb_play_item(const XMBItem *it, u32 resume_secs,
+                   const char *media_source_id = NULL);
 
 // Play an episode with the end-of-item NEXT prompt / auto-advance, resolving
 // each follower from the server so it works from any launch point (Home rows,
 // Continue Watching, search, season lists) and across season boundaries.
-void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs);
+void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs,
+                                const char *media_source_id = NULL);
 
 // Triangle detail overlay (xmb/ui_info.cpp)
 void xmb_show_item_info(const XMBItem *it);
+
+// Open the Seasons -> Episodes browser for a Series.
+//
+// A Series is a FOLDER, not something playable, so neither X nor Triangle
+// should hand it to the player or to the version overlay -- there is no
+// version to pick until an actual episode is chosen.  Every entry point
+// (home rows, search results, any library list) routes through here so they
+// cannot drift apart again.  Returns false if the TV tab is unavailable.
+bool xmb_open_series(const XMBItem *it);
 
 // Resume-or-restart prompt for a partly-watched item (xmb/ui_info.cpp).
 // Returns seconds to start at (0 = beginning), or <0 if the user cancelled.
