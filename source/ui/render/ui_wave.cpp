@@ -914,8 +914,8 @@ void wave_draw(void) {
                 v[n].x = q_->x; v[n].y = q_->y;                            \
                 v[n].z = 0.0f;  v[n].w = 1.0f;                             \
                 v[n].rgba = (USE_RIM)                                      \
-                    ? WAVE_RGBA(q_->rr, q_->rg, q_->rb, 255)               \
-                    : WAVE_RGBA(q_->r,  q_->g,  q_->b,  (A));              \
+                    ? WAVE_RGBA(128, 128, 128, 255)                       \
+                    : WAVE_RGBA(128, 128, 128, (A));              \
                 n++;                                                       \
             } while (0)
 
@@ -1069,7 +1069,7 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // STROBE ISOLATION TEST 6: submit the COMPLETE BODY of only the
+            // STROBE ISOLATION TEST 7: keep the Test-6 geometry/submission exactly intact,\n            // but force JellyWave RGB to constant 128/128/128. Alpha remains the\n            // authored layer alpha, so this isolates lighting/Fresnel/RGB generation.\n            // STROBE ISOLATION TEST 6: submit the COMPLETE BODY of only the
             // furthest layer, but draw each section as its own independent
             // triangle strip. This removes the section-to-section degenerate
             // joins from the RSX primitive stream while leaving the actual
