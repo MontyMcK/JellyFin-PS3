@@ -904,6 +904,12 @@ void wave_draw(void) {
 
         if (s_wave_jelly && jw_rebuild) {
             /*
+             * TEST 3: do not execute the JellyWave geometry build below.
+             * The gradient is still populated and submitted from the same
+             * reusable RSX vertex buffer. This removes both geometry writes
+             * and JellyWave rasterisation from the test.
+             */
+            if (false) {
              * STROBE ISOLATION TEST.
              * Leave the JellyWave buffer construction intact, but do not submit
              * its body/rim geometry. This leaves the exact same RSX programs,
@@ -1003,6 +1009,7 @@ void wave_draw(void) {
             s_jw_verts     = (u32)n;
             s_jw_draws     = 1 + JW_LAYERS * 2;
             s_jw_have_geom = 1;
+            }
         } else if (s_wave_blend) {
             // One quad per ribbon: constant tint, alpha ramping from the
             // crest opacity down to zero at the screen bottom.  The GPU
@@ -1107,16 +1114,10 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // STROBE ISOLATION TEST 2: submit ONLY the furthest JellyWave
-            // layer's BODY. No other layer and no rim are rasterised.
-            // The gradient, vertex-array bindings, blend state and presentation
-            // path remain identical to the previous diagnostic.
-            if (s_jw_have_geom && s_jw_cnt[0][0] != 0) {
-                rsxInvalidateVertexCache(context);
-                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                   4 + s_jw_off[0][0],
-                                   s_jw_cnt[0][0]);
-            }
+            // STROBE ISOLATION TEST 3: submit NO JellyWave geometry AND do not
+            // build/write its vertex data. The gradient remains on the exact
+            // same vertex-array path. This isolates the JellyWave CPU geometry
+            // buffer writes from the gradient/state path.
         } else {
             const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
