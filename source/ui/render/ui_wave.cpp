@@ -1069,13 +1069,13 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 17: section 2, first half of the generated vertices intact;
-            // second half collapsed to the first safe vertex. Binary-search the
+            // TEST 19: section 2, first eighth of the generated vertices intact;
+            // remaining vertices collapsed to the first safe vertex. Binary-search the
             // generated strip for the geometry that triggers the RSX strobe.
             if (s_jw_cnt[0][0] >= (u32)(4 * JW_STATIONS)) {
                 const u32 section_v = (u32)(2 * JW_STATIONS);
                 WaveVert *tv = v + s_jw_off[0][0] + section_v;
-                const u32 keep = section_v / 2;
+                const u32 keep = section_v / 8;
                 float sx = tv[0].x, sy = tv[0].y;
                 if (!(sx == sx)) sx = 0.0f; else if (sx > 2.0f) sx = 2.0f; else if (sx < -2.0f) sx = -2.0f;
                 if (!(sy == sy)) sy = 0.0f; else if (sy > 2.0f) sy = 2.0f; else if (sy < -2.0f) sy = -2.0f;
