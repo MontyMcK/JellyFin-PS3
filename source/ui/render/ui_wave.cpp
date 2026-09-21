@@ -1082,7 +1082,7 @@ void wave_draw(void) {
                 // RGB/lighting values. This bisects the actual section geometry.
                 const u32 section_v = (u32)(2 * JW_STATIONS);
                 const u32 join_v = section_v + 2;
-                for (int js = 0; js < 1; js++) {
+                for (int js = 1; js < 6; js++) {
                     const u32 section_off =
                         s_jw_off[0][0] + (u32)js * join_v;
                     rsxInvalidateVertexCache(context);
