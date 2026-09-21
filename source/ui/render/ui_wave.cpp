@@ -1069,14 +1069,22 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // STROBE ISOLATION TEST 5: submit the COMPLETE BODY of only the
-            // furthest layer. This keeps the body geometry but includes all
-            // section-to-section degenerate joins. No rim and no other layers.
-            // If this strobes, the degenerate multi-section strip is implicated.
-            if (s_jw_cnt[0][0] != 0) {
-                rsxInvalidateVertexCache(context);
-                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                   s_jw_off[0][0], s_jw_cnt[0][0]);
+            // STROBE ISOLATION TEST 6: submit the COMPLETE BODY of only the
+            // furthest layer, but draw each section as its own independent
+            // triangle strip. This removes the section-to-section degenerate
+            // joins from the RSX primitive stream while leaving the actual
+            // vertices, lighting, geometry and blend state unchanged.
+            // No rim and no other layers.
+            if (s_jw_cnt[0][0] >= (u32)(JW_SECTION * 2 * JW_STATIONS)) {
+                const u32 section_v = (u32)(2 * JW_STATIONS);
+                const u32 join_v = section_v + 2;
+                for (int js = 0; js < JW_SECTION; js++) {
+                    const u32 section_off =
+                        s_jw_off[0][0] + (u32)js * join_v;
+                    rsxInvalidateVertexCache(context);
+                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
+                                       section_off, section_v);
+                }
             }
         } else {
             const u32 stripv  = (u32)(ncols * 2);
