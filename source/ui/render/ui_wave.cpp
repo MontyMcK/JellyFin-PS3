@@ -1051,26 +1051,29 @@ void wave_draw(void) {
         if (jw_rebuild)
             __asm__ __volatile__ ("sync" ::: "memory");
 
-        // Draw the opaque background BEFORE binding the JellyWave vertex
-        // arrays. Do not mix immediate vertices with active array-fetch state:
-        // the background is independent of the reusable JellyWave buffer, so
-        // submit it while the vertex inputs are not array-bound.
-        rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
-        wave_vtx(-1.0f,  1.0f, gtlr, gtlg, gtlb);
-        wave_vtx(-1.0f, -1.0f, gblr, gblg, gblb);
-        wave_vtx( 1.0f,  1.0f, gtrr, gtrg, gtrb);
-        wave_vtx( 1.0f, -1.0f, gbrr, gbrg, gbrb);
-        rsxDrawVertexEnd(context);
-
-        // Bind the reusable JellyWave vertex arrays only after the background
-        // has been submitted. TEX0 is explicitly disabled rather than left as
-        // whatever the previous textured draw configured.
+        // The gradient is the first four vertices in the same reusable
+        // array as the JellyWave geometry. Keep it on the array-fetch path:
+        // the previous frame leaves POS array-bound, so submitting this quad
+        // with rsxDrawVertex* would mix immediate vertices with a live POS
+        // binding. That can make the first primitive fetch stale data and
+        // manifest as a black/colour-strobing frame on real hardware.
+        //
+        // Drawing the gradient from the same array also makes rebuild and
+        // reuse frames identical: on a reuse frame vertices [0,4) are already
+        // present in the buffer, so no CPU writes or extra synchronization are
+        // needed.
+        //
+        // Bind POS/COLOR first, then draw the gradient while blending is still
+        // disabled. TEX0 is explicitly disabled rather than inherited.
         rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
             vo, (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
         rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
             vo + 16, (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_U8, GCM_LOCATION_RSX);
         rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
             0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
+
+        rsxInvalidateVertexCache(context);
+        rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
 
         if (s_wave_blend) {
             // src*a + dst*(1-a), ribbons back to front -- algebraically the
