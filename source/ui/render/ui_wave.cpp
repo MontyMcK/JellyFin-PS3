@@ -1069,22 +1069,20 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 23: submit ONE generated strip, but replace its projected XY
-            // with a smooth linear envelope. Keep the JellyWave render state,
-            // vertex-array path and draw count, but remove every generated
-            // curvature/lump/clip edge from the rasterizer input. If this is
-            // stable, the trigger is in the spatial shape/curvature, not RSX
-            // state, colour, alpha, or primitive submission.
+            // TEST 23: keep the JellyWave array/render path, but replace the
+            // submitted coordinates with a completely smooth screen-space
+            // strip. This removes camera projection, curvature, lumps, clipping,
+            // colour variation and alpha/blend effects from the test.
             const u32 section_v = (u32)(2 * JW_STATIONS);
             const u32 base = s_jw_off[0][0];
 
-            if (s_jw_cnt[0][0] >= (u32)(section_v)) {
+            if (s_jw_cnt[0][0] >= section_v) {
                 rsxSetBlendEnable(context, GCM_FALSE);
+
                 WaveVert *tv = v + base;
                 for (u32 k = 0; k < section_v; k++) {
                     float t = (float)k / (float)(section_v - 1);
-                    // Smooth, deliberately boring screen-space strip.
-                    // Width and height stay well inside the viewport.
+
                     tv[k].x = -0.75f + 1.50f * t;
                     tv[k].y = -0.35f + 0.70f * t;
                     tv[k].z = 0.0f;
@@ -1095,14 +1093,8 @@ void wave_draw(void) {
                 __asm__ __volatile__("sync" ::: "memory");
                 rsxInvalidateVertexCache(context);
                 rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, base, section_v);
-                rsxSetBlendEnable(context, GCM_TRUE);
-            }
 
-                    __asm__ __volatile__("sync" ::: "memory");
-                    rsxInvalidateVertexCache(context);
-                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                       base + (u32)sec * (section_v + 2), section_v);
-                }
+                rsxSetBlendEnable(context, GCM_TRUE);
             }
         }
 
