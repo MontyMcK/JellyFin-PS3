@@ -1069,14 +1069,16 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 21: submit the complete far-layer body as 12 independent
+            // TEST 22: submit the complete far-layer body as 12 independent
             // triangle strips.  No section-to-section degenerate joins, no rim.
             // Every generated coordinate is finite and clipped to a conservative
-            // NDC envelope before the RSX sees it.
+            // NDC envelope. Use constant opaque colour and disable blending
+            // so this isolates rasterized XY geometry from alpha/blend math.
             const u32 section_v = (u32)(2 * JW_STATIONS);
             const u32 base = s_jw_off[0][0];
 
             if (s_jw_cnt[0][0] >= (u32)(JW_SECTION * section_v + (JW_SECTION - 1) * 2)) {
+                rsxSetBlendEnable(context, GCM_FALSE);
                 for (int sec = 0; sec < JW_SECTION; sec++) {
                     WaveVert *tv = v + base + (u32)sec * (section_v + 2);
                     for (u32 k = 0; k < section_v; k++) {
@@ -1094,6 +1096,7 @@ void wave_draw(void) {
                         tv[k].y = y;
                         tv[k].z = 0.0f;
                         tv[k].w = 1.0f;
+                        tv[k].rgba = WAVE_RGBA(128, 128, 128, 255);
                     }
 
                     __asm__ __volatile__("sync" ::: "memory");
