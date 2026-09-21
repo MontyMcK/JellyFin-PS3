@@ -660,6 +660,9 @@ void show_player(const JFItem *item, u32 resume_secs,
         if (ps.paused && !any_input && act == HUD_ACTION_NONE &&
             !ps.show_seek_frame && ps.seek.pending_secs == 0 &&
             ps.seek.state == SEEK_IDLE && pause_settle == 0) {
+            // No display step this refresh, by choice — don't let the gate's
+            // backlog drain bill the idle gap as frames owed on resume.
+            timing_gate_reset();
             usleep(16000);
             continue;
         }

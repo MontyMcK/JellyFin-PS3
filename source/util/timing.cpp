@@ -34,6 +34,8 @@ static volatile u64  s_last_shown_vsync = 0;
 static s64           s_vsync_err        = 0;   // Bresenham accumulator, units of fps_num
 static volatile u32  s_vsyncs_next      = 2;   // precomputed vsync hold for the next frame
 static volatile bool s_vsync_shown_once = false;
+// Elapsed-vblank cursor for the duration-consumption gate (timing_vsyncs_elapsed).
+static u64           s_gate_last_vc     = 0;
 
 // Phase 2 — vblank-edge flip trigger.
 // The vblank handler sets s_flip_trigger at the exact vsync edge where the
@@ -94,6 +96,7 @@ void timing_init(u32 fps_num, u32 fps_den) {
     s_fps_den          = fps_den;
     s_vsync_count      = 0;
     s_last_shown_vsync = 0;
+    s_gate_last_vc     = 0;
     s_vsync_err        = 0;
     s_vsyncs_next      = 2;
     s_vsync_shown_once = false;
@@ -165,6 +168,21 @@ s64 timing_vblank_period_us(void) {
     if (s_display_num == 0) return 16683;   // defensive; never happens post-init
     return (s64)1000000 * (s64)s_display_den / (s64)s_display_num;
 }
+
+// ---- Elapsed-vblank cursor for the duration-consumption gate ----
+// See timing.h for why the gate must count REAL vblanks, not display steps.
+#define GATE_MAX_CATCHUP_VSYNCS 4
+
+u32 timing_vsyncs_elapsed(void) {
+    u64 vc   = s_vsync_count;
+    u64 prev = s_gate_last_vc;
+    s_gate_last_vc = vc;
+    if (prev == 0 || vc <= prev) return 1;      // first call after a reset
+    u64 d = vc - prev;
+    return (d > GATE_MAX_CATCHUP_VSYNCS) ? GATE_MAX_CATCHUP_VSYNCS : (u32)d;
+}
+
+void timing_gate_reset(void) { s_gate_last_vc = 0; }
 
 // ---- AV sync EMA ----
 
