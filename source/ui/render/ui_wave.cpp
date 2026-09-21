@@ -1110,12 +1110,16 @@ void wave_draw(void) {
                                        s_jw_off[slot][0], s_jw_cnt[slot][0]);
                 }
                 if (s_jw_cnt[slot][1]) {
-                    // Additive: src*a + dst.  The rim colours already carry
-                    // their own intensity, so alpha rides at 255 and the pass
-                    // adds exactly what wave_gel.h's rimColor computed.
+                    // Keep the rim on the same ordinary alpha blend path as
+                    // the body.  JellyWave originally used a second additive
+                    // blend mode here; that is the only mode-3-only colour
+                    // state transition and is unnecessary because rimColor is
+                    // already lit/tinted in wave_gel.h.  A single blend
+                    // function for the whole pass also avoids carrying an
+                    // additive state across the next layer/draw.
                     rsxSetBlendFunc(context,
-                        GCM_SRC_ALPHA, GCM_ONE,
-                        GCM_SRC_ALPHA, GCM_ONE);
+                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
+                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
                     rsxInvalidateVertexCache(context);
                     rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
                                        s_jw_off[slot][1], s_jw_cnt[slot][1]);
