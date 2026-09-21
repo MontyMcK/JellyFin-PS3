@@ -903,10 +903,9 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly && jw_rebuild) {
-            // STROBE ISOLATION TEST 3: deliberately skip ALL JellyWave
-            // geometry generation and all writes into the JellyWave portion
-            // of the RSX vertex buffer. The gradient quad is still generated
-            // and submitted through the same vertex-array path.
+            // STROBE ISOLATION TEST 3: skip ALL JellyWave geometry generation
+            // and all writes into the JellyWave portion of the RSX buffer.
+            // The gradient vertices [0,4) are still written above.
         }        } else if (s_wave_blend) {
             // One quad per ribbon: constant tint, alpha ramping from the
             // crest opacity down to zero at the screen bottom.  The GPU
@@ -1011,10 +1010,8 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // STROBE ISOLATION TEST 3: submit NO JellyWave geometry AND do not
-            // build/write its vertex data. The gradient remains on the exact
-            // same vertex-array path. This isolates the JellyWave CPU geometry
-            // buffer writes from the gradient/state path.
+            // STROBE ISOLATION TEST 3: submit NO JellyWave geometry.
+            // Only the gradient quad above is submitted in mode 3.
         } else {
             const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
