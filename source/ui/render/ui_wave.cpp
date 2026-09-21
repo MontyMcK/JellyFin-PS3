@@ -1062,11 +1062,7 @@ void wave_draw(void) {
         rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
             0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
 
-        // Gradient is opaque and must land before anything blends over it.
-        rsxInvalidateVertexCache(context);
-        rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
-
-        if (s_wave_blend) {
+        // Draw the background inline every frame. The JellyWave vertex buffer is\n        // intentionally reused between rebuilds, so the background must not\n        // depend on its [0,4) contents or vertex-array fetch state.\n        rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);\n        wave_vtx(-1.0f,  1.0f, gtlr, gtlg, gtlb);\n        wave_vtx(-1.0f, -1.0f, gblr, gblg, gblb);\n        wave_vtx( 1.0f,  1.0f, gtrr, gtrg, gtrb);\n        wave_vtx( 1.0f, -1.0f, gbrr, gbrg, gbrb);\n        rsxDrawVertexEnd(context);\n\n        if (s_wave_blend) {
             // src*a + dst*(1-a), ribbons back to front -- algebraically the
             // same cumulative composite wave_bg() does on the CPU, and the
             // same blend the UI uses everywhere else.
