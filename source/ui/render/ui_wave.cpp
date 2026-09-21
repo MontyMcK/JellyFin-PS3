@@ -1087,7 +1087,7 @@ void wave_draw(void) {
                 rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, s_jw_off[0][0] + section_v, section_v);
             }
         }
-    } else {{
+        else {
             const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
             for (int s = 0; s < nstrips; s++) {
