@@ -46,28 +46,39 @@ static int settings_rows_top(void) {
     return settings_panel_y() + SET_PANEL_H + 24;
 }
 
-// Vertical pitch between action rows.  Normally the natural SET_ROW_H + 10,
-// but the rows are top-anchored under a card whose own top moves down with
-// the overscan inset, so the list can run past the safe area once the entry
-// count grows: at the 8% maximum inset, five rows at the natural pitch put
-// the last one ~26px below the safe bottom edge, where a CRT clips it.
-// Compress only when that actually happens — at zero/low overscan the
-// arithmetic returns SET_ROW_H + 10 and the layout is untouched.
+// Keep a stable XMB row rhythm. When the list is longer than the safe area,
+// selection scrolling (rather than row compression) moves the visible window.
 static int settings_row_pitch(void) {
-    const int natural = SET_ROW_H + UIS_H(10);
-    if (XMB_SETTINGS_COUNT < 2) return natural;
-    int avail  = (int)display_height - XMB_BOTTOM_PAD - settings_rows_top();
-    int needed = (XMB_SETTINGS_COUNT - 1) * natural + SET_ROW_H;
-    if (avail >= needed) return natural;
-    int pitch = (avail - SET_ROW_H) / (XMB_SETTINGS_COUNT - 1);
-    if (pitch > natural)       pitch = natural;
-    if (pitch < SET_ROW_H + 2) pitch = SET_ROW_H + 2;  // keep rows separated
-    return pitch;
+    return SET_ROW_H + UIS_H(10);
 }
 
-// Y of the i-th action row, below the account info card.
+static int settings_visible_rows(void) {
+    int avail = (int)display_height - XMB_BOTTOM_PAD - settings_rows_top();
+    int pitch = settings_row_pitch();
+    if (avail < SET_ROW_H) return 1;
+
+    int n = 1 + (avail - SET_ROW_H) / pitch;
+    if (n < 1) n = 1;
+    if (n > XMB_SETTINGS_COUNT) n = XMB_SETTINGS_COUNT;
+    return n;
+}
+
+// First row in the visible settings window. The selected row is always kept
+// visible by advancing this window; the row height itself never changes.
+static int settings_first_row(void) {
+    int vis = settings_visible_rows();
+    int first = g_settings_sel - vis + 1;
+    if (first < 0) first = 0;
+
+    int max_first = XMB_SETTINGS_COUNT - vis;
+    if (max_first < 0) max_first = 0;
+    if (first > max_first) first = max_first;
+    return first;
+}
+
 static int settings_row_y(int i) {
-    return settings_rows_top() + i * settings_row_pitch();
+    return settings_rows_top()
+         + (i - settings_first_row()) * settings_row_pitch();
 }
 
 // Centered confirm dialog rect.
@@ -112,12 +123,18 @@ void xmb_cpu_draw_settings(void) {
     hairline_frame(list_x, py, XMB_LIST_W, SET_PANEL_H);
     fill_circle(list_x + 46, py + SET_PANEL_H / 2, 22, XMB_ACCENT_DEEP);
 
-    // Selected action row.
-    for (int i = 0; i < XMB_SETTINGS_COUNT; i++) {
-        if (i != g_settings_sel) continue;
-        int iy = settings_row_y(i);
-        drawRect((u32)list_x, (u32)iy, (u32)XMB_LIST_W, SET_ROW_H, XMB_PANEL_HI);
-        drawRect((u32)(list_x - UIS_W(4)), (u32)iy, UIS_W(3), SET_ROW_H, XMB_ACCENT);
+    // Selected action row. The visible window is derived from the selected
+    // row, so navigation can reach every setting without putting anything
+    // below the safe area.
+    {
+        int first = settings_first_row();
+        int last  = first + settings_visible_rows();
+        for (int i = first; i < last; i++) {
+            if (i != g_settings_sel) continue;
+            int iy = settings_row_y(i);
+            drawRect((u32)list_x, (u32)iy, (u32)XMB_LIST_W, SET_ROW_H, XMB_PANEL_HI);
+            drawRect((u32)(list_x - UIS_W(4)), (u32)iy, UIS_W(3), SET_ROW_H, XMB_ACCENT);
+        }
     }
 }
 
@@ -161,8 +178,11 @@ void xmb_draw_settings(void) {
     snprintf(line, sizeof(line), "%s", g_server[0] ? g_server : "(no server)");
     drawTTF((u32)tx, (u32)(py + UIS_H(64)), line, UIS_TF(14), XMB_TEXT_DIM);
 
-    // Action rows.
-    for (int i = 0; i < XMB_SETTINGS_COUNT; i++) {
+    // Action rows. Draw only the visible window; the input handler still
+    // owns the full selection range.
+    int first_row = settings_first_row();
+    int last_row  = first_row + settings_visible_rows();
+    for (int i = first_row; i < last_row; i++) {
         int  iy  = settings_row_y(i);
         bool sel = (i == g_settings_sel);
         u32  clr = sel ? XMB_WHITE : XMB_TEXT_DIM;
@@ -244,11 +264,12 @@ void xmb_draw_settings(void) {
 #endif
     }
 
-    // Version footer — skip it if a large overscan inset has squeezed the
-    // bottom-anchored footer up into the last (top-anchored) action row.
+    // Version footer — skip it if the visible settings window already
+    // occupies the bottom of the safe area.
     {
         int footer_y = (int)display_height - XMB_BOTTOM_PAD - UIS_H(26);
-        int last_row_bottom = settings_row_y(XMB_SETTINGS_COUNT - 1) + SET_ROW_H;
+        int last_visible = settings_first_row() + settings_visible_rows() - 1;
+        int last_row_bottom = settings_row_y(last_visible) + SET_ROW_H;
         if (footer_y > last_row_bottom + 6) {
             const char *ver = "Jellyfin for PS3 " APP_VERSION " \xC2\xB7 built " __DATE__;
             int vw = ttf_text_width(ver, UIS_TF(13));
