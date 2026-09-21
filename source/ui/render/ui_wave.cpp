@@ -1198,3 +1198,18 @@ void wave_dim_screen(u8 alpha) {
     const u8    col[4] = { 0, 0, 0, alpha };
     const float tl[4]  = { -1.0f,  1.0f, 0.0f, 1.0f };
     const float tr[4]  = {  1.0f,  1.0f, 0.0f, 1.0f };
+    const float bl[4]  = { -1.0f, -1.0f, 0.0f, 1.0f };
+    const float br[4]  = {  1.0f, -1.0f, 0.0f, 1.0f };
+    rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    tl);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    tr);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    bl);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    br);
+    rsxDrawVertexEnd(context);
+
+    rsxSync();
+}
