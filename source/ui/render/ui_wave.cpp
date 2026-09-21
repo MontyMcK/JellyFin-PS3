@@ -1069,40 +1069,41 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 20: draw only the first eighth of section 2; no collapsed boundary is submitted;
-            // unused vertices are irrelevant because they are not submitted. Isolate the
-            // generated strip for the geometry that triggers the RSX strobe.
-            if (s_jw_cnt[0][0] >= (u32)(4 * JW_STATIONS)) {
-                const u32 section_v = (u32)(2 * JW_STATIONS);
-                WaveVert *tv = v + s_jw_off[0][0] + section_v;
-                const u32 keep = section_v / 8;
-                float sx = tv[0].x, sy = tv[0].y;
-                if (!(sx == sx)) sx = 0.0f; else if (sx > 2.0f) sx = 2.0f; else if (sx < -2.0f) sx = -2.0f;
-                if (!(sy == sy)) sy = 0.0f; else if (sy > 2.0f) sy = 2.0f; else if (sy < -2.0f) sy = -2.0f;
-                for (u32 k = 0; k < section_v; k++) {
-                    if (k < keep) {
-                        float x=tv[k].x, y=tv[k].y;
-                        if (!(x==x)) x=0.0f; else if(x>2.0f)x=2.0f; else if(x<-2.0f)x=-2.0f;
-                        if (!(y==y)) y=0.0f; else if(y>2.0f)y=2.0f; else if(y<-2.0f)y=-2.0f;
-                        tv[k].x=x; tv[k].y=y;
-                    } else { tv[k].x=sx; tv[k].y=sy; }
-                    tv[k].z=0.0f; tv[k].w=1.0f;
+            // TEST 21: submit the complete far-layer body as 12 independent
+            // triangle strips.  No section-to-section degenerate joins, no rim.
+            // Every generated coordinate is finite and clipped to a conservative
+            // NDC envelope before the RSX sees it.
+            const u32 section_v = (u32)(2 * JW_STATIONS);
+            const u32 base = s_jw_off[0][0];
+
+            if (s_jw_cnt[0][0] >= (u32)(JW_SECTION * section_v)) {
+                for (int sec = 0; sec < JW_SECTION; sec++) {
+                    WaveVert *tv = v + base + (u32)sec * section_v;
+                    for (u32 k = 0; k < section_v; k++) {
+                        float x = tv[k].x;
+                        float y = tv[k].y;
+
+                        if (!(x == x)) x = 0.0f;
+                        if (!(y == y)) y = 0.0f;
+                        if (x > 1.0f) x = 1.0f;
+                        if (x < -1.0f) x = -1.0f;
+                        if (y > 1.0f) y = 1.0f;
+                        if (y < -1.0f) y = -1.0f;
+
+                        tv[k].x = x;
+                        tv[k].y = y;
+                        tv[k].z = 0.0f;
+                        tv[k].w = 1.0f;
+                    }
+
+                    __asm__ __volatile__("sync" ::: "memory");
+                    rsxInvalidateVertexCache(context);
+                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
+                                       base + (u32)sec * section_v, section_v);
                 }
-                __asm__ __volatile__("sync" ::: "memory");
-                rsxInvalidateVertexCache(context);
-                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, s_jw_off[0][0] + section_v, keep);
             }
         }
         else {
-            const u32 stripv  = (u32)(ncols * 2);
-            const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
-            for (int s = 0; s < nstrips; s++) {
-                rsxInvalidateVertexCache(context);
-                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                   4 + (u32)s * stripv, stripv);
-            }
-        }
-
         // Release the colour array.  Everything the UI draws after the
         // background this frame -- cards, text, chrome, the dim quad --
         // submits inline, and a stale per-vertex COLOR0 array is what the
