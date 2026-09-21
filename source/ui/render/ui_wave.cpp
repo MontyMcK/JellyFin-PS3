@@ -1248,3 +1248,35 @@ void wave_dim_screen(u8 alpha) {
     void *vp_ucode; u32 vp_size;
     rsxVertexProgramGetUCode(vpo, &vp_ucode, &vp_size);
     rsxLoadVertexProgram(context, vpo, vp_ucode);
+    rsxLoadVertexProgram(context, vpo, vp_ucode);
+    rsxSetVertexAttribOutputMask(context, vpo->output_mask);
+    rsxLoadFragmentProgramLocation(context, fpo, s_wave_fp_offset, GCM_LOCATION_RSX);
+
+    rsxSetDepthTestEnable(context, GCM_FALSE);
+    rsxSetDepthWriteEnable(context, GCM_FALSE);
+    rsxSetBlendFunc(context,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
+        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
+    rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
+    rsxSetBlendEnable(context, GCM_TRUE);
+
+    // wave_vtx() forces opaque vertices, so push these by hand (colour first,
+    // position last — the position write commits the vertex).
+    const u8    col[4] = { 0, 0, 0, alpha };
+    const float tl[4]  = { -1.0f,  1.0f, 0.0f, 1.0f };
+    const float tr[4]  = {  1.0f,  1.0f, 0.0f, 1.0f };
+    const float bl[4]  = { -1.0f, -1.0f, 0.0f, 1.0f };
+    const float br[4]  = {  1.0f, -1.0f, 0.0f, 1.0f };
+    rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    tl);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    tr);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    bl);
+    rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, col);
+    rsxDrawVertex4f (context, GCM_VERTEX_ATTRIB_POS,    br);
+    rsxDrawVertexEnd(context);
+
+    rsxSync();
+}
