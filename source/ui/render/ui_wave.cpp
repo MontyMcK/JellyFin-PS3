@@ -1069,11 +1069,25 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 12: draw the already-known-good gradient vertices through
-            // the JellyWave render state. This removes JellyWave geometry,
-            // offsets and generated vertex contents from the submission path.
-            rsxInvalidateVertexCache(context);
-            rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, 0, 4);
+            // TEST 13: use the JellyWave vertex-array path/state, but overwrite
+            // the submitted section with a completely fixed, finite clip-space
+            // triangle strip. This isolates generated x/y geometry from the RSX state.
+            if (s_jw_cnt[0][0] >= (u32)(2 * JW_STATIONS)) {
+                WaveVert *tv = v + s_jw_off[0][0];
+                const u32 section_v = (u32)(2 * JW_STATIONS);
+                for (u32 k = 0; k < section_v; k++) {
+                    const float t = (float)(k & 1);
+                    tv[k].x = -1.0f + 2.0f * t;
+                    tv[k].y = 0.25f;
+                    tv[k].z = 0.0f;
+                    tv[k].w = 1.0f;
+                    tv[k].rgba = WAVE_RGBA(128, 128, 128, 255);
+                }
+                __asm__ __volatile__("sync" ::: "memory");
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
+                                   s_jw_off[0][0], section_v);
+            }
         } else {
             const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
