@@ -1051,10 +1051,20 @@ void wave_draw(void) {
         if (jw_rebuild)
             __asm__ __volatile__ ("sync" ::: "memory");
 
-        // One binding for every draw below.  TEX0 is explicitly disabled
-        // (stride 0, 0 elements) rather than left as whatever the last
-        // textured draw set -- that stale binding is the actual bug behind
-        // the "vertex arrays are unreliable" folklore.
+        // Draw the opaque background BEFORE binding the JellyWave vertex
+        // arrays. Do not mix immediate vertices with active array-fetch state:
+        // the background is independent of the reusable JellyWave buffer, so
+        // submit it while the vertex inputs are not array-bound.
+        rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);
+        wave_vtx(-1.0f,  1.0f, gtlr, gtlg, gtlb);
+        wave_vtx(-1.0f, -1.0f, gblr, gblg, gblb);
+        wave_vtx( 1.0f,  1.0f, gtrr, gtrg, gtrb);
+        wave_vtx( 1.0f, -1.0f, gbrr, gbrg, gbrb);
+        rsxDrawVertexEnd(context);
+
+        // Bind the reusable JellyWave vertex arrays only after the background
+        // has been submitted. TEX0 is explicitly disabled rather than left as
+        // whatever the previous textured draw configured.
         rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_POS, 0,
             vo, (u8)sizeof(WaveVert), 4, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
         rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_COLOR0, 0,
@@ -1062,7 +1072,7 @@ void wave_draw(void) {
         rsxBindVertexArrayAttrib(context, GCM_VERTEX_ATTRIB_TEX0, 0,
             0, 0, 0, GCM_VERTEX_DATA_TYPE_F32, GCM_LOCATION_RSX);
 
-        // Draw the background inline every frame. The JellyWave vertex buffer is\n        // intentionally reused between rebuilds, so the background must not\n        // depend on its [0,4) contents or vertex-array fetch state.\n        rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_STRIP);\n        wave_vtx(-1.0f,  1.0f, gtlr, gtlg, gtlb);\n        wave_vtx(-1.0f, -1.0f, gblr, gblg, gblb);\n        wave_vtx( 1.0f,  1.0f, gtrr, gtrg, gtrb);\n        wave_vtx( 1.0f, -1.0f, gbrr, gbrg, gbrb);\n        rsxDrawVertexEnd(context);\n\n        if (s_wave_blend) {
+        if (s_wave_blend) {
             // src*a + dst*(1-a), ribbons back to front -- algebraically the
             // same cumulative composite wave_bg() does on the CPU, and the
             // same blend the UI uses everywhere else.
