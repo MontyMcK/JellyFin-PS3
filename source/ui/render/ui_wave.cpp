@@ -903,6 +903,17 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly && jw_rebuild) {
+            /*
+             * STROBE ISOLATION TEST.
+             * Leave the JellyWave buffer construction intact, but do not submit
+             * its body/rim geometry. This leaves the exact same RSX programs,
+             * framebuffer, clear, gradient vertex array, blend teardown and
+             * flip path in play while removing every JellyWave triangle.
+             *
+             * If the strobe remains, the defect is outside JellyWave geometry
+             * (presentation/clear/state/gradient path). If it disappears, the
+             * defect is in the JellyWave geometry submission/raster path.
+             */
             u64 jw_t0;
             // --- JellyWave -----------------------------------------------
             //
@@ -1096,44 +1107,8 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // Body then rim, layer by layer, furthest first.
-            //
-            // The rim is drawn immediately after ITS OWN body rather than all
-            // six passes being grouped, because there is no depth buffer: a
-            // nearer layer has to be able to cover a further layer's rolled
-            // edge, and grouping the additive passes at the end would let the
-            // far ribbon's highlight show through the near one.
-            //
-            // The blend function therefore alternates.  That is six register
-            // writes a frame, which is nothing, and it is the ONLY piece of
-            // RSX state this mode uses that the others do not.  It is put back
-            // to the UI's standard function at the end of this function, where
-            // it always was.
-            for (int slot = 0; slot < JW_LAYERS; slot++) {
-                if (s_jw_cnt[slot][0]) {
-                    rsxSetBlendFunc(context,
-                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
-                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
-                    rsxInvalidateVertexCache(context);
-                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                       s_jw_off[slot][0], s_jw_cnt[slot][0]);
-                }
-                if (s_jw_cnt[slot][1]) {
-                    // Keep the rim on the same ordinary alpha blend path as
-                    // the body.  JellyWave originally used a second additive
-                    // blend mode here; that is the only mode-3-only colour
-                    // state transition and is unnecessary because rimColor is
-                    // already lit/tinted in wave_gel.h.  A single blend
-                    // function for the whole pass also avoids carrying an
-                    // additive state across the next layer/draw.
-                    rsxSetBlendFunc(context,
-                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
-                        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
-                    rsxInvalidateVertexCache(context);
-                    rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                       s_jw_off[slot][1], s_jw_cnt[slot][1]);
-                }
-            }
+            // STROBE ISOLATION: intentionally submit no JellyWave body/rim.
+            // The gradient quad above is still submitted normally.
         } else {
             const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
