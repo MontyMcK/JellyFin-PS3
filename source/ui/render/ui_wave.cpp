@@ -397,8 +397,7 @@ static int jwspeed_setting(void) {
 // IT IS ONLY DEFENSIBLE BECAUSE THE WAVE IS SLOW.  Sampling a slow curve at
 // 20 Hz and holding each sample for three frames is invisible; doing it to
 // something with fast detail would judder. The two settings are therefore
-// related, and lowering JW_SPEED is what makes a higher N free.
-//
+// related, and lowering JW_SPEED is what makes a higher N free.//
 // The gradient quad lives in the same buffer and is rebuilt with it, so a
 // theme change takes up to N calls to appear -- 50 ms at N = 3. That is the
 // one visible cost and it is well under a frame of human latency.
@@ -797,8 +796,7 @@ void wave_draw(void) {
     // s_jw_speed applies ONLY in mode 3 and is exactly 1.0 everywhere else, so
     // the legacy modes keep the drift rate WAVE_FIELD_DT was calibrated for.
     // See the JW_SPEED block for why JellyWave wants its own.
-    //
-    // The solver still steps on EVERY call even when the geometry is rebuilt
+    //    // The solver still steps on EVERY call even when the geometry is rebuilt
     // less often.  That is deliberate: the chain stays continuous and the
     // audio analyser keeps its cadence; only the SAMPLING of the curve drops
     // to the rebuild rate.  Stepping it in bigger jumps instead would change
@@ -865,11 +863,22 @@ void wave_draw(void) {
                 s_jw_rebuild_phase = 0;
         }
 
-        // The flip happens ONLY on a rebuild.  A reuse frame must draw from
-        // the same buffer it drew from last time -- flipping without writing
-        // would point the RSX at the previous build's geometry, which is one
-        // rebuild interval stale and would show as a visible stutter.
-        if (jw_rebuild) s_wave_vbuf_turn ^= 1;
+        // The RSX consumes vertex arrays asynchronously.  The two-buffer
+        // rotation is normally enough, but JellyWave can leave a buffer queued
+        // for several frames while the PPU rebuilds the other one.  If the RSX
+        // falls more than one buffer behind, rotating back after only three
+        // wave_draw calls can overwrite a buffer that is still being fetched.
+        //
+        // DIAGNOSTIC SAFETY FENCE: before reusing a JellyWave buffer, wait until
+        // all previously queued RSX work has consumed the old buffer.  This is
+        // intentionally conservative.  If this removes the real-PS3 strobe,
+        // the next optimization is a per-buffer fence rather than removing the
+        // safety entirely.
+        if (jw_rebuild) {
+            if (s_wave_jelly && s_jw_have_geom)
+                rsxSync();
+            s_wave_vbuf_turn ^= 1;
+        }
 
         WaveVert *v  = s_wave_vbuf[s_wave_vbuf_turn];
         u32       vo = s_wave_vbuf_off[s_wave_vbuf_turn];
