@@ -903,114 +903,11 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly && jw_rebuild) {
-            /*
-             * TEST 3: do not execute the JellyWave geometry build below.
-             * The gradient is still populated and submitted from the same
-             * reusable RSX vertex buffer. This removes both geometry writes
-             * and JellyWave rasterisation from the test.
-             */
-            if (false) {
-             * STROBE ISOLATION TEST.
-             * Leave the JellyWave buffer construction intact, but do not submit
-             * its body/rim geometry. This leaves the exact same RSX programs,
-             * framebuffer, clear, gradient vertex array, blend teardown and
-             * flip path in play while removing every JellyWave triangle.
-             *
-             * If the strobe remains, the defect is outside JellyWave geometry
-             * (presentation/clear/state/gradient path). If it disappears, the
-             * defect is in the JellyWave geometry submission/raster path.
-             */
-            u64 jw_t0;
-            // --- JellyWave -----------------------------------------------
-            //
-            // Three lofted layers, each emitted as TWO merged triangle strips:
-            // the translucent body and the additive rolled edge.
-            //
-            // THE JOINS ARE DEGENERATE PAIRS, and that is what makes this two
-            // draw calls a layer instead of eighteen.  Between one section
-            // strip and the next, the previous strip's last vertex is repeated
-            // and the next strip's first vertex is emitted early; the
-            // triangles spanning the seam then have zero area and rasterise no
-            // pixels.  Two vertices a join, eleven joins for the body.
-            //
-            // This is only safe because BACKFACE CULLING IS NEVER ENABLED in
-            // this client -- nothing in source/ sets it and the gcm default is
-            // off -- so the winding parity the joins disturb does not matter.
-            // If culling is ever turned on globally, this needs a third vertex
-            // per join and a comment saying so.
-            //
-            // Strips go out in jw_strip_order()'s furthest-first order, which
-            // is a painter's algorithm and is EXACT here rather than a
-            // heuristic: the swept section is convex, so no two strips can
-            // mutually overlap in depth.  See wave_gel.h.
-            jw_t0 = timing_get_us();
-
-            #define JW_EMIT(Q, A, USE_RIM) do {                            \
-                const jw_vert *q_ = (Q);                                   \
-                v[n].x = q_->x; v[n].y = q_->y;                            \
-                v[n].z = 0.0f;  v[n].w = 1.0f;                             \
-                v[n].rgba = (USE_RIM)                                      \
-                    ? WAVE_RGBA(q_->rr, q_->rg, q_->rb, 255)               \
-                    : WAVE_RGBA(q_->r,  q_->g,  q_->b,  (A));              \
-                n++;                                                       \
-            } while (0)
-
-            for (int slot = 0; slot < JW_LAYERS; slot++) {
-                // slot 0 draws first and must be the furthest layer, so walk
-                // JW_LAYER (which is authored near-to-far) backwards.
-                const int       li = JW_LAYERS - 1 - slot;
-                const jw_layer *L  = &JW_LAYER[li];
-                int   order[JW_SECTION];
-                int   pass, s, i;
-
-                s_jw_cnt[slot][0] = s_jw_cnt[slot][1] = 0;
-                s_jw_off[slot][0] = s_jw_off[slot][1] = 0;
-
-                if (!jw_build_layer(L, s_field.sy[li], WF_SAMPLES,
-                                    W / H, s_jw, JW_VERTS))
-                    continue;
-                jw_strip_order(s_jw, order);
-
-                // pass 0 = body (every strip), pass 1 = rim (the six that
-                // carry the rolled edge; the other six would add exactly zero
-                // and cost their fill anyway).
-                for (pass = 0; pass < 2; pass++) {
-                    int started = 0;
-                    s_jw_off[slot][pass] = (u32)n;
-
-                    for (s = 0; s < JW_SECTION; s++) {
-                        const int j  = order[s];
-                        const int j2 = (j + 1) % JW_SECTION;
-
-                        if (pass == 1 && !jw_strip_has_rim(j)) continue;
-                        if (n + 2 * JW_STATIONS + 2 > WAVE_MAX_VERTS) break;
-
-                        if (started) {
-                            // Degenerate join: repeat the last vertex, then
-                            // emit this strip's first one early.  The strip
-                            // loop below emits it again, which is the point.
-                            v[n] = v[n - 1]; n++;
-                            JW_EMIT(&s_jw[0 * JW_SECTION + j], L->alpha, pass);
-                        }
-                        started = 1;
-
-                        for (i = 0; i < JW_STATIONS; i++) {
-                            JW_EMIT(&s_jw[i * JW_SECTION + j],  L->alpha, pass);
-                            JW_EMIT(&s_jw[i * JW_SECTION + j2], L->alpha, pass);
-                        }
-                    }
-                    s_jw_cnt[slot][pass] = (u32)n - s_jw_off[slot][pass];
-                }
-            }
-            #undef JW_EMIT
-
-            s_jw_gen_us += timing_get_us() - jw_t0;
-            s_jw_rebuilds++;
-            s_jw_verts     = (u32)n;
-            s_jw_draws     = 1 + JW_LAYERS * 2;
-            s_jw_have_geom = 1;
-            }
-        } else if (s_wave_blend) {
+            // STROBE ISOLATION TEST 3: deliberately skip ALL JellyWave
+            // geometry generation and all writes into the JellyWave portion
+            // of the RSX vertex buffer. The gradient quad is still generated
+            // and submitted through the same vertex-array path.
+        }        } else if (s_wave_blend) {
             // One quad per ribbon: constant tint, alpha ramping from the
             // crest opacity down to zero at the screen bottom.  The GPU
             // interpolates that ramp, which is why the WAVE_NS slicing is not
