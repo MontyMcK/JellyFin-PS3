@@ -1074,9 +1074,12 @@ void wave_draw(void) {
             // strip. This removes camera projection, curvature, lumps, clipping,
             // colour variation and alpha/blend effects from the test.
             const u32 section_v = (u32)(2 * JW_STATIONS);
-            const u32 base = s_jw_off[0][0];
+            // TEST 24: same synthetic strip as Test 23, but at the exact
+            // buffer address used by body section 2.  This isolates vertex
+            // buffer offset/address from the generated coordinates.
+            const u32 base = s_jw_off[0][0] + section_v + 2;
 
-            if (s_jw_cnt[0][0] >= section_v) {
+            if (s_jw_cnt[0][0] >= (section_v + 2)) {
                 rsxSetBlendEnable(context, GCM_FALSE);
 
                 WaveVert *tv = v + base;
