@@ -1103,7 +1103,7 @@ void wave_draw(void) {
                 }
             }
         }
-        else {
+
         // Release the colour array.  Everything the UI draws after the
         // background this frame -- cards, text, chrome, the dim quad --
         // submits inline, and a stale per-vertex COLOR0 array is what the
