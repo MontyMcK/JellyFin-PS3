@@ -1069,8 +1069,8 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 19: section 2, first eighth of the generated vertices intact;
-            // remaining vertices collapsed to the first safe vertex. Binary-search the
+            // TEST 20: draw only the first eighth of section 2; no collapsed boundary is submitted;
+            // unused vertices are irrelevant because they are not submitted. Isolate the
             // generated strip for the geometry that triggers the RSX strobe.
             if (s_jw_cnt[0][0] >= (u32)(4 * JW_STATIONS)) {
                 const u32 section_v = (u32)(2 * JW_STATIONS);
@@ -1090,7 +1090,7 @@ void wave_draw(void) {
                 }
                 __asm__ __volatile__("sync" ::: "memory");
                 rsxInvalidateVertexCache(context);
-                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, s_jw_off[0][0] + section_v, section_v);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, s_jw_off[0][0] + section_v, keep);
             }
         }
         else {
