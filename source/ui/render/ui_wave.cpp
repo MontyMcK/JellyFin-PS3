@@ -1076,9 +1076,9 @@ void wave_draw(void) {
             const u32 section_v = (u32)(2 * JW_STATIONS);
             const u32 base = s_jw_off[0][0];
 
-            if (s_jw_cnt[0][0] >= (u32)(JW_SECTION * section_v)) {
+            if (s_jw_cnt[0][0] >= (u32)(JW_SECTION * section_v + (JW_SECTION - 1) * 2)) {
                 for (int sec = 0; sec < JW_SECTION; sec++) {
-                    WaveVert *tv = v + base + (u32)sec * section_v;
+                    WaveVert *tv = v + base + (u32)sec * (section_v + 2);
                     for (u32 k = 0; k < section_v; k++) {
                         float x = tv[k].x;
                         float y = tv[k].y;
@@ -1099,7 +1099,7 @@ void wave_draw(void) {
                     __asm__ __volatile__("sync" ::: "memory");
                     rsxInvalidateVertexCache(context);
                     rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
-                                       base + (u32)sec * section_v, section_v);
+                                       base + (u32)sec * (section_v + 2), section_v);
                 }
             }
         }
