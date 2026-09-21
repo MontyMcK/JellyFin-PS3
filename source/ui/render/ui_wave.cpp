@@ -1107,8 +1107,16 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // STROBE ISOLATION: intentionally submit no JellyWave body/rim.
-            // The gradient quad above is still submitted normally.
+            // STROBE ISOLATION TEST 2: submit ONLY the furthest JellyWave
+            // layer's BODY. No other layer and no rim are rasterised.
+            // The gradient, vertex-array bindings, blend state and presentation
+            // path remain identical to the previous diagnostic.
+            if (s_jw_have_geom && s_jw_cnt[0][0] != 0) {
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP,
+                                   4 + s_jw_off[0][0],
+                                   s_jw_cnt[0][0]);
+            }
         } else {
             const u32 stripv  = (u32)(ncols * 2);
             const int nstrips = s_wave_blend ? 3 : (3 * WAVE_NS);
