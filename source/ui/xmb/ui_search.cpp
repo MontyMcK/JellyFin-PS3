@@ -25,11 +25,25 @@
 // pushed the deadline back, so the query went out — and froze the UI — while
 // the user was still walking to the next letter.  Any button activity now
 // counts as "still typing".
-#define SEARCH_DEBOUNCE_US 900000   // idle pause before the query fires
-#define SEARCH_MIN_CHARS   2        // shorter terms are noise, not a search
+// The pause only has to cover the gap between releasing X on a key and
+// starting to walk to the next one; any pad activity after that pushes the
+// deadline back (below), so it no longer needs to span a whole key walk.
+#define SEARCH_DEBOUNCE_US 600000   // idle pause before the query fires
+// SEARCH_MIN_CHARS (shorter terms are noise, not a search) lives in
+// ui_visuals.h so the renderer can name the number in its hint.
 
 static u64  s_search_edit_us = 0;   // when the term last changed
 static bool s_search_pending = false;
+static u64  s_hold_since_us  = 0;   // pad has read "held" continuously since
+static bool s_hold_logged    = false;
+
+// What the results area should say.  The renderer used to print "No results"
+// whenever the count was zero and the box was not empty -- which is also
+// what a one-letter term (never queried) and a term still inside the
+// debounce look like.  On the console that read as a dead search: type A,
+// "No results", clear, type I N, "No results", leave -- all before a single
+// query had gone out.  The state says which of those it actually is.
+int g_search_state = SEARCH_IDLE;
 
 // Search OSK state
 const char *OSK_LETTERS[OSK_ROWS_N] = {
@@ -133,7 +147,7 @@ bool xmb_handle_input_search(void) {
         xmb_switch_tab(xmb_next_enabled(g_active_tab, +1));
         return false;
     }
-    if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; g_search_focus_results = false; return false; }
+    if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; g_search_focus_results = false; s_search_pending = false; g_search_state = SEARCH_IDLE; return false; }
 
     int row_count = OSK_ROWS_N + 1;
 
@@ -247,6 +261,8 @@ bool xmb_handle_input_search(void) {
                 g_search_buf[0] = '\0';
                 g_search_results_count = 0;
                 g_search_focus_results = false;
+                s_search_pending = false;
+                g_search_state = SEARCH_IDLE;
             }
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
@@ -273,11 +289,29 @@ bool xmb_handle_input_search(void) {
             // the top of this file).
             s_search_pending = true;
             s_search_edit_us = timing_get_us();
+            g_search_state   = ((int)strlen(g_search_buf) >= SEARCH_MIN_CHARS)
+                             ? SEARCH_PENDING : SEARCH_TOO_SHORT;
+            {
+                char dbg[96];
+                snprintf(dbg, sizeof(dbg), "search: term='%s' queued", g_search_buf);
+                plog(dbg);
+            }
         } else {
             s_search_pending       = false;
             g_search_results_count = 0;
             g_search_focus_results = false;
+            g_search_state         = SEARCH_IDLE;
         }
+    }
+
+    // The request blocks the UI thread, and it runs inside this handler --
+    // before the frame it would have been drawn on.  Firing it one frame
+    // AFTER flipping to SEARCH_QUERYING is what gets "Searching..." onto the
+    // screen for the duration of the round trip instead of a frozen box.
+    if (g_search_state == SEARCH_QUERYING) {
+        xmb_do_search();
+        g_search_state = SEARCH_DONE;
+        return false;
     }
 
     // Still working the keyboard — moving between keys, holding a direction,
@@ -286,19 +320,40 @@ bool xmb_handle_input_search(void) {
     if (s_search_pending &&
         (btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right ||
          btn_cur.cross || btn_cur.circle || btn_cur.square ||
-         btn_cur.triangle || btn_cur.l1 || btn_cur.r1))
+         btn_cur.triangle || btn_cur.l1 || btn_cur.r1)) {
         s_search_edit_us = timing_get_us();
+        // A query that has been "still typing" for many seconds is not being
+        // typed; something is reading as held.  Say which, once, so a pulled
+        // log shows whether the pad (or a second paired one -- pads are OR'd
+        // together in poll_buttons) is pinning a button.
+        if (s_hold_since_us == 0) s_hold_since_us = s_search_edit_us;
+        if (!s_hold_logged && s_search_edit_us - s_hold_since_us > 5000000ULL) {
+            s_hold_logged = true;
+            char dbg[128];
+            snprintf(dbg, sizeof(dbg),
+                "search: query held back >5s by pad: u%d d%d l%d r%d x%d o%d sq%d tr%d l1%d r1%d",
+                btn_cur.up, btn_cur.down, btn_cur.left, btn_cur.right,
+                btn_cur.cross, btn_cur.circle, btn_cur.square,
+                btn_cur.triangle, btn_cur.l1, btn_cur.r1);
+            plog(dbg);
+        }
+    } else {
+        s_hold_since_us = 0;        // pad quiet: the hold, if any, is over
+    }
 
     if (s_search_pending &&
         timing_get_us() - s_search_edit_us >= SEARCH_DEBOUNCE_US) {
         s_search_pending = false;
+        s_hold_logged    = false;
         if ((int)strlen(g_search_buf) >= SEARCH_MIN_CHARS) {
-            xmb_do_search();
+            g_search_state = SEARCH_QUERYING;   // goes out next frame, see above
         } else {
             // Too short to search on: show nothing rather than whatever a
-            // one-letter query happens to match.
+            // one-letter query happens to match -- and SAY so, rather than
+            // "No results".
             g_search_results_count = 0;
             g_search_focus_results = false;
+            g_search_state = SEARCH_TOO_SHORT;
         }
     }
 

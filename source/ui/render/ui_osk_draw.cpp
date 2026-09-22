@@ -175,7 +175,22 @@ void xmb_rsx_draw_osk(void) {
             xmb_draw_meta((u32)sr_tx, (u32)(iy + 46), it, 14);
         }
     }
-    if (count == 0 && g_search_buf[0]) {
+    // Only a real query gets to say "No results".  A term that is too short
+    // was never sent, and one inside the typing pause is about to be; both
+    // used to print "No results" and made a working search look dead.
+    if (g_search_buf[0] && g_search_state == SEARCH_TOO_SHORT) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Type at least %d letters", SEARCH_MIN_CHARS);
+        int mw = ttf_text_width(msg, 16);
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + 10),
+                msg, 16, XMB_TEXT_FAINT);
+    } else if (g_search_buf[0] && (g_search_state == SEARCH_PENDING ||
+                                   g_search_state == SEARCH_QUERYING)) {
+        const char *msg = "Searching...";
+        int mw = ttf_text_width(msg, 16);
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + 10),
+                msg, 16, XMB_TEXT_FAINT);
+    } else if (count == 0 && g_search_buf[0] && g_search_state == SEARCH_DONE) {
         char msg[96];
         snprintf(msg, sizeof(msg), "No results for \"%s\"", g_search_buf);
         int mw = ttf_text_width(msg, 16);
