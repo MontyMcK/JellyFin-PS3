@@ -1092,12 +1092,18 @@ void wave_draw(void) {
                     if (!(gx == gx)) gx = 0.0f;
                     if (gx < -1.0f) gx = -1.0f;
                     if (gx >  1.0f) gx =  1.0f;
-                    tv[k].x = -0.75f + 1.50f * t;
-                    // TEST 26: real generated Y, synthetic X.
+                    // TEST 27: real generated X/Y pair, but only from the
+                    // already-projected first 80 vertices. Clamp both axes
+                    // and keep the same synthetic strip topology.
+                    float gx = s_jw[k % JW_VERTS].x;
                     float gy = s_jw[k % JW_VERTS].y;
+                    if (!(gx == gx)) gx = 0.0f;
                     if (!(gy == gy)) gy = 0.0f;
+                    if (gx < -1.0f) gx = -1.0f;
+                    if (gx >  1.0f) gx =  1.0f;
                     if (gy < -1.0f) gy = -1.0f;
                     if (gy >  1.0f) gy =  1.0f;
+                    tv[k].x = gx;
                     tv[k].y = gy;
                     tv[k].z = 0.0f;
                     tv[k].w = 1.0f;
