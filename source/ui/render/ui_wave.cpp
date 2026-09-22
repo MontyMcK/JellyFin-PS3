@@ -1084,14 +1084,6 @@ void wave_draw(void) {
 
                 WaveVert *tv = v + base;
                 for (u32 k = 0; k < section_v; k++) {
-                    float t = (float)k / (float)(section_v - 1);
-
-                    // TEST 25: real generated X, synthetic Y. Clamp only to keep
-                    // pathological values from turning this into a GPU-state test.
-                    float gx = s_jw[k % JW_VERTS].x;
-                    if (!(gx == gx)) gx = 0.0f;
-                    if (gx < -1.0f) gx = -1.0f;
-                    if (gx >  1.0f) gx =  1.0f;
                     // TEST 27: real generated X/Y pair, but only from the
                     // already-projected first 80 vertices. Clamp both axes
                     // and keep the same synthetic strip topology.
