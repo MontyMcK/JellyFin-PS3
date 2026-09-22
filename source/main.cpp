@@ -100,6 +100,12 @@ int main(int argc, const char *argv[]) {
     crash_log("5 sysutil_cb");
     sysUtilRegisterCallback(0, sysutil_exit_callback, NULL);
 
+    // Builds before the redaction in do_login() left the sign-in request body
+    // -- password included -- in this file, where anonymous FTP exposes it to
+    // the whole LAN.  Remove any copy an older build left behind; this build
+    // rewrites the file (redacted) on the next sign-in anyway.
+    remove("/dev_hdd0/tmp/jf_debug.txt");
+
     crash_log("6 ui_init");
     ui_init();
     plog_load_setting();   // starts logging only if the user enabled it

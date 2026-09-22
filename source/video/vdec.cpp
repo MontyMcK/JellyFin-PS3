@@ -128,25 +128,66 @@ bool vdec_open(void) {
     // throughput (SPU count and work-area size are independent cellVdec params).
     // Gated: the 720p ship path keeps the proven 3× arena unchanged.
     const u32 arena_mult = vdec_wants_hd() ? 1u : NUM_SPUS;
-    u32 mem_size_aligned = ((attr.mem_size * arena_mult) + (1024*1024-1))
-                           & ~(u32)(1024*1024-1);
+    const u32 MB = 1024u * 1024u;
+    // What queryAttr itself requires, and what this path would prefer.  They
+    // only differ at 720p (33MB vs 96MB); at 1080p both are 55MB.
+    u32 mem_size_min     = (attr.mem_size + (MB - 1)) & ~(MB - 1);
+    u32 mem_size_aligned = ((attr.mem_size * arena_mult) + (MB - 1)) & ~(MB - 1);
     // The arena is CACHED across vdec_close/vdec_open (seek reopens the
     // decoder): once the jitter buffer packs the heap tightly around a
     // freed 96MB hole, memalign can't get slightly-more-than-96MB back
     // and the re-open fails mid-seek.  Only vdec_release_mem() frees it.
+    //
+    // Never give up a cached arena that still satisfies queryAttr.  The boot
+    // reservation is sized for whichever mode was active at startup (64MB in
+    // 1080p, 96MB in 720p), so changing quality from 1080p to 720p mid-session
+    // used to ask for a 96MB arena with only 64MB cached: this freed the 64MB
+    // block, memalign(96MB) failed on the jbuf-fragmented heap, and every
+    // vdec_open until restart failed the same way.  64MB is ~2x what L3.1
+    // actually requires, and the 1080p path already proves the decoder runs
+    // with 3 SPUs on exactly the queryAttr size, so the cached block is kept
+    // and handed over whole.  Only an arena smaller than the requirement is
+    // ever released.
     if (s_vdec_mem && s_vdec_mem_size < mem_size_aligned) {
-        free(s_vdec_mem);
-        s_vdec_mem = NULL;
-        s_vdec_mem_size = 0;
+        if (s_vdec_mem_size >= mem_size_min) {
+            char b[96];
+            snprintf(b, sizeof(b),
+                     "vdec_open: cached %uMB arena kept (wanted %uMB, need %uMB)",
+                     s_vdec_mem_size / MB, mem_size_aligned / MB,
+                     mem_size_min / MB);
+            plog(b);
+            mem_size_aligned = s_vdec_mem_size;
+        } else {
+            char b[96];
+            snprintf(b, sizeof(b),
+                     "vdec_open: cached %uMB arena too small (need %uMB), freeing",
+                     s_vdec_mem_size / MB, mem_size_min / MB);
+            plog(b);
+            free(s_vdec_mem);
+            s_vdec_mem = NULL;
+            s_vdec_mem_size = 0;
+        }
     }
     crash_log("v5 memalign vdec_mem");
     plog("vdec_open: memalign vdec_mem");
     if (!s_vdec_mem) {
-        s_vdec_mem = (u8*)memalign(1024*1024, mem_size_aligned);
+        s_vdec_mem = (u8*)memalign(MB, mem_size_aligned);
+        if (!s_vdec_mem && mem_size_aligned > mem_size_min) {
+            // The preferred over-allocation did not fit; the queryAttr
+            // requirement is what the decoder actually needs, so try that
+            // before declaring the player dead.
+            char b[96];
+            snprintf(b, sizeof(b),
+                     "vdec_open: %uMB arena alloc failed, retrying at %uMB",
+                     mem_size_aligned / MB, mem_size_min / MB);
+            plog(b);
+            mem_size_aligned = mem_size_min;
+            s_vdec_mem = (u8*)memalign(MB, mem_size_aligned);
+        }
         if (!s_vdec_mem) {
             char b[64];
             snprintf(b, sizeof(b), "vdec_open: vdec_mem alloc FAILED (%uMB)",
-                     mem_size_aligned / (1024*1024));
+                     mem_size_aligned / MB);
             plog(b);
             return false;
         }
@@ -245,13 +286,16 @@ void vdec_release_mem(void) {
 // Boot-time reservation: grab the arena before the UI touches the heap so
 // it always lands at the same low address.  96MB matches vdec_open's math
 // (H.264 queryAttr mem_size 33368829 x 3 SPUs, 1MB-aligned); if a firmware
-// ever reports a bigger attr, vdec_open frees this and re-allocates.
+// ever reports an attr bigger than what is cached, vdec_open frees this and
+// re-allocates.
 void vdec_reserve_mem(void) {
     // 720p reserves the 3×-SPU arena it always used (~96MB).  1080p (Alpha)
     // sizes the arena at the queryAttr requirement instead (L4.2 = ~55MB, 1×;
     // see vdec_open), so 64MB is enough and leaves the heap for the bigger
     // jitter-buffer slots.  Reserving up front keeps it off the UI-fragmented
-    // heap; vdec_open re-allocates if the real queryAttr comes back larger.
+    // heap.  Either size covers BOTH levels' queryAttr requirement (33MB at
+    // L3.1, 55MB at L4.2), so a quality change after boot reuses whichever
+    // block was reserved rather than re-allocating (see vdec_open).
     const u32 RESERVE = vdec_wants_hd() ? 64u * 1024 * 1024
                                          : 96u * 1024 * 1024;
     if (!s_vdec_mem) {

@@ -71,7 +71,16 @@ void audio_set_volume(int pct) {
     if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
     if (pct == s_volume_pct) return;
+    int prev = s_volume_pct;
     s_volume_pct = pct;
+    // A playback freeze was reported right after a volume change, and the
+    // log had nothing to line it up against -- volume was not instrumented.
+    // One line per step so the next report can be placed on the timeline.
+    {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "volume: %d%% -> %d%%", prev, pct);
+        plog(buf);
+    }
     FILE *f = fopen(jf_data_path(VOLUME_FILE), "w");
     if (f) { fprintf(f, "%d\n", pct); fclose(f); }
 }
