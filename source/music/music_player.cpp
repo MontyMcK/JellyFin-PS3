@@ -460,7 +460,12 @@ static int play_one_track(u32 start_secs, bool gapless) {
 
     char url[1024];
     build_audio_url(url, sizeof(url), t->id, start_secs);
-    int sock = stream_open(url);
+    // 64 KB, not the video path's 512: a 320 kbps MP3 is 40 KB/s, and the
+    // server produces the transcode far faster than that, so the socket
+    // buffer sits full for the whole track.  Sized to the video default it
+    // held the entire libnet pool and every other connect in the app failed
+    // for as long as music played (thumbnails, playstate, the works).
+    int sock = stream_open_rcvbuf(url, 64);
     if (sock < 0) {
         plog("music: stream_open failed, skipping track");
         jellyfin_report_stopped(t->id, s_session_id, elapsed_ticks());

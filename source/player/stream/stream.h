@@ -21,6 +21,14 @@ void stream_set_wait_cb(stream_wait_fn cb);
 // Open an HTTP connection to url and read the response headers.
 // Returns a connected socket fd on success, -1 on failure.
 int stream_open(const char *url);
+// Same, with an explicit socket receive buffer in KB (0 = the video default,
+// jellyfin_rcvbuf.txt or 512).  libnet funds every socket's buffers from one
+// 128 KB pool, so a stream that asks for more than the pool can starve every
+// OTHER socket while its buffer sits full -- and a socket the app is not
+// draining (music: the server produces a transcode far faster than real
+// time) sits full permanently.  Streams that do not need the throughput
+// should ask for less and leave the pool for the API calls.
+int stream_open_rcvbuf(const char *url, int rcvbuf_kb);
 
 // Why the last stream_open() failed, in words fit for the error screen
 // ("Server returned HTTP 400", "Could not connect to 192.168.0.5:8096",
