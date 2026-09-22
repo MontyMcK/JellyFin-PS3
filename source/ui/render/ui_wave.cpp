@@ -1069,14 +1069,18 @@ void wave_draw(void) {
         }
 
         if (s_wave_jelly) {
-            // TEST 23: keep the JellyWave array/render path, but replace the
-            // submitted coordinates with a completely smooth screen-space
-            // strip. This removes camera projection, curvature, lumps, clipping,
-            // colour variation and alpha/blend effects from the test.
+            // TEST 30: DO NOT READ RSX LOCAL MEMORY FROM THE PPU.
+            //
+            // Test 29 read tv[k].x/y back from the RSX vertex buffer before
+            // rewriting it.  The project rule is "never read the framebuffer",
+            // and RSX local memory is likewise not a safe PPU read path.
+            // Tests 23/24 already proved that this exact array address and
+            // draw state are clean when the CPU only WRITES known-safe data.
+            //
+            // This test keeps the exact same buffer offset, vertex count,
+            // primitive type, blend state and cache invalidation as Test 24,
+            // but makes every write one-way: no VRAM readback whatsoever.
             const u32 section_v = (u32)(2 * JW_STATIONS);
-            // TEST 24: same synthetic strip as Test 23, but at the exact
-            // buffer address used by body section 2.  This isolates vertex
-            // buffer offset/address from the generated coordinates.
             const u32 base = s_jw_off[0][0] + section_v + 2;
 
             if (s_jw_cnt[0][0] >= (section_v + 2)) {
@@ -1084,18 +1088,8 @@ void wave_draw(void) {
 
                 WaveVert *tv = v + base;
                 for (u32 k = 0; k < section_v; k++) {
-                    // TEST 29: operate on the ACTUAL generated section in
-                    // place. Preserve its topology, but clamp the real X/Y
-                    // values and sanitize NaNs. This distinguishes a bad
-                    // coordinate value from a bad vertex-buffer write.
-                    float x = tv[k].x;
-                    float y = tv[k].y;
-                    if (!(x == x)) x = 0.0f;
-                    if (!(y == y)) y = 0.0f;
-                    if (x < -1.0f) x = -1.0f;
-                    if (x >  1.0f) x =  1.0f;
-                    if (y < -1.0f) y = -1.0f;
-                    if (y >  1.0f) y =  1.0f;
+                    const float x = -0.75f + 1.5f * ((float)k / (float)(section_v - 1));
+                    const float y = -0.35f + 0.70f * ((k & 1) ? 1.0f : 0.0f);
                     tv[k].x = x;
                     tv[k].y = y;
                     tv[k].z = 0.0f;
