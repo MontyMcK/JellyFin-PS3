@@ -1092,8 +1092,13 @@ void wave_draw(void) {
                     if (!(gx == gx)) gx = 0.0f;
                     if (gx < -1.0f) gx = -1.0f;
                     if (gx >  1.0f) gx =  1.0f;
-                    tv[k].x = gx;
-                    tv[k].y = -0.35f + 0.70f * t;
+                    tv[k].x = -0.75f + 1.50f * t;
+                    // TEST 26: real generated Y, synthetic X.
+                    float gy = s_jw[k % JW_VERTS].y;
+                    if (!(gy == gy)) gy = 0.0f;
+                    if (gy < -1.0f) gy = -1.0f;
+                    if (gy >  1.0f) gy =  1.0f;
+                    tv[k].y = gy;
                     tv[k].z = 0.0f;
                     tv[k].w = 1.0f;
                     tv[k].rgba = WAVE_RGBA(128, 128, 128, 255);
