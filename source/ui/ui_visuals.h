@@ -274,6 +274,21 @@ extern int     g_search_sel;
 extern int     g_search_scroll;
 extern char    g_search_buf[64];
 extern int     g_search_results_count;
+// Search-tab status for the renderer (ui_search.cpp owns the transitions).
+// One letter is enough.  The merged v1.1 code required two on the grounds
+// that short terms match loosely -- but its real complaint was results
+// flickering as the term grew, and that came from querying on every
+// keystroke, which the debounce already fixed.  On the console a single
+// letter producing nothing read as a dead search: the user typed one letter,
+// waited, and left, three sessions running.  A loose first page that narrows
+// as you type is what tells you it is working.
+#define SEARCH_MIN_CHARS  1   // terms shorter than this are never sent
+#define SEARCH_IDLE       0   // box empty
+#define SEARCH_TOO_SHORT  1   // typed, but below the minimum -- never queried
+#define SEARCH_PENDING    2   // typed, waiting for the typing pause
+#define SEARCH_QUERYING   3   // request in flight (blocks the UI thread)
+#define SEARCH_DONE       4   // results (possibly zero) are from a real query
+extern int     g_search_state;
 extern XMBItem g_search_results[XMB_ITEMS_MAX];
 extern int     OSK_Y0;
 
@@ -286,7 +301,7 @@ extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 // The "Player Stats Overlay" row only exists when the diagnostics module is
 // compiled in — a build with ENABLE_PLAYER_STATS 0 has nothing for it to
 // toggle, so the row goes away rather than sitting there doing nothing.
-#define XMB_SETTINGS_COUNT (4 + ENABLE_PLAYER_STATS)  // selectable settings entries
+#define XMB_SETTINGS_COUNT (6 + ENABLE_PLAYER_STATS)  // selectable settings entries
 extern int   g_settings_sel;       // highlighted settings entry
 extern bool  g_settings_confirm;   // true while the logout confirm prompt is up
 extern bool  g_overscan_calib;     // true while the overscan calibration screen is up

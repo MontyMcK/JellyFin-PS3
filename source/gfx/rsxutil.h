@@ -33,3 +33,8 @@ void flip();
 void rsxSync(void); // flush + stall until RSX has finished all queued commands
 
 #endif
+
+// Log every display mode the panel advertises, plus which resolution ids
+// are available.  Read-only; changes nothing.  Call after plog is open.
+void video_log_capabilities(void);
+

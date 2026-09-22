@@ -1,11 +1,15 @@
 #include "video.h"
 #include "video_internal.h"
+#include "ts_demux.h"   // TS_VPES_AU_MAX — one shared AU ceiling
 #include "plog.h"
 #include "timing.h"
 #include "meminfo.h"
 #include "hd1080.h"
+#include "vquality.h"
+#include "jellyfin_api.h"   // g_source_fps_milli — server-reported frame rate
 
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include <unistd.h>
 #include <malloc.h>
@@ -16,11 +20,58 @@
 
 extern void crash_log(const char *msg);
 
+// The H.264 picture info the decoder attaches to every output picture, laid
+// out as the firmware actually writes it.  PSL1GHT's vdecH264Info declares
+// pic_order_count as s8[2]; Sony's CellVdecAvcInfo (RPCS3 carries a byte-exact
+// copy, and Movian's ps3_vdec.c masks the field with 0x7fff) has int16[2].
+// That two-byte difference shifts every field after pic_struct, so through
+// the PSL1GHT struct `frame_rate` reads Sony's transfer_characteristics byte:
+// BT.709 is code 1, which is also the frame-rate code for 23.976, so the
+// detection looked right on every tagged 23.976 transcode and reported "no
+// frc" on the untagged stream copy.  Offsets are pinned below so this cannot
+// drift again.
+struct VdecAvcInfo {
+    u16 width;
+    u16 height;
+    u8  picture_type[2];
+    u8  idr_picture_flag;
+    u8  aspect_ratio_idc;
+    u16 sar_height;
+    u16 sar_width;
+    u8  pic_struct;
+    u8  pad_;
+    s16 pic_order_count[2];
+    u8  vui_parameters_present_flag;
+    u8  frame_mbs_only_flag;
+    u8  video_signal_type_present_flag;
+    u8  video_format;
+    u8  video_full_range_flag;
+    u8  color_description_present_flag;
+    u8  color_primaries;
+    u8  transfer_characteristics;
+    u8  matrix_coefficients;
+    u8  timing_info_present_flag;
+    u8  frame_rate;
+    u8  fixed_frame_rate_flag;
+    u8  low_delay_hrd_flag;
+    u8  entropy_coding_mode_flag;
+    u16 nal_unit_present_flags;
+};
+typedef char vdec_avc_poc_offset_check[offsetof(VdecAvcInfo, pic_order_count) == 14 ? 1 : -1];
+typedef char vdec_avc_frc_offset_check[offsetof(VdecAvcInfo, frame_rate)      == 28 ? 1 : -1];
+typedef char vdec_avc_nal_offset_check[offsetof(VdecAvcInfo, nal_unit_present_flags) == 32 ? 1 : -1];
+
 // -------------------------------------------------------
 // VDEC — video decoder
 // -------------------------------------------------------
 
-#define AU_BUF_SIZE  (512 * 1024)
+// One access unit.  Must match the demuxer's ceiling: at 512 KB a 53 Mbps
+// 1080p remux had its I-frames truncated upstream and handed here as corrupt
+// AUs that passed this size check, so the drop below never fired and the
+// decoder simply stopped producing frames.  TS_VPES_AU_MAX is the H.264
+// Level 4.1 maximum coded frame size (MaxFS * 384 / MinCR = 1,572,864), so a
+// conforming stream at the level these remuxes use always fits.
+#define AU_BUF_SIZE  TS_VPES_AU_MAX
 #define AU_BUF_COUNT 4
 
 static u32  s_vdec     = 0;
@@ -59,6 +110,27 @@ static u32 vdec_cb(u32 handle, u32 msgtype, u32 msgdata, u32 arg) {
     return 0;
 }
 
+
+// Is this playback 1080p-class?
+//
+// Everything below used to ask hd1080_enabled() directly, which predates the
+// quality row on the info screen.  Once that row could select 1080p (or
+// Original) independently of the toggle, the toggle stopped being the truth:
+// with it OFF and 1080p picked, VDEC was configured for LEVEL 3.1 and then
+// fed a level-4.1/4.2 stream, and the arena was sized for 720p.  Resolving
+// through vquality_params() is the same call the stream URL and the jitter
+// buffer already use, so all four agree on the frame size by construction.
+//
+// VQ_AUTO still resolves via the toggle, so an install that never touches the
+// quality row behaves exactly as before.
+static bool vdec_wants_hd(void)
+{
+    u32 w = 0, h = 0;
+    vquality_params(vquality_get(), hd1080_enabled(), 0, 0, &w, &h,
+                    NULL, NULL, NULL);
+    return w >= 1920 || h >= 1080;
+}
+
 bool vdec_open(void) {
     crash_log("v1 vdec_open enter");
     crash_log("v2 sysModuleLoad VDEC");
@@ -71,10 +143,12 @@ bool vdec_open(void) {
 
     vdecType codec;
     codec.codec_type    = VDEC_CODEC_TYPE_H264;
-    // 1080p (Alpha) needs H.264 level 4.2 (1920×1080); the shipped 720p path
-    // uses level 3.1.  queryAttr sizes the SPU arena from this, so the level
-    // drives how much memory vdec_reserve_mem()/vdec_open() must grab.
-    codec.profile_level = hd1080_enabled() ? 42 : 31;
+    // 1080p needs H.264 level 4.2 (1920×1080); the 720p path uses level 3.1.
+    // queryAttr sizes the SPU arena from this, so the level drives how much
+    // memory vdec_reserve_mem()/vdec_open() must grab.  Level 4.2 also covers
+    // the 4.1 that Blu-ray H.264 actually uses, which is what makes the
+    // "Original" direct-play setting decodable at all.
+    codec.profile_level = vdec_wants_hd() ? 42 : 31;
 
     crash_log("v4 queryAttr");
     plog("vdec_open: queryAttr");
@@ -95,26 +169,67 @@ bool vdec_open(void) {
     // arena at exactly the queryAttr requirement; num_spus stays 3 for decode
     // throughput (SPU count and work-area size are independent cellVdec params).
     // Gated: the 720p ship path keeps the proven 3× arena unchanged.
-    const u32 arena_mult = hd1080_enabled() ? 1u : NUM_SPUS;
-    u32 mem_size_aligned = ((attr.mem_size * arena_mult) + (1024*1024-1))
-                           & ~(u32)(1024*1024-1);
+    const u32 arena_mult = vdec_wants_hd() ? 1u : NUM_SPUS;
+    const u32 MB = 1024u * 1024u;
+    // What queryAttr itself requires, and what this path would prefer.  They
+    // only differ at 720p (33MB vs 96MB); at 1080p both are 55MB.
+    u32 mem_size_min     = (attr.mem_size + (MB - 1)) & ~(MB - 1);
+    u32 mem_size_aligned = ((attr.mem_size * arena_mult) + (MB - 1)) & ~(MB - 1);
     // The arena is CACHED across vdec_close/vdec_open (seek reopens the
     // decoder): once the jitter buffer packs the heap tightly around a
     // freed 96MB hole, memalign can't get slightly-more-than-96MB back
     // and the re-open fails mid-seek.  Only vdec_release_mem() frees it.
+    //
+    // Never give up a cached arena that still satisfies queryAttr.  The boot
+    // reservation is sized for whichever mode was active at startup (64MB in
+    // 1080p, 96MB in 720p), so changing quality from 1080p to 720p mid-session
+    // used to ask for a 96MB arena with only 64MB cached: this freed the 64MB
+    // block, memalign(96MB) failed on the jbuf-fragmented heap, and every
+    // vdec_open until restart failed the same way.  64MB is ~2x what L3.1
+    // actually requires, and the 1080p path already proves the decoder runs
+    // with 3 SPUs on exactly the queryAttr size, so the cached block is kept
+    // and handed over whole.  Only an arena smaller than the requirement is
+    // ever released.
     if (s_vdec_mem && s_vdec_mem_size < mem_size_aligned) {
-        free(s_vdec_mem);
-        s_vdec_mem = NULL;
-        s_vdec_mem_size = 0;
+        if (s_vdec_mem_size >= mem_size_min) {
+            char b[96];
+            snprintf(b, sizeof(b),
+                     "vdec_open: cached %uMB arena kept (wanted %uMB, need %uMB)",
+                     s_vdec_mem_size / MB, mem_size_aligned / MB,
+                     mem_size_min / MB);
+            plog(b);
+            mem_size_aligned = s_vdec_mem_size;
+        } else {
+            char b[96];
+            snprintf(b, sizeof(b),
+                     "vdec_open: cached %uMB arena too small (need %uMB), freeing",
+                     s_vdec_mem_size / MB, mem_size_min / MB);
+            plog(b);
+            free(s_vdec_mem);
+            s_vdec_mem = NULL;
+            s_vdec_mem_size = 0;
+        }
     }
     crash_log("v5 memalign vdec_mem");
     plog("vdec_open: memalign vdec_mem");
     if (!s_vdec_mem) {
-        s_vdec_mem = (u8*)memalign(1024*1024, mem_size_aligned);
+        s_vdec_mem = (u8*)memalign(MB, mem_size_aligned);
+        if (!s_vdec_mem && mem_size_aligned > mem_size_min) {
+            // The preferred over-allocation did not fit; the queryAttr
+            // requirement is what the decoder actually needs, so try that
+            // before declaring the player dead.
+            char b[96];
+            snprintf(b, sizeof(b),
+                     "vdec_open: %uMB arena alloc failed, retrying at %uMB",
+                     mem_size_aligned / MB, mem_size_min / MB);
+            plog(b);
+            mem_size_aligned = mem_size_min;
+            s_vdec_mem = (u8*)memalign(MB, mem_size_aligned);
+        }
         if (!s_vdec_mem) {
             char b[64];
             snprintf(b, sizeof(b), "vdec_open: vdec_mem alloc FAILED (%uMB)",
-                     mem_size_aligned / (1024*1024));
+                     mem_size_aligned / MB);
             plog(b);
             return false;
         }
@@ -213,14 +328,17 @@ void vdec_release_mem(void) {
 // Boot-time reservation: grab the arena before the UI touches the heap so
 // it always lands at the same low address.  96MB matches vdec_open's math
 // (H.264 queryAttr mem_size 33368829 x 3 SPUs, 1MB-aligned); if a firmware
-// ever reports a bigger attr, vdec_open frees this and re-allocates.
+// ever reports an attr bigger than what is cached, vdec_open frees this and
+// re-allocates.
 void vdec_reserve_mem(void) {
     // 720p reserves the 3×-SPU arena it always used (~96MB).  1080p (Alpha)
     // sizes the arena at the queryAttr requirement instead (L4.2 = ~55MB, 1×;
     // see vdec_open), so 64MB is enough and leaves the heap for the bigger
     // jitter-buffer slots.  Reserving up front keeps it off the UI-fragmented
-    // heap; vdec_open re-allocates if the real queryAttr comes back larger.
-    const u32 RESERVE = hd1080_enabled() ? 64u * 1024 * 1024
+    // heap.  Either size covers BOTH levels' queryAttr requirement (33MB at
+    // L3.1, 55MB at L4.2), so a quality change after boot reuses whichever
+    // block was reserved rather than re-allocating (see vdec_open).
+    const u32 RESERVE = vdec_wants_hd() ? 64u * 1024 * 1024
                                          : 96u * 1024 * 1024;
     if (!s_vdec_mem) {
         s_vdec_mem = (u8*)memalign(1024*1024, RESERVE);
@@ -235,7 +353,13 @@ void vdec_reserve_mem(void) {
     }
 }
 
+// Display-order key state (see vdec_pull_frame).
+static s64 s_order_base = 0;
+static int s_poc_ext    = 0;
+
 void vdec_reset_counters(void) {
+    s_order_base   = 0;
+    s_poc_ext      = 0;
     s_au_submitted = 0;
     s_got_sps      = false;
     s_au_buf_idx   = 0;
@@ -397,8 +521,35 @@ static void fps_from_frc(int frc, int *num, int *den) {
         case 7: *num = 60000; *den = 1001; break;  /* 59.94fps  */
         case 8: *num = 60;    *den = 1;    break;  /* 60fps     */
         default:
-            plog("fps_detect: unknown frc, defaulting to 30fps");
-            *num = 30; *den = 1; break;
+            // VDEC gave us no frame-rate code.  A TRANSCODE always has one
+            // (ffmpeg writes a clean SPS); a STREAM COPY of a Blu-ray remux
+            // frequently does not, and this used to fall through to 30 fps.
+            // Pacing 23.976 fps film at 30 judders permanently however full
+            // the buffer is -- which is exactly what "Original always
+            // judders" was.  Prefer the rate the server reported.
+            if (g_source_fps_milli > 1000) {
+                // Snap the common broadcast rates to their EXACT fractions.
+                // The server reports 23.976, which as 23976/1000 is not quite
+                // 24000/1001 -- and 59.94Hz / (24000/1001) is exactly 2.5, the
+                // clean 3:2 pulldown ratio, while 59.94 / 23.976 is not.  The
+                // transcode path gets the exact fraction from the frame-rate
+                // code, so snapping here makes the stream-copy path identical
+                // rather than merely close.
+                int m = g_source_fps_milli;
+                if      (m >= 23950 && m <= 23990) { *num = 24000; *den = 1001; }
+                else if (m >= 29950 && m <= 29990) { *num = 30000; *den = 1001; }
+                else if (m >= 59900 && m <= 59980) { *num = 60000; *den = 1001; }
+                else { *num = m; *den = 1000; }
+                char b[80];
+                snprintf(b, sizeof(b),
+                         "fps_detect: no frc, using server rate %d.%03d",
+                         g_source_fps_milli / 1000, g_source_fps_milli % 1000);
+                plog(b);
+            } else {
+                plog("fps_detect: no frc and no server rate, defaulting to 30fps");
+                *num = 30; *den = 1;
+            }
+            break;
     }
 }
 
@@ -413,7 +564,12 @@ static s64 dur_from_frc(int frc) {
         case 6: return 20000;   /* 50 fps     */
         case 7: return 16683;   /* 59.94 fps  */
         case 8: return 16667;   /* 60 fps     */
-        default: return 40000;
+        default:
+            // Same fallback as fps_from_frc(): the server rate beats a
+            // hardcoded 25 fps guess when VDEC reports no code.
+            if (g_source_fps_milli > 1000)
+                return (s64)(1000000000LL / g_source_fps_milli);
+            return 40000;
     }
 }
 
@@ -449,11 +605,15 @@ bool vdec_pull_frame(void) {
             plog(buf);
         }
     }
-    u8 frc = 0;
+    u8  frc   = 0;
+    s64 order = JBUF_ORDER_NONE;
     if (pic->codec_specific_addr) {
-        const vdecH264Info *h =
-            (const vdecH264Info*)(uintptr_t)pic->codec_specific_addr;
-        frc = h->frame_rate;
+        const VdecAvcInfo *h =
+            (const VdecAvcInfo*)(uintptr_t)pic->codec_specific_addr;
+        // The rate code is only meaningful when the SPS carried VUI timing;
+        // otherwise fps_from_frc()'s fallback to the server-reported rate is
+        // the right answer, not whatever this byte happens to hold.
+        frc = h->timing_info_present_flag ? h->frame_rate : 0;
         if (h->width > 0 && h->height > 0 &&
             (h->width != jbuf_fw() || h->height != jbuf_fh())) {
             char buf[80];
@@ -463,6 +623,50 @@ bool vdec_pull_frame(void) {
                      (unsigned)pic->picture_size);
             plog(buf);
             jbuf_set_dims(h->width, h->height);
+        }
+
+        // Display-order key, Movian's construction verbatim: the decoder
+        // emits pictures in decode order and the jitter buffer sorts them by
+        // this.  An IDR starts a new epoch above everything before it; the
+        // 15-bit picture order count wraps, tracked by its top two bits
+        // (poc_ext), and a straggler from just before a wrap sorts back into
+        // the previous epoch.
+        if (h->idr_picture_flag) {
+            s_order_base += 0x100000000LL;
+            s_poc_ext = 0;
+        }
+        u32 om = (u32)((u16)h->pic_order_count[0] & 0x7fff);
+        int p  = (int)(om >> 13);
+        if (p == ((s_poc_ext + 1) & 3)) {
+            s_poc_ext = p;
+            if (p == 0) s_order_base += 0x100000000LL;
+        }
+        if (p == 3 && s_poc_ext == 0)
+            order = s_order_base + om - 0x100000000LL;
+        else
+            order = s_order_base + om;
+
+        // First pictures of a session: the fields this path depends on, so a
+        // pulled log shows the struct layout holds on the firmware in use
+        // (POC should step by 2 per frame in display order and be far from
+        // monotonic in arrival order on a B-frame stream; frc lives at byte
+        // 28, transfer_characteristics at 25).
+        static int s_info_log = 0;
+        if (s_info_log < 8) {
+            s_info_log++;
+            const u8 *raw = (const u8*)h;
+            char buf[200];
+            snprintf(buf, sizeof(buf),
+                "avc_info: %ux%u type=%u idr=%u ps=%u poc=%d/%d vui=%u tip=%u frc=%u "
+                "ffr=%u tc=%u mc=%u nal=0x%04x order=%lld b25=%u b28=%u",
+                h->width, h->height, h->picture_type[0], h->idr_picture_flag,
+                h->pic_struct, (int)h->pic_order_count[0], (int)h->pic_order_count[1],
+                h->vui_parameters_present_flag, h->timing_info_present_flag,
+                h->frame_rate, h->fixed_frame_rate_flag,
+                h->transfer_characteristics, h->matrix_coefficients,
+                (unsigned)h->nal_unit_present_flags, (long long)order,
+                raw[25], raw[28]);
+            plog(buf);
         }
     }
 
@@ -528,7 +732,7 @@ bool vdec_pull_frame(void) {
             plog(buf);
         }
     }
-    jbuf_push(pts_us, dur_us);
+    jbuf_push(pts_us, dur_us, order);
 
     if (!s_timing_ready) {
         int fps_num, fps_den;

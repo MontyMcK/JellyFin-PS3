@@ -20,6 +20,34 @@ void timing_init(u32 fps_num, u32 fps_den);
 // mis-paces playback on a 50Hz (PAL) one.  Valid after timing_init().
 s64  timing_vblank_period_us(void);
 
+// Real vblanks elapsed since the previous call, clamped to [1, 4].
+//
+// The duration-consumption gate must drain one vblank of content per REAL
+// vblank, not per loop iteration.  Those are the same thing only while the
+// display loop keeps up: flips are vsync-locked with two framebuffers, so a
+// loop body that overruns its refresh by any margin lands on the NEXT one and
+// an entire vblank passes with no display step.  Consuming a single period per
+// call then silently loses that time, video falls permanently behind real time,
+// the jitter buffer saturates, and the decode thread stops reading the muxed
+// socket -- which starves audio (see decode_thread_fn).  This slips at ANY
+// content rate, not just at the refresh rate: a host simulation of this gate
+// slips 3.4s per 70s and saturates the 24-slot jbuf even at 29.97fps once
+// roughly one step in twenty overruns.  What makes a 59.94fps bob-deinterlaced
+// transcode on a 59.94Hz display so much worse is that the retire ceiling is
+// one frame per display step, so demand sits exactly ON the ceiling and every
+// iteration is a candidate to overrun.  Returning the true elapsed count lets
+// the gate retire the backlog and hold real time by dropping frames instead;
+// with it, the same simulation holds zero slip and never reaches the cap.
+//
+// Clamped at 4 so a long stall (seek, unpause, HDD hitch) cannot dump the whole
+// jitter buffer in one step.
+u32  timing_vsyncs_elapsed(void);
+
+// Forget the elapsed-vblank cursor: the next timing_vsyncs_elapsed() returns 1.
+// Call when the display loop deliberately skips display steps (paused idle) so
+// the backlog drain does not count that gap as frames owed.
+void timing_gate_reset(void);
+
 // Non-blocking: returns true when it is time to display the next frame.
 bool timing_frame_due(void);
 

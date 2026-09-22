@@ -1,0 +1,173 @@
+# Host-side (x86) tests for the surround audio paths.
+# Builds the SAME vendored liba52 / libdca / FFmpeg-MLP decoders and the SAME
+# channel maps, framing and track-label logic the PS3 build compiles.
+#
+#   make -f Makefile.host          # build every test
+#   make -f Makefile.host check    # build + generate tones with ffmpeg + run
+#
+# Requires: cc, and ffmpeg for the decode tests' input files.  The DTS and
+# TrueHD tone files need ffmpeg's `dca` and `truehd` encoders, which are
+# experimental (hence -strict -2) but good enough to carry a distinct tone per
+# channel.  Note ffmpeg's truehd encoder tops out at 5.1, so the 7.1 path is
+# covered by test_truehd_map rather than by an end-to-end decode.
+
+CC      ?= cc
+CXX     ?= c++
+CFLAGS  ?= -O2 -Wall
+CFLAGS  += -I../source/audio -I../source/audio/a52 -I../source/util
+CXXFLAGS ?= -O2 -Wall
+CXXFLAGS += -I../source/api -I../source/net
+
+A52_DIR  = ../source/audio/a52
+A52_SRCS = $(A52_DIR)/parse.c $(A52_DIR)/bit_allocate.c $(A52_DIR)/bitstream.c \
+           $(A52_DIR)/downmix.c $(A52_DIR)/imdct.c
+MAP_SRC  = ../source/audio/ac3_map.c
+
+DCA_DIR  = ../source/audio/dca
+DCA_SRCS = $(DCA_DIR)/dca_parse.c $(DCA_DIR)/dca_downmix.c \
+           $(DCA_DIR)/dca_bitstream.c
+DTS_MAP_SRC  = ../source/audio/dts_map.c
+DTS_EXSS_SRC = ../source/audio/dts_exss.c
+DTS_STREAM_SRC = ../source/audio/dts_stream.c
+TRACK_SRC    = ../source/util/track_codec.c
+
+# Vendored FFmpeg MLP/TrueHD decoder: mlp_api.c is the whole decoder in one
+# translation unit (source/audio/mlp/PROVENANCE.md), so only it and the
+# runtime shim are compiled here.
+MLP_CFLAGS = -I../source/audio/mlp/ff -I../source/audio/mlp/ff/libavcodec \
+             -Wno-dangling-else
+TRUEHD_SRCS = ../source/audio/truehd_stream.c ../source/audio/truehd_map.c \
+              ../source/audio/mlp_api.c ../source/audio/mlp_compat.c
+
+# Vendored FFmpeg DTS decoder with DTS-HD MA (XLL).  Same include ORDER rule
+# as MLP: the FFmpeg headers' `#include "config.h"` must find ff/config.h and
+# not liba52's, so DCAHD_CFLAGS goes BEFORE CFLAGS.
+DCAHD_CFLAGS = -I../source/audio/mlp/ff -I../source/audio/mlp/ff/libavcodec \
+               -I../source/audio/dcahd
+DCAHD_SRCS = ../source/audio/dcahd_api.c ../source/audio/dcahd_xll.c \
+             ../source/audio/dcahd_compat.c \
+             ../source/audio/mlp_api.c ../source/audio/mlp_compat.c
+DTS_HD_DEPS = $(DTS_STREAM_SRC) $(DTS_MAP_SRC) $(DTS_EXSS_SRC) $(DCA_SRCS) \
+              ../source/audio/truehd_map.c $(DCAHD_SRCS)
+
+all: test_ac3_map test_ac3_decode test_media_sources \
+     test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
+     test_truehd_map test_truehd_decode \
+     test_dts_hd test_dts_xll_dump
+
+test_ac3_map: test_ac3_map.c $(MAP_SRC)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test_ac3_decode: test_ac3_decode.c $(MAP_SRC) $(A52_SRCS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test_dts_map: test_dts_map.c $(DTS_MAP_SRC)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test_dts_decode: test_dts_decode.c $(DTS_MAP_SRC) $(DCA_SRCS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test_dts_stream: test_dts_stream.c $(DTS_STREAM_SRC) $(DTS_MAP_SRC) $(DTS_EXSS_SRC) $(DCA_SRCS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+test_dts_exss: test_dts_exss.c $(DTS_EXSS_SRC)
+	$(CC) $(CFLAGS) -o $@ $^
+
+test_track_codec: test_track_codec.c $(TRACK_SRC)
+	$(CC) $(CFLAGS) -o $@ $^
+
+test_truehd_map: test_truehd_map.c ../source/audio/truehd_map.c
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+# MLP_CFLAGS must come BEFORE CFLAGS: three vendored trees each ship their own
+# config.h, and CFLAGS puts liba52's directory on the include path, so the
+# FFmpeg headers' `#include "config.h"` would otherwise pick up a52's.
+test_truehd_decode: test_truehd_decode.c $(TRUEHD_SRCS)
+	$(CC) $(MLP_CFLAGS) $(CFLAGS) -o $@ $^ -lm
+
+test_media_sources: test_media_sources.cpp ../source/api/media_sources.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+test_dts_hd: test_dts_hd.c $(DTS_HD_DEPS)
+	$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o $@ $^ -lm
+
+# XLL -- the actual lossless data -- cannot be covered by a SYNTHESISED
+# fixture, because no free DTS-HD MA encoder exists.  It can be covered by an
+# EXTRACTED one, which is what test_dts_xll_dump is for:
+#
+#   ffmpeg -ss 00:52:00 -i <rip.mkv> -map 0:<dts-hd-ma-idx> -t 8 -c:a copy \
+#          -f dts dtsma.dts
+#   ffmpeg -i dtsma.dts -c:a pcm_s32le -f s32le dtsma.ref
+#   ./test_dts_xll_dump dtsma.dts ours.pcm && cmp ours.pcm dtsma.ref
+#
+# DTS-HD MA is lossless, so dtsma.ref is an EXACT reference and cmp is a real
+# pass/fail rather than a tolerance check.  Seek to a point well inside the
+# film: a cut landing mid-frame makes the first frame decode without its core
+# and that one frame will differ for reasons that are not the decoder's.
+#
+# Build it big-endian too, which is the whole point on a PPU target:
+#   powerpc64-linux-gnu-gcc -O2 -static $(DCAHD_CFLAGS) $(CFLAGS) \
+#       -o dump_be test_dts_xll_dump.c $(DTS_HD_DEPS) -lm
+#   qemu-ppc64 ./dump_be dtsma.dts be.pcm && cmp be.pcm dtsma.ref
+test_dts_xll_dump: test_dts_xll_dump.c $(DTS_HD_DEPS)
+	$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o $@ $^ -lm
+
+tones51.ac3:
+	ffmpeg -y -loglevel error \
+	  -f lavfi -i "sine=frequency=300:duration=2" \
+	  -f lavfi -i "sine=frequency=500:duration=2" \
+	  -f lavfi -i "sine=frequency=700:duration=2" \
+	  -f lavfi -i "sine=frequency=60:duration=2" \
+	  -f lavfi -i "sine=frequency=900:duration=2" \
+	  -f lavfi -i "sine=frequency=1100:duration=2" \
+	  -filter_complex "join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR[a]" \
+	  -map "[a]" -c:a ac3 -b:a 640k -ar 48000 $@
+
+tones51.dts:
+	ffmpeg -y -loglevel error \
+	  -f lavfi -i "sine=frequency=300:duration=2" \
+	  -f lavfi -i "sine=frequency=500:duration=2" \
+	  -f lavfi -i "sine=frequency=700:duration=2" \
+	  -f lavfi -i "sine=frequency=60:duration=2" \
+	  -f lavfi -i "sine=frequency=900:duration=2" \
+	  -f lavfi -i "sine=frequency=1100:duration=2" \
+	  -filter_complex "join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR[a]" \
+	  -map "[a]" -c:a dca -strict -2 -b:a 1509k -ar 48000 -f dts $@
+
+tones51.thd:
+	ffmpeg -y -loglevel error \
+	  -f lavfi -i "sine=frequency=300:duration=2" \
+	  -f lavfi -i "sine=frequency=500:duration=2" \
+	  -f lavfi -i "sine=frequency=700:duration=2" \
+	  -f lavfi -i "sine=frequency=60:duration=2" \
+	  -f lavfi -i "sine=frequency=900:duration=2" \
+	  -f lavfi -i "sine=frequency=1100:duration=2" \
+	  -filter_complex "join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR[a]" \
+	  -map "[a]" -c:a truehd -strict -2 -ar 48000 -f truehd $@
+
+# TrueHD is lossless, so ffmpeg's own decode of the same file is an exact
+# reference, not just a sanity check — test_truehd_decode compares against it
+# sample for sample.
+tones51.thd.ref: tones51.thd
+	ffmpeg -y -loglevel error -i tones51.thd -c:a pcm_s32le -f s32le $@
+
+check: all tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
+	./test_ac3_map
+	./test_ac3_decode tones51.ac3
+	./test_dts_map
+	./test_dts_decode tones51.dts
+	./test_dts_stream tones51.dts
+	./test_dts_exss
+	./test_track_codec
+	./test_truehd_map
+	./test_truehd_decode tones51.thd tones51.thd.ref
+	./test_dts_hd tones51.dts
+	./test_media_sources
+
+clean:
+	rm -f test_ac3_map test_ac3_decode test_media_sources \
+	      test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
+	      test_truehd_map test_truehd_decode test_dts_hd test_dts_xll_dump \
+	      tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
+
+.PHONY: all check clean

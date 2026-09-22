@@ -12,6 +12,9 @@
 #include "video.h"
 #include "plog.h"
 #include "hd1080.h"
+#include "vquality.h"
+#include "surround.h"
+#include "track_codec.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "rsxutil.h"
@@ -70,6 +73,10 @@ int player_sub_stream_idx(const PlayerState *ps) {
     return (ps->cur_sub >= 0) ? ps->tracks.subs[ps->cur_sub].index : -1;
 }
 
+const JFMediaSource *player_current_source(const PlayerState *ps) {
+    return ps->source.id[0] ? &ps->source : NULL;
+}
+
 // -------------------------------------------------------
 // Stream URL builder — used for the initial open and for every seek.
 // start_ticks is in Jellyfin's 100-ns units (seconds * 10,000,000).
@@ -87,26 +94,128 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     // 1080p (Alpha): 1080p exceeds baseline/level-3.1, so ask for a High-profile
     // level-4.2 transcode at a higher ceiling bitrate.  Gated — OFF reproduces
     // the exact baseline/31/4Mbps query the 720p ship path sends.
-    const bool hd        = hd1080_enabled();
-    const char *profile  = hd ? "high" : "baseline";
-    const char *level    = hd ? "42"   : "31";
-    unsigned    vbitrate = hd ? 10000000u : 4000000u;
+    // Resolved through the quality row on the info screen; at its default
+    // (Auto) this is exactly the hd-toggle pair above it used to be.  Note
+    // req_w/req_h were resolved by the same call in player.cpp, so the URL
+    // and the jitter buffer cannot disagree about the frame size.
+    const bool  hd = hd1080_enabled();
+    const char *profile;
+    const char *level;
+    unsigned    vbitrate;
+    vquality_params(vquality_get(), hd, 0, 0, NULL, NULL,
+                    &profile, &level, &vbitrate);
+    // Surround 5.1 (Alpha): request an AC-3 5.1 transcode at the standard DVD
+    // rate.  Gated — OFF reproduces the exact stereo MP3 query the ship path
+    // sends.  This builder is reused by every seek (player_seek.cpp), so the
+    // codec choice is stable across seeks by construction.
+    const bool  surround = surround_enabled();
+    const char *acodec   = surround ? "ac3"    : "mp3";
+    unsigned    abitrate = surround ? 640000u  : 192000u;
+    int         achans   = surround ? 6        : 2;
+    // Surround "HD" mode: ask the server to STREAM-COPY the source's own HD
+    // audio track instead of transcoding it.  Copy is the only way either of
+    // these formats ever arrives — Jellyfin will not transcode TO them
+    // (ffmpeg's dca encoder is experimental and its truehd encoder tops out
+    // at 5.1) — and it is also the whole point:
+    //   * a DTS-HD MA / DTS:X track copied intact still carries the 5.1 core
+    //     this app decodes, at up to 1509 kbps;
+    //   * a TrueHD / Atmos track copied intact decodes here LOSSLESSLY, to
+    //     5.1 or 7.1.
+    // Either way there is no audio transcode on the server at all.
+    //
+    // Only asked for when the SELECTED track really is one of those (its
+    // label says so).  On any other track — including Dolby Digital Plus,
+    // which nothing here decodes — the request is the plain AC-3 one, which
+    // is why HD mode never plays worse than AC-3 mode.  Four knobs differ
+    // from the AC-3 request and all of them matter:
+    //   * AllowAudioStreamCopy=true — without it the server transcodes and
+    //     the "dts"/"truehd" preference lands on an encoder we do not want.
+    //   * no AudioBitrate — Jellyfin checks the requested audio bitrate
+    //     before allowing a copy, and a 1509 kbps DTS core (let alone a
+    //     multi-Mbps TrueHD stream) fails a 640 kbps ceiling, silently
+    //     demoting us to a transcode.
+    //   * MaxAudioChannels=8, not 6 — DTS-HD MA, DTS:X and TrueHD tracks are
+    //     routinely 7.1, and a 6-channel ceiling would refuse to copy them.
+    //     Copying them is right: TrueHD then plays as a real 7.1 program, and
+    //     what this app decodes out of a DTS-HD track is its 5.1 core either
+    //     way.
+    //   * ac3 is listed FIRST even though the HD codec is the one being asked
+    //     for.  Copy eligibility only asks whether the source codec appears
+    //     in the list; the order decides what an actual transcode would
+    //     encode to, and that must be ac3.
+    const char *hd_codec = NULL;
+    if (surround && surround_hd_preferred() && ps->cur_audio >= 0) {
+        const char *label = ps->tracks.audio[ps->cur_audio].label;
+        if      (track_label_is_dts(label))    hd_codec = "dts";
+        else if (track_label_is_truehd(label)) hd_codec = "truehd";
+    }
+    char aparams[128];
+    if (hd_codec) {
+        snprintf(aparams, sizeof(aparams),
+                 "&AudioCodec=ac3,%s,mp3&AudioSampleRate=48000"
+                 "&MaxAudioChannels=8", hd_codec);
+    } else {
+        snprintf(aparams, sizeof(aparams),
+                 "&AudioCodec=%s&AudioBitrate=%u&AudioSampleRate=48000"
+                 "&MaxAudioChannels=%d", acodec, abitrate, achans);
+    }
+    const char *copy_audio = hd_codec ? "true" : "false";
+    const JFMediaSource *source = player_current_source(ps);
+    const char *source_id = (source && source->id[0]) ? source->id : ps->item->id;
+    char encoded_source[288];
+    url_encode_query(source_id, encoded_source, sizeof(encoded_source));
+    // Video request.  vbitrate == 0 is DIRECT PLAY (the "Original" quality
+    // setting): ask the server to copy the source video through untouched.
+    //
+    // The ceiling has to be ABSENT, not just large.  Jellyfin checks the
+    // requested bitrate before it will allow a copy, so a 10 Mbps ask against
+    // a 30 Mbps remux does not clamp the copy -- it refuses it and re-encodes,
+    // silently. That is the same trap the HD audio path documents above for
+    // AudioBitrate, and it fails the same quiet way.
+    //
+    // MaxWidth/MaxHeight and MaxFramerate stay in both cases and act as the
+    // safety gate: a 4K or 60 fps source exceeds them, so the server scales it
+    // down rather than copying something this console cannot decode.
+    // Copy is ALWAYS permitted now, at every quality.  Jellyfin allows a copy
+    // when the source bitrate is <= the requested one, so a ceiling is a
+    // CEILING ON THE COPY, not an instruction to re-encode at that rate:
+    //
+    //   source <= ceiling -> copied untouched (full quality, no server CPU)
+    //   source >  ceiling -> transcoded to the ceiling, exactly as before
+    //
+    // Sending AllowVideoStreamCopy=false, as every mode but Original used to,
+    // forbade the copy even when the source would have fit comfortably --
+    // re-encoding an 8 Mbps file down to a 10 Mbps target for no reason. This
+    // is strictly better at every setting: it can only turn a transcode into
+    // a copy, never the reverse.
+    char vparams[96];
+    if (vbitrate == 0)
+        snprintf(vparams, sizeof(vparams), "&AllowVideoStreamCopy=true");
+    else
+        snprintf(vparams, sizeof(vparams),
+                 "&VideoBitrate=%u&AllowVideoStreamCopy=true", vbitrate);
+
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
         "?VideoCodec=h264"
         "&Profile=%s"
         "&Level=%s"
         "&MaxWidth=%u&MaxHeight=%u"
-        "&VideoBitrate=%u"
-        "&AudioCodec=mp3&AudioBitrate=192000&AudioSampleRate=48000"
-        "&MaxAudioChannels=2"
+        "%s"
+        "%s"
         "&MaxFramerate=30"
-        "&AllowVideoStreamCopy=false&AllowAudioStreamCopy=false"
+        "&AllowAudioStreamCopy=%s"
         "&DeviceId=%s&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",
-        g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vbitrate,
-        jf_device_id(), ps->item->id, (unsigned long long)start_ticks);
+        g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vparams,
+        aparams, copy_audio,
+        jf_device_id(), encoded_source, (unsigned long long)start_ticks);
+    if (source && source->live_stream_id[0] && n > 0 && n < url_sz) {
+        char encoded_live[288];
+        url_encode_query(source->live_stream_id, encoded_live, sizeof(encoded_live));
+        n += snprintf(url + n, url_sz - n, "&LiveStreamId=%s", encoded_live);
+    }
     if (audio_idx >= 0 && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
     if (sub_idx >= 0 && n > 0 && n < url_sz)
@@ -125,7 +234,10 @@ void player_prefill(PlayerState *ps, bool fatal_on_eof, int guard_max) {
     u8   ts_pkt[TS_PACKET_SIZE];
     bool first_pkt = true;
     int  guard     = 0;
-    while (jbuf_count() < jbuf_prefill_target() && running && !s_vdec_error &&
+    // Counted with jbuf_used(): pictures the reorder hold has not released yet
+    // are decoded and buffered, and on the 8-slot 1080p path the displayable
+    // count alone can never reach the target while the hold owns half of it.
+    while (jbuf_used() < jbuf_prefill_target() && running && !s_vdec_error &&
            guard < guard_max) {
         sysUtilCheckCallback();
         int rd = stream_read(ps->sock, ts_pkt, TS_PACKET_SIZE);

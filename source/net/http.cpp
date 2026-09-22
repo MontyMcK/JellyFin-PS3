@@ -2,6 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <malloc.h>   // memalign -- libnet pool alignment
+
+#include "plog.h"   // truncated-body warning
 
 #include <ppu-types.h>
 #include <net/net.h>
@@ -13,6 +16,7 @@
 #include <sys/mutex.h>
 
 #include "http.h"
+#include "jf_paths.h"
 
 // Jellyfin-layer hooks (api_auth.cpp): the per-install device id sent in the
 // MediaBrowser identity, and the expired-session flag raised on any
@@ -258,7 +262,100 @@ static int build_headers(char *req, int cap, const char *method,
 int http_init(void) {
     int ret;
     ret = sysModuleLoad(SYSMODULE_NET); if (ret < 0) return ret;
-    ret = netInitialize();              if (ret < 0) { sysModuleUnload(SYSMODULE_NET); return ret; }
+
+    // How libnet's MEMORY POOL is sized, and why this is a switch rather than
+    // a decision.
+    //
+    // netInitialize() hands libnet a hardcoded 128 KB pool (LIBNET_MEMORY_SIZE
+    // in ppu/sprx/libnet/init.c) shared by every socket in the process, and
+    // socket receive buffers are charged against it.  The theory was that this
+    // was the real 25 Mbps receive ceiling: SO_RCVBUF=512KB was accepted and
+    // read back as 524288, but nothing said there was 512 KB of pool to back
+    // it.  netInitializeNetworkEx() is exported, so a bigger pool is one call
+    // away.
+    //
+    // MEASURED ON HARDWARE 2026-09-18, AND THE THEORY IS WRONG.  With a 4 MB
+    // pool, against the identical build and movie at 1080p 25 Mbps:
+    //
+    //            net= median   net= peak   heartbeats with ring empty
+    //   stock      25.0 Mbps    62.2 Mbps             8%
+    //   4 MB       12.0 Mbps    18.7 Mbps            55%
+    //
+    // Throughput HALVED, and getsockopt(SO_RCVBUF) -- the same call, on the
+    // same line -- went from returning 524288 to failing outright, as did
+    // netGetSockInfo.  Both are libnet telling us it is in a worse state than
+    // the stock init leaves it in, not a coincidence of load.  A pool that is
+    // merely too big would not break getsockopt.
+    //
+    // So the default is stock, exactly as v1.0 shipped.  The pool stays
+    // reachable because the experiment is worth finishing -- 128 here would
+    // isolate whether the damage is the SIZE or the Ex path itself -- but it
+    // is opt-in, set at runtime, and never on unless someone asks for it.
+    //
+    // Size in KB in jellyfin_netpool.txt; 0 or absent means stock.
+    {
+        u32 kb = 0;
+        FILE *f = fopen(jf_data_path("jellyfin_netpool.txt"), "r");
+        if (f) {
+            unsigned v = 0;
+            if (fscanf(f, "%u", &v) != 1) v = 0;
+            fclose(f);
+            if (v > 8192) v = 8192;     // 8 MB is already absurd; cap it
+            kb = v;
+        }
+
+        bool up = false;
+        if (kb) {
+            // 64 KB alignment rather than whatever malloc happens to give.
+            // Alignment is the other candidate explanation for the damage
+            // above, and PSL1GHT's 128 KB malloc may simply land aligned by
+            // luck where a 4 MB one does not.
+            void *mem = memalign(64 * 1024, (size_t)kb << 10);
+            if (mem) {
+                netInitParam pp;
+                memset(&pp, 0, sizeof(pp));
+                pp.memory      = (u32)(u64)mem;
+                pp.memory_size = (u32)kb << 10;
+                pp.flags       = 0;
+                const s32 rc = netInitializeNetworkEx(&pp);
+                char b[112];
+                snprintf(b, sizeof(b), "net: libnet pool %u KB rc=%d addr=0x%08x",
+                         (unsigned)kb, (int)rc, (unsigned)(u64)mem);
+                plog(b);
+                if (rc == 0) up = true;
+                else         free(mem);
+            } else {
+                plog("net: pool allocation refused, using stock netInitialize()");
+            }
+        }
+        if (!up) {
+            ret = netInitialize();
+            if (ret < 0) { sysModuleUnload(SYSMODULE_NET); return ret; }
+            plog("net: libnet stock (PSL1GHT 128 KB pool)");
+        }
+    }
+
+    // Prove the socket layer is healthy BEFORE any playback depends on it.
+    // This is the exact pair of calls that regressed under the 4 MB pool, so
+    // running them on a throwaway socket at startup turns "is libnet in a good
+    // state?" into one line at the top of the log instead of something only
+    // visible once a stream is already stuttering.
+    {
+        int s = netSocket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (s < 0) {
+            plog("net: probe socket failed");
+        } else {
+            int want = 512 * 1024, got = 0;
+            socklen_t gl = sizeof(got);
+            const int src = setsockopt(s, SOL_SOCKET, SO_RCVBUF, &want, sizeof(want));
+            const int grc = getsockopt(s, SOL_SOCKET, SO_RCVBUF, &got, &gl);
+            char b[112];
+            snprintf(b, sizeof(b), "net: probe set=%d get=%d rcvbuf=%d",
+                     src, grc, (grc == 0) ? got : -1);
+            plog(b);
+            netClose(s);
+        }
+    }
     sys_mutex_attr_t attr;
     memset(&attr, 0, sizeof(attr));
     attr.attr_protocol  = SYS_MUTEX_PROTOCOL_FIFO;
@@ -304,7 +401,17 @@ int http_request(int method, const char *url, const char *body,
     if (status == 401 && token && token[0]) g_auth_expired = true;
 
     memset(out, 0, out_size);
-    if (body_len > out_size - 1) body_len = out_size - 1;
+    if (body_len > out_size - 1) {
+        // Truncating JSON produces a parse that "works" and quietly returns
+        // fewer items — the version list losing everything past the cut is
+        // exactly that bug.  Say so.
+        char b[96];
+        snprintf(b, sizeof(b),
+                 "http: body TRUNCATED %d -> %d bytes (raise RESPONSE_SIZE)",
+                 body_len, out_size - 1);
+        plog(b);
+        body_len = out_size - 1;
+    }
     if (body_len > 0) memcpy(out, s_raw_buf + body_off, body_len);
     out[body_len > 0 ? body_len : 0] = '\0';
 

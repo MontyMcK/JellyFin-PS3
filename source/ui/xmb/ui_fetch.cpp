@@ -22,8 +22,14 @@
 // connect are not reliably bounded by the socket timeouts (see the note in
 // net/http.cpp), so a transient miss here is expected rather than exotic.
 // Only hard failures retry; the delay gives the network stack a moment.
-#define DETECT_TABS_TRIES     3
-#define DETECT_TABS_RETRY_US  750000
+// 6 tries, was 3.  Three attempts ~750ms apart gave up about 12 seconds
+// after launch (each failed request also burns its own timeout), and a PS3
+// that has just been power-cycled often does not have its network up by
+// then.  The result looked like a broken app: no Movies, no TV, and no way
+// back without restarting it.  See also the background retry in ui_xmb.cpp,
+// which keeps trying after this gives up.
+#define DETECT_TABS_TRIES     6
+#define DETECT_TABS_RETRY_US  1500000
 
 // One attempt at fetching and parsing /Users/{id}/Views.  Returns false only
 // when the request or the parse failed outright — a reply that parses to
@@ -145,6 +151,10 @@ static bool detect_tabs_once(void) {
 // leaving the user with no library tabs for the rest of the session.
 // Re-runnable: each attempt clears every library slot first, so a re-login or
 // a server-side change cannot leave a stale tab behind.
+// One attempt, for the XMB's background retry: the render loop must not sit
+// inside the full retry set, which can block for tens of seconds.
+bool xmb_detect_tabs_once(void) { return detect_tabs_once(); }
+
 void xmb_detect_tabs(void) {
     for (int try_n = 1; try_n <= DETECT_TABS_TRIES; try_n++) {
         if (detect_tabs_once()) {

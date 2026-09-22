@@ -236,13 +236,38 @@ bool player_execute_seek(PlayerState *ps) {
     // spins up a brand-new transcode anchored at the seek target.
     {
         char new_session[64] = "";
-        if (jellyfin_get_play_session_id(ps->item->id, new_session,
-                                         sizeof(new_session), NULL) &&
+        JFMediaSource opened;
+        const JFMediaSource *chosen = player_current_source(ps);
+        char source_id[96] = "";
+        if (chosen) snprintf(source_id, sizeof(source_id), "%s", chosen->id);
+        unsigned source_runtime = 0;
+        if (jellyfin_get_playback_info(ps->item->id, source_id,
+                                       new_session, sizeof(new_session),
+                                       &source_runtime, NULL, &opened) &&
             new_session[0]) {
             snprintf(ps->session_id, sizeof(ps->session_id), "%s", new_session);
             char sb[96];
             snprintf(sb, sizeof(sb), "seek: new session=%s", ps->session_id);
             plog(sb);
+
+            // AutoOpenLiveStream may resolve a plugin source to a LiveStreamId
+            // (and occasionally a new MediaSourceId).  Carry that resolution
+            // into the stream.ts request while preserving the user's current
+            // audio/subtitle selections across an ordinary seek.
+            if (opened.id[0]) {
+                JFMediaSource *dst = &ps->source;
+                char old_label[128];
+                snprintf(old_label, sizeof(old_label), "%s", dst->label);
+                snprintf(dst->id, sizeof(dst->id), "%s", opened.id);
+                snprintf(dst->live_stream_id, sizeof(dst->live_stream_id),
+                         "%s", opened.live_stream_id);
+                if (!dst->label[0])
+                    snprintf(dst->label, sizeof(dst->label), "%s", opened.label);
+                else
+                    snprintf(dst->label, sizeof(dst->label), "%s", old_label);
+                if (source_runtime > 0) dst->runtime_secs = source_runtime;
+                if (dst->runtime_secs > 0) ps->total_secs = dst->runtime_secs;
+            }
         } else {
             plog("seek: PlaybackInfo failed, reusing old session");
         }

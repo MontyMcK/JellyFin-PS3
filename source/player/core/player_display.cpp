@@ -61,6 +61,62 @@ static void log_refresh_rate(void) {
     }
 }
 
+// Count a PRESENTATION, not a buffer swap.
+//
+// player_stats_on_frame_shown() derives `held` -- how many vblanks a frame
+// stayed on screen -- from the hardware vblank counter, and the pulldown
+// figures (pd= in the heartbeat) are built from it: 24fps on a 59.94Hz
+// output should alternate 3,2,3,2, so hold2 and hold3 should be roughly
+// equal and hold_other near zero.
+//
+// It used to be called from BOTH flip paths below, unconditionally, and
+// that made the numbers meaningless.  The upload thread re-stages
+// jbuf_peek() and raises s_vid_frame_ready again the moment the display
+// consumes it, WITHOUT popping -- so the flag goes true about once per
+// vblank even for 24fps content.  `held` was therefore almost always 1,
+// which is neither 2 nor 3, and every sample fell into hold_other.  That
+// is why pd read like 14/1/1905: not broken cadence, a broken counter.
+//
+// The upload thread now records WHICH frame it staged, so a re-upload of
+// the picture already on screen is ignored and `held` becomes the number
+// of vblanks that frame was actually displayed.
+static void stats_on_picture_shown(void) {
+    static u32 s_last_seq = 0xFFFFFFFFu;
+    const u32  seq = s_vid_uploaded_seq;
+    if (seq == s_last_seq) return;      // same picture, re-staged
+    s_last_seq = seq;
+    player_stats_on_frame_shown();
+}
+
+// Retire content for vblanks that elapsed WITHOUT a display step.
+//
+// The gate below consumes exactly one vblank period per call, which is correct
+// only while the loop actually runs once per vblank.  When it overruns, the
+// vsync-locked flip pushes the next iteration a whole refresh out and that time
+// is otherwise never accounted for -- video slips behind real time by exactly
+// the frames it dropped, permanently, because the retire ceiling is one frame
+// per call and there is no way to catch up.  Draining the surplus here holds
+// real time by dropping frames instead of accumulating a backlog, which is what
+// keeps the jitter buffer off its cap and the decode thread reading the socket
+// (audio rides that same socket -- a saturated jbuf is what starves it).
+//
+// Frames retired here are never displayed, so there is nothing to blend; each
+// carries its spill into the next slot so no time leaks.  Always leaves one
+// frame for the caller to display.
+static void gate_drain_backlog(s64 budget_us) {
+    while (budget_us > 0 && jbuf_count() > 1) {
+        s64 dur = jbuf_peek_dur();
+        if (dur < 0) dur = 0;              // already exhausted; pop it
+        if (dur > budget_us) {
+            jbuf_consume_dur(budget_us);
+            break;
+        }
+        jbuf_consume_dur(dur);             // exhaust front, carry the remainder
+        budget_us -= dur;
+        jbuf_advance();
+    }
+}
+
 void player_display_frame(PlayerState *ps) {
     check_fps_fallback(ps);
     log_refresh_rate();
@@ -77,6 +133,24 @@ void player_display_frame(PlayerState *ps) {
     static int  s_pure_count = 0;
     static int  s_mid_count  = 0;
     static s64  s_spill_max  = 0;
+    static int  s_catchup_vb = 0;
+
+    // Account for refreshes this loop missed before consuming the current one.
+    u32 vsyncs = timing_vsyncs_elapsed();
+    if (vsyncs > 1 && !ps->paused && s_timing_ready && jbuf_count() > 1) {
+        gate_drain_backlog(vblank_period_us * (s64)(vsyncs - 1));
+        s_catchup_vb += (int)(vsyncs - 1);
+        // Throttled: a sustained overrun trips this every iteration, and the
+        // log ring is 256 entries deep.
+        static int s_catchup_n = 0;
+        if (s_catchup_n < 40 || (s_catchup_n % 60) == 0) {
+            char buf[80];
+            snprintf(buf, sizeof(buf), "gate_catchup: missed=%u q=%d total_vb=%d",
+                     vsyncs - 1, jbuf_count(), s_catchup_vb);
+            plog(buf);
+        }
+        s_catchup_n++;
+    }
 
     bool  do_pop       = false;
     bool  render_blend = false;
@@ -152,7 +226,7 @@ void player_display_frame(PlayerState *ps) {
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = false;
         s_vid_disp_idx ^= 1;
-        player_stats_on_frame_shown();   // observe only
+        stats_on_picture_shown();   // observe only; ignores re-staged frames
         {
             static u64 s_fi_last_us = 0;
             static u64 s_fi_gaps[2] = {0, 0};
@@ -207,7 +281,7 @@ void player_display_frame(PlayerState *ps) {
         __asm__ volatile("sync" ::: "memory");
         s_vid_frame_ready = false;
         s_vid_disp_idx ^= 1;
-        player_stats_on_frame_shown();   // observe only
+        stats_on_picture_shown();   // observe only; ignores re-staged frames
     } else if (ps->show_seek_frame && ps->paused && s_vid_frame_ready) {
         // Paused seek: display the target frame exactly once, staying paused.
         __asm__ volatile("sync" ::: "memory");

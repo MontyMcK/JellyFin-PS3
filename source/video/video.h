@@ -9,7 +9,26 @@
 // path), a 1920×1088 slot is 3.13 MB — so the ring holds MORE frames in LESS
 // memory than the shipped 12-slot ARGB buffer ever did.
 #define JBUF_PREFILL      12   // frames to decode before display starts
-#define JBUF_1080_SLOTS   16   // ring slots on the 1080p (Alpha) path (~50 MB)
+// 8 slots, was 10.  These come from the SAME heap the compressed
+// read-ahead ring draws from, so every slot removed is ~3.1 MB the ring
+// gains -- and a compressed byte buys far more runway than a decoded one.
+//
+// Safe because the jitter buffer is never the constraint: `q=` in the
+// heartbeat sits pinned at its cap in every healthy sample, i.e. the
+// decoder always outruns the display and the extra slots were idle.
+// Every measured stall had ring=0, not q=0.  8 slots is still a third of
+// a second of decode jitter at 24fps, and the display only ever needs two
+// (current + next, for the blend).
+#define JBUF_1080_SLOTS   8    // ring slots on the 1080p path (~25 MB)
+// Was 16 (~50 MB).  Hardware logging showed where that memory is better
+// spent: with direct play the console decodes 1080p at a full 24 fps
+// whenever the compressed ring has data, and stalls only when it runs
+// dry -- and the ring was refilling to 72% before draining again, so
+// average delivery MATCHES playback and it is the swings that hurt.
+// Compressed bytes buy roughly 75x the runway per byte that decoded
+// frames do, so six slots (18 MB of decoded video, 0.25 s) moved into
+// the ring is worth several SECONDS of burst tolerance.  Ten slots is
+// still comfortably above JBUF_PREFILL.
 #define JBUF_SD_SLOTS     24   // ring slots on the 720p path       (~32 MB)
 // The static ring arrays are sized for the LARGER of the two active counts;
 // jbuf_cap() picks how many are actually used per path.
@@ -44,6 +63,14 @@ void video_reset_demux(void);
 // Returns true if a frame was added to the jitter buffer.
 bool video_feed_ts(const u8 *pkt);
 
+// Feed only the audio/PSI packets of the stream, leaving video untouched.
+// Returns false when the packet was a video one (the caller must hold it and
+// feed it through video_feed_ts() later, in order).  Never submits to VDEC
+// and never touches the jitter buffer, so it is safe to call precisely when
+// the jitter buffer is full — which is the point: see the hold-back ring in
+// player_threads.cpp.
+bool video_feed_ts_audio_only(const u8 *pkt);
+
 // ---- Jitter buffer ----
 bool         jbuf_alloc(u32 fw, u32 fh);
 int          jbuf_cap(void);            // active ring capacity (<= JBUF_MAX_SLOTS)
@@ -57,7 +84,12 @@ const u8    *jbuf_peek(void);
 void         jbuf_pop(void);
 u32          jbuf_fw(void);
 u32          jbuf_fh(void);
-int          jbuf_count(void);
+int          jbuf_count(void);          // frames ready to DISPLAY (in order)
+// Frames the decoder has produced and not yet retired: displayable ones plus
+// those the reorder hold is still sorting.  This is the number to test the
+// buffer's fullness against -- jbuf_count() alone can sit below the capacity
+// forever while the hold owns the rest of the slots.
+int          jbuf_used(void);
 int          jbuf_rd(void);
 u64          jbuf_peek_pts_us(void);  // PTS (us, 0=unknown) of current front slot
 u32          jbuf_peek_seq(void);  // decode sequence number of current front slot

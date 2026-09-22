@@ -343,17 +343,11 @@ static void home_activate(void) {
     XMBItem *it = &row->items[s_focus_col];
 
     // A show opens the existing TV Series -> Seasons -> Episodes sub-screen.
-    if (s_focus_row == HR_SHOWS && strcmp(it->type, "Series") == 0) {
-        int tvt = xmb_tab_of_kind(TABKIND_TV);
-        if (tvt < 0) return;
-        g_active_tab = tvt;
-        strncpy(g_tv_series_id,   it->id,   sizeof(g_tv_series_id)-1);
-        strncpy(g_tv_series_name, it->name, sizeof(g_tv_series_name)-1);
-        g_tv_sub_start = 0; g_tv_sub_total = 0;
-        g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items,
-                                           XMB_ITEMS_MAX, 0, &g_tv_sub_total);
-        g_tv_depth = 1; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
-        init_btns();
+    // Keyed off the ITEM TYPE, not the row: a Series turns up in Continue
+    // Watching and Recently Added too, and there it used to fall through to
+    // the video player, which cannot play a folder.
+    if (strcmp(it->type, "Series") == 0) {
+        if (xmb_open_series(it)) init_btns();
         return;
     }
 
@@ -391,8 +385,14 @@ bool xmb_handle_input_home(void) {
     if (BTN_REPEAT(left)  && s_focus_col > 0)                                        { s_focus_col--; ensure_col_visible(); }
 
     if (BTN_PRESSED(cross)) home_activate();
-    if (BTN_PRESSED(triangle) && row->kind != HROW_STUB && s_focus_col < row->count)
-        xmb_show_item_info(&row->items[s_focus_col]);
+    if (BTN_PRESSED(triangle) && row->kind != HROW_STUB && s_focus_col < row->count) {
+        XMBItem *it = &row->items[s_focus_col];
+        // Triangle on a show browses its seasons rather than opening the
+        // version overlay, which for a Series could only ever say "Play".
+        // Pick the episode first; Triangle THERE gives the version picker.
+        if (strcmp(it->type, "Series") == 0) { if (xmb_open_series(it)) init_btns(); }
+        else                                 xmb_show_item_info(it);
+    }
 
     return false;
 }

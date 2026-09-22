@@ -73,6 +73,10 @@ struct PlayerState {
     int      cur_sub;
     int      menu_kind;          // PLAYER_MENU_*
 
+    // The version chosen before playback.  Only the active source is retained;
+    // the full list belongs to the info screen and never enters the player.
+    JFMediaSource source;
+
     int      sock;
     volatile bool playing;
     volatile bool paused;
@@ -111,6 +115,7 @@ void plog_url(const char *tag, const char *url);
 // Jellyfin MediaStream index of the current audio/subtitle selection (-1 = none).
 int  player_audio_stream_idx(const PlayerState *ps);
 int  player_sub_stream_idx(const PlayerState *ps);
+const JFMediaSource *player_current_source(const PlayerState *ps);
 
 // Build the transcode stream URL — used for the initial open and every seek.
 // start_ticks is in Jellyfin's 100-ns units (seconds * 10,000,000).
@@ -161,6 +166,16 @@ void player_display_frame(PlayerState *ps);
 
 bool player_spawn_decode(PlayerState *ps);
 
+// Compressed read-ahead ring (player_threads.cpp).  Allocated per playback
+// from whatever memory is free and released on teardown; this is the buffer
+// that rides out a server delivering its transcode below real time, so a
+// bigger one is strictly better until it starves the rest of the app.
+// decode_ring_fill()/cap() are in PACKETS and drive the pre-roll wait.
+bool decode_ring_alloc(u32 want_bytes);
+void decode_ring_free(void);
+int  decode_ring_fill(void);
+int  decode_ring_cap(void);
+
 // -------------------------------------------------------
 // GPU blit state (defined in gpu/player_gpu.cpp)
 // -------------------------------------------------------
@@ -170,6 +185,7 @@ extern volatile u8  * s_yuvA_buf[2][3];  extern u32 s_yuvA_off[2][3];
 extern volatile u8  * s_yuvB_buf[2][3];  extern u32 s_yuvB_off[2][3];
 extern volatile int   s_vid_disp_idx;
 extern volatile bool  s_vid_frame_ready;
+extern volatile u32   s_vid_uploaded_seq;
 extern volatile bool  s_vid_b_present;
 
 void vid_gpu_init(u32 fw, u32 fh);

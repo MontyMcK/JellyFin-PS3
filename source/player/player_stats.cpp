@@ -16,7 +16,9 @@
 #include <rsx/rsx.h>
 #include <rsx/gcm_sys.h>
 
-#include "adec.h"        // PCM_RING_HIGHWATER
+#include "adec.h"        // PCM_RING_HIGHWATER, adec_get_codec/adec_output_channels
+#include "adec_dts.h"    // adec_dts_saw_extension() — "dts" vs "dts-hd" tag
+#include "audio.h"       // audio_output_channels — negotiated program width
 #include "meminfo.h"     // meminfo_get
 #include "player_rsx.h"  // rsx_draw_overlay_quad
 #include "rsxutil.h"     // display_width / display_height
@@ -121,6 +123,11 @@ static volatile u32 s_audio_starves = 0;
 static volatile u32 s_pcm_avail     = 0;
 static volatile u32 s_dma_ahead     = 0;
 static volatile u32 s_dma_total     = 0;
+// Per-channel output peak, 1/32768 units, peak-hold with decay so a 5.3 ms
+// DMA block does not flicker in a 250 ms recompose.  Slot order is the PS3
+// CellAudio one: 0=FL 1=FR 2=FC 3=LFE 4=SL 5=SR 6=BL 7=BR.
+static volatile u32 s_ch_peak[8]    = {0,0,0,0,0,0,0,0};
+static volatile int s_ch_count      = 0;
 
 // Overlay buffers.
 static u32 *s_ovl_stage   = NULL;
@@ -149,6 +156,8 @@ void player_stats_reset(void) {
     memset(s_hist, 0, sizeof(s_hist));
     s_audio_blocks = s_audio_starves = 0;
     s_pcm_avail = s_dma_ahead = s_dma_total = 0;
+    for (int i = 0; i < 8; i++) s_ch_peak[i] = 0;
+    s_ch_count = 0;
     s_ram_total_kb = s_ram_avail_kb = 0;
     s_ram_min_kb = 0xFFFFFFFFu;
     s_ram_next_us = 0;
@@ -277,6 +286,22 @@ void player_stats_on_audio_write(int pcm_avail_pairs, int dma_ahead,
     s_dma_total = (u32)(dma_total < 0 ? 0 : dma_total);
 }
 
+// Audio thread — per-channel peak of the block just DMA'd.
+void player_stats_on_audio_levels(const int *peaks, int count) {
+    if (!peaks) return;
+    if (count < 0) count = 0;
+    if (count > 8) count = 8;
+    s_ch_count = count;
+    for (int c = 0; c < count; c++) {
+        u32 pk  = (u32)(peaks[c] < 0 ? 0 : peaks[c]);
+        u32 cur = s_ch_peak[c];
+        // Rise instantly, fall ~3%/block (~0.2 s to decay a full-scale peak
+        // to the noise floor) so a dialogue line stays visible long enough
+        // to read off the overlay.
+        s_ch_peak[c] = (pk > cur) ? pk : (cur - (cur >> 5));
+    }
+}
+
 // =========================================================================
 //  Aggregation (display thread, once per recompose)
 // =========================================================================
@@ -362,6 +387,8 @@ void player_stats_get(PlayerStats *out) {
 
     out->audio_blocks  = s_audio_blocks;
     out->audio_starves = s_audio_starves;
+    out->ch_count = s_ch_count;
+    for (int i = 0; i < 8; i++) out->ch_peak[i] = s_ch_peak[i];
     out->pcm_ring_pct  = 100.0f * (float)s_pcm_avail / (float)PCM_RING_HIGHWATER;
     if (out->pcm_ring_pct > 999.0f) out->pcm_ring_pct = 999.0f;
     out->dma_ring_pct  = s_dma_total
@@ -413,6 +440,16 @@ static void ovl_dim(int rx, int ry, int rw, int rh, u8 alpha) {
 
 // One "label: value" line.  Label in faint ink at the left margin, value in
 // the given colour at a fixed column so the numbers stay in a straight edge.
+// Peak in 1/32768 units -> integer dBFS, floored at -99 for "silent".
+// Integer result keeps the overlay line short enough to read at TV distance.
+static int peak_db(u32 pk) {
+    if (pk == 0) return -99;
+    float d = 20.0f * log10f((float)pk / 32768.0f);
+    if (d < -99.0f) d = -99.0f;
+    if (d >   0.0f) d =   0.0f;
+    return (int)(d - 0.5f);
+}
+
 static void stat_line(int y, const char *label, const char *value, u32 color) {
     drawTTF((u32)ST_PAD, (u32)y, label, ST_PX, XMB_TEXT_FAINT);
     drawTTF((u32)(ST_PAD + 62), (u32)y, value, ST_PX, color);
@@ -493,7 +530,27 @@ static void stats_compose(const PlayerStats *s) {
     y += ST_LINE;
 
     // ---- audio ----
-    snprintf(v, sizeof(v), "pcm %.0f%%  dma %.0f%%",
+    // Codec + channels prefix is the surround diagnostic: what the PMT
+    // actually selected (ac3/dts/truehd/mp3) and how wide the decoder is
+    // running, against the port's capacity (8 for the surround port).
+    // "ac3 6/8" is the fully working 5.1 path; "ac3 2/2" is liba52's stereo
+    // downmix (8ch port unavailable); "mp3 2/2" with surround ON means the
+    // server refused the surround codec.  "dts-hd 6/8" means a DTS-HD MA /
+    // DTS:X track played from its core (extension substreams present and
+    // skipped); plain "dts 6/8" is a core-only DTS track.  "truehd 8/8" is a
+    // lossless 7.1 TrueHD/Atmos bed, "truehd 6/8" a 5.1 one.
+    const char *codec_tag = "mp3";
+    if (adec_get_codec() == ADEC_CODEC_AC3)      codec_tag = "ac3";
+    else if (adec_get_codec() == ADEC_CODEC_DTS)
+        // "dts-ma" is the one that matters: the XLL extension decoded
+        // LOSSLESSLY. "dts-hd" means the extension is present but we are
+        // playing its lossy core, which is all libdca could ever do.
+        codec_tag = adec_dts_is_lossless()    ? "dts-ma"
+                  : adec_dts_saw_extension()  ? "dts-hd" : "dts";
+    else if (adec_get_codec() == ADEC_CODEC_TRUEHD) codec_tag = "truehd";
+    snprintf(v, sizeof(v), "%s %d/%d  pcm %.0f%%  dma %.0f%%",
+             codec_tag,
+             adec_output_channels(), audio_output_channels(),
              (double)s->pcm_ring_pct, (double)s->dma_ring_pct);
     stat_line(y, "aud buf", v,
               (s->pcm_ring_pct < 25.0f) ? XMB_ACCENT : XMB_TEXT_DIM);
@@ -503,6 +560,34 @@ static void stats_compose(const PlayerStats *s) {
              (unsigned)s->audio_starves, (unsigned)s->audio_blocks);
     stat_line(y, "starves", v,
               s->audio_starves ? XMB_ACCENT : XMB_TEXT_DIM); y += ST_LINE;
+
+    // ---- per-channel output level ----
+    // The dialogue diagnostic.  These are peaks of the block handed to the
+    // DMA engine, i.e. the last thing the app can see, so they separate the
+    // two reasons a centre speaker can go quiet: a centre reading far below
+    // L/R means the decode really is short of dialogue, while a healthy
+    // centre with nothing audible means the AV chain is not rendering slot 2
+    // (see centermix.h).  Rendered only for a port wider than stereo, where
+    // a centre slot exists at all.
+    if (s->ch_count >= 3) {
+        static const char *SLOT[8] = { "L", "R", "C", "E", "sl", "sr", "bl", "br" };
+        char lv[96];
+        int  n = 0;
+        for (int c = 0; c < s->ch_count && c < 8 && n < (int)sizeof(lv) - 12; c++) {
+            int db = peak_db(s->ch_peak[c]);
+            n += snprintf(lv + n, sizeof(lv) - n, "%s%s%d",
+                          c ? " " : "", SLOT[c], db);
+        }
+        // Flag the case that matters: front L/R clearly active while the
+        // centre sits 20 dB under them is the "dialogue missing" signature.
+        const int dbl = peak_db(s->ch_peak[0]);
+        const int dbr = peak_db(s->ch_peak[1]);
+        const int dbc = peak_db(s->ch_peak[2]);
+        const int fronts = (dbl > dbr) ? dbl : dbr;
+        const bool centre_dead = (fronts > -40) && (dbc < fronts - 20);
+        stat_line(y, "ch peak", lv, centre_dead ? XMB_ACCENT : XMB_TEXT_DIM);
+        y += ST_LINE;
+    }
 
     // ---- A/V sync ----
     snprintf(v, sizeof(v), "%+.1f ms  %s", (double)s->avsync_us / 1000.0,
