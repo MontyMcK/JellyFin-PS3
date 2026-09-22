@@ -456,7 +456,7 @@ void show_player(const JFItem *item, u32 resume_secs,
     exit_reports_join();
     music_join_stale();
     plog("show_player: enter");
-    plog("show_player: BUILD=vdec-arena-fix-1");
+    plog("show_player: BUILD=reorder-1");
     init_btns();
 
 #if BUILD_FOR_RPCS3
