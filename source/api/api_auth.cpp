@@ -153,9 +153,14 @@ int do_login(void) {
              g_username, password);
 
     {
+        // Diagnostic trace of the sign-in request.  /dev_hdd0/tmp is readable
+        // by anyone on the LAN through webMAN's anonymous FTP, so the request
+        // body must NEVER be written verbatim: it carried the password in
+        // plaintext.  Log the URL, the username and the body length only.
         FILE *dbg = fopen("/dev_hdd0/tmp/jf_debug.txt", "w");
         if (dbg) {
-            fprintf(dbg, "URL: %s\nBody(%d): %s\n", url, (int)strlen(body), body);
+            fprintf(dbg, "URL: %s\nBody(%d): {\"Username\":\"%s\",\"Pw\":\"<redacted>\"}\n",
+                    url, (int)strlen(body), g_username);
             fclose(dbg);
         }
     }
