@@ -160,6 +160,15 @@ static int sb_read(int sock, u8 *dst, int want) {
 // 400 because the MediaSourceId was wrong, and those need different fixes.
 static char s_last_error[64] = "";
 
+static int s_rcvbuf_override_kb = 0;   // consumed by the next stream_open()
+
+int stream_open_rcvbuf(const char *url, int rcvbuf_kb) {
+    s_rcvbuf_override_kb = rcvbuf_kb;
+    int r = stream_open(url);
+    s_rcvbuf_override_kb = 0;
+    return r;
+}
+
 int stream_open(const char *url) {
     const char *p = url;
     if (strncmp(p, "http://", 7) == 0) p += 7;
@@ -208,7 +217,9 @@ int stream_open(const char *url) {
         // getsockopt reports the request rather than what is funded, so this
         // cannot be settled by reading it back -- hence the knob
         // (jellyfin_rcvbuf.txt, in KB) rather than another guess.
-        int rb = netcfg_kb("jellyfin_rcvbuf.txt", 512, 2048) * 1024;
+        int rb = (s_rcvbuf_override_kb > 0)
+               ? s_rcvbuf_override_kb * 1024
+               : netcfg_kb("jellyfin_rcvbuf.txt", 512, 2048) * 1024;
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
         s_sb_req = netcfg_kb("jellyfin_netbuf.txt", SB_SIZE / 1024,
                              SB_SIZE / 1024) * 1024;

@@ -71,6 +71,18 @@ static char s_session_id[80] = "";
 
 static sys_ppu_thread_t s_stream_tid = 0;
 static sys_ppu_thread_t s_pump_tid   = 0;
+static sys_ppu_thread_t s_report_tid = 0;
+
+// Playstate reporting runs on its own thread (below).  It used to run on
+// whichever thread wanted it: the 10 s heartbeat on the stream thread, and
+// the pause toggle on the UI thread.  Each is a blocking HTTP round trip,
+// and when the connect fails -- which it does whenever the stream socket has
+// eaten libnet's pool -- it costs the full 5 s connect timeout.  On the
+// console that was: press pause, the whole UI freezes for five seconds; the
+// stream thread's heartbeat hits the same wall, the PCM ring drains, the
+// pump writes silence ("decoder stall" x200), then everything lurches back.
+// The reporter absorbs those stalls where nothing depends on them.
+static volatile bool s_report_now = false;   // pause toggled: push state ASAP
 
 // -------------------------------------------------------
 // PCM ring + audio source callbacks
@@ -264,7 +276,12 @@ static int play_one_track(u32 start_secs) {
 
     char url[1024];
     build_audio_url(url, sizeof(url), t->id, start_secs);
-    int sock = stream_open(url);
+    // 64 KB, not the video path's 512: a 320 kbps MP3 is 40 KB/s, and the
+    // server produces the transcode far faster than that, so the socket
+    // buffer sits full for the whole track.  Sized to the video default it
+    // held the entire libnet pool and every other connect in the app failed
+    // for as long as music played (thumbnails, playstate, the works).
+    int sock = stream_open_rcvbuf(url, 64);
     if (sock < 0) {
         plog("music: stream_open failed, skipping track");
         jellyfin_report_stopped(t->id, s_session_id, elapsed_ticks());
@@ -277,20 +294,13 @@ static int play_one_track(u32 start_secs) {
     static u8 mp3[65536];
     int  buf_pos = 0, buf_len = 0;
     bool eof = false;
-    u64  last_prog_us = timing_get_us();
     int  ret = MCMD_NONE;
 
     while (running && s_run) {
         int c = take_cmd();
         if (c != MCMD_NONE) { ret = c; break; }
-
-        // ~10 s progress heartbeat keeps the server's session view honest.
-        u64 now = timing_get_us();
-        if (now - last_prog_us >= 10000000ULL) {
-            last_prog_us = now;
-            jellyfin_report_progress(t->id, s_session_id, elapsed_ticks(),
-                                     s_paused);
-        }
+        // (Progress reporting lives on the reporter thread; nothing here may
+        // block on the server or the ring runs dry.)
 
         // Fill: keep a healthy sync window ahead of the decoder.  A read
         // timeout (rd == 0) falls through to decode whatever is buffered so
@@ -401,6 +411,33 @@ static void music_pump_thread(void *arg) {
 }
 
 // -------------------------------------------------------
+// Reporter thread — playstate to the server, off everyone else's path
+// -------------------------------------------------------
+
+static void music_report_thread(void *arg) {
+    (void)arg;
+    u64 last_us = timing_get_us();
+    while (running && s_run) {
+        u64 now = timing_get_us();
+        bool due = s_report_now || (now - last_us >= 10000000ULL);
+        if (due && s_active && s_session_id[0] && s_pos < s_count) {
+            s_report_now = false;
+            last_us = now;
+            // A stale track id or a session id mid-rewrite (the stream
+            // thread owns both) costs one wrong heartbeat, which the next
+            // one corrects; a lock here would put the stream thread behind
+            // this thread's HTTP again.
+            jellyfin_report_progress(s_queue[s_order[s_pos]].id, s_session_id,
+                                     elapsed_ticks(), s_paused);
+        } else {
+            usleep(100000);
+        }
+    }
+    plog("music: report thread exit");
+    sysThreadExit(0);
+}
+
+// -------------------------------------------------------
 // Public API
 // -------------------------------------------------------
 
@@ -435,13 +472,18 @@ bool music_start(const MusicTrack *tracks, int count, int start_idx) {
     audio_set_source(music_pcm_avail, music_read_pcm, music_channels);
     audio_open(2);   // music path is stereo by design
 
-    s_run     = true;
-    s_active  = true;
-    s_started = true;
+    s_run        = true;
+    s_active     = true;
+    s_started    = true;
+    s_report_now = false;
     sysThreadCreate(&s_pump_tid, music_pump_thread, NULL,
                     700, 0x8000, THREAD_JOINABLE, (char*)"jf_mpump");
     sysThreadCreate(&s_stream_tid, music_stream_thread, NULL,
                     850, 0x20000, THREAD_JOINABLE, (char*)"jf_music");
+    // Lowest of the three: it only ever talks to the server, and a stalled
+    // report must lose to the pump and the decoder, never the other way.
+    sysThreadCreate(&s_report_tid, music_report_thread, NULL,
+                    1200, 0x10000, THREAD_JOINABLE, (char*)"jf_mreport");
     return true;
 }
 
@@ -453,6 +495,7 @@ void music_stop(void) {
     u64 retval;
     sysThreadJoin(s_stream_tid, &retval);
     sysThreadJoin(s_pump_tid, &retval);
+    sysThreadJoin(s_report_tid, &retval);   // may be inside a 5 s connect wait
     g_stream_cancel = false;
     audio_close();
     audio_set_source(NULL, NULL, NULL);   // hand the port back to the video path
@@ -463,10 +506,12 @@ void music_stop(void) {
 
 void music_toggle_pause(void) {
     s_paused = !s_paused;
-    // Push the state immediately so the server UI flips too.
-    if (s_pos < s_count)
-        jellyfin_report_progress(s_queue[s_order[s_pos]].id, s_session_id,
-                                 elapsed_ticks(), s_paused);
+    plog(s_paused ? "music: paused" : "music: resumed");
+    // Push the state promptly so the server UI flips too -- from the
+    // reporter thread.  This runs on the UI thread, and the report is a
+    // blocking round trip that used to freeze the screen for its whole
+    // timeout whenever the server was slow to accept.
+    s_report_now = true;
 }
 
 void music_next(void) { s_cmd = MCMD_NEXT; }
