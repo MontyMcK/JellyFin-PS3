@@ -84,7 +84,12 @@ const u8    *jbuf_peek(void);
 void         jbuf_pop(void);
 u32          jbuf_fw(void);
 u32          jbuf_fh(void);
-int          jbuf_count(void);
+int          jbuf_count(void);          // frames ready to DISPLAY (in order)
+// Frames the decoder has produced and not yet retired: displayable ones plus
+// those the reorder hold is still sorting.  This is the number to test the
+// buffer's fullness against -- jbuf_count() alone can sit below the capacity
+// forever while the hold owns the rest of the slots.
+int          jbuf_used(void);
 int          jbuf_rd(void);
 u64          jbuf_peek_pts_us(void);  // PTS (us, 0=unknown) of current front slot
 u32          jbuf_peek_seq(void);  // decode sequence number of current front slot

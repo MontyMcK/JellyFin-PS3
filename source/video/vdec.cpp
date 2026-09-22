@@ -9,6 +9,7 @@
 #include "jellyfin_api.h"   // g_source_fps_milli — server-reported frame rate
 
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include <unistd.h>
 #include <malloc.h>
@@ -18,6 +19,47 @@
 #include <codec/vdec.h>
 
 extern void crash_log(const char *msg);
+
+// The H.264 picture info the decoder attaches to every output picture, laid
+// out as the firmware actually writes it.  PSL1GHT's vdecH264Info declares
+// pic_order_count as s8[2]; Sony's CellVdecAvcInfo (RPCS3 carries a byte-exact
+// copy, and Movian's ps3_vdec.c masks the field with 0x7fff) has int16[2].
+// That two-byte difference shifts every field after pic_struct, so through
+// the PSL1GHT struct `frame_rate` reads Sony's transfer_characteristics byte:
+// BT.709 is code 1, which is also the frame-rate code for 23.976, so the
+// detection looked right on every tagged 23.976 transcode and reported "no
+// frc" on the untagged stream copy.  Offsets are pinned below so this cannot
+// drift again.
+struct VdecAvcInfo {
+    u16 width;
+    u16 height;
+    u8  picture_type[2];
+    u8  idr_picture_flag;
+    u8  aspect_ratio_idc;
+    u16 sar_height;
+    u16 sar_width;
+    u8  pic_struct;
+    u8  pad_;
+    s16 pic_order_count[2];
+    u8  vui_parameters_present_flag;
+    u8  frame_mbs_only_flag;
+    u8  video_signal_type_present_flag;
+    u8  video_format;
+    u8  video_full_range_flag;
+    u8  color_description_present_flag;
+    u8  color_primaries;
+    u8  transfer_characteristics;
+    u8  matrix_coefficients;
+    u8  timing_info_present_flag;
+    u8  frame_rate;
+    u8  fixed_frame_rate_flag;
+    u8  low_delay_hrd_flag;
+    u8  entropy_coding_mode_flag;
+    u16 nal_unit_present_flags;
+};
+typedef char vdec_avc_poc_offset_check[offsetof(VdecAvcInfo, pic_order_count) == 14 ? 1 : -1];
+typedef char vdec_avc_frc_offset_check[offsetof(VdecAvcInfo, frame_rate)      == 28 ? 1 : -1];
+typedef char vdec_avc_nal_offset_check[offsetof(VdecAvcInfo, nal_unit_present_flags) == 32 ? 1 : -1];
 
 // -------------------------------------------------------
 // VDEC — video decoder
@@ -311,7 +353,13 @@ void vdec_reserve_mem(void) {
     }
 }
 
+// Display-order key state (see vdec_pull_frame).
+static s64 s_order_base = 0;
+static int s_poc_ext    = 0;
+
 void vdec_reset_counters(void) {
+    s_order_base   = 0;
+    s_poc_ext      = 0;
     s_au_submitted = 0;
     s_got_sps      = false;
     s_au_buf_idx   = 0;
@@ -557,11 +605,15 @@ bool vdec_pull_frame(void) {
             plog(buf);
         }
     }
-    u8 frc = 0;
+    u8  frc   = 0;
+    s64 order = JBUF_ORDER_NONE;
     if (pic->codec_specific_addr) {
-        const vdecH264Info *h =
-            (const vdecH264Info*)(uintptr_t)pic->codec_specific_addr;
-        frc = h->frame_rate;
+        const VdecAvcInfo *h =
+            (const VdecAvcInfo*)(uintptr_t)pic->codec_specific_addr;
+        // The rate code is only meaningful when the SPS carried VUI timing;
+        // otherwise fps_from_frc()'s fallback to the server-reported rate is
+        // the right answer, not whatever this byte happens to hold.
+        frc = h->timing_info_present_flag ? h->frame_rate : 0;
         if (h->width > 0 && h->height > 0 &&
             (h->width != jbuf_fw() || h->height != jbuf_fh())) {
             char buf[80];
@@ -571,6 +623,50 @@ bool vdec_pull_frame(void) {
                      (unsigned)pic->picture_size);
             plog(buf);
             jbuf_set_dims(h->width, h->height);
+        }
+
+        // Display-order key, Movian's construction verbatim: the decoder
+        // emits pictures in decode order and the jitter buffer sorts them by
+        // this.  An IDR starts a new epoch above everything before it; the
+        // 15-bit picture order count wraps, tracked by its top two bits
+        // (poc_ext), and a straggler from just before a wrap sorts back into
+        // the previous epoch.
+        if (h->idr_picture_flag) {
+            s_order_base += 0x100000000LL;
+            s_poc_ext = 0;
+        }
+        u32 om = (u32)((u16)h->pic_order_count[0] & 0x7fff);
+        int p  = (int)(om >> 13);
+        if (p == ((s_poc_ext + 1) & 3)) {
+            s_poc_ext = p;
+            if (p == 0) s_order_base += 0x100000000LL;
+        }
+        if (p == 3 && s_poc_ext == 0)
+            order = s_order_base + om - 0x100000000LL;
+        else
+            order = s_order_base + om;
+
+        // First pictures of a session: the fields this path depends on, so a
+        // pulled log shows the struct layout holds on the firmware in use
+        // (POC should step by 2 per frame in display order and be far from
+        // monotonic in arrival order on a B-frame stream; frc lives at byte
+        // 28, transfer_characteristics at 25).
+        static int s_info_log = 0;
+        if (s_info_log < 8) {
+            s_info_log++;
+            const u8 *raw = (const u8*)h;
+            char buf[200];
+            snprintf(buf, sizeof(buf),
+                "avc_info: %ux%u type=%u idr=%u ps=%u poc=%d/%d vui=%u tip=%u frc=%u "
+                "ffr=%u tc=%u mc=%u nal=0x%04x order=%lld b25=%u b28=%u",
+                h->width, h->height, h->picture_type[0], h->idr_picture_flag,
+                h->pic_struct, (int)h->pic_order_count[0], (int)h->pic_order_count[1],
+                h->vui_parameters_present_flag, h->timing_info_present_flag,
+                h->frame_rate, h->fixed_frame_rate_flag,
+                h->transfer_characteristics, h->matrix_coefficients,
+                (unsigned)h->nal_unit_present_flags, (long long)order,
+                raw[25], raw[28]);
+            plog(buf);
         }
     }
 
@@ -636,7 +732,7 @@ bool vdec_pull_frame(void) {
             plog(buf);
         }
     }
-    jbuf_push(pts_us, dur_us);
+    jbuf_push(pts_us, dur_us, order);
 
     if (!s_timing_ready) {
         int fps_num, fps_den;

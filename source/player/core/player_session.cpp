@@ -234,7 +234,10 @@ void player_prefill(PlayerState *ps, bool fatal_on_eof, int guard_max) {
     u8   ts_pkt[TS_PACKET_SIZE];
     bool first_pkt = true;
     int  guard     = 0;
-    while (jbuf_count() < jbuf_prefill_target() && running && !s_vdec_error &&
+    // Counted with jbuf_used(): pictures the reorder hold has not released yet
+    // are decoded and buffered, and on the 8-slot 1080p path the displayable
+    // count alone can never reach the target while the hold owns half of it.
+    while (jbuf_used() < jbuf_prefill_target() && running && !s_vdec_error &&
            guard < guard_max) {
         sysUtilCheckCallback();
         int rd = stream_read(ps->sock, ts_pkt, TS_PACKET_SIZE);

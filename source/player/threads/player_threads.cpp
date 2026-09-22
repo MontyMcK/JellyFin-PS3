@@ -34,7 +34,7 @@ extern u32 running;
 // The decode thread used to stop reading the socket entirely whenever the
 // jitter buffer was full:
 //
-//     if (jbuf_count() >= jbuf_cap()) { usleep(1000); continue; }
+//     if (jbuf_used() >= jbuf_cap()) { usleep(1000); continue; }
 //
 // That made the decoded-frame jitter buffer the ONLY shock absorber, and at
 // 1080p it holds sixteen frames — about half a second.  A server transcoding
@@ -161,8 +161,12 @@ void decode_thread_fn(void *arg) {
     int  hb_fr_last            = 0;
 
     while (running && *playing && *ctx->dec_run && !s_vdec_error) {
+        // "Room" is measured with jbuf_used(), not jbuf_count(): frames the
+        // reorder hold is still sorting own slots too, and testing only the
+        // displayable count would keep feeding the decoder into a buffer
+        // with nowhere to put the picture.
         // Buffered video first, in arrival order, while there is room for it.
-        while (s_ring_n > 0 && jbuf_count() < jbuf_cap()) {
+        while (s_ring_n > 0 && jbuf_used() < jbuf_cap()) {
             video_feed_ts(s_ring + (size_t)s_ring_rd * TS_PACKET_SIZE);
             s_ring_rd = (s_ring_rd + 1) % s_ring_cap;
             s_ring_n--;
@@ -181,7 +185,7 @@ void decode_thread_fn(void *arg) {
         // audio has to fit in the compressed-audio queue: overrun it and the
         // oldest PES is dropped, which is heard as a jump.  So the reserve is
         // whichever of the two runs out first.
-        const bool jbuf_full = jbuf_count() >= jbuf_cap();
+        const bool jbuf_full = jbuf_used() >= jbuf_cap();
         const bool ring_full = (s_ring_cap == 0) || (s_ring_n >= s_ring_cap);
         if (jbuf_full && (ring_full || !adec_pes_queue_hungry())) {
             usleep(1000);
@@ -191,7 +195,7 @@ void decode_thread_fn(void *arg) {
         for (int batch = 0; batch < 128; batch++) {
             // Stop the batch when neither the jitter buffer nor the ring can
             // take any more.
-            if (jbuf_count() >= jbuf_cap() &&
+            if (jbuf_used() >= jbuf_cap() &&
                 (s_ring_cap == 0 || s_ring_n >= s_ring_cap ||
                  !adec_pes_queue_hungry()))
                 break;
@@ -215,7 +219,7 @@ void decode_thread_fn(void *arg) {
             // Keep the buffered video moving as soon as room appears.  This
             // has to happen inside the batch, not just once per outer
             // iteration: the jitter buffer drains mid-batch.
-            while (s_ring_n > 0 && jbuf_count() < jbuf_cap()) {
+            while (s_ring_n > 0 && jbuf_used() < jbuf_cap()) {
                 video_feed_ts(s_ring + (size_t)s_ring_rd * TS_PACKET_SIZE);
                 s_ring_rd = (s_ring_rd + 1) % s_ring_cap;
                 s_ring_n--;
@@ -228,7 +232,7 @@ void decode_thread_fn(void *arg) {
             // PES wrong — which looks like constant macroblock artifacts
             // rather than like a queueing bug.  A packet only goes straight
             // through when the ring is empty.
-            if (s_ring_n == 0 && jbuf_count() < jbuf_cap()) {
+            if (s_ring_n == 0 && jbuf_used() < jbuf_cap()) {
                 video_feed_ts(ts_pkt);          // normal path, unchanged
             } else if (!video_feed_ts_audio_only(ts_pkt)) {
                 if (s_ring_cap > 0 && s_ring_n < s_ring_cap) ring_push(ts_pkt);
@@ -237,7 +241,7 @@ void decode_thread_fn(void *arg) {
         }
 
         // Drain all decoded frames from VDEC into the jitter buffer
-        while (s_frames_ready > 0 && jbuf_count() < jbuf_cap()) {
+        while (s_frames_ready > 0 && jbuf_used() < jbuf_cap()) {
             if (!vdec_pull_frame()) break;
         }
 
