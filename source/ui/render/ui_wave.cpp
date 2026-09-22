@@ -1084,11 +1084,20 @@ void wave_draw(void) {
 
                 WaveVert *tv = v + base;
                 for (u32 k = 0; k < section_v; k++) {
-                    // TEST 28: preserve the actual generated X/Y for the
-                    // submitted section, but force safe Z/W and constant
-                    // opaque colour. This removes our synthetic coordinate
-                    // rewrite while keeping the RSX submission otherwise
-                    // identical to Test 27.
+                    // TEST 29: operate on the ACTUAL generated section in
+                    // place. Preserve its topology, but clamp the real X/Y
+                    // values and sanitize NaNs. This distinguishes a bad
+                    // coordinate value from a bad vertex-buffer write.
+                    float x = tv[k].x;
+                    float y = tv[k].y;
+                    if (!(x == x)) x = 0.0f;
+                    if (!(y == y)) y = 0.0f;
+                    if (x < -1.0f) x = -1.0f;
+                    if (x >  1.0f) x =  1.0f;
+                    if (y < -1.0f) y = -1.0f;
+                    if (y >  1.0f) y =  1.0f;
+                    tv[k].x = x;
+                    tv[k].y = y;
                     tv[k].z = 0.0f;
                     tv[k].w = 1.0f;
                     tv[k].rgba = WAVE_RGBA(128, 128, 128, 255);
