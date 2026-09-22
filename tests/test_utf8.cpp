@@ -76,6 +76,7 @@ void bitmapDestroy(Bitmap *bm)         { memset(bm, 0, sizeof(*bm)); }
 
 #include "ui_text_gpu.h"
 bool ui_text_gpu_run(u32, u32, const char *, float, u32, int) { return false; }
+bool strobe_test_disable_tracked_text(void) { return false; }
 bool ui_text_gpu_icon(u32, u32, int, float, u32) { return false; }
 
 // ui_draw.cpp reaches for these two.  Colours do not affect metrics, so a

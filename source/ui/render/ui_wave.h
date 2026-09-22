@@ -22,6 +22,11 @@ bool wave_gpu_blend_ready(void);
 // already landed, and it would draw over them.  See ui_wave.cpp.
 void wave_draw_divider_gpu(int y_px, u8 r, u8 g, u8 b, u8 peak_alpha);
 
+// Focus glow for the XMB category strip.  This is a small blended fan emitted
+// in the pre-fence GPU phase, so it never composites through the framebuffer.
+void wave_draw_glow_gpu(int cx_px, int cy_px, int radius_px,
+                        u8 r, u8 g, u8 b, u8 peak_alpha);
+
 // Blended full-screen black quad at the given alpha, drawn on the GPU and
 // fenced with rsxSync() so CPU pixel writes may follow immediately.  Used to
 // dim the finished frame under a modal.

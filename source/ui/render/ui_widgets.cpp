@@ -9,6 +9,7 @@
 #include "ui.h"
 #include "ui_visuals.h"
 #include "ui_wave.h"
+#include "ui_strobe_test.h"
 #include "icons.h"
 #include "stb_image.h"
 #include "ps_buttons_png.h"
@@ -44,6 +45,40 @@ static int tab_icon(int tab) {
     // tabler-icons.ttf with the ICON_* codepoints, per that file's header).
     default:               return ICON_PHOTO;
     }
+}
+
+static int xmb_tab_layout(int *enabled, int *spacing, int *x0)
+{
+    const int n = xmb_tab_order(enabled);
+    const int avail = (int)display_width - 2 * XMB_ITEM_PAD;
+    int step = UIS_H(136);
+
+    if (n > 1 && (n - 1) * step > avail) {
+        step = avail / (n - 1);
+        const int floor_px = UIS_H(32) + UIS_H(8);
+        if (step < floor_px) step = floor_px;
+    }
+    *spacing = step;
+    *x0 = (int)display_width / 2 - (n - 1) * step / 2;
+    return n;
+}
+
+int xmb_nav_depth(void)
+{
+    if (g_tv_depth > 0) return g_tv_depth;
+    if (g_col_depth > 0) return g_col_depth;
+    if (g_music_depth > 0) return g_music_depth;
+    return 0;
+}
+
+int xmb_tab_focus_center(void)
+{
+    int enabled[XMB_TAB_COUNT], spacing, x0;
+    const int n = xmb_tab_layout(enabled, &spacing, &x0);
+
+    for (int i = 0; i < n; i++)
+        if (enabled[i] == g_active_tab) return x0 + i * spacing;
+    return (int)display_width / 2;
 }
 
 // -------------------------------------------------------
@@ -86,10 +121,15 @@ void xmb_draw_topbar(void) {
     const int   wx = (int)XMB_ITEM_PAD + mark_px + UIS_H(6);
     int wy;
     if (ttf_center_y("JELLYFIN", word_px, UI_FACE_LOCKUP, cy, &wy)) {
-        drawTTF_tracked((u32)wx, (u32)(wy + UIS_H(1)), "JELLYFIN", word_px,
-                        0x00000000, UI_FACE_LOCKUP, track);
-        drawTTF_ramp((u32)wx, (u32)wy, "JELLYFIN", word_px,
-                     ramp, 4, UI_FACE_LOCKUP, track);
+        if (xmb_nav_depth() > 0) {
+            drawTTF_tracked((u32)wx, (u32)wy, "JELLYFIN", word_px,
+                            XMB_TEXT_FAINT, UI_FACE_LOCKUP, track);
+        } else {
+            drawTTF_tracked((u32)wx, (u32)(wy + UIS_H(1)), "JELLYFIN", word_px,
+                            0x00000000, UI_FACE_LOCKUP, track);
+            drawTTF_ramp((u32)wx, (u32)wy, "JELLYFIN", word_px,
+                         ramp, 4, UI_FACE_LOCKUP, track);
+        }
     }
 
     // Clock, right-aligned, with the date dimmer beside it.
@@ -197,8 +237,8 @@ void xmb_draw_divider(void) {
 // numbers win over any revision note, because they were read off the rendered
 // JFChrome frame rather than projected:
 //
-//   7 items, width 70, gap 40, stride 110, row starts x=275
-//   icon 26x26 at y=61 · label y=96 (active only) · underline 2px y=110
+//   7 items, width 70, gap 66, stride 136, row starts x=275
+//   focused icon 32x32 at y=61 · label y=96 · underline 2px y=110
 //   divider y=144
 //
 // The "nav band 80->68px" note is NOT a stride and was never one: it describes
@@ -211,10 +251,11 @@ void xmb_draw_divider(void) {
 // strip proportional and consistent with the hints bar.  The vertical anchors
 // stay RELATIVE to XMB_TOPBAR_H so the strip cannot drift away from the bar
 // above it if that ever changes.
-#define TAB_ICON_PX     26   // uniform; the active tab reads by colour, not size
+#define TAB_FOCUS_ICON_PX 32
+#define TAB_IDLE_ICON_PX  24
 #define TAB_ITEM_W      70
-#define TAB_GAP         40
-#define TAB_STRIDE      (TAB_ITEM_W + TAB_GAP)   // 110
+#define TAB_GAP         66
+#define TAB_STRIDE      (TAB_ITEM_W + TAB_GAP)   // 136
 #define TAB_ICON_Y      61   // from the top of the frame, 720p
 #define TAB_LABEL_Y     96
 #define TAB_RULE_Y     110
@@ -225,67 +266,53 @@ void xmb_draw_tabs(void) {
 
     // Display order (Search, Home, libraries, Settings) — NOT array order,
     // since Settings keeps a low index but renders last.
-    int enabled[XMB_TAB_COUNT];
-    int n = xmb_tab_order(enabled);
+    int enabled[XMB_TAB_COUNT], spacing, tab_group_x0;
+    int n = xmb_tab_layout(enabled, &spacing, &tab_group_x0);
     if (n == 0) return;
 
-    // Stride adapts, because the tab count follows the server's library count
-    // rather than the design's fixed 7.  The measured 110 is kept whenever the
-    // row fits; past that it shrinks to whatever divides the usable width,
-    // floored so icons never overlap.
-    const int avail = (int)display_width - 2 * XMB_ITEM_PAD;
-    int spacing = UIS_H(TAB_STRIDE);
-    if (n > 1 && (n - 1) * spacing > avail) {
-        spacing = avail / (n - 1);
-        const int floor_px = UIS_H(TAB_ICON_PX) + UIS_H(8);
-        if (spacing < floor_px) spacing = floor_px;
-    }
-
-    const int group_w      = (n - 1) * spacing;
-    const int tab_group_x0 = (int)display_width / 2 - group_w / 2;
-
-    const int icon_px = UIS_H(TAB_ICON_PX);
     const int icon_y  = oy + UIS_H(TAB_ICON_Y);
     const int label_y = oy + UIS_H(TAB_LABEL_Y);
     const int rule_y  = oy + UIS_H(TAB_RULE_Y);
+    const bool recessed = xmb_nav_depth() > 0;
+    const int focus_center = xmb_tab_focus_center();
 
-    // Uniform icon row: the active tab reads by COLOUR plus its label and the
-    // accent underline, never by growing.  Section 3.0: "Focused items change
-    // scale, ring and brightness — never weight", and the strip's own table
-    // gives one icon size for every state.
     for (int i = 0; i < n; i++) {
         int  t      = enabled[i];
         int  cx     = tab_group_x0 + i * spacing;
         bool active = (t == g_active_tab);
+        int  dist   = active ? 0 : abs(i - (focus_center - tab_group_x0) / spacing);
+        int  icon_px = UIS_H(active && !recessed ? TAB_FOCUS_ICON_PX
+                                                  : TAB_IDLE_ICON_PX);
+        u32 icon_color = recessed ? XMB_ICON_IDLE
+                       : active   ? XMB_WHITE
+                       : dist == 1 ? XMB_ICON_IDLE : XMB_HAIRLINE;
 
         drawIcon((u32)(cx - icon_px / 2), (u32)icon_y, tab_icon(t),
-                 (float)icon_px, active ? XMB_WHITE : XMB_ICON_IDLE);
+                 (float)icon_px, icon_color);
 
+        // Profile 1 suppresses only inactive labels; profile 2 suppresses
+        // the entire category-label path. All other profiles preserve the
+        // reconstructed strip exactly, including its tracked label layout.
+        const float px    = UIS_TF(11.5f);
+        const float track = px * 0.04f;
+        char label[sizeof(g_tabs[t].label)];
+        snprintf(label, sizeof label, "%s", g_tabs[t].label);
+        ui_upper_ascii(label);
+
+        int lw = ttf_text_width_tracked(label, px, UI_FACE_TAB, track);
+        int lx = cx - lw / 2;
+        int lo = XMB_ITEM_PAD;
+        int hi = (int)display_width - XMB_ITEM_PAD - lw;
+        if (lx < lo) lx = lo;
+        if (hi >= lo && lx > hi) lx = hi;
+        u32 label_color = recessed ? XMB_TEXT_FAINT : XMB_WHITE;
+        if (!strobe_test_disable_category_labels() &&
+            (active || !strobe_test_disable_inactive_labels()))
+            drawTTF_tracked((u32)lx, (u32)label_y, label, px, label_color,
+                            active ? UI_FACE_TAB : UI_FACE_TAB_REG, track);
         if (active) {
-            // v1.0: Satoshi Bold 11.5px, UPPERCASE, 0.04em tracking.
-            //
-            // Labels are server library names, so they can be long and the
-            // active tab can sit at either end of the row.  Centre under the
-            // icon, then clamp into the safe area so a wide name is never
-            // pushed off-screen -- measured WITH the tracking, or the clamp
-            // would be computed against a narrower string than gets drawn.
-            const float px    = UIS_TF(11.5f);
-            const float track = px * 0.04f;      // 0.04em
-            char label[sizeof(g_tabs[t].label)];
-            snprintf(label, sizeof label, "%s", g_tabs[t].label);
-            ui_upper_ascii(label);
-
-            int lw = ttf_text_width_tracked(label, px, UI_FACE_TAB, track);
-            int lx = cx - lw / 2;
-            int lo = XMB_ITEM_PAD;
-            int hi = (int)display_width - XMB_ITEM_PAD - lw;
-            if (lx < lo) lx = lo;
-            if (hi >= lo && lx > hi) lx = hi;
-            drawTTF_tracked((u32)lx, (u32)label_y, label, px, XMB_TEXT,
-                            UI_FACE_TAB, track);
-            const int rw = UIS_H(TAB_ICON_PX);   // underline matches the icon
-            drawRect((u32)(cx - rw / 2), (u32)rule_y,
-                     (u32)rw, (u32)UIS_H(TAB_RULE_H), XMB_ACCENT);
+            drawRect((u32)lx, (u32)rule_y, (u32)lw, (u32)UIS_H(TAB_RULE_H),
+                     recessed ? XMB_HAIRLINE : XMB_ACCENT);
         }
     }
 }

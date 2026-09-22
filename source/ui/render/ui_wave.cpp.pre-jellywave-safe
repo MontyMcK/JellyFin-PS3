@@ -14,7 +14,6 @@
 #include "ui_wave_audio.h"
 #include "ui_wave.h"
 #include "ui_visuals.h"
-#include "ui_strobe_test.h"
 #include "plog.h"
 #include "jf_paths.h"
 
@@ -311,41 +310,6 @@ static bool      s_wave_jelly       = false;   // mode 3
 // WaveVert and deliberately never goes near video memory, so the one dangerous
 // layout stays in the one file that documents why it is dangerous.
 static jw_vert   s_jw[JW_VERTS];
-
-/*
- * Finished WaveVert stream in ordinary PPU/main memory.
- *
- * IMPORTANT: this is the only place the JellyWave WaveVert stream is built.
- * The RSX-local vertex buffers are WRITE-ONLY from the PPU.  Never read a
- * WaveVert back from s_wave_vbuf[].
- */
-static WaveVert s_jw_stage[WAVE_MAX_VERTS];
-
-static u64 s_jw_upload_us = 0;
-static u32 s_jw_repaired  = 0;
-static u32 s_jw_dropped   = 0;
-
-/*
- * Upload the completed stream using whole aligned 64-bit stores only.
- *
- * WaveVert is 24 bytes and aligned(8), so every vertex and the complete
- * JellyWave stream are 64-bit aligned.  may_alias prevents strict-aliasing
- * from turning this into an unsafe typed access on the PPU.
- */
-typedef u64 jw_upload_word __attribute__((may_alias));
-
-static inline void jw_upload(WaveVert *dst, const WaveVert *src, u32 count)
-{
-    volatile jw_upload_word *d = (volatile jw_upload_word *)dst;
-    const jw_upload_word *s = (const jw_upload_word *)src;
-    u32 words = (count * (u32)sizeof(WaveVert)) / 8u;
-    u32 i;
-
-    for (i = 0; i < words; i++)
-        d[i] = s[i];
-
-    __asm__ __volatile__("sync" ::: "memory");
-}
 
 // Rolling cost, logged once a second.  The xmb: frame line's `gpu` bucket
 // measures SUBMISSION, not RSX work, so the only honest things to report from
@@ -772,7 +736,6 @@ static inline void wave_vtx(float x, float y, u8 r, u8 g, u8 b) {
 void wave_draw(void) {
     if (ui_cpu_bg()) { wave_draw_cpu(); return; }
     if (!s_wave_fp_buf) return;
-    const bool jellywave = s_wave_jelly && !strobe_test_disable_jellywave();
 
     rsxVertexProgram  *vpo = (rsxVertexProgram*)  wave_vp_data;
     rsxFragmentProgram *fpo = (rsxFragmentProgram*) wave_fp_data;
@@ -842,7 +805,7 @@ void wave_draw(void) {
         float ts, pert, drv;
         wave_audio_frame(&ts, &pert, &drv);
         wf_step(&s_field,
-                WAVE_FIELD_DT * ts * (jellywave ? s_jw_speed : 1.0f),
+                WAVE_FIELD_DT * ts * (s_wave_jelly ? s_jw_speed : 1.0f),
                 pert, drv);
     }
 
@@ -865,7 +828,7 @@ void wave_draw(void) {
     // cost that is invisible in a profile because it is spread over three
     // loops.
     static float crest[3][WAVE_MAX_COLS];
-    if (!jellywave) {
+    if (!s_wave_jelly) {
         for (int li = 0; li < 3; li++)
             for (int ci = 0; ci < ncols; ci++)
                 crest[li][ci] = wave_crest(li, colx[ci], W, H);
@@ -894,7 +857,7 @@ void wave_draw(void) {
         // always did.  The first call after init must build whatever the
         // cadence says, or the first frames would draw an empty buffer.
         bool jw_rebuild = true;
-        if (jellywave && s_jw_rebuild_every > 1 && s_jw_have_geom) {
+        if (s_wave_jelly && s_jw_rebuild_every > 1 && s_jw_have_geom) {
             jw_rebuild = (s_jw_rebuild_phase == 0);
             if (++s_jw_rebuild_phase >= s_jw_rebuild_every)
                 s_jw_rebuild_phase = 0;
@@ -912,13 +875,12 @@ void wave_draw(void) {
         // the next optimization is a per-buffer fence rather than removing the
         // safety entirely.
         if (jw_rebuild) {
-            if (jellywave && s_jw_have_geom)
+            if (s_wave_jelly && s_jw_have_geom)
                 rsxSync();
+            s_wave_vbuf_turn ^= 1;
         }
 
-        WaveVert *v  = jellywave
-                     ? s_jw_stage
-                     : s_wave_vbuf[s_wave_vbuf_turn];
+        WaveVert *v  = s_wave_vbuf[s_wave_vbuf_turn];
         u32       vo = s_wave_vbuf_off[s_wave_vbuf_turn];
         int       n  = 0;
 
@@ -940,34 +902,26 @@ void wave_draw(void) {
             WV_PUT( 1.0f, -1.0f, gbrr, gbrg, gbrb, 255);   // bottom-right
         }
 
-        if (jellywave && jw_rebuild) {
+        if (s_wave_jelly && jw_rebuild) {
             // STROBE ISOLATION TEST 4: build the real JellyWave geometry,
             // but the submission below will draw only the first body strip
             // of the furthest layer. This isolates basic JellyWave geometry
             // from the merged multi-strip/degen-join path.
             u64 jw_t0 = timing_get_us();
 
-            /*
-             * Build the COMPLETE JellyWave stream in main memory.
-             *
-             * Nothing below reads from the RSX-local destination buffer.
-             * This is deliberately separated from the upload step below.
-             */
-            #define JW_EMIT(Q, A, USE_RIM) do {                         \
-                const jw_vert *q_ = (Q);                                \
-                s_jw_stage[n].x = q_->x;                                \
-                s_jw_stage[n].y = q_->y;                                \
-                s_jw_stage[n].z = 0.0f;                                 \
-                s_jw_stage[n].w = 1.0f;                                 \
-                s_jw_stage[n].rgba = (USE_RIM)                         \
-                    ? WAVE_RGBA(q_->rr, q_->rg, q_->rb, 255)            \
-                    : WAVE_RGBA(q_->r, q_->g, q_->b, (A));              \
-                n++;                                                    \
+            #define JW_EMIT(Q, A, USE_RIM) do {                            \
+                const jw_vert *q_ = (Q);                                   \
+                v[n].x = q_->x; v[n].y = q_->y;                            \
+                v[n].z = 0.0f;  v[n].w = 1.0f;                             \
+                v[n].rgba = (USE_RIM)                                      \
+                    ? WAVE_RGBA(128, 128, 128, 255)                       \
+                    : WAVE_RGBA(128, 128, 128, (A));              \
+                n++;                                                       \
             } while (0)
 
             for (int slot = 0; slot < JW_LAYERS; slot++) {
-                const int       li = JW_LAYERS - 1 - slot;
-                const jw_layer *L  = &JW_LAYER[li];
+                const int li = JW_LAYERS - 1 - slot;
+                const jw_layer *L = &JW_LAYER[li];
                 int order[JW_SECTION];
                 int pass, s, i;
 
@@ -977,68 +931,39 @@ void wave_draw(void) {
                 if (!jw_build_layer(L, s_field.sy[li], WF_SAMPLES,
                                     W / H, s_jw, JW_VERTS))
                     continue;
-
-                {
-                    int repaired = 0;
-                    if (!jw_sanitize_layer(s_jw, &repaired)) {
-                        s_jw_dropped++;
-                        continue;
-                    }
-                    s_jw_repaired += (u32)repaired;
-                }
-
                 jw_strip_order(s_jw, order);
 
                 for (pass = 0; pass < 2; pass++) {
                     int started = 0;
-                    const jw_vert *tail = NULL;
-
                     s_jw_off[slot][pass] = (u32)n;
 
                     for (s = 0; s < JW_SECTION; s++) {
-                        const int j  = order[s];
+                        const int j = order[s];
                         const int j2 = (j + 1) % JW_SECTION;
 
-                        if (pass == 1 && !jw_strip_has_rim(j))
-                            continue;
-
-                        if (n + 2 * JW_STATIONS + 2 > WAVE_MAX_VERTS)
-                            break;
+                        if (pass == 1 && !jw_strip_has_rim(j)) continue;
+                        if (n + 2 * JW_STATIONS + 2 > WAVE_MAX_VERTS) break;
 
                         if (started) {
-                            /*
-                             * Degenerate join, entirely from CPU/main memory.
-                             * NEVER do v[n] = v[n-1] here: v is the RSX-local
-                             * destination and PPU readback from it is unsafe.
-                             */
-                            JW_EMIT(tail, L->alpha, pass);
-                            JW_EMIT(&s_jw[0 * JW_SECTION + j],
-                                    L->alpha, pass);
+                            v[n] = v[n - 1]; n++;
+                            JW_EMIT(&s_jw[0 * JW_SECTION + j], L->alpha, pass);
                         }
-
                         started = 1;
 
                         for (i = 0; i < JW_STATIONS; i++) {
-                            JW_EMIT(&s_jw[i * JW_SECTION + j],
-                                    L->alpha, pass);
-                            JW_EMIT(&s_jw[i * JW_SECTION + j2],
-                                    L->alpha, pass);
+                            JW_EMIT(&s_jw[i * JW_SECTION + j],  L->alpha, pass);
+                            JW_EMIT(&s_jw[i * JW_SECTION + j2], L->alpha, pass);
                         }
-
-                        tail = &s_jw[(JW_STATIONS - 1) * JW_SECTION + j2];
                     }
-
-                    s_jw_cnt[slot][pass] =
-                        (u32)n - s_jw_off[slot][pass];
+                    s_jw_cnt[slot][pass] = (u32)n - s_jw_off[slot][pass];
                 }
             }
-
             #undef JW_EMIT
-
 
             s_jw_gen_us += timing_get_us() - jw_t0;
             s_jw_rebuilds++;
             s_jw_verts = (u32)n;
+            s_jw_draws = 1 + JW_LAYERS * 2;
             s_jw_have_geom = 1;
         } else if (s_wave_blend) {
             // One quad per ribbon: constant tint, alpha ramping from the
@@ -1081,35 +1006,6 @@ void wave_draw(void) {
         }
         #undef WV_PUT
 
-        /*
-         * JellyWave is always uploaded from main-memory staging into the
-         * alternate RSX buffer.  The full RSX fence happens BEFORE reusing
-         * the destination buffer; the upload itself is write-only.
-         *
-         * This deliberately happens on reuse calls too.  With two buffers,
-         * the destination is the buffer the RSX used on the previous call,
-         * so the fence makes the ownership transition explicit.
-         */
-        if (jellywave) {
-            u64 jw_up0 = timing_get_us();
-
-            /*
-             * DIAGNOSTIC: the destination RSX buffer must no longer be
-             * in use before the PPU overwrites it.  The sync inside
-             * jw_upload() only orders PPU stores; it does NOT wait for
-             * the RSX to finish consuming the previous contents.
-             */
-            rsxSync();
-
-            s_wave_vbuf_turn ^= 1;
-
-            v  = s_wave_vbuf[s_wave_vbuf_turn];
-            vo = s_wave_vbuf_off[s_wave_vbuf_turn];
-
-            jw_upload(v, s_jw_stage, s_jw_verts);
-            s_jw_upload_us += timing_get_us() - jw_up0;
-        }
-
         // Drain the PPU's write-gather buffer before the RSX reads these
         // vertices.  Same barrier, same reason, as ui_text_gpu.cpp's
         // submit_queue() -- the PPU has just written this buffer and the GPU is
@@ -1134,7 +1030,7 @@ void wave_draw(void) {
         // barrier that made those stores visible ran on the build that put the
         // geometry there.  Every call that writes a single vertex still takes
         // it.
-        if (jw_rebuild && !jellywave)
+        if (jw_rebuild)
             __asm__ __volatile__ ("sync" ::: "memory");
 
         // The gradient is the first four vertices in the same reusable
@@ -1172,38 +1068,40 @@ void wave_draw(void) {
             rsxSetBlendEnable(context, GCM_TRUE);
         }
 
-        if (jellywave) {
-            // Explicitly establish JellyWave's hardware-validated standard
-            // alpha blend state. Do not inherit whatever state the previous
-            // UI/background operation left behind.
-            rsxSetBlendFunc(context,
-                GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
-                GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
-            rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
-            rsxSetBlendEnable(context, GCM_TRUE);
-
-            // Draw the finished JellyWave stream uploaded from CPU staging.
+        if (s_wave_jelly) {
+            // TEST 30: DO NOT READ RSX LOCAL MEMORY FROM THE PPU.
             //
-            // IMPORTANT: s_jw_off/s_jw_cnt describe the CPU-built stream;
-            // the RSX buffer is write-only from the PPU. Never read it back.
-            rsxInvalidateVertexCache(context);
-            s_jw_draws = 1;   // gradient plus the body/rim strips sent below
+            // Test 29 read tv[k].x/y back from the RSX vertex buffer before
+            // rewriting it.  The project rule is "never read the framebuffer",
+            // and RSX local memory is likewise not a safe PPU read path.
+            // Tests 23/24 already proved that this exact array address and
+            // draw state are clean when the CPU only WRITES known-safe data.
+            //
+            // This test keeps the exact same buffer offset, vertex count,
+            // primitive type, blend state and cache invalidation as Test 24,
+            // but makes every write one-way: no VRAM readback whatsoever.
+            const u32 section_v = (u32)(2 * JW_STATIONS);
+            const u32 base = s_jw_off[0][0] + section_v + 2;
 
-            for (int slot = 0; slot < JW_LAYERS; slot++) {
-                for (int pass = 0; pass < 2; pass++) {
-                    if ((pass == 0 && strobe_test_disable_jellywave_body()) ||
-                        (pass == 1 && strobe_test_disable_jellywave_rim()))
-                        continue;
-                    const u32 count = s_jw_cnt[slot][pass];
-                    if (!count)
-                        continue;
+            if (s_jw_cnt[0][0] >= (section_v + 2)) {
+                rsxSetBlendEnable(context, GCM_FALSE);
 
-                    rsxDrawVertexArray(context,
-                        GCM_TYPE_TRIANGLE_STRIP,
-                        s_jw_off[slot][pass],
-                        count);
-                    s_jw_draws++;
+                WaveVert *tv = v + base;
+                for (u32 k = 0; k < section_v; k++) {
+                    const float x = -0.75f + 1.5f * ((float)k / (float)(section_v - 1));
+                    const float y = -0.35f + 0.70f * ((k & 1) ? 1.0f : 0.0f);
+                    tv[k].x = x;
+                    tv[k].y = y;
+                    tv[k].z = 0.0f;
+                    tv[k].w = 1.0f;
+                    tv[k].rgba = WAVE_RGBA(128, 128, 128, 255);
                 }
+
+                __asm__ __volatile__("sync" ::: "memory");
+                rsxInvalidateVertexCache(context);
+                rsxDrawVertexArray(context, GCM_TYPE_TRIANGLE_STRIP, base, section_v);
+
+                rsxSetBlendEnable(context, GCM_TRUE);
             }
         }
 
@@ -1280,25 +1178,21 @@ void wave_draw(void) {
     // behaviour the legacy path has -- it rebuilds every vertex on each call
     // too -- but it is worth knowing when reading the number against a frame
     // budget.
-    if (jellywave && ++s_jw_frames >= 60) {
+    if (s_wave_jelly && ++s_jw_frames >= 60) {
         char msg[192];
         u32  nb = s_jw_rebuilds ? s_jw_rebuilds : 1;
         snprintf(msg, sizeof(msg),
-                 "jellywave: gen=%lluus/build amort=%lluus/call "
-                 "up=%lluus/call verts=%u draws=%u rebuild=1/%d "
-                 "speed=%d%% repaired=%u dropped=%u (%d calls, %d builds)",
+                 "jellywave: gen=%lluus/build amort=%lluus/call verts=%u "
+                 "draws=%u rebuild=1/%d speed=%d%% (%d calls, %d builds)",
                  (unsigned long long)(s_jw_gen_us / nb),
                  (unsigned long long)(s_jw_gen_us / s_jw_frames),
-                 (unsigned long long)(s_jw_upload_us / s_jw_frames),
                  s_jw_verts, s_jw_draws, s_jw_rebuild_every,
                  (int)(s_jw_speed * 100.0f + 0.5f),
-                 (unsigned)s_jw_repaired, (unsigned)s_jw_dropped,
                  (int)s_jw_frames, (int)s_jw_rebuilds);
         plog(msg);
-        s_jw_gen_us     = 0;
-        s_jw_upload_us  = 0;
-        s_jw_frames     = 0;
-        s_jw_rebuilds   = 0;
+        s_jw_gen_us   = 0;
+        s_jw_frames   = 0;
+        s_jw_rebuilds = 0;
     }
 }
 
@@ -1354,58 +1248,6 @@ void wave_draw_divider_gpu(int y_px, u8 r, u8 g, u8 b, u8 peak_alpha) {
     DV( 1.0f, yt, 0);            DV( 1.0f, yb, 0);
     rsxDrawVertexEnd(context);
     #undef DV
-}
-
-// A 12-segment radial fan (centre plus a closed 12-point ring): 14 vertices
-// total.  The perimeter alpha is zero, so the RSX performs the falloff without
-// reading or blending pixels on the PPU.
-void wave_draw_glow_gpu(int cx_px, int cy_px, int radius_px,
-                        u8 r, u8 g, u8 b, u8 peak_alpha) {
-    static const float ring[13][2] = {
-        { 1.000000f,  0.000000f }, { 0.866025f,  0.500000f },
-        { 0.500000f,  0.866025f }, { 0.000000f,  1.000000f },
-        {-0.500000f,  0.866025f }, {-0.866025f,  0.500000f },
-        {-1.000000f,  0.000000f }, {-0.866025f, -0.500000f },
-        {-0.500000f, -0.866025f }, { 0.000000f, -1.000000f },
-        { 0.500000f, -0.866025f }, { 0.866025f, -0.500000f },
-        { 1.000000f,  0.000000f },
-    };
-
-    if (!s_wave_fp_buf || radius_px <= 0 || !peak_alpha) return;
-
-    rsxVertexProgram   *vpo = (rsxVertexProgram*)wave_vp_data;
-    rsxFragmentProgram *fpo = (rsxFragmentProgram*)wave_fp_data;
-    void *vp_ucode; u32 vp_size;
-    rsxVertexProgramGetUCode(vpo, &vp_ucode, &vp_size);
-    rsxLoadVertexProgram(context, vpo, vp_ucode);
-    rsxSetVertexAttribOutputMask(context, vpo->output_mask);
-    rsxLoadFragmentProgramLocation(context, fpo, s_wave_fp_offset, GCM_LOCATION_RSX);
-
-    rsxSetDepthTestEnable(context, GCM_FALSE);
-    rsxSetDepthWriteEnable(context, GCM_FALSE);
-    rsxSetBlendFunc(context,
-        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA,
-        GCM_SRC_ALPHA, GCM_ONE_MINUS_SRC_ALPHA);
-    rsxSetBlendEquation(context, GCM_FUNC_ADD, GCM_FUNC_ADD);
-    rsxSetBlendEnable(context, GCM_TRUE);
-
-    const float W = (float)display_width;
-    const float H = (float)display_height;
-    #define GV(px, py, pa) do {                                        \
-        const u8 c4[4] = { r, g, b, (pa) };                            \
-        const float p4[4] = { (2.0f * (px) / W) - 1.0f,                \
-                               1.0f - (2.0f * (py) / H), 0.0f, 1.0f }; \
-        rsxDrawVertex4ub(context, GCM_VERTEX_ATTRIB_COLOR0, c4);       \
-        rsxDrawVertex4f(context, GCM_VERTEX_ATTRIB_POS, p4);           \
-    } while (0)
-
-    rsxDrawVertexBegin(context, GCM_TYPE_TRIANGLE_FAN);
-    GV((float)cx_px, (float)cy_px, peak_alpha);
-    for (int i = 0; i < 13; i++)
-        GV((float)cx_px + ring[i][0] * radius_px,
-           (float)cy_px + ring[i][1] * radius_px, 0);
-    rsxDrawVertexEnd(context);
-    #undef GV
 }
 
 // Full-screen dim quad — darkens the finished frame under a modal (the

@@ -80,6 +80,7 @@ void bitmapDestroy(Bitmap *bm)         { memset(bm, 0, sizeof(*bm)); }
 // path against the run path directly, so drawTTF must take the CPU path.
 #include "ui_text_gpu.h"
 bool ui_text_gpu_run(u32, u32, const char *, float, u32, int) { return false; }
+bool strobe_test_disable_tracked_text(void) { return false; }
 
 // Likewise drawIcon(): ui_text.cpp calls it unconditionally, so the link needs
 // it whether or not a test case draws an icon.  Returning false keeps drawIcon

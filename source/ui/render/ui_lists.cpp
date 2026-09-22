@@ -12,6 +12,7 @@
 #include "thumbnail_cache.h"
 #include "circle_blit.h"
 #include "ui_card_gpu.h"
+#include "ui_strobe_test.h"
 
 // -------------------------------------------------------
 // CPU blits: main-memory bitmap -> framebuffer
@@ -393,7 +394,8 @@ void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
     // VRAM read-modify-write path, ~1,200 pixels at the measured ~700 ns each.
     // When the GPU pass is live it has already drawn the identical geometry
     // with blended quads, so skip it here rather than paying for it twice.
-    if (selected && !ui_card_gpu_ready()) {
+    if (selected && !ui_card_gpu_ready() &&
+        !strobe_test_disable_card_cpu_fallback()) {
         const int T = 2, G = 2, O = G + T;
         int w = card_w, h = card_h;
         drawRect((u32)(cx - O), (u32)(cy - O), (u32)(w + 2*O), T, XMB_FOCUS_RING);
@@ -554,4 +556,3 @@ void xmb_grid_text(const GridGeom *gg, const XMBItem *items, int count,
         }
     }
 }
-

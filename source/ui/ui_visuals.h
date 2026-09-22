@@ -463,6 +463,8 @@ void ui_upper_ascii(char *s);
 // per-frame cost line; see docs/spu-feasibility.md.
 void ui_text_stats_reset(void);
 void ui_text_stats_get(u32 *glyphs, u32 *blend_px, u32 *opaque_px);
+int  xmb_nav_depth(void);
+int  xmb_tab_focus_center(void);
 void xmb_draw_tabs(void);
 void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = UIS_TF(14));
 

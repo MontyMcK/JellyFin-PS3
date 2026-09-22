@@ -11,6 +11,7 @@
 #include "ui_wave.h"
 #include "ui_card_gpu.h"
 #include "ui_text_gpu.h"
+#include "ui_strobe_test.h"
 #include "thumbnail_cache.h"
 #include "slog.h"
 #include "plog.h"
@@ -155,6 +156,16 @@ static void xmb_draw_gpu_phase(int tab) {
     // frame's rsxSync() -- see wave_draw_divider_gpu().
     if (wave_gpu_blend_ready()) {
         wave_draw_divider_gpu(XMB_DIVIDER_Y, 0x8A, 0x93, 0xC8, 72);
+        if (!strobe_test_disable_gpu_glow()) {
+            const u32 accent = XMB_ACCENT;
+            const int alpha = xmb_nav_depth() > 0 ? 24 : 72;
+            wave_draw_glow_gpu(xmb_tab_focus_center(),
+                               XMB_OY + UIS_H(61) + UIS_H(16),
+                               UIS_H(34),
+                               (u8)((accent >> 16) & 0xFF),
+                               (u8)((accent >> 8) & 0xFF),
+                               (u8)(accent & 0xFF), (u8)alpha);
+        }
         s_div_on_gpu = true;
     } else {
         s_div_on_gpu = false;
@@ -177,7 +188,8 @@ static void xmb_draw_gpu_phase(int tab) {
 // CPU draw phase — direct framebuffer writes, runs after rsxSync().
 static void xmb_draw_cpu_phase(int tab) {
     // Only when the GPU phase did not already lay it down as a blended quad.
-    if (!s_div_on_gpu) xmb_draw_divider();
+    if (!s_div_on_gpu && !strobe_test_disable_cpu_divider())
+        xmb_draw_divider();
 
     if (tab == XMB_TAB_SEARCH) {
         xmb_cpu_draw_osk();
@@ -318,7 +330,7 @@ static void xmb_cost_tick(u64 frame_us)
     snprintf(b, sizeof(b),
              "xmb: frame=%llu.%02llums vsync=%llu gpu=%llu sync=%llu cards=%llu "
              "text=%llu chrome=%llu tgpu=%llu flip=%llu other=%llu (us/frame) "
-             "gl=%u bpx=%u opx=%u tr=%u tm=%u tkb=%u",
+             "gl=%u bpx=%u opx=%u tr=%u tm=%u tkb=%u strobe=%d:%s",
              (unsigned long long)(s_fc.total / n / 1000),
              (unsigned long long)((s_fc.total / n % 1000) / 10),
              (unsigned long long)(s_fc.vsync  / n),
@@ -330,7 +342,8 @@ static void xmb_cost_tick(u64 frame_us)
              (unsigned long long)(s_fc.textgpu / n),
              (unsigned long long)(s_fc.flip    / n),
              (unsigned long long)(other        / n),
-             gl / n, bpx / n, opx / n, tr / n, tm, tb / 1024u);
+             gl / n, bpx / n, opx / n, tr / n, tm, tb / 1024u,
+             strobe_test_profile(), strobe_test_profile_name());
     plog(b);
 
     memset(&s_fc, 0, sizeof(s_fc));
@@ -408,6 +421,7 @@ void ui_run_xmb(void) {
     // Breadcrumbs inside the loop fire only on the first pass so the log
     // doesn't grow unbounded once the UI is actually running.
     bool first_iter = true;
+    strobe_test_enter_xmb();
     while (running) {
         // The server revoked this device's token (http.cpp saw a 401 on a
         // request that carried it).  Every fetch from here on returns nothing,
@@ -417,6 +431,7 @@ void ui_run_xmb(void) {
             crash_log("13.x auth expired, leaving XMB");
             plog("xmb: session revoked by server, returning to login");
             xmb_search_shutdown();
+            strobe_test_leave_xmb();
             return;
         }
         u64 t_f0 = timing_get_us();
@@ -560,6 +575,7 @@ void ui_run_xmb(void) {
         if (first_iter) { crash_log("13.10 first frame done"); first_iter = false; }
         sysUtilCheckCallback();
         xmb_cost_tick(timing_get_us() - t_f0);
+        strobe_test_tick();
     }
 
     // A search can still be out on its worker.  It writes into file-static
@@ -568,4 +584,5 @@ void ui_run_xmb(void) {
     // the caller tears it down.  Join it here -- worst case this waits out one
     // request, which is bounded by the HTTP timeouts.
     xmb_search_shutdown();
+    strobe_test_leave_xmb();
 }
