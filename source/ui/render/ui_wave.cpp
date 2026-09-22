@@ -1084,19 +1084,11 @@ void wave_draw(void) {
 
                 WaveVert *tv = v + base;
                 for (u32 k = 0; k < section_v; k++) {
-                    // TEST 27: real generated X/Y pair, but only from the
-                    // already-projected first 80 vertices. Clamp both axes
-                    // and keep the same synthetic strip topology.
-                    float gx = s_jw[k % JW_VERTS].x;
-                    float gy = s_jw[k % JW_VERTS].y;
-                    if (!(gx == gx)) gx = 0.0f;
-                    if (!(gy == gy)) gy = 0.0f;
-                    if (gx < -1.0f) gx = -1.0f;
-                    if (gx >  1.0f) gx =  1.0f;
-                    if (gy < -1.0f) gy = -1.0f;
-                    if (gy >  1.0f) gy =  1.0f;
-                    tv[k].x = gx;
-                    tv[k].y = gy;
+                    // TEST 28: preserve the actual generated X/Y for the
+                    // submitted section, but force safe Z/W and constant
+                    // opaque colour. This removes our synthetic coordinate
+                    // rewrite while keeping the RSX submission otherwise
+                    // identical to Test 27.
                     tv[k].z = 0.0f;
                     tv[k].w = 1.0f;
                     tv[k].rgba = WAVE_RGBA(128, 128, 128, 255);
