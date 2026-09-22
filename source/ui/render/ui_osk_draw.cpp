@@ -175,17 +175,24 @@ void xmb_rsx_draw_osk(void) {
             xmb_draw_meta((u32)sr_tx, (u32)(iy + UIS_H(46)), it, UIS_TF(14));
         }
     }
-    if (count == 0 && g_search_buf[0] && xmb_search_in_flight()) {
-        // The query is out on its worker thread.  This server takes 2.5-8.4 s
-        // to answer a search (HANDOFF.md), and saying "No results" for that
-        // whole window is indistinguishable from the search being broken --
-        // which is exactly what it looked like before.
+    // Only a real query gets to say "No results".  A term that is too short
+    // was never sent, one inside the typing pause is about to be, and one out
+    // on the worker thread can take this server 2.5-8.4 s (HANDOFF.md); all
+    // three used to print "No results" and made a working search look dead.
+    if (count == 0 && g_search_buf[0] && g_search_state == SEARCH_TOO_SHORT) {
+        char msg[64];
+        snprintf(msg, sizeof(msg), "Type at least %d letters", SEARCH_MIN_CHARS);
+        int mw = ttf_text_width(msg, UIS_TF(16));
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(10)),
+                msg, UIS_TF(16), XMB_TEXT_FAINT);
+    } else if (count == 0 && g_search_buf[0] && (g_search_state == SEARCH_PENDING ||
+                                                 g_search_state == SEARCH_QUERYING)) {
         char msg[96];
         snprintf(msg, sizeof(msg), "Searching for \"%s\"...", g_search_buf);
         int mw = ttf_text_width(msg, UIS_TF(16));
         drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(10)),
                 msg, UIS_TF(16), XMB_TEXT_DIM);
-    } else if (count == 0 && g_search_buf[0]) {
+    } else if (count == 0 && g_search_buf[0] && g_search_state == SEARCH_DONE) {
         char msg[96];
         snprintf(msg, sizeof(msg), "No results for \"%s\"", g_search_buf);
         int mw = ttf_text_width(msg, UIS_TF(16));

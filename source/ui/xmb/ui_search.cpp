@@ -48,10 +48,21 @@
 //      it after unlocking — so two callers sharing that global would happily
 //      parse each other's response.  Search gets its own.
 #define SEARCH_DEBOUNCE_US 900000   // idle pause before the query fires
-#define SEARCH_MIN_CHARS   2        // shorter terms are noise, not a search
+// SEARCH_MIN_CHARS (shorter terms are noise, not a search) lives in
+// ui_visuals.h so the renderer can name the number in its hint.
 
 static u64  s_search_edit_us = 0;   // when the term last changed
 static bool s_search_pending = false;
+static u64  s_hold_since_us  = 0;   // pad has read "held" continuously since
+static bool s_hold_logged    = false;
+
+// What the results area should say.  The renderer used to print "No results"
+// whenever the count was zero and the box was not empty -- which is also
+// what a too-short term (never queried) and a term still inside the
+// debounce look like.  On the console that read as a dead search: type A,
+// "No results", clear, type I N, "No results", leave -- all before a single
+// query had gone out.  The state says which of those it actually is.
+int g_search_state = SEARCH_IDLE;
 
 // Search OSK state
 const char *OSK_LETTERS[OSK_ROWS_N] = {
@@ -241,9 +252,11 @@ static void xmb_do_search(void) {
         char b[64];
         snprintf(b, sizeof(b), "search: sysThreadCreate FAILED 0x%08x", (u32)rc);
         plog(b);
+        g_search_state = SEARCH_DONE;   // nothing is coming; don't spin "Searching..."
         return;
     }
     s_search_running = true;
+    g_search_state   = SEARCH_QUERYING;
 }
 
 // Collect a finished search.  Called every frame from the input handler; does
@@ -263,6 +276,7 @@ static void xmb_search_collect(void) {
     // be worse than showing the previous ones.
     if (strcmp(s_search_term, g_search_buf) != 0) return;
 
+    g_search_state = SEARCH_DONE;   // from here on, zero hits really means zero
     if (s_search_status == 200) {
         for (int i = 0; i < s_search_out_n; i++)
             g_search_results[i] = s_search_out[i];
@@ -325,7 +339,7 @@ bool xmb_handle_input_search(void) {
         xmb_switch_tab(xmb_next_enabled(g_active_tab, +1));
         return false;
     }
-    if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; g_search_focus_results = false; return false; }
+    if (BTN_PRESSED(circle)) { g_search_buf[0] = '\0'; g_search_results_count = 0; g_search_focus_results = false; s_search_pending = false; g_search_state = SEARCH_IDLE; return false; }
 
     // Square = backspace, from anywhere on this screen.
     //
@@ -472,6 +486,8 @@ bool xmb_handle_input_search(void) {
                 g_search_buf[0] = '\0';
                 g_search_results_count = 0;
                 g_search_focus_results = false;
+                s_search_pending = false;
+                g_search_state = SEARCH_IDLE;
             }
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
@@ -498,10 +514,18 @@ bool xmb_handle_input_search(void) {
             // the top of this file).
             s_search_pending = true;
             s_search_edit_us = timing_get_us();
+            g_search_state   = ((int)strlen(g_search_buf) >= SEARCH_MIN_CHARS)
+                             ? SEARCH_PENDING : SEARCH_TOO_SHORT;
+            {
+                char dbg[96];
+                snprintf(dbg, sizeof(dbg), "search: term='%s' queued", g_search_buf);
+                plog(dbg);
+            }
         } else {
             s_search_pending       = false;
             g_search_results_count = 0;
             g_search_focus_results = false;
+            g_search_state         = SEARCH_IDLE;
         }
     }
 
@@ -511,11 +535,30 @@ bool xmb_handle_input_search(void) {
     if (s_search_pending &&
         (btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right ||
          btn_cur.cross || btn_cur.circle || btn_cur.square ||
-         btn_cur.triangle || btn_cur.l1 || btn_cur.r1))
+         btn_cur.triangle || btn_cur.l1 || btn_cur.r1)) {
         s_search_edit_us = timing_get_us();
+        // A query that has been "still typing" for many seconds is not being
+        // typed; something is reading as held.  Say which, once, so a pulled
+        // log shows whether the pad (or a second paired one -- pads are OR'd
+        // together in poll_buttons) is pinning a button.
+        if (s_hold_since_us == 0) s_hold_since_us = s_search_edit_us;
+        if (!s_hold_logged && s_search_edit_us - s_hold_since_us > 5000000ULL) {
+            s_hold_logged = true;
+            char dbg[128];
+            snprintf(dbg, sizeof(dbg),
+                "search: query held back >5s by pad: u%d d%d l%d r%d x%d o%d sq%d tr%d l1%d r1%d",
+                btn_cur.up, btn_cur.down, btn_cur.left, btn_cur.right,
+                btn_cur.cross, btn_cur.circle, btn_cur.square,
+                btn_cur.triangle, btn_cur.l1, btn_cur.r1);
+            plog(dbg);
+        }
+    } else {
+        s_hold_since_us = 0;        // pad quiet: the hold, if any, is over
+    }
 
     if (s_search_pending &&
         timing_get_us() - s_search_edit_us >= SEARCH_DEBOUNCE_US) {
+        s_hold_logged = false;
         if ((int)strlen(g_search_buf) >= SEARCH_MIN_CHARS) {
             // Leave it pending while a query is still in flight: xmb_do_search
             // refuses to start a second worker, and clearing the flag here
@@ -528,9 +571,11 @@ bool xmb_handle_input_search(void) {
         } else {
             s_search_pending = false;
             // Too short to search on: show nothing rather than whatever a
-            // one-letter query happens to match.
+            // one-letter query happens to match -- and SAY so, rather than
+            // "No results".
             g_search_results_count = 0;
             g_search_focus_results = false;
+            g_search_state = SEARCH_TOO_SHORT;
         }
     }
 

@@ -412,6 +412,19 @@ extern int     g_search_results_count;
 // show "Searching..." instead of "No results" for the several seconds the
 // server takes to answer.
 bool xmb_search_in_flight(void);
+// Search-tab status for the renderer (ui_search.cpp owns the transitions).
+// Two letters, not one: this server answers short terms slowly and often
+// empty (~10 s, then a retry -- see search_thread_fn), and only one query is
+// in flight at a time, so a one-letter search would hold back the term the
+// user goes on to type.  A single letter used to read as a dead search
+// because it printed "No results"; it now says it needs another letter.
+#define SEARCH_MIN_CHARS  2   // terms shorter than this are never sent
+#define SEARCH_IDLE       0   // box empty
+#define SEARCH_TOO_SHORT  1   // typed, but below the minimum -- never queried
+#define SEARCH_PENDING    2   // typed, waiting for the typing pause
+#define SEARCH_QUERYING   3   // out on the worker thread for the current term
+#define SEARCH_DONE       4   // results (possibly zero) are from a real query
+extern int     g_search_state;
 extern XMBItem g_search_results[XMB_ITEMS_MAX];
 extern int     OSK_Y0;
 
