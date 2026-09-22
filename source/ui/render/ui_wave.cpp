@@ -1086,7 +1086,13 @@ void wave_draw(void) {
                 for (u32 k = 0; k < section_v; k++) {
                     float t = (float)k / (float)(section_v - 1);
 
-                    tv[k].x = -0.75f + 1.50f * t;
+                    // TEST 25: real generated X, synthetic Y. Clamp only to keep
+                    // pathological values from turning this into a GPU-state test.
+                    float gx = s_jw[k % JW_VERTS].x;
+                    if (!(gx == gx)) gx = 0.0f;
+                    if (gx < -1.0f) gx = -1.0f;
+                    if (gx >  1.0f) gx =  1.0f;
+                    tv[k].x = gx;
                     tv[k].y = -0.35f + 0.70f * t;
                     tv[k].z = 0.0f;
                     tv[k].w = 1.0f;
