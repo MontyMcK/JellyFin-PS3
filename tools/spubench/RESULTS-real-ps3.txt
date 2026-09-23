@@ -1,0 +1,110 @@
+Jellyfin PS3 -- SPU feasibility benchmark
+REAL PS3 RESULT (this file is written by the console itself)
+timebase = 79800000 Hz (12.531 ns/tick)
+display  = 1920x1080
+object   = 8 floats (x y vx vy rot scale alpha life), 32 bytes
+
+== 1. PPU baseline (32 reps, best and mean us per frame) ==
+objects  impl                      best_us    mean_us    ns/object
+1000     scalar AoS                  342.1      374.4        342.1
+1000     scalar SoA                  338.2      354.3        338.2
+1000     AltiVec SoA                  25.5       28.1         25.5  (13.29x scalar SoA)
+1000                                  0.2% of a 16.67 ms frame (AltiVec)
+5000     scalar AoS                 1731.4     1828.5        346.3
+5000     scalar SoA                 1688.8     1803.0        337.8
+5000     AltiVec SoA                 126.9      134.5         25.4  (13.31x scalar SoA)
+5000                                  0.8% of a 16.67 ms frame (AltiVec)
+10000    scalar AoS                 3546.1     3787.1        354.6
+10000    scalar SoA                 3426.8     3631.2        342.7
+10000    AltiVec SoA                 253.7      282.6         25.4  (13.51x scalar SoA)
+10000                                 1.5% of a 16.67 ms frame (AltiVec)
+20000    scalar AoS                 7615.0     7831.5        380.8
+20000    scalar SoA                 7127.0     7321.4        356.3
+20000    AltiVec SoA                 673.0      723.5         33.7  (10.59x scalar SoA)
+20000                                 4.0% of a 16.67 ms frame (AltiVec)
+spu: sysSpuInitialize(6,0) rc=0
+spu: sysSpuImageImport rc=0
+
+== 9. SPU / PPU agreement ==
+  after 8 frames on 8192 objects, worst relative difference = 7.910e-05
+  (field vy, index 4325)
+  PASS -- the two agree to well inside single-precision rounding.
+
+== 2. SPU animation worker, SoA + double-buffered DMA, chunk=512 ==
+objects  workers     wall_us    compute     dma_in    dma_out    sync_us     ns/obj
+1000     1              18.7       10.9        1.4        5.4        1.0       18.7
+1000     2              13.6        5.5        3.0        4.2        0.9       13.6
+1000     3              10.8        3.7        2.7        3.3        1.1       10.8
+1000     4               8.7        2.8        1.9        2.3        1.6        8.7
+1000     5               8.8        2.2        2.2        2.8        1.7        8.8
+5000     1              82.6       54.6        1.7       24.8        1.5       16.5
+5000     2              47.8       27.3        3.3       15.7        1.4        9.6
+5000     3              31.7       18.3        2.3        9.2        2.0        6.3
+5000     4              26.2       13.7        2.9        7.9        1.7        5.2
+5000     5              27.7       10.9        7.3        7.5        1.9        5.5
+10000    1             162.2      109.2        1.9       48.7        2.4       16.2
+10000    2              92.0       54.6        3.6       32.3        1.4        9.2
+10000    3              68.5       36.5        4.2       25.6        2.2        6.8
+10000    4              59.0       27.3        5.6       23.8        2.3        5.9
+10000    5              49.2       21.8        6.5       18.9        2.0        4.9
+20000    1             322.3      218.4        2.6       97.0        4.3       16.1
+20000    2             181.0      109.3        3.8       65.0        2.9        9.0
+20000    3             130.6       72.9        4.4       50.6        2.7        6.5
+20000    4             114.4       54.6        5.8       52.1        1.9        5.7
+20000    5              74.3       43.7        3.7       24.7        2.3        3.7
+
+== 3. Buffering / layout / chunk size, 1 worker, 10000 objects ==
+variant                     wall_us    compute     dma_in    dma_out
+SoA single-buffered           185.1      109.0       26.1       47.6
+SoA double-buffered           162.6      109.1        1.9       48.8
+AoS double-buffered          1081.7      994.5       25.5       60.5
+
+  chunk sweep (SoA double-buffered):
+  chunk    in-flight     wall_us    compute     dma_in    dma_out
+  32       1024            293.1      123.6        9.7      130.1
+  64       2048            224.5      115.7        5.4       88.4
+  128      4096            187.2      112.0        2.9       64.4
+  256      8192            169.3      110.1        2.0       52.8
+  512      16384           162.3      109.2        1.9       48.7
+  1024     32768           160.6      108.7        2.8       47.1
+  2048     65536           161.8      108.4        5.0       46.9
+
+  local store: static (code+data) = 144272 bytes, stack pointer at 260976,
+               free between them  = 116704 bytes of 262144
+
+== 4. Round-trip synchronisation cost (near-empty job, 1 worker) ==
+  busy-poll   : best 2.01 us, mean 3.71 us
+  signal write: best 2.16 us, mean 3.17 us  (includes one LV2 syscall)
+  -> per-frame sync overhead is the figure a 16667 us budget must absorb
+
+== 5. PPU memory bandwidth (this is what the UI actually spends) ==
+  main -> main memcpy (4 MB)                         10.53 ms      398.2 MB/s
+  main read-modify-write, 4 B at a time (4 MB)        8.63 ms      486.0 MB/s
+  main -> VRAM memcpy (one framebuffer)               5.47 ms      766.6 MB/s
+  VRAM flat fill, 4 B stores (one framebuffer)        6.44 ms     1288.2 MB/s
+  VRAM read-modify-write (the text/alpha path)     1446.51 ms        5.7 MB/s
+  VRAM read only                                   1080.53 ms        7.7 MB/s
+
+  framebuffer is 1920x1080 = 7.91 MB; a full-screen CPU pass at the
+  read-modify-write rate above is the UI's worst case.
+
+== 6. SPU MFC bandwidth, 4 transfers in flight ==
+  size        LS->main MB/s  main->LS MB/s
+  128                3196.2         2257.4
+  512                9226.6         7141.4
+  1024              12920.0         8888.7
+  4096              19250.6        12193.2
+  16384             21681.9        13447.6
+
+== 8. 60 Hz stability with and without SPU workers (300 frames) ==
+  flip only                    mean   16.64 ms  best   2.31  worst   16.75  >16.7ms  56/300  >33.4ms 0
+  + PPU AltiVec 10k            mean   16.63 ms  best   0.55  worst   16.95  >16.7ms  94/300  >33.4ms 0
+  + 3 SPU workers 10k          mean   16.58 ms  best   0.09  worst   16.77  >16.7ms  51/300  >33.4ms 0
+  + 3 SPU overlapped w/ RSX    mean   16.62 ms  best   0.09  worst   16.75  >16.7ms  60/300  >33.4ms 0
+
+== 7. Can an SPU DMA into RSX local memory? ==
+  framebuffer[1] effective address = 0xcda2cf80
+  RESULT: completed.  LS -> RSX local memory = 3313.7 MB/s
+          (compare the PPU's main->VRAM memcpy figure in section 5)
+
+== done ==

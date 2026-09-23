@@ -108,17 +108,17 @@ static void ring_aa(int cx, int cy, float r, float t, u32 color, u8 alpha) {
 // Four-segment breadcrumb (the shared helper caps at three).
 static void draw_breadcrumb4(int x, int y, const char *a, const char *b,
                              const char *c, const char *leaf) {
-    const float px = 15.0f;
+    const float px = UIS_TF(15.0f);
     const char *parts[4] = { a, b, c, leaf };
     for (int i = 0; i < 4; i++) {
         if (!parts[i]) continue;
         bool is_leaf = (i == 3);
         drawTTF((u32)x, (u32)y, parts[i], px,
-                is_leaf ? 0x00C5CBE3UL : XMB_TEXT_FAINT);
+                is_leaf ? XMB_TEXT : XMB_TEXT_FAINT);
         x += ttf_text_width(parts[i], px);
         if (!is_leaf) {
-            drawIcon((u32)(x + 4), (u32)(y - 1), ICON_CHEVRON_RIGHT, 16.0f, XMB_TEXT_FAINT);
-            x += 24;
+            drawIcon((u32)(x + UIS_W(4)), (u32)(y - 1), ICON_CHEVRON_RIGHT, UIS_TF(16.0f), XMB_TEXT_FAINT);
+            x += UIS_W(24);
         }
     }
 }
@@ -133,18 +133,25 @@ static void draw_visualizer(int x, int baseline, int width, int max_h) {
     float bands[MUSIC_VIZ_BANDS];
     music_viz_bands(bands);
 
-    int gap = 3;
+    // Geometry from the design's JFBars component (gap 4, 2px floor).  Its bar
+    // COUNT and motion are not copied: JFBars drives its bars from a sine
+    // stand-in, while this client has real FFT band levels from music_fft.cpp,
+    // which is strictly better data.  Only the presentation is taken across.
+    int gap = UIS_W(4);
     int bw  = (width - gap * (MUSIC_VIZ_BANDS - 1)) / MUSIC_VIZ_BANDS;
     if (bw < 4) bw = 4;
 
     for (int i = 0; i < MUSIC_VIZ_BANDS; i++) {
-        int h = 3 + (int)(bands[i] * (float)(max_h - 3));
+        int h = UIS_H(2) + (int)(bands[i] * (float)(max_h - 2));
         int bx = x + i * (bw + gap);
         int by = baseline - h;
         drawRect((u32)bx, (u32)by, (u32)bw, (u32)h, XMB_ACCENT);
-        // Lighter 2px cap on any bar with real energy.
+        // Lighter 2px cap on any bar with real energy.  This was a hardcoded
+        // lilac (0x00C4B5F7) that ignored the theme entirely -- harmless under
+        // XMB wave, plainly wrong under Golden Age, where it put a purple cap
+        // on gold bars.  XMB_TEXT is the theme's light ink and tracks it.
         if (h > 6)
-            drawRect((u32)bx, (u32)by, (u32)bw, 2, 0x00C4B5F7UL);
+            drawRect((u32)bx, (u32)by, (u32)bw, UIS_H(2), XMB_TEXT);
     }
 }
 
@@ -181,12 +188,25 @@ static int s_u_sel    = 0;   // QUEUE zone: selected play-order position
 static int s_u_scroll = 0;   // QUEUE zone: first visible position
 static bool s_swallow_left = false;   // eat the held LEFT that exited QUEUE
 
-// Rows that fit the Up Next list (54 px per entry, stopping above the
+// Up Next row metrics.
+//
+// The cover is MQ_ART square and the row pitch is that plus MQ_ROW_GAP, so the
+// artworks are always separated by the gap and never by whatever is left over.
+// They used to be: the pitch was a RAW 54 while the cover was UIS_H(40), so at
+// 1080p the cover grew to 60 and the pitch did not -- the artworks overlapped
+// by 6px and the column read as one continuous block. The scrollbar was worse
+// again, sized from UIS_H(54) while the rows advanced by the raw one, so the
+// two disagreed about how tall the list was.
+#define MQ_ART      UIS_H(40)
+#define MQ_ROW_GAP  UIS_H(6)
+#define MQ_ROW_H    (MQ_ART + MQ_ROW_GAP)
+
+// Rows that fit the Up Next list (MQ_ROW_H per entry, stopping above the
 // seek bar's time labels).
 static int uq_vis_rows(void) {
-    int ey0 = (int)(display_height * 0.18f) + 34;
-    int bot = (int)(display_height * 0.895f) - 16;
-    int n   = (bot - ey0) / 54;
+    int ey0 = (int)(display_height * 0.18f) + UIS_H(34);
+    int bot = (int)(display_height * 0.895f) - UIS_H(16);
+    int n   = (bot - ey0) / MQ_ROW_H;
     return n < 1 ? 1 : n;
 }
 
@@ -271,13 +291,13 @@ static int seek_display_secs(void) {
     return disp;
 }
 
-#define Q_ROW_H 42
+#define Q_ROW_H UIS_H(42)
 
 // Rows that fit the full-height panel at the current resolution.
 static int q_vis_rows(void) {
-    int top = XMB_TOPBAR_H + 26;
-    int bot = (int)display_height - XMB_BOTTOM_PAD - 6;
-    int n   = (bot - top - 56 - 14) / Q_ROW_H;
+    int top = XMB_TOPBAR_H + UIS_H(26);
+    int bot = (int)display_height - XMB_BOTTOM_PAD - UIS_H(6);
+    int n   = (bot - top - UIS_H(56) - UIS_H(14)) / Q_ROW_H;
     return n < 3 ? 3 : n;
 }
 
@@ -287,10 +307,10 @@ static void draw_queue_overlay(const MusicTrack *tracks, int count,
 
     const int rows_fit = q_vis_rows();
     const int rows     = count < rows_fit ? count : rows_fit;
-    const int mw       = 640;
-    const int mh       = 56 + rows * Q_ROW_H + 14;
+    const int mw       = UIS_W(640);
+    const int mh       = UIS_H(56) + rows * Q_ROW_H + UIS_H(14);
     int mx = ((int)display_width - mw) / 2;
-    int my = XMB_TOPBAR_H + 26;
+    int my = XMB_TOPBAR_H + UIS_H(26);
 
     drawRect((u32)mx, (u32)my, (u32)mw, (u32)mh, XMB_PANEL);
     drawRect((u32)mx, (u32)my, (u32)mw, 1, XMB_HAIRLINE);
@@ -298,22 +318,22 @@ static void draw_queue_overlay(const MusicTrack *tracks, int count,
     drawRect((u32)mx, (u32)my, 1, (u32)mh, XMB_HAIRLINE);
     drawRect((u32)(mx + mw - 1), (u32)my, 1, (u32)mh, XMB_HAIRLINE);
 
-    drawTTF((u32)(mx + 26), (u32)(my + 18), "QUEUE", 14, XMB_TEXT_FAINT, true);
+    drawTTF((u32)(mx + UIS_W(26)), (u32)(my + UIS_H(18)), "QUEUE", UIS_TF(14), XMB_TEXT_FAINT, true);
     if (music_is_shuffle())
-        drawIcon((u32)(mx + 92), (u32)(my + 16), ICON_SHUFFLE, 18.0f, XMB_ACCENT);
+        drawIcon((u32)(mx + UIS_W(92)), (u32)(my + UIS_H(16)), ICON_SHUFFLE, UIS_TF(18.0f), XMB_ACCENT);
     if (ctx_title[0])
-        draw_clipped((u32)(mx + 124), (u32)(my + 18), ctx_title, 14,
-                     XMB_TEXT_DIM, mw - 240);
+        draw_clipped((u32)(mx + UIS_W(124)), (u32)(my + UIS_H(18)), ctx_title, UIS_TF(14),
+                     XMB_TEXT_DIM, mw - UIS_W(240));
     {
         char pos_str[24];
         snprintf(pos_str, sizeof(pos_str), "%d / %d", s_q_sel + 1, count);
-        int pw = ttf_text_width(pos_str, 13);
-        drawTTF((u32)(mx + mw - 26 - pw), (u32)(my + 19), pos_str, 13,
+        int pw = ttf_text_width(pos_str, UIS_TF(13));
+        drawTTF((u32)(mx + mw - UIS_W(26) - pw), (u32)(my + UIS_H(19)), pos_str, UIS_TF(13),
                 XMB_TEXT_DIM);
     }
 
     int cur_pos = music_current_pos();
-    int list_y  = my + 48;
+    int list_y  = my + UIS_H(48);
     for (int i = 0; i < rows; i++) {
         int p = s_q_scroll + i;
         if (p >= count) break;
@@ -323,43 +343,43 @@ static void draw_queue_overlay(const MusicTrack *tracks, int count,
         int  ry  = list_y + i * Q_ROW_H;
         bool sel = (p == s_q_sel);
         if (sel)
-            drawRect((u32)(mx + 12), (u32)ry, (u32)(mw - 24), Q_ROW_H,
+            drawRect((u32)(mx + UIS_W(12)), (u32)ry, (u32)(mw - UIS_W(24)), Q_ROW_H,
                      XMB_PANEL_HI);
         // Playing marker / play-order number (track # when unshuffled).
         if (p == cur_pos)
-            drawIcon((u32)(mx + 24), (u32)(ry + 10), ICON_MUSIC, 20.0f,
+            drawIcon((u32)(mx + UIS_W(24)), (u32)(ry + UIS_H(10)), ICON_MUSIC, UIS_TF(20.0f),
                      XMB_ACCENT);
         else {
             int shown = (!music_is_shuffle() && t->track_num > 0)
                             ? t->track_num : p + 1;
             char num[8];
             snprintf(num, sizeof(num), "%d", shown);
-            drawTTF((u32)(mx + 26), (u32)(ry + 12), num, 15, XMB_TEXT_FAINT);
+            drawTTF((u32)(mx + UIS_W(26)), (u32)(ry + UIS_H(12)), num, UIS_TF(15), XMB_TEXT_FAINT);
         }
         // Album-art thumb (letter tile while it loads).
-        if (!xmb_cpu_blit_thumb(t->art_id, mx + 56, ry + 3, 36, 36))
-            xmb_draw_letter_tile(t->id, t->name, mx + 56, ry + 3, 36);
-        draw_clipped((u32)(mx + 104), (u32)(ry + 11), t->name, 16,
-                     sel ? XMB_WHITE : XMB_TEXT, mw - 214, sel);
+        if (!xmb_cpu_blit_thumb(t->art_id, mx + UIS_W(56), ry + UIS_H(3), UIS_W(36), UIS_H(36)))
+            xmb_draw_letter_tile(t->id, t->name, mx + UIS_W(56), ry + UIS_H(3), UIS_H(36));
+        draw_clipped((u32)(mx + UIS_W(104)), (u32)(ry + UIS_H(11)), t->name, UIS_TF(16),
+                     sel ? XMB_WHITE : XMB_TEXT, mw - UIS_W(214), sel);
         if (t->duration_secs > 0) {
             char d[16];
             fmt_mmss(d, sizeof(d), t->duration_secs);
-            int dw = ttf_text_width(d, 14);
-            drawTTF((u32)(mx + mw - 30 - dw), (u32)(ry + 12), d, 14,
+            int dw = ttf_text_width(d, UIS_TF(14));
+            drawTTF((u32)(mx + mw - UIS_W(30) - dw), (u32)(ry + UIS_H(12)), d, UIS_TF(14),
                     XMB_TEXT_DIM);
         }
     }
 
     // Scrollbar along the right edge when the queue outruns the panel.
     if (count > rows) {
-        int bar_x   = mx + mw - 12;
-        int track_h = rows * Q_ROW_H - 8;
-        drawRect((u32)bar_x, (u32)list_y, 3, (u32)track_h, XMB_TRACK);
+        int bar_x   = mx + mw - UIS_W(12);
+        int track_h = rows * Q_ROW_H - UIS_H(8);
+        drawRect((u32)bar_x, (u32)list_y, UIS_W(3), (u32)track_h, XMB_TRACK);
         int th = track_h * rows / count;
         if (th < 18) th = 18;
         int rng = count - rows;
         int off = rng > 0 ? (track_h - th) * s_q_scroll / rng : 0;
-        drawRect((u32)bar_x, (u32)(list_y + off), 3, (u32)th, XMB_ACCENT);
+        drawRect((u32)bar_x, (u32)(list_y + off), UIS_W(3), (u32)th, XMB_ACCENT);
     }
 
     static const Hint h[] = {{'X', "Play"}, {'T', "Shuffle"}, {'C', "Close"}};
@@ -376,7 +396,7 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
     int H = (int)display_height;
 
     xmb_draw_topbar();
-    draw_breadcrumb4(40, XMB_TOPBAR_H + 1, "Music", ctx->parent,
+    draw_breadcrumb4(UIS_W(40), XMB_TOPBAR_H + 1, "Music", ctx->parent,
                      ctx->title[0] ? ctx->title : NULL, "Now Playing");
 
     int cur = music_current_index();
@@ -385,35 +405,39 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
 
     // ---- art (follows the current track's album) + accent frame/glow ----
     int A  = (int)(H * 0.42f);
-    int ax = 40;
+    int ax = UIS_W(40);
     int ay = (int)(H * 0.27f);
     if (!xmb_cpu_blit_thumb(t->art_id, ax, ay, A, A))
         xmb_draw_letter_tile(t->art_id,
                              ctx->title[0] ? ctx->title : t->name,
                              ax, ay, A);
     {
-        const int T = 2, G = 2, O = G + T;
-        drawRect((u32)(ax - O), (u32)(ay - O), (u32)(A + 2*O), T, XMB_ACCENT);
-        drawRect((u32)(ax - O), (u32)(ay + A + G), (u32)(A + 2*O), T, XMB_ACCENT);
-        drawRect((u32)(ax - O), (u32)(ay - G), T, (u32)(A + 2*G), XMB_ACCENT);
-        drawRect((u32)(ax + A + G), (u32)(ay - G), T, (u32)(A + 2*G), XMB_ACCENT);
-        drawRectBlend((u32)(ax - O - 1), (u32)(ay - O - 1), (u32)(A + 2*O + 2), 1, XMB_ACCENT, 80);
-        drawRectBlend((u32)(ax - O - 1), (u32)(ay + A + O), (u32)(A + 2*O + 2), 1, XMB_ACCENT, 80);
-        drawRectBlend((u32)(ax - O - 1), (u32)(ay - O), 1, (u32)(A + 2*O), XMB_ACCENT, 80);
-        drawRectBlend((u32)(ax + A + O), (u32)(ay - O), 1, (u32)(A + 2*O), XMB_ACCENT, 80);
+        // The artwork sits IN the layout, not in a frame.
+        //
+        // This was a 2px solid accent border on all four sides plus a second
+        // 1px pass at alpha 80, with a 2px gap -- a card, and at 1080p a loud
+        // one. What is left is a single hairline at alpha 32 (12.5%), drawn
+        // tight against the art: enough to stop a dark album cover dissolving
+        // into a dark background, not enough to read as an edge. Deliberately
+        // NOT replaced with a shadow or a glow.
+        const u8 EDGE_A = 32;
+        drawRectBlend((u32)(ax - 1),     (u32)(ay - 1),     (u32)(A + 2), 1, XMB_ACCENT, EDGE_A);
+        drawRectBlend((u32)(ax - 1),     (u32)(ay + A),     (u32)(A + 2), 1, XMB_ACCENT, EDGE_A);
+        drawRectBlend((u32)(ax - 1),     (u32)(ay - 1),     1, (u32)(A + 2), XMB_ACCENT, EDGE_A);
+        drawRectBlend((u32)(ax + A),     (u32)(ay - 1),     1, (u32)(A + 2), XMB_ACCENT, EDGE_A);
     }
 
     // ---- text column: visualizer, title, artist, album, meta ----
-    int tx        = ax + A + 56;
+    int tx        = ax + A + UIS_W(56);
     int up_x      = W - (int)(W * 0.27f);
-    int col_w     = up_x - 30 - tx;
+    int col_w     = up_x - UIS_W(30) - tx;
     int title_top = ay + (int)(H * 0.15f);
 
     draw_visualizer(tx, title_top - 18, (int)(W * 0.265f), (int)(H * 0.11f));
 
-    draw_clipped((u32)tx, (u32)title_top, t->name, 32, XMB_WHITE, col_w, true);
+    draw_clipped((u32)tx, (u32)title_top, t->name, UIS_TF(32), XMB_WHITE, col_w, true);
     if (t->artist[0])
-        draw_clipped((u32)tx, (u32)(title_top + 48), t->artist, 20,
+        draw_clipped((u32)tx, (u32)(title_top + UIS_H(48)), t->artist, UIS_TF(20),
                      XMB_ACCENT, col_w);
     {
         char line[160] = "";
@@ -421,10 +445,10 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
         if (ctx->year[0]) {
             int l = (int)strlen(line);
             snprintf(line + l, sizeof(line) - l, "%s%s",
-                     line[0] ? " \xB7 " : "", ctx->year);
+                     line[0] ? " \xC2\xB7 " : "", ctx->year);
         }
         if (line[0])
-            draw_clipped((u32)tx, (u32)(title_top + 80), line, 15,
+            draw_clipped((u32)tx, (u32)(title_top + UIS_H(80)), line, UIS_TF(15),
                          XMB_TEXT_DIM, col_w);
     }
     {
@@ -433,11 +457,11 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
         int  n = snprintf(meta, sizeof(meta), "Track %d of %d",
                           music_current_pos() + 1, count);
         if (ctx->genre[0])
-            n += snprintf(meta + n, sizeof(meta) - n, " \xB7 %s", ctx->genre);
+            n += snprintf(meta + n, sizeof(meta) - n, " \xC2\xB7 %s", ctx->genre);
         const char *src = music_source_info();
         if (src[0])
-            n += snprintf(meta + n, sizeof(meta) - n, " \xB7 %s", src);
-        draw_clipped((u32)tx, (u32)(title_top + 128), meta, 14,
+            n += snprintf(meta + n, sizeof(meta) - n, " \xC2\xB7 %s", src);
+        draw_clipped((u32)tx, (u32)(title_top + UIS_H(128)), meta, UIS_TF(14),
                      XMB_TEXT_FAINT, col_w);
     }
 
@@ -446,13 +470,13 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
     //      outruns the window ----
     {
         int uy    = (int)(H * 0.18f);
-        int ey0   = uy + 34;
+        int ey0   = uy + UIS_H(34);
         int n_vis = uq_vis_rows();
         int pos   = music_current_pos();
         int first = pos + 1;              // first upcoming position
         int n_up  = count - first;
 
-        drawTTF((u32)up_x, (u32)uy, "UP NEXT", 13,
+        drawTTF((u32)up_x, (u32)uy, "UP NEXT", UIS_TF(13),
                 s_fzone == FZ_QUEUE ? XMB_TEXT : XMB_TEXT_FAINT, true);
 
         if (n_up > 0) {
@@ -462,7 +486,7 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
             if (scroll > count - n_vis) scroll = count - n_vis;
             if (scroll < first)         scroll = first;
 
-            int text_w = W - 46 - (up_x + 56);
+            int text_w = W - UIS_W(46) - (up_x + UIS_W(56));
             int ey     = ey0;
             for (int p = scroll; p < count && p < scroll + n_vis; p++) {
                 int orig = music_track_at(p);
@@ -470,28 +494,28 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
                 const MusicTrack *u = &tracks[orig];
                 bool selq = (s_fzone == FZ_QUEUE && p == s_u_sel);
                 if (selq)
-                    drawRect((u32)(up_x - 8), (u32)(ey - 4),
-                             (u32)(W - 34 - (up_x - 8)), 48, XMB_PANEL_HI);
-                if (!xmb_cpu_blit_thumb(u->art_id, up_x, ey, 40, 40))
-                    xmb_draw_letter_tile(u->id, u->name, up_x, ey, 40);
-                draw_clipped((u32)(up_x + 56), (u32)(ey + 1), u->name, 15,
+                    drawRect((u32)(up_x - UIS_W(8)), (u32)(ey - MQ_ROW_GAP / 2),
+                             (u32)(W - UIS_W(34) - (up_x - UIS_W(8))), MQ_ROW_H, XMB_PANEL_HI);
+                if (!xmb_cpu_blit_thumb(u->art_id, up_x, ey, MQ_ART, MQ_ART))
+                    xmb_draw_letter_tile(u->id, u->name, up_x, ey, MQ_ART);
+                draw_clipped((u32)(up_x + UIS_W(56)), (u32)(ey + 1), u->name, UIS_TF(15),
                              selq ? XMB_WHITE : XMB_TEXT, text_w, selq);
                 if (u->artist[0])
-                    draw_clipped((u32)(up_x + 56), (u32)(ey + 22), u->artist,
-                                 12, XMB_TEXT_FAINT, text_w);
-                ey += 54;
+                    draw_clipped((u32)(up_x + UIS_W(56)), (u32)(ey + UIS_H(22)), u->artist,
+                                 UIS_TF(12), XMB_TEXT_FAINT, text_w);
+                ey += MQ_ROW_H;
             }
 
             if (n_up > n_vis) {
-                int bar_x   = W - 26;
-                int track_h = n_vis * 54 - 14;
-                drawRect((u32)bar_x, (u32)ey0, 3, (u32)track_h, XMB_TRACK);
+                int bar_x   = W - UIS_W(26);
+                int track_h = n_vis * MQ_ROW_H - MQ_ROW_GAP;
+                drawRect((u32)bar_x, (u32)ey0, UIS_W(3), (u32)track_h, XMB_TRACK);
                 int th = track_h * n_vis / n_up;
                 if (th < 18) th = 18;
                 int rng = n_up - n_vis;
                 int off = rng > 0 ? (track_h - th) * (scroll - first) / rng
                                   : 0;
-                drawRect((u32)bar_x, (u32)(ey0 + off), 3, (u32)th,
+                drawRect((u32)bar_x, (u32)(ey0 + off), UIS_W(3), (u32)th,
                          XMB_ACCENT);
             }
         }
@@ -511,25 +535,25 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
 
         for (int i = 0; i < 5; i++) {
             bool fc = (i == s_t_focus);
-            int  ix = cx + T_OFF[i];
+            int  ix = cx + UIS_W(T_OFF[i]);
             if (i == 2) {
                 // Play/pause disc — clean two-tone AA fill; focus is a
                 // single crisp ring instead of the old dotted glow.
-                if (fc) ring_aa(cx, cy, 30.5f, 2.0f, 0x00E9EBF5UL, 235);
+                if (fc) ring_aa(cx, cy, 30.5f, 2.0f, XMB_TEXT, 235);
                 fill_circle(cx, cy, 26, XMB_ACCENT_DEEP);
                 fill_circle(cx, cy, 24, XMB_ACCENT);
-                drawIcon((u32)(cx - 14), (u32)(cy - 14),
-                         paused ? ICON_PLAY : ICON_PAUSE, 28.0f, XMB_WHITE);
+                drawIcon((u32)(cx - UIS_W(14)), (u32)(cy - UIS_H(14)),
+                         paused ? ICON_PLAY : ICON_PAUSE, UIS_TF(28.0f), XMB_WHITE);
             } else {
-                int half = (int)(T_PX[i] * 0.5f);
+                int half = (int)(UIS_TF(T_PX[i]) * 0.5f);
                 u32 col  = fc ? XMB_WHITE
-                              : (i == 1 || i == 3) ? 0x00AEB5D2UL
+                              : (i == 1 || i == 3) ? XMB_TEXT_DIM
                                                    : XMB_TEXT_FAINT;
                 drawIcon((u32)(ix - half), (u32)(cy - half), T_CP[i],
-                         T_PX[i], col);
+                         UIS_TF(T_PX[i]), col);
             }
             if (fc)
-                drawRect((u32)(ix - 8), (u32)(cy + 38), 16, 3, XMB_KEY_SEL);
+                drawRect((u32)(ix - UIS_W(8)), (u32)(cy + UIS_H(38)), UIS_W(16), UIS_H(3), XMB_KEY_SEL);
         }
 
         // Shuffle — the 6th focusable control (triangle also toggles it).
@@ -537,11 +561,11 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
             bool fc = (s_t_focus == 5);
             bool on = music_is_shuffle();
             u32 col = on ? XMB_ACCENT
-                         : fc ? 0x00AEB5D2UL : 0x00363D63UL;
-            drawIcon((u32)(cx + 182 - 10), (u32)(cy - 10), ICON_SHUFFLE, 20.0f,
+                         : fc ? XMB_TEXT_DIM : XMB_HAIRLINE;
+            drawIcon((u32)(cx + UIS_W(182) - UIS_W(10)), (u32)(cy - UIS_H(10)), ICON_SHUFFLE, UIS_TF(20.0f),
                      col);
             if (fc)
-                drawRect((u32)(cx + 182 - 8), (u32)(cy + 38), 16, 3,
+                drawRect((u32)(cx + UIS_W(182) - UIS_W(8)), (u32)(cy + UIS_H(38)), UIS_W(16), UIS_H(3),
                          XMB_KEY_SEL);
         }
     }
@@ -554,27 +578,45 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
         u32  duration = music_duration_secs();
         if (duration > 0 && shown > duration) shown = duration;
 
-        int bx0 = (int)(W * 0.30f);
-        int bx1 = (int)(W * 0.70f);
+        // v1.0 moves this block from a centred fixed width to the full content
+        // width: the container goes `left:40px; right:40px` and the row holding
+        // it becomes `width:100%`, so the elapsed/remaining labels sit INSIDE
+        // the margins with the bar flexing to fill what is left between them
+        // (`gap:16px`).  It used to be a bar from 30% to 70% with the labels
+        // hanging outside it, which is why the times sat so far apart.
+        //
+        // The transport icons above are unaffected: their row keeps
+        // `justify-content:center` inside the now-full-width container, and
+        // 40px of margin on both sides leaves the centre where it was.
+        char ts[16], td[16];
+        fmt_mmss(ts, sizeof(ts), shown);
+        td[0] = 0;
+        if (duration > 0) fmt_mmss(td, sizeof(td), duration);
+
+        const int gap16 = UIS_W(16);
+        int tw = ttf_text_width(ts, UIS_TF(14));
+        int dw = td[0] ? ttf_text_width(td, UIS_TF(14)) : 0;
+
+        int rx0 = XMB_ITEM_PAD;
+        int rx1 = (int)W - XMB_ITEM_PAD;
+        int bx0 = rx0 + tw + gap16;
+        int bx1 = rx1 - (td[0] ? dw + gap16 : 0);
         int by  = (int)(H * 0.895f);
         int bw  = bx1 - bx0;
+        if (bw < UIS_W(40)) bw = UIS_W(40);          // degenerate width guard
 
-        drawRect((u32)bx0, (u32)by, (u32)bw, 4, XMB_TRACK);
+        drawRect((u32)bx0, (u32)by, (u32)bw, UIS_H(4), XMB_TRACK);
         int fill = (duration > 0) ? (int)((u64)bw * shown / duration) : 0;
         if (fill > bw) fill = bw;
         if (fill > 0)
-            drawRect((u32)bx0, (u32)by, (u32)fill, 4, XMB_ACCENT);
-        fill_circle(bx0 + fill, by + 2, 6, XMB_WHITE);
+            drawRect((u32)bx0, (u32)by, (u32)fill, UIS_H(4), XMB_ACCENT);
+        fill_circle(bx0 + fill, by + UIS_H(2), UIS_H(6), XMB_WHITE);
 
-        char ts[16];
-        fmt_mmss(ts, sizeof(ts), shown);
-        int tw = ttf_text_width(ts, 14);
-        drawTTF((u32)(bx0 - 16 - tw), (u32)(by - 6), ts, 14,
+        drawTTF((u32)rx0, (u32)(by - UIS_H(6)), ts, UIS_TF(14),
                 seeking ? XMB_TEXT : XMB_TEXT_DIM);
-        if (duration > 0) {
-            fmt_mmss(ts, sizeof(ts), duration);
-            drawTTF((u32)(bx1 + 16), (u32)(by - 6), ts, 14, XMB_TEXT_DIM);
-        }
+        if (td[0])
+            drawTTF((u32)(rx1 - dw), (u32)(by - UIS_H(6)), td, UIS_TF(14),
+                    XMB_TEXT_DIM);
     }
 
     if (!s_q_open) {
@@ -747,11 +789,33 @@ static void music_screen_run(const MusicCtx *ctx, int count, int start_idx) {
     s_last_pos  = -1;
     init_btns();
 
+    // Render-thread proof of life.  When the app died on hardware there was no
+    // way to tell whether this loop was still turning, because the only thing
+    // it logged was a wave trace that had already hit its cap.  One line every
+    // five seconds, carrying the frame count and the paused flag, dates the
+    // last frame the music screen ever drew.
+    u64 hb_us    = 0;
+    u32 hb_frame = 0;
+
     while (running) {
         waitflip();
         sysUtilCheckCallback();
         clearScreen(XMB_BG);
         wave_draw();
+
+        hb_frame++;
+        {
+            u64 now = timing_get_us();
+            if (hb_us == 0 || now - hb_us >= 5000000ULL) {
+                hb_us = now;
+                char b[80];
+                snprintf(b, sizeof b, "music_screen: f=%u %s pos=%us",
+                         (unsigned)hb_frame,
+                         music_is_paused() ? "PAUSED" : "playing",
+                         (unsigned)music_elapsed_secs());
+                plog(b);
+            }
+        }
 
         poll_buttons();
         if (music_screen_input(s_tracks, count)) break;

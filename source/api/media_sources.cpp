@@ -207,6 +207,10 @@ static void parse_tracks(const char *source, const char *source_end,
             out->subs[pos].index = index;
             snprintf(out->subs[pos].label, sizeof(out->subs[pos].label), "%s",
                      display[0] ? display : (language[0] ? language : "Subtitle"));
+            out->subs[pos].codec[0] = ' ';
+            v = find_top_value(p, oe, "Codec");
+            if (v) read_json_string(v, oe, out->subs[pos].codec,
+                                    sizeof(out->subs[pos].codec));
         }
         p = oe;
     }
@@ -394,4 +398,35 @@ bool jellyfin_parse_selected_media_source(const char *json,
     }
     if (have_first) { *out = first; return true; }
     return false;
+}
+
+// Text subtitle formats can be fetched as SubRip and drawn on the console;
+// bitmap ones cannot. Everything not recognised is treated as a bitmap, so an
+// unknown format falls back to the burn-in that has always worked rather than
+// to an empty overlay.
+static bool ieq(const char *a, const char *b)
+{
+    for (; *a && *b; a++, b++) {
+        char x = *a, y = *b;
+        if (x >= 'A' && x <= 'Z') x += 32;
+        if (y >= 'A' && y <= 'Z') y += 32;
+        if (x != y) return false;
+    }
+    return *a == *b;
+}
+
+bool jf_sub_is_text(const char *codec)
+{
+    if (!codec || !codec[0]) return false;
+    static const char *kText[] = { "subrip", "srt", "ass", "ssa", "vtt",
+                                   "webvtt", "text", "mov_text", "sami" };
+    for (unsigned i = 0; i < sizeof(kText)/sizeof(kText[0]); i++)
+        if (ieq(codec, kText[i])) return true;
+    return false;
+}
+
+bool jf_sub_is_pgs(const char *codec)
+{
+    if (!codec || !codec[0]) return false;
+    return ieq(codec, "pgssub") || ieq(codec, "hdmv_pgs_subtitle");
 }

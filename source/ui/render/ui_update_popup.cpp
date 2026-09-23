@@ -46,14 +46,14 @@ void xmb_update_popup_draw(void) {
 
     const int mw = 480, mh = 170;
     int mx = ((int)display_width  - mw) / 2;
-    int my = ((int)display_height - mh) / 2 - 20;
+    int my = ((int)display_height - mh) / 2 - UIS_H(20);
 
     drawRect((u32)mx, (u32)my, (u32)mw, (u32)mh, XMB_PANEL);
     hairline_frame(mx, my, mw, mh);
 
     const char *title = "New version detected";
-    int tw = ttf_text_width(title, 21, true);
-    drawTTF((u32)(mx + (mw - tw) / 2), (u32)(my + 28), title, 21, XMB_TEXT, true);
+    int tw = ttf_text_width(title, UIS_TF(21), true);
+    drawTTF((u32)(mx + (mw - tw) / 2), (u32)(my + UIS_H(28)), title, UIS_TF(21), XMB_TEXT, true);
 
     // Release tag, shown without a leading v/V.
     {
@@ -61,21 +61,21 @@ void xmb_update_popup_draw(void) {
         if (*v == 'v' || *v == 'V') v++;
         char line[80];
         snprintf(line, sizeof(line), "Version %s", v);
-        int lw = ttf_text_width(line, 14);
-        drawTTF((u32)(mx + (mw - lw) / 2), (u32)(my + 64), line, 14, XMB_TEXT_DIM);
+        int lw = ttf_text_width(line, UIS_TF(14));
+        drawTTF((u32)(mx + (mw - lw) / 2), (u32)(my + UIS_H(64)), line, UIS_TF(14), XMB_TEXT_DIM);
     }
 
     // OK button — always focused, so it uses the OSK selected-key style
     // (white key, dark label).
     {
         const int   bw = 140, bh = 36;
-        const float px = 18.0f;
+        const float px = UIS_TF(18.0f);
         int bx = mx + (mw - bw) / 2;
-        int by = my + mh - bh - 22;
+        int by = my + mh - bh - UIS_H(22);
         drawRect((u32)bx, (u32)by, (u32)bw, (u32)bh, XMB_KEY_SEL);
         int lw = ttf_text_width("OK", px, true);
         drawTTF((u32)(bx + (bw - lw) / 2),
-                (u32)(by + (bh - (int)px) / 2 - 2), "OK", px,
+                (u32)(by + (bh - (int)px) / 2 - UIS_H(2)), "OK", px,
                 XMB_KEY_LABEL_SEL, true);
     }
 

@@ -13,10 +13,13 @@
 #include "surround.h"
 #include "centermix.h"
 #include "statsovl.h"
+#include "subfont.h"
+#include "subcolor.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
     { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)",
-      "Audio Output", "Dialogue Boost"
+      "Audio Output", "Dialogue Boost", "Subtitle Font", "Subtitle Colour",
+      "Theme"
 #if ENABLE_PLAYER_STATS
     , "Player Stats Overlay"
 #endif
@@ -26,14 +29,15 @@ static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
 // ui/fonts/tabler_icons.h) — a new glyph would mean regenerating the subset.
 // ICON_MUSIC (already in the subset) marks the surround audio row.
 static const int   SETTINGS_ICONS[XMB_SETTINGS_COUNT]  =
-    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE, ICON_MUSIC, ICON_MUSIC
+    { ICON_LOGOUT, ICON_BUG, ICON_TV, ICON_MOVIE, ICON_MUSIC, ICON_MUSIC,
+      ICON_TV, ICON_TV, ICON_PHOTO
 #if ENABLE_PLAYER_STATS
     , ICON_BUG
 #endif
     };
 
-#define SET_PANEL_H 96
-#define SET_ROW_H   56
+#define SET_PANEL_H UIS_H(96)
+#define SET_ROW_H   UIS_H(56)
 
 static int settings_panel_y(void) { return XMB_CONTENT_Y + 16; }
 
@@ -42,28 +46,39 @@ static int settings_rows_top(void) {
     return settings_panel_y() + SET_PANEL_H + 24;
 }
 
-// Vertical pitch between action rows.  Normally the natural SET_ROW_H + 10,
-// but the rows are top-anchored under a card whose own top moves down with
-// the overscan inset, so the list can run past the safe area once the entry
-// count grows: at the 8% maximum inset, five rows at the natural pitch put
-// the last one ~26px below the safe bottom edge, where a CRT clips it.
-// Compress only when that actually happens — at zero/low overscan the
-// arithmetic returns SET_ROW_H + 10 and the layout is untouched.
+// Keep a stable XMB row rhythm. When the list is longer than the safe area,
+// selection scrolling (rather than row compression) moves the visible window.
 static int settings_row_pitch(void) {
-    const int natural = SET_ROW_H + 10;
-    if (XMB_SETTINGS_COUNT < 2) return natural;
-    int avail  = (int)display_height - XMB_BOTTOM_PAD - settings_rows_top();
-    int needed = (XMB_SETTINGS_COUNT - 1) * natural + SET_ROW_H;
-    if (avail >= needed) return natural;
-    int pitch = (avail - SET_ROW_H) / (XMB_SETTINGS_COUNT - 1);
-    if (pitch > natural)       pitch = natural;
-    if (pitch < SET_ROW_H + 2) pitch = SET_ROW_H + 2;  // keep rows separated
-    return pitch;
+    return SET_ROW_H + UIS_H(10);
 }
 
-// Y of the i-th action row, below the account info card.
+static int settings_visible_rows(void) {
+    int avail = (int)display_height - XMB_BOTTOM_PAD - settings_rows_top();
+    int pitch = settings_row_pitch();
+    if (avail < SET_ROW_H) return 1;
+
+    int n = 1 + (avail - SET_ROW_H) / pitch;
+    if (n < 1) n = 1;
+    if (n > XMB_SETTINGS_COUNT) n = XMB_SETTINGS_COUNT;
+    return n;
+}
+
+// First row in the visible settings window. The selected row is always kept
+// visible by advancing this window; the row height itself never changes.
+static int settings_first_row(void) {
+    int vis = settings_visible_rows();
+    int first = g_settings_sel - vis + 1;
+    if (first < 0) first = 0;
+
+    int max_first = XMB_SETTINGS_COUNT - vis;
+    if (max_first < 0) max_first = 0;
+    if (first > max_first) first = max_first;
+    return first;
+}
+
 static int settings_row_y(int i) {
-    return settings_rows_top() + i * settings_row_pitch();
+    return settings_rows_top()
+         + (i - settings_first_row()) * settings_row_pitch();
 }
 
 // Centered confirm dialog rect.
@@ -108,12 +123,18 @@ void xmb_cpu_draw_settings(void) {
     hairline_frame(list_x, py, XMB_LIST_W, SET_PANEL_H);
     fill_circle(list_x + 46, py + SET_PANEL_H / 2, 22, XMB_ACCENT_DEEP);
 
-    // Selected action row.
-    for (int i = 0; i < XMB_SETTINGS_COUNT; i++) {
-        if (i != g_settings_sel) continue;
-        int iy = settings_row_y(i);
-        drawRect((u32)list_x, (u32)iy, (u32)XMB_LIST_W, SET_ROW_H, XMB_PANEL_HI);
-        drawRect((u32)(list_x - 4), (u32)iy, 3, SET_ROW_H, XMB_ACCENT);
+    // Selected action row. The visible window is derived from the selected
+    // row, so navigation can reach every setting without putting anything
+    // below the safe area.
+    {
+        int first = settings_first_row();
+        int last  = first + settings_visible_rows();
+        for (int i = first; i < last; i++) {
+            if (i != g_settings_sel) continue;
+            int iy = settings_row_y(i);
+            drawRect((u32)list_x, (u32)iy, (u32)XMB_LIST_W, SET_ROW_H, XMB_PANEL_HI);
+            drawRect((u32)(list_x - UIS_W(4)), (u32)iy, UIS_W(3), SET_ROW_H, XMB_ACCENT);
+        }
     }
 }
 
@@ -126,16 +147,16 @@ void xmb_draw_settings(void) {
         int mx, my, mw, mh;
         settings_confirm_rect(&mx, &my, &mw, &mh);
         const char *q = "Log out of this account?";
-        int qw = ttf_text_width(q, 21, true);
-        drawTTF((u32)(mx + (mw - qw) / 2), (u32)(my + 28), q, 21, XMB_TEXT, true);
+        int qw = ttf_text_width(q, UIS_TF(21), true);
+        drawTTF((u32)(mx + (mw - qw) / 2), (u32)(my + UIS_H(28)), q, UIS_TF(21), XMB_TEXT, true);
         const char *s = "You'll need to sign in again to browse your library.";
-        int sw = ttf_text_width(s, 14);
-        drawTTF((u32)(mx + (mw - sw) / 2), (u32)(my + 66), s, 14, XMB_TEXT_DIM);
+        int sw = ttf_text_width(s, UIS_TF(14));
+        drawTTF((u32)(mx + (mw - sw) / 2), (u32)(my + UIS_H(66)), s, UIS_TF(14), XMB_TEXT_DIM);
         return;
     }
 
     int py = settings_panel_y();
-    int tx = list_x + 84;
+    int tx = list_x + UIS_W(84);
 
     // Avatar initial.
     {
@@ -144,86 +165,115 @@ void xmb_draw_settings(void) {
             ini[0] = g_username[0];
             if (ini[0] >= 'a' && ini[0] <= 'z') ini[0] -= 32;
         }
-        int iw = ttf_text_width(ini, 22, true);
-        drawTTF((u32)(list_x + 46 - iw / 2), (u32)(py + SET_PANEL_H / 2 - 12),
-                ini, 22, XMB_WHITE, true);
+        int iw = ttf_text_width(ini, UIS_TF(22), true);
+        drawTTF((u32)(list_x + UIS_W(46) - iw / 2), (u32)(py + SET_PANEL_H / 2 - UIS_H(12)),
+                ini, UIS_TF(22), XMB_WHITE, true);
     }
 
     // Identity.
-    drawTTF((u32)tx, (u32)(py + 14), "Account", 13, XMB_TEXT_FAINT);
+    drawTTF((u32)tx, (u32)(py + UIS_H(14)), "Account", UIS_TF(13), XMB_TEXT_FAINT);
     char line[320];
     snprintf(line, sizeof(line), "%s", g_username[0] ? g_username : "(unknown)");
-    drawTTF((u32)tx, (u32)(py + 34), line, 21, XMB_TEXT, true);
+    drawTTF((u32)tx, (u32)(py + UIS_H(34)), line, UIS_TF(21), XMB_TEXT, true);
     snprintf(line, sizeof(line), "%s", g_server[0] ? g_server : "(no server)");
-    drawTTF((u32)tx, (u32)(py + 64), line, 14, XMB_TEXT_DIM);
+    drawTTF((u32)tx, (u32)(py + UIS_H(64)), line, UIS_TF(14), XMB_TEXT_DIM);
 
-    // Action rows.
-    for (int i = 0; i < XMB_SETTINGS_COUNT; i++) {
+    // Action rows. Draw only the visible window; the input handler still
+    // owns the full selection range.
+    int first_row = settings_first_row();
+    int last_row  = first_row + settings_visible_rows();
+    for (int i = first_row; i < last_row; i++) {
         int  iy  = settings_row_y(i);
         bool sel = (i == g_settings_sel);
         u32  clr = sel ? XMB_WHITE : XMB_TEXT_DIM;
-        drawIcon((u32)(list_x + 20), (u32)(iy + (SET_ROW_H - 20) / 2),
-                 SETTINGS_ICONS[i], 20.0f, clr);
-        drawTTF((u32)(list_x + 52), (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
-                SETTINGS_LABELS[i], 18, clr, sel);
+        drawIcon((u32)(list_x + UIS_W(20)), (u32)(iy + (SET_ROW_H - UIS_H(20)) / 2),
+                 SETTINGS_ICONS[i], UIS_TF(20.0f), clr);
+        drawTTF((u32)(list_x + UIS_W(52)), (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                SETTINGS_LABELS[i], UIS_TF(18), clr, sel);
         if (i == 1) {   // Debug Logging — right-aligned On/Off state
             const char *val = plog_enabled() ? "On" : "Off";
-            int vw = ttf_text_width(val, 18, sel);
-            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
-                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
-                    val, 18, plog_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), plog_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
         if (i == 2) {   // Screen Size — right-aligned overscan percentage
             int pm = (int)(overscan_frac() * 1000.0f + 0.5f);   // permille
             char val[16];
             if (pm == 0) snprintf(val, sizeof(val), "Off");
             else         snprintf(val, sizeof(val), "%d.%d%%", pm / 10, pm % 10);
-            int vw = ttf_text_width(val, 18, sel);
-            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
-                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
-                    val, 18, pm ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), pm ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
         if (i == 3) {   // 1080p Playback (Alpha) — right-aligned On/Off state
             const char *val = hd1080_enabled() ? "On" : "Off";
-            int vw = ttf_text_width(val, 18, sel);
-            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
-                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
-                    val, 18, hd1080_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), hd1080_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
         if (i == 4) {   // Audio Output — right-aligned Stereo/5.1/7.1 state
             const char *val = surround_mode_label();
-            int vw = ttf_text_width(val, 18, sel);
-            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
-                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
-                    val, 18, surround_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), surround_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
         if (i == 5) {   // Dialogue Boost — right-aligned gain state
             const char *val = centermix_label();
-            int vw = ttf_text_width(val, 18, sel);
-            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
-                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
-                    val, 18, centermix_active() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), centermix_active() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
+        if (i == 6) {   // Subtitle Font — right-aligned typeface name
+            const char *val = subfont_label();
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18),
+                    subfont_get() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
+        if (i == 7) {   // Subtitle Colour — right-aligned look name
+            const char *val = subcolor_label();
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18),
+                    subcolor_get() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+        }
+        if (i == 8) {   // Theme — right-aligned live theme name
+            // Always drawn in the accent, because the accent IS the thing the
+            // row changes: the value's colour previews the choice.
+            const char *val = theme_current_name();
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), XMB_ACCENT, sel);
         }
 #if ENABLE_PLAYER_STATS
-        if (i == 6) {   // Player Stats Overlay — right-aligned On/Off state
+        if (i == 9) {   // Player Stats Overlay — right-aligned On/Off state
             const char *val = statsovl_enabled() ? "On" : "Off";
-            int vw = ttf_text_width(val, 18, sel);
-            drawTTF((u32)(list_x + XMB_LIST_W - 24 - vw),
-                    (u32)(iy + (SET_ROW_H - 18) / 2 - 2),
-                    val, 18, statsovl_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+            int vw = ttf_text_width(val, UIS_TF(18), sel);
+            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
+                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), statsovl_enabled() ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
         }
 #endif
     }
 
-    // Version footer — skip it if a large overscan inset has squeezed the
-    // bottom-anchored footer up into the last (top-anchored) action row.
+    // Version footer — skip it if the visible settings window already
+    // occupies the bottom of the safe area.
     {
-        int footer_y = (int)display_height - XMB_BOTTOM_PAD - 26;
-        int last_row_bottom = settings_row_y(XMB_SETTINGS_COUNT - 1) + SET_ROW_H;
+        int footer_y = (int)display_height - XMB_BOTTOM_PAD - UIS_H(26);
+        int last_visible = settings_first_row() + settings_visible_rows() - 1;
+        int last_row_bottom = settings_row_y(last_visible) + SET_ROW_H;
         if (footer_y > last_row_bottom + 6) {
-            const char *ver = "Jellyfin for PS3 " APP_VERSION " \xB7 built " __DATE__;
-            int vw = ttf_text_width(ver, 13);
-            drawTTF((u32)((W - vw) / 2), (u32)footer_y, ver, 13, XMB_TEXT_FAINT);
+            const char *ver = "Jellyfin for PS3 " APP_VERSION " \xC2\xB7 built " __DATE__;
+            int vw = ttf_text_width(ver, UIS_TF(13));
+            drawTTF((u32)((W - vw) / 2), (u32)footer_y, ver, UIS_TF(13), XMB_TEXT_FAINT);
         }
     }
 }
@@ -237,6 +287,9 @@ void xmb_draw_settings(void) {
 // drawn at exactly the inset that the whole UI will use, matching the corners
 // to the screen edges guarantees nothing else clips.
 
+// DELIBERATELY NOT THEMED.  The overscan calibration screen has to stay
+// legible under ANY theme -- including one a user writes badly -- because it is
+// what you use to fix a screen you cannot read.  Fixed light field, dark ink.
 #define OVL_FIELD   0x00C8CCDAUL   // light safe-area field
 #define OVL_SURND   0x00101018UL   // near-black surround (over the wave)
 #define OVL_INK     0x00202634UL   // dark title text on the field
@@ -253,7 +306,7 @@ void xmb_overscan_calib_cpu(void) {
     drawRect((u32)ox, (u32)oy, (u32)(W - 2 * ox), (u32)(H - 2 * oy), OVL_FIELD);
 
     // Thin accent border at the inset edge.
-    const int t = 4;
+    const int t = UIS_H(4);
     drawRect((u32)ox, (u32)oy,            (u32)(W - 2 * ox), (u32)t, XMB_ACCENT);
     drawRect((u32)ox, (u32)(H - oy - t),  (u32)(W - 2 * ox), (u32)t, XMB_ACCENT);
     drawRect((u32)ox, (u32)oy, (u32)t, (u32)(H - 2 * oy), XMB_ACCENT);
@@ -280,24 +333,24 @@ void xmb_overscan_calib_text(void) {
     int cy = H / 2;
 
     const char *title = "Screen Size";
-    int tw = ttf_text_width(title, 26, true);
-    drawTTF((u32)((W - tw) / 2), (u32)(cy - 78), title, 26, OVL_INK, true);
+    int tw = ttf_text_width(title, UIS_TF(26), true);
+    drawTTF((u32)((W - tw) / 2), (u32)(cy - UIS_H(78)), title, UIS_TF(26), OVL_INK, true);
 
     const char *l1 = "Match the corners to the edges of your screen";
-    int l1w = ttf_text_width(l1, 16);
-    drawTTF((u32)((W - l1w) / 2), (u32)(cy - 34), l1, 16, OVL_INK_DIM);
+    int l1w = ttf_text_width(l1, UIS_TF(16));
+    drawTTF((u32)((W - l1w) / 2), (u32)(cy - UIS_H(34)), l1, UIS_TF(16), OVL_INK_DIM);
 
     int pm = (int)(overscan_frac() * 1000.0f + 0.5f);
     char pct[16];
     snprintf(pct, sizeof(pct), "%d.%d%%", pm / 10, pm % 10);
-    int pw = ttf_text_width(pct, 30, true);
-    drawTTF((u32)((W - pw) / 2), (u32)(cy - 2), pct, 30, XMB_ACCENT_DEEP, true);
+    int pw = ttf_text_width(pct, UIS_TF(30), true);
+    drawTTF((u32)((W - pw) / 2), (u32)(cy - UIS_H(2)), pct, UIS_TF(30), XMB_ACCENT_DEEP, true);
 
     const char *hint = "D-pad Left / Right to adjust";
-    int hw = ttf_text_width(hint, 15);
-    drawTTF((u32)((W - hw) / 2), (u32)(cy + 44), hint, 15, OVL_INK_DIM);
+    int hw = ttf_text_width(hint, UIS_TF(15));
+    drawTTF((u32)((W - hw) / 2), (u32)(cy + UIS_H(44)), hint, UIS_TF(15), OVL_INK_DIM);
 
     const char *keys = "Cross  Save        Circle  Cancel";
-    int kw = ttf_text_width(keys, 15);
-    drawTTF((u32)((W - kw) / 2), (u32)(cy + 70), keys, 15, OVL_INK_DIM);
+    int kw = ttf_text_width(keys, UIS_TF(15));
+    drawTTF((u32)((W - kw) / 2), (u32)(cy + UIS_H(70)), keys, UIS_TF(15), OVL_INK_DIM);
 }

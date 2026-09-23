@@ -5,9 +5,12 @@
 // grace-bridged to ride out the bit's frame-to-frame flicker:
 //   * quick TAP  -> +10s skip, batched by a 1s gate so taps stack into one
 //                   reopen further ahead.
-//   * HOLD       -> pause and scrub the seek bar +25s/-25s every 250ms.  While
-//                   held NOTHING is fetched — only the bar moves; the single
-//                   reopen to the scrubbed spot happens when the user releases.
+//   * HOLD       -> pause and scrub the seek bar +25s/-25s every 250ms. The
+//                   STREAM itself is never re-fetched while held — the
+//                   single reopen to the scrubbed spot happens on release —
+//                   but a trickplay preview thumbnail is (see trickplay.h),
+//                   since that is a separate, much cheaper request the
+//                   server already has sitting on disk.
 // The D-pad also gives +10s taps via the HUD.
 
 #include <stdio.h>
@@ -25,9 +28,11 @@
 #include "video.h"
 #include "timing.h"
 #include "plog.h"
+#include "subtitles.h"
 #include "ui.h"
 #include "jellyfin_api.h"
 #include "slog.h"
+#include "trickplay.h"
 
 extern void crash_log(const char *msg);
 
@@ -40,6 +45,21 @@ extern void crash_log(const char *msg);
 // Set true before the seek flush window, false after the decode thread is
 // respawned.
 static volatile bool s_seeking = false;
+
+// A seek moves the clock backwards as often as forwards, and the cue lookup
+// walks forward from where it last was.  Telling it to start over costs one
+// binary search and keeps the wrong line from lingering after a jump.
+static void subs_after_seek(void) { subs_reset_cursor(); }
+
+// Absolute media time (ms) the currently-accumulated scrub offset points
+// at -- same base+clock+pending_secs arithmetic player_execute_seek() uses
+// to compute its real seek target, just not yet committed to a reopen.
+static u32 scrub_target_ms(const PlayerState *ps) {
+    s64 cur_us    = (s64)ps->play_base_us + (s64)audio_get_clock_us();
+    s64 target_us = cur_us + (s64)ps->seek.pending_secs * 1000000LL;
+    if (target_us < 0) target_us = 0;
+    return (u32)(target_us / 1000);
+}
 
 static const u64 SEEK_HOLD_DELAY_US = 400000ULL;   // held longer than this -> scrub
 static const u64 SEEK_SCRUB_STEP_US = 250000ULL;   // one scrub step per 250ms
@@ -98,6 +118,8 @@ HudAction player_seek_input_update(PlayerState *ps, HudAction act) {
             sk->scrub_step_us = now - SEEK_SCRUB_STEP_US;   // first step now
             sk->tap_gate_us   = 0;
             plog("seek: scrub begin");
+            trickplay_scrub_update(ps->item->id, ps->source.id,
+                                   scrub_target_ms(ps));
         } else {
             sk->dir = dir;             // allow F<->B before it commits
         }
@@ -115,11 +137,14 @@ HudAction player_seek_input_update(PlayerState *ps, HudAction act) {
                 ps->paused = !sk->scrub_resume;
             }
             plog("seek: scrub end");
+            trickplay_release_sheet();   // give its memory back -- see trickplay.cpp
         } else {
             sk->dir = dir;
             if (now - sk->scrub_step_us >= SEEK_SCRUB_STEP_US) {
                 sk->scrub_step_us = now;
                 sk->pending_secs += dir * SEEK_SCRUB_SECS;   // move bar +25s
+                trickplay_scrub_update(ps->item->id, ps->source.id,
+                                       scrub_target_ms(ps));
             }
         }
         break;
@@ -286,6 +311,7 @@ bool player_execute_seek(PlayerState *ps) {
     // The new stream's PTS restarts at ~0, so its clock now maps to
     // absolute media time target_us.
     ps->play_base_us = (u64)target_us;
+    subs_after_seek();      // the cue cursor must not walk on from the old spot
     { struct { u32 sec; u32 usec; } tv = { 0, 5000 };
       setsockopt(ps->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
     crash_log("sk4 reopened");

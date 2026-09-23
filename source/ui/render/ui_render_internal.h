@@ -15,6 +15,11 @@ void xmb_cpu_blit_thumb_scaled(const char *item_id, int x, int y, int w, int h);
 // tile (music cards, per the album-grid design).
 // img selects which Jellyfin image to draw — landscape cards pass
 // THUMB_IMG_THUMB for items that have wide art (see ui_home.cpp).
+// GPU phase (BEFORE rsxSync) counterparts to the CPU card draws.  See
+// ui_card_gpu.h: these submit RSX textured quads for card images whose VRAM
+// mirror is ready, and the matching CPU call then skips its blit.
+bool xmb_card_gpu_one(const char *item_id, int cx, int cy,
+                      int card_w, int card_h, ThumbImg img = THUMB_IMG_PRIMARY);
 void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
                    u8 progress_pct, bool selected,
                    const char *tile_name = NULL,

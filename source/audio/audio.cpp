@@ -329,7 +329,18 @@ bool audio_write_pcm(void) {
             // Decoder stall — write silence to keep DMA ring alive
             memset(blk_buf, 0, s_port_channels * AUDIO_BLOCK_SAMPLES * sizeof(float));
             s_sil_blocks++;
-            plog("audio: decoder stall");
+            // RATE-LIMITED.  A block is 5.33 ms, so a source that has stopped
+            // producing entirely writes ~188 of these a second -- 219 of them
+            // buried the last crash, which is the one thing the log had to
+            // survive.  One line a second, carrying the run length, says the
+            // same thing and leaves room for everything else.
+            static u32 s_stall_run = 0;
+            if ((s_stall_run++ % 188) == 0) {
+                char b[64];
+                snprintf(b, sizeof b, "audio: decoder stall (%u blocks)",
+                         (unsigned)s_stall_run);
+                plog(b);
+            }
         }
         // Per-channel peak of the block we just handed to the DMA engine —
         // the last point the app can observe its own audio.  This is what

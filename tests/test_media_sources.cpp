@@ -59,6 +59,14 @@ int main(int argc, char **argv) {
     assert(strcmp(selected.live_stream_id, "live-b") == 0);
     assert(selected.tracks.audio[0].index == 4);
 
+    assert(jf_sub_is_pgs("pgssub"));
+    assert(jf_sub_is_pgs("PgsSub"));
+    assert(jf_sub_is_pgs("hdmv_pgs_subtitle"));
+    assert(!jf_sub_is_pgs("subrip"));
+    assert(!jf_sub_is_pgs("dvdsub"));
+    assert(!jf_sub_is_pgs(NULL));
+    assert(!jf_sub_is_pgs(""));
+
     puts("media source parser: synthetic ok");
 
     // Optional real item-DTO/PlaybackInfo fixture (used by the WSL check).

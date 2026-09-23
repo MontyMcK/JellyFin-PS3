@@ -218,7 +218,16 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     }
     if (audio_idx >= 0 && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
-    if (sub_idx >= 0 && n > 0 && n < url_sz)
+    // Only a subtitle this app cannot decode itself goes to the server to be
+    // burned in.  Asking for Encode forces a full video transcode, which
+    // throws away the stream-copy path and with it the source's lossless
+    // audio -- so a track drawn on-device (text via player/subtitles.cpp,
+    // or PGS via subtitles_pgs.h) must not appear in this URL at all.
+    // sub_is_text/sub_is_pgs are decided from the stream's Codec when the
+    // track is chosen; anything unrecognised (VOBSUB, or either fetch
+    // failing) counts as a bitmap and keeps the burn-in that has always
+    // worked.
+    if (sub_idx >= 0 && !ps->sub_is_text && !ps->sub_is_pgs && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n,
                       "&SubtitleStreamIndex=%d&SubtitleMethod=Encode", sub_idx);
     if (ps->session_id[0] && n > 0 && n < url_sz) {

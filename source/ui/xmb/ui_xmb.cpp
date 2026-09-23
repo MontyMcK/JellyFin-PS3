@@ -9,6 +9,9 @@
 
 #include "ui_internal.h"
 #include "ui_wave.h"
+#include "ui_card_gpu.h"
+#include "ui_text_gpu.h"
+#include "ui_strobe_test.h"
 #include "thumbnail_cache.h"
 #include "slog.h"
 #include "plog.h"
@@ -136,9 +139,57 @@ static void slog_menu_tick(void) {
 static inline void slog_menu_tick(void) {}
 #endif
 
+// GPU draw phase — RSX commands, runs BEFORE rsxSync().
+//
+// Card images are submitted here as textured quads instead of being memcpy'd
+// into video memory by the CPU after the fence.  Measured motivation: cards
+// were 6,446 us of a 15,661 us Home frame (docs/spu-feasibility.md).  Order
+// matters and is the whole reason this is a separate phase -- these are queued
+// RSX commands, so they must be issued before the fence for the CPU's
+// selection borders, progress strips and labels to land on top of them.
+static bool s_div_on_gpu = false;   // set per frame by the GPU phase
+
+static void xmb_draw_gpu_phase(int tab) {
+    // The hairline goes first and is NOT gated on the card path: it is a
+    // blended quad over the wave, and at 1,351 us of CPU VRAM reads it was the
+    // single largest item in the frame.  It has to be issued here, before the
+    // frame's rsxSync() -- see wave_draw_divider_gpu().
+    if (wave_gpu_blend_ready()) {
+        wave_draw_divider_gpu(XMB_DIVIDER_Y, 0x8A, 0x93, 0xC8, 72);
+        if (!strobe_test_disable_gpu_glow()) {
+            const u32 accent = XMB_ACCENT;
+            const int alpha = xmb_nav_depth() > 0 ? 24 : 72;
+            wave_draw_glow_gpu(xmb_tab_focus_center(),
+                               XMB_OY + UIS_H(61) + UIS_H(16),
+                               UIS_H(34),
+                               (u8)((accent >> 16) & 0xFF),
+                               (u8)((accent >> 8) & 0xFF),
+                               (u8)(accent & 0xFF), (u8)alpha);
+        }
+        s_div_on_gpu = true;
+    } else {
+        s_div_on_gpu = false;
+    }
+
+    if (!ui_card_gpu_ready()) return;
+
+    if (tab == XMB_TAB_HOME) {
+        xmb_home_gpu_phase();
+    } else if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_SETTINGS) {
+        GridGeom gg; const XMBItem *items;
+        int count, sel, scroll, y0, a_start, a_total; bool more;
+        if (xmb_grid_view(tab, &gg, &items, &count, &sel, &scroll, &y0,
+                          &more, &a_start, &a_total))
+            xmb_grid_gpu(&gg, items, count, sel, scroll, y0);
+    }
+    ui_card_gpu_end();
+}
+
 // CPU draw phase — direct framebuffer writes, runs after rsxSync().
 static void xmb_draw_cpu_phase(int tab) {
-    xmb_draw_divider();
+    // Only when the GPU phase did not already lay it down as a blended quad.
+    if (!s_div_on_gpu && !strobe_test_disable_cpu_divider())
+        xmb_draw_divider();
 
     if (tab == XMB_TAB_SEARCH) {
         xmb_cpu_draw_osk();
@@ -171,7 +222,7 @@ static void xmb_draw_text_phase(int tab) {
         if (xmb_kind(tab) == TABKIND_MUSIC && g_music_depth == 0) {
             GridGeom mg;
             xmb_grid_geom(tab, &mg);
-            xmb_draw_music_subtabs(mg.x0, XMB_CONTENT_Y + 2,
+            xmb_draw_music_subtabs(mg.x0, XMB_CONTENT_Y + UIS_H(2),
                                    g_music_subtab, g_music_header);
         } else if (g_music_depth > 0) {
             // Reached from a music library OR a standalone Playlists one, so
@@ -179,20 +230,20 @@ static void xmb_draw_text_phase(int tab) {
             // an artist/genre into its albums.
             bool tracks = (g_music_sub_count > 0 &&
                            strcmp(g_music_sub_items[0].type, "Audio") == 0);
-            xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+            xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
                                 g_music_parent_name,
                                 tracks ? "Tracks" : "Albums", NULL);
         }
         if (g_tv_depth > 0) {
             if (g_tv_depth == 1)
-                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
                                     g_tv_series_name, "Seasons", NULL);
             else
-                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+                xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
                                     g_tv_series_name, g_tv_season_name,
                                     "Episodes");
         } else if (g_col_depth > 0) {
-            xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + 2,
+            xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
                                 g_col_name, "Movies", NULL);
         }
 
@@ -221,6 +272,85 @@ static void xmb_draw_text_phase(int tab) {
     }
 }
 
+// -------------------------------------------------------
+// Per-frame cost line
+// -------------------------------------------------------
+// The XMB has never reported what a frame actually costs, which is why the
+// SPU feasibility work had to estimate it from layout constants multiplied by
+// synthetic bandwidth figures (docs/spu-feasibility.md, Deliverable 5).  That
+// estimate has a known weakness -- the framebuffer read rate was measured with
+// a `volatile` loop that cannot batch -- so before any of the renderer is
+// restructured on the strength of it, the real split needs to be on the record.
+//
+// Emitted once a second to player_log.txt when plog is on, so it costs nothing
+// when it is off and never grows the log quickly.  timing_get_us() is a
+// timebase read plus one divide; eight per frame is far below the noise of
+// what it measures.
+//
+// Reading the line:
+//   vsync  time parked in waitflip() -- NOT work, it is the 60 Hz budget the
+//          frame did not use.  Large vsync means the frame has headroom.
+//   gpu    submitting the clear + wave (RSX does the work asynchronously)
+//   sync   rsxSync(), the full GPU fence -- the PPU stalled here, and nothing
+//          overlaps it
+//   cards  CPU phase: thumbnail memcpy into video memory
+//   text   text phase: glyph compositing, the read-modify-write path
+//   chrome hints + tab bar
+//   flip   gcmSetFlip + buffer swap
+//   other  everything unaccounted, mostly xmb_fetch_tab_items' network I/O
+//   gl     glyphs drawn; bpx/opx glyph pixels that blended vs stored opaque
+//   tgpu   submitting the frame's text runs as RSX quads (GPU text path only)
+//   tr/tm  text runs queued / of those, the ones that missed the cache and had
+//          to be rasterized and uploaded; tkb is what those misses uploaded.
+//          A warm screen should settle at tm=0 tkb=0 -- caching per RUN rather
+//          than per glyph is the entire point of that path.
+struct XmbFrameCost {
+    u64 vsync, gpu, sync, cards, text, chrome, flip, textgpu, total;
+    u32 frames;
+};
+static XmbFrameCost s_fc;
+
+static void xmb_cost_tick(u64 frame_us)
+{
+    s_fc.total += frame_us;
+    if (++s_fc.frames < 60) return;
+
+    u32 gl = 0, bpx = 0, opx = 0;
+    ui_text_stats_get(&gl, &bpx, &opx);
+    u32 tr = 0, tm = 0, tb = 0, tf = 0;
+    ui_text_gpu_stats_get(&tr, &tm, &tb, &tf);
+
+    const u32 n = s_fc.frames;
+    u64 acc = s_fc.vsync + s_fc.gpu + s_fc.sync + s_fc.cards +
+              s_fc.text + s_fc.chrome + s_fc.flip + s_fc.textgpu;
+    u64 other = (s_fc.total > acc) ? (s_fc.total - acc) : 0;
+
+
+    char b[320];
+    snprintf(b, sizeof(b),
+             "xmb: frame=%llu.%02llums vsync=%llu gpu=%llu sync=%llu cards=%llu "
+             "text=%llu chrome=%llu tgpu=%llu flip=%llu other=%llu (us/frame) "
+             "gl=%u bpx=%u opx=%u tr=%u tm=%u tkb=%u strobe=%d:%s",
+             (unsigned long long)(s_fc.total / n / 1000),
+             (unsigned long long)((s_fc.total / n % 1000) / 10),
+             (unsigned long long)(s_fc.vsync  / n),
+             (unsigned long long)(s_fc.gpu    / n),
+             (unsigned long long)(s_fc.sync   / n),
+             (unsigned long long)(s_fc.cards  / n),
+             (unsigned long long)(s_fc.text   / n),
+             (unsigned long long)(s_fc.chrome  / n),
+             (unsigned long long)(s_fc.textgpu / n),
+             (unsigned long long)(s_fc.flip    / n),
+             (unsigned long long)(other        / n),
+             gl / n, bpx / n, opx / n, tr / n, tm, tb / 1024u,
+             strobe_test_profile(), strobe_test_profile_name());
+    plog(b);
+
+    memset(&s_fc, 0, sizeof(s_fc));
+    ui_text_stats_reset();
+    ui_text_gpu_stats_reset();
+}
+
 // Contextual hints bar for the current tab / mode.
 static void xmb_draw_hints(int tab) {
     bool in_tv_sub  = (g_tv_depth > 0);
@@ -236,11 +366,11 @@ static void xmb_draw_hints(int tab) {
         }
     } else if (tab == XMB_TAB_SEARCH) {
         if (g_search_focus_results) {
-            static const Hint h[] = {{'X',"Play"},{'C',"Back"}};
-            draw_hints_bar(h, 2);
+            static const Hint h[] = {{'X',"Play"},{'S',"Delete"},{'C',"Back"}};
+            draw_hints_bar(h, 3);
         } else {
-            static const Hint h[] = {{'X',"Type"},{'C',"Clear"}};
-            draw_hints_bar(h, 2);
+            static const Hint h[] = {{'X',"Type"},{'S',"Delete"},{'C',"Clear"}};
+            draw_hints_bar(h, 3);
         }
     } else if (xmb_kind(tab) == TABKIND_MUSIC && g_music_header) {
         static const Hint h[] = {{'D',"Switch"},{'X',"Select"}};
@@ -253,11 +383,17 @@ static void xmb_draw_hints(int tab) {
         static const Hint h[] = {{'X',"Jump"},{'C',"Cancel"}};
         draw_hints_bar(h, 2);
     } else if (tab == XMB_TAB_HOME) {
-        static const Hint h[] = {{'X',"Open"},{'T',"Info"}};
-        draw_hints_bar(h, 2);
+        // The L1/R1 cluster leads, per handoff section 3.1.  Label is "Tab"
+        // and not the document's "Page" because L1/R1 switch TABS on this
+        // build (ui_nav.cpp / ui_home.cpp) -- paging is Phase 4, and a hint
+        // must describe what the button does today.
+        static const Hint h[] = {{'l',""},{'r',"Tab"},
+                                 {'X',"Open"},{'T',"Info"}};
+        draw_hints_bar(h, 4);
     } else {
-        static const Hint h[] = {{'E',"Nav"},{'X',"Select"},{'T',"Info"}};
-        draw_hints_bar(h, 3);
+        static const Hint h[] = {{'l',""},{'r',"Tab"},
+                                 {'E',"Nav"},{'X',"Select"},{'T',"Info"}};
+        draw_hints_bar(h, 5);
     }
 }
 
@@ -285,6 +421,7 @@ void ui_run_xmb(void) {
     // Breadcrumbs inside the loop fire only on the first pass so the log
     // doesn't grow unbounded once the UI is actually running.
     bool first_iter = true;
+    strobe_test_enter_xmb();
     while (running) {
         // The server revoked this device's token (http.cpp saw a 401 on a
         // request that carried it).  Every fetch from here on returns nothing,
@@ -293,10 +430,15 @@ void ui_run_xmb(void) {
         if (g_auth_expired) {
             crash_log("13.x auth expired, leaving XMB");
             plog("xmb: session revoked by server, returning to login");
+            xmb_search_shutdown();
+            strobe_test_leave_xmb();
             return;
         }
+        u64 t_f0 = timing_get_us();
         if (first_iter) crash_log("13.5a waitflip");
         waitflip();
+        u64 t_vsync = timing_get_us();
+        s_fc.vsync += t_vsync - t_f0;
         if (first_iter) crash_log("13.5b syscb");
         sysUtilCheckCallback();
 
@@ -341,10 +483,12 @@ void ui_run_xmb(void) {
             }
         }
         thumb_cache_tick();   // age out thumbs nothing on screen still wants
+        u64 t_gpu0 = timing_get_us();
         if (first_iter) crash_log("13.5c clearScreen");
         clearScreen(XMB_BG);
         if (first_iter) crash_log("13.5d wave_draw");
         wave_draw();
+        s_fc.gpu += timing_get_us() - t_gpu0;
         if (first_iter) crash_log("13.6 wave_draw done");
 
         int tab = g_active_tab;
@@ -370,7 +514,20 @@ void ui_run_xmb(void) {
 
         slog_menu_tick();   // STATE: MENU ... (emulator-only, emits on change)
 
+        // Card images go into the FIFO with the wave, ahead of the fence.
+        if (!g_overscan_calib) xmb_draw_gpu_phase(tab);
+
+        u64 t_sync0 = timing_get_us();
         rsxSync();
+        u64 t_sync1 = timing_get_us();
+        s_fc.sync += t_sync1 - t_sync0;
+
+        // Open the text-run collecting window.  From here until the flush
+        // below, drawTTF hands whole strings to the RSX instead of blending
+        // glyph pixels against video memory.  It has to be bracketed: a queued
+        // run that nobody submits is invisible text, so only the loop that
+        // promises to flush is allowed to queue.  See ui_text_gpu.h.
+        ui_text_gpu_begin();
 
         if (g_overscan_calib) {
             // Full-screen overscan calibration takeover — no chrome/hints/tabs.
@@ -379,19 +536,53 @@ void ui_run_xmb(void) {
         } else {
             if (first_iter) crash_log("13.8 cpu_phase");
             xmb_draw_cpu_phase(tab);
+            u64 t_cards = timing_get_us();
+            s_fc.cards += t_cards - t_sync1;
             if (first_iter) crash_log("13.8b text_phase");
             xmb_draw_text_phase(tab);
+            u64 t_text = timing_get_us();
+            s_fc.text += t_text - t_cards;
             if (first_iter) crash_log("13.8c hints");
             bool popup = xmb_update_popup_active();
             if (!popup) xmb_draw_hints(tab);   // the popup swaps in its own hint
             if (first_iter) crash_log("13.8d tabs");
             xmb_draw_tabs();
-            if (popup) xmb_update_popup_draw();
+            if (popup) {
+                // The popup GPU-dims the whole screen and then lays an opaque
+                // panel on it, so everything queued so far has to be on the
+                // framebuffer BEFORE it draws -- otherwise the screen behind
+                // the modal would be dimmed without its text and the text
+                // would then land on top of the modal, undimmed.  This is the
+                // one place in the frame where a CPU draw covers earlier text;
+                // the hints bar and the tab bar draw no background at all.
+                ui_text_gpu_flush_fenced();
+                xmb_update_popup_draw();
+            }
+            s_fc.chrome += timing_get_us() - t_text;
         }
 
+        // Submit the frame's text runs.  No fence: flip() queues the flip
+        // behind these quads and waitflip() at the top of the next iteration
+        // is the wait, so the RSX gets the rest of the vblank to draw them.
+        u64 t_tg0 = timing_get_us();
+        ui_text_gpu_flush();
+        s_fc.textgpu += timing_get_us() - t_tg0;
+
+        u64 t_flip0 = timing_get_us();
         if (first_iter) crash_log("13.9 first flip");
         flip();
+        s_fc.flip += timing_get_us() - t_flip0;
         if (first_iter) { crash_log("13.10 first frame done"); first_iter = false; }
         sysUtilCheckCallback();
+        xmb_cost_tick(timing_get_us() - t_f0);
+        strobe_test_tick();
     }
+
+    // A search can still be out on its worker.  It writes into file-static
+    // storage in ui_search.cpp and calls http_request(), so letting it outlive
+    // the screen that started it would leave a thread using the network while
+    // the caller tears it down.  Join it here -- worst case this waits out one
+    // request, which is bounded by the HTTP timeouts.
+    xmb_search_shutdown();
+    strobe_test_leave_xmb();
 }

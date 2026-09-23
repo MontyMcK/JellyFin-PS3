@@ -19,9 +19,11 @@
 #include "detail_media.h"
 #include "thumbnail_cache.h"
 
-// The title band behind the header — a deep purple stripe over the backdrop
-// (the official page's grey bar, re-tinted to fit the XMB indigo palette).
-#define XMB_DETAIL_BAND 0x00412C73UL
+// The title band behind the header — a deep stripe over the backdrop (the
+// official page's grey bar, re-tinted to fit the theme).  Now the `detail_band`
+// theme token: XMB wave keeps the exact 412C73 this was hardcoded to, so the
+// shipping theme is unchanged, and Golden Age finally gets a brass band instead
+// of a violet one on a gold screen.  See theme.h.
 
 // "More Like This" recommendations to request/show.
 #define INFO_SIMILAR_MAX 12
@@ -30,9 +32,33 @@
 // Draw text at (x,y), truncated with ".." to max_w px.  y is a signed screen
 // coordinate (the page scrolls), so a line above the top is simply culled by
 // drawTTF's own clipping.
+// face < 0 keeps the system face (regular or bold).  Pass a UI_FACE_* for the
+// handoff section 3.0 faces: UI_FACE_DISPLAY for the media title,
+// UI_FACE_SPEC for codec and quality values.
 static void info_clip_text(int x, int y, const char *text, float px,
-                           u32 color, int max_w, bool bold) {
+                           u32 color, int max_w, bool bold, int face = -1) {
     if (!text || !text[0]) return;
+    if (face >= 0) {
+        if (ttf_text_width_face(text, px, face) <= max_w) {
+            drawTTF_face((u32)x, (u32)y, text, px, color, face);
+            return;
+        }
+        // Clip against the SAME face the text is drawn in, or the ellipsis
+        // lands in the wrong place.
+        char fb[160];
+        snprintf(fb, sizeof(fb), "%s", text);
+        int fl = (int)strlen(fb);
+        while (fl > 1) {
+            fb[--fl] = '\0';
+            char tr[164];
+            snprintf(tr, sizeof(tr), "%s..", fb);
+            if (ttf_text_width_face(tr, px, face) <= max_w) {
+                drawTTF_face((u32)x, (u32)y, tr, px, color, face);
+                return;
+            }
+        }
+        return;
+    }
     if (ttf_text_width(text, px, bold) <= max_w) {
         drawTTF((u32)x, (u32)y, text, px, color, bold);
         return;
@@ -128,14 +154,16 @@ static int info_choose_version(const char *title,
         drawRect((u32)(px + pw - 1), (u32)py, 1, (u32)ph, XMB_HAIRLINE);
 
         int cx = px + UIS_W(30);
-        info_clip_text(cx, py + UIS_H(22), title, 24, XMB_WHITE,
-                       pw - UIS_W(160), true);
+        // Media title -- one of the two things section 3.0 gives to the
+        // display face.
+        info_clip_text(cx, py + UIS_H(22), title, UIS_TF(24), XMB_WHITE,
+                       pw - UIS_W(160), false, UI_FACE_DISPLAY);
         char count[24];
         snprintf(count, sizeof(count), "%d / %d", sel + 1,
                  sources->n_sources);
-        int cw = ttf_text_width(count, 17);
+        int cw = ttf_text_width(count, UIS_TF(17));
         drawTTF((u32)(px + pw - UIS_W(30) - cw),
-                (u32)(py + UIS_H(27)), count, 17, XMB_TEXT_DIM);
+                (u32)(py + UIS_H(27)), count, UIS_TF(17), XMB_TEXT_DIM);
 
         int y0 = py + UIS_H(72);
         for (int row = 0; row < shown; row++) {
@@ -149,7 +177,7 @@ static int info_choose_version(const char *title,
                          (u32)(row_h - UIS_H(4)), XMB_ACCENT);
             }
             info_clip_text(cx + UIS_W(16), ry + UIS_H(12),
-                           sources->source[idx].label, 19,
+                           sources->source[idx].label, UIS_TF(19),
                            idx == sel ? XMB_TEXT : XMB_TEXT_DIM,
                            pw - UIS_W(100), idx == sel);
         }
@@ -188,19 +216,20 @@ void xmb_show_item_info(const XMBItem *root) {
 
     // ---- Layout, computed once (poster + text column geometry) ----
     const int X   = XMB_ITEM_PAD;
-    const int top = XMB_OY + XMB_TOPBAR_H + 12;
+    const int top = XMB_OY + XMB_TOPBAR_H + UIS_H(12);
     const int content_bot = (int)display_height - XMB_BOTTOM_PAD;
     int poster_h = content_bot - top;
-    if (poster_h > 456) poster_h = 456;
+    // v1.0: 216x324 at the authoring size (the 2:3 below gives the width).
+    if (poster_h > UIS_H(324)) poster_h = UIS_H(324);
     const int poster_w = poster_h * 2 / 3;
     const int poster_x = X, poster_y = top;
-    const int tx    = poster_x + poster_w + 28;   // text column left edge
+    const int tx    = poster_x + poster_w + UIS_W(28);   // text column left edge
     const int max_w = (int)display_width - tx - X;
     const int back_w = (int)display_width;
-    const int band_y0 = top - 14;                 // purple title-band extent
-    const int band_y1 = top + 96;
+    const int band_y0 = top - UIS_H(14);                 // purple title-band extent
+    const int band_y1 = top + UIS_H(96);
     const int view_bottom = content_bot;
-    const int SIM_CH = 222;                       // More Like This card height
+    const int SIM_CH = UIS_H(222);                // More Like This card height
 
     // ---- Per-title state, (re)loaded whenever the nav stack moves ----
     XMBItemDetail detail;
@@ -391,27 +420,43 @@ void xmb_show_item_info(const XMBItem *root) {
                                           poster_w, poster_h);
             // Hairline frame just outside the artwork.
             drawRect((u32)(poster_x - 1), (u32)(py - 1),
-                     (u32)(poster_w + 2), 1, XMB_HAIRLINE);
+                     (u32)(poster_w + UIS_W(2)), 1, XMB_HAIRLINE);
             drawRect((u32)(poster_x - 1), (u32)(py + poster_h),
-                     (u32)(poster_w + 2), 1, XMB_HAIRLINE);
+                     (u32)(poster_w + UIS_W(2)), 1, XMB_HAIRLINE);
             drawRect((u32)(poster_x - 1), (u32)(py - 1),
-                     1, (u32)(poster_h + 2), XMB_HAIRLINE);
+                     1, (u32)(poster_h + UIS_H(2)), XMB_HAIRLINE);
             drawRect((u32)(poster_x + poster_w), (u32)(py - 1),
-                     1, (u32)(poster_h + 2), XMB_HAIRLINE);
+                     1, (u32)(poster_h + UIS_H(2)), XMB_HAIRLINE);
 
             // ---- Right column: title + metadata + text, to the poster's right.
             int Y = top - scroll_y;
 
-            // Title, truncated to the text-column width.
+            // Title.  v1.0 puts this on --font-display at 25px/700 (it was 40px
+            // on the bold system face), so the poster stops competing with it.
+            //
+            // The display face is a subset -- see UI_FACE_DISPLAY in
+            // ui_visuals.h -- which is exactly why the truncation loop has to
+            // measure through ttf_text_width_face on the SAME face it draws
+            // with: a hyphen costs Rodin's advance here, not zero.
             {
                 char tbuf[132];
                 snprintf(tbuf, sizeof(tbuf), "%s", it->name);
+                const float tpx  = UIS_TF(25);
+                // v1.0 tracks titles -0.01em (tighter).  Applied HERE and not
+                // to card titles: a tracked draw takes the per-glyph CPU path,
+                // because ui_text_gpu.cpp keys a cached run on
+                // (text, px, face, colour) with no room for tracking.  One hero
+                // title per frame is free; ten card titles would not be, and
+                // -0.25px per letter gap does not buy back the run cache.
+                const float ttrk = tpx * -0.01f;
                 int len = (int)strlen(tbuf);
-                while (len > 1 && ttf_text_width(tbuf, 40) > max_w)
-                    tbuf[--len] = '\0';
-                drawTTF((u32)tx, (u32)Y, tbuf, 40, XMB_WHITE, true);
+                while (len > 1 &&
+                       ttf_text_width_tracked(tbuf, tpx, UI_FACE_DISPLAY, ttrk) > max_w)
+                    tbuf[--len] = 0;
+                drawTTF_tracked((u32)tx, (u32)Y, tbuf, tpx, XMB_WHITE,
+                                UI_FACE_DISPLAY, ttrk);
             }
-            Y += 62;
+            Y += UIS_H(40);
 
             // Meta row: year · duration, official-rating chip, ★ rating.
             {
@@ -420,29 +465,31 @@ void xmb_show_item_info(const XMBItem *root) {
                 if (it->year_str[0])
                     snprintf(meta, sizeof(meta), "%s", it->year_str);
                 if (it->duration_str[0]) {
-                    if (meta[0]) strncat(meta, " \xB7 ", sizeof(meta)-strlen(meta)-1);
+                    if (meta[0]) strncat(meta, " \xC2\xB7 ", sizeof(meta)-strlen(meta)-1);
                     strncat(meta, it->duration_str, sizeof(meta)-strlen(meta)-1);
                 }
                 if (meta[0]) {
-                    drawTTF((u32)mx, (u32)Y, meta, 18, XMB_TEXT_DIM);
-                    mx += ttf_text_width(meta, 18) + 18;
+                    drawTTF((u32)mx, (u32)Y, meta, UIS_TF(18), XMB_TEXT_DIM);
+                    mx += ttf_text_width(meta, UIS_TF(18)) + 18;
                 }
                 if (detail.official_rating[0]) {
                     // Outlined chip.
-                    int cw = ttf_text_width(detail.official_rating, 13) + 16;
-                    int ch = 22;
+                    int cw = ttf_text_width(detail.official_rating, UIS_TF(13)) + UIS_W(16);
+                    int ch = UIS_H(22);
                     drawRect((u32)mx, (u32)Y, (u32)cw, 1, XMB_HAIRLINE);
                     drawRect((u32)mx, (u32)(Y + ch - 1), (u32)cw, 1, XMB_HAIRLINE);
                     drawRect((u32)mx, (u32)Y, 1, (u32)ch, XMB_HAIRLINE);
                     drawRect((u32)(mx + cw - 1), (u32)Y, 1, (u32)ch, XMB_HAIRLINE);
-                    drawTTF((u32)(mx + 8), (u32)(Y + 3), detail.official_rating,
-                            13, XMB_TEXT_DIM);
+                    drawTTF((u32)(mx + UIS_W(8)), (u32)(Y + UIS_H(3)), detail.official_rating,
+                            UIS_TF(13), XMB_TEXT_DIM);
                     mx += cw + 18;
                 }
                 if (detail.community_rating[0]) {
-                    drawIcon((u32)mx, (u32)(Y + 1), ICON_STAR, 18.0f, 0x00E8B64CUL);
-                    drawTTF((u32)(mx + 24), (u32)Y, detail.community_rating,
-                            18, XMB_TEXT_DIM);
+                    // Rating gold is semantic, not palette: a star reads as gold
+                    // in every theme, the way a warning reads as amber.
+                    drawIcon((u32)mx, (u32)(Y + 1), ICON_STAR, UIS_TF(18.0f), 0x00E8B64CUL);
+                    drawTTF((u32)(mx + UIS_W(24)), (u32)Y, detail.community_rating,
+                            UIS_TF(18), XMB_TEXT_DIM);
                 }
             }
             Y += 44;
@@ -456,46 +503,46 @@ void xmb_show_item_info(const XMBItem *root) {
                 drawRect((u32)tx, (u32)Y, (u32)bw, (u32)bh,
                          pf ? XMB_ACCENT : XMB_PANEL_HI);
                 if (pf) {
-                    drawRect((u32)(tx - 2), (u32)(Y - 2), (u32)(bw + 4), 2, XMB_KEY_SEL);
-                    drawRect((u32)(tx - 2), (u32)(Y + bh), (u32)(bw + 4), 2, XMB_KEY_SEL);
-                    drawRect((u32)(tx - 2), (u32)(Y - 2), 2, (u32)(bh + 4), XMB_KEY_SEL);
-                    drawRect((u32)(tx + bw), (u32)(Y - 2), 2, (u32)(bh + 4), XMB_KEY_SEL);
+                    drawRect((u32)(tx - UIS_W(2)), (u32)(Y - UIS_H(2)), (u32)(bw + UIS_W(4)), UIS_H(2), XMB_FOCUS_RING);
+                    drawRect((u32)(tx - UIS_W(2)), (u32)(Y + bh), (u32)(bw + UIS_W(4)), UIS_H(2), XMB_FOCUS_RING);
+                    drawRect((u32)(tx - UIS_W(2)), (u32)(Y - UIS_H(2)), UIS_W(2), (u32)(bh + UIS_H(4)), XMB_FOCUS_RING);
+                    drawRect((u32)(tx + bw), (u32)(Y - UIS_H(2)), UIS_W(2), (u32)(bh + UIS_H(4)), XMB_FOCUS_RING);
                 }
-                u32 fg = pf ? 0x00131630UL : XMB_TEXT_DIM;
-                drawIcon((u32)(tx + 16), (u32)(Y + (bh - 22) / 2), ICON_PLAY,
-                         22.0f, fg);
-                drawTTF((u32)(tx + 46), (u32)(Y + (bh - 20) / 2 + 1), "Play",
-                        20, fg, true);
+                u32 fg = pf ? XMB_KEY_LABEL_SEL : XMB_TEXT_DIM;
+                drawIcon((u32)(tx + UIS_W(16)), (u32)(Y + (bh - UIS_H(22)) / 2), ICON_PLAY,
+                         UIS_TF(22.0f), fg);
+                drawTTF((u32)(tx + UIS_W(46)), (u32)(Y + (bh - UIS_H(20)) / 2 + 1), "Play",
+                        UIS_TF(20), fg, true);
                 Y += bh + 18;
             }
 
             // Version selector is shown only when it has a real choice.  X
             // opens the full scrollable list; Left/Right also step through it.
             if (versions.n_sources > 1) {
-                const int bh = 44;
+                const int bh = UIS_H(44);
                 const int bw = max_w > 680 ? 680 : max_w;
                 const bool vf = (focus == FOCUS_VERSION);
                 drawRect((u32)tx, (u32)Y, (u32)bw, (u32)bh,
                          vf ? XMB_PANEL_HI : XMB_PANEL);
                 if (vf) {
-                    drawRect((u32)(tx - 4), (u32)Y, 3, (u32)bh, XMB_ACCENT);
-                    drawRect((u32)(tx - 1), (u32)(Y - 1), (u32)(bw + 2), 1,
+                    drawRect((u32)(tx - UIS_W(4)), (u32)Y, UIS_W(3), (u32)bh, XMB_ACCENT);
+                    drawRect((u32)(tx - 1), (u32)(Y - 1), (u32)(bw + UIS_W(2)), 1,
                              XMB_HAIRLINE);
-                    drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + 2), 1,
+                    drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + UIS_W(2)), 1,
                              XMB_HAIRLINE);
                 }
-                drawTTF_vcentered((u32)(tx + 16), Y + bh / 2, "Version", 16,
+                drawTTF_vcentered((u32)(tx + UIS_W(16)), Y + bh / 2, "Version", UIS_TF(16),
                                   vf ? XMB_ACCENT : XMB_TEXT_FAINT, true);
-                info_clip_text(tx + 118, Y + 11,
-                               versions.source[version_sel].label, 18,
+                info_clip_text(tx + UIS_W(118), Y + UIS_H(11),
+                               versions.source[version_sel].label, UIS_TF(18),
                                vf ? XMB_WHITE : XMB_TEXT,
-                               bw - 166, vf);
+                               bw - UIS_W(166), vf);
                 char pos[20];
                 snprintf(pos, sizeof(pos), "%d/%d", version_sel + 1,
                          versions.n_sources);
-                int pw = ttf_text_width(pos, 15);
-                drawTTF_vcentered((u32)(tx + bw - pw - 14), Y + bh / 2,
-                                  pos, 15, XMB_TEXT_DIM);
+                int pw = ttf_text_width(pos, UIS_TF(15));
+                drawTTF_vcentered((u32)(tx + bw - pw - UIS_W(14)), Y + bh / 2,
+                                  pos, UIS_TF(15), XMB_TEXT_DIM);
                 Y += bh + 18;
             }
 
@@ -503,19 +550,19 @@ void xmb_show_item_info(const XMBItem *root) {
             // always a real choice.  Left/Right (or X) step it; the value is
             // persisted, so it applies to this title and the next one.
             {
-                const int bh = 44;
+                const int bh = UIS_H(44);
                 const int bw = max_w > 680 ? 680 : max_w;
                 const bool qf = (focus == FOCUS_QUALITY);
                 drawRect((u32)tx, (u32)Y, (u32)bw, (u32)bh,
                          qf ? XMB_PANEL_HI : XMB_PANEL);
                 if (qf) {
-                    drawRect((u32)(tx - 4), (u32)Y, 3, (u32)bh, XMB_ACCENT);
-                    drawRect((u32)(tx - 1), (u32)(Y - 1), (u32)(bw + 2), 1,
+                    drawRect((u32)(tx - UIS_W(4)), (u32)Y, UIS_W(3), (u32)bh, XMB_ACCENT);
+                    drawRect((u32)(tx - 1), (u32)(Y - 1), (u32)(bw + UIS_W(2)), 1,
                              XMB_HAIRLINE);
-                    drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + 2), 1,
+                    drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + UIS_W(2)), 1,
                              XMB_HAIRLINE);
                 }
-                drawTTF_vcentered((u32)(tx + 16), Y + bh / 2, "Quality", 16,
+                drawTTF_vcentered((u32)(tx + UIS_W(16)), Y + bh / 2, "Quality", UIS_TF(16),
                                   qf ? XMB_ACCENT : XMB_TEXT_FAINT, true);
 
                 // Spell out what the setting actually asks the server for —
@@ -539,13 +586,17 @@ void xmb_show_item_info(const XMBItem *root) {
                 else
                     snprintf(qtxt, sizeof(qtxt), "%s  (%u Mbps)",
                              vquality_label(vq), qbr / 1000000u);
-                info_clip_text(tx + 118, Y + 11, qtxt, 18,
-                               qf ? XMB_WHITE : XMB_TEXT, bw - 166, qf);
+                // A quality value ("Auto  (1920x1080, 25 Mbps)") -- section 3.0
+                // gives codec and quality values to the spec face, "set one
+                // step smaller than its host line".
+                info_clip_text(tx + UIS_W(118), Y + UIS_H(11), qtxt, UIS_TF(17),
+                               qf ? XMB_WHITE : XMB_TEXT, bw - UIS_W(166), false,
+                               UI_FACE_SPEC);
                 Y += bh + 18;
             }
 
             if (detail.tagline[0]) {
-                drawTTF((u32)tx, (u32)Y, detail.tagline, 20, 0x00AFA3E8UL);
+                drawTTF((u32)tx, (u32)Y, detail.tagline, UIS_TF(20), XMB_TEXT_DIM);
                 Y += 38;
             }
 
@@ -566,7 +617,7 @@ void xmb_show_item_info(const XMBItem *root) {
                     while (p[fit] && fit < (int)sizeof(buf) - 1) {
                         if (p[fit] == ' ') last_sp = fit;
                         one[0] = p[fit];
-                        wpx += ttf_text_width(one, 19);
+                        wpx += ttf_text_width(one, UIS_TF(19));
                         if (wpx > wrap_w) break;
                         fit++;
                     }
@@ -574,7 +625,7 @@ void xmb_show_item_info(const XMBItem *root) {
                              : (last_sp > 0 ? last_sp : fit);
                     if (take <= 0) take = 1;
                     snprintf(buf, sizeof(buf), "%.*s", take, p);
-                    drawTTF((u32)tx, (u32)Y, buf, 19, 0x00C9CEE4UL);
+                    drawTTF((u32)tx, (u32)Y, buf, UIS_TF(19), XMB_TEXT);
                     p += take;
                     while (*p == ' ') p++;
                     Y += 30;
@@ -592,41 +643,54 @@ void xmb_show_item_info(const XMBItem *root) {
             };
             for (int i = 0; i < 4; i++) {
                 if (!facts[i].value[0]) continue;
-                drawTTF((u32)tx,         (u32)(Y + 2), facts[i].label, 15,
+                drawTTF((u32)tx,         (u32)(Y + UIS_H(2)), facts[i].label, UIS_TF(15),
                         XMB_TEXT_FAINT);
-                drawTTF((u32)(tx + 120), (u32)Y, facts[i].value, 17, XMB_TEXT);
+                drawTTF((u32)(tx + UIS_W(120)), (u32)Y, facts[i].value, UIS_TF(17), XMB_TEXT);
                 Y += 32;
             }
 
             // ---- Sections below the hero: begin under whichever column is
             // taller — the fact list or the poster.
             int hero_bottom = poster_y + poster_h - scroll_y;
-            int sec = (Y > hero_bottom ? Y : hero_bottom) + 40;
+            int sec = (Y > hero_bottom ? Y : hero_bottom) + UIS_H(40);
 
-            // Cast & Crew — headshot cards with name + role.
+            // Cast & Crew.  v1.0 restyles this row: the headshots were 118x176
+            // rectangles and are now 64px circles in a 92px column, with the
+            // name and character stacked under them on --font-tab.
+            //
+            // The images are NOT new -- parse_people() has filled
+            // detail.people[] since before this fork, and this row has always
+            // drawn them.  Only the shape, sizes and face changed.
             if (detail.n_people > 0) {
-                drawTTF((u32)X, (u32)sec, "Cast & Crew", 22, XMB_TEXT, true);
-                sec += 42;
-                const int cw = 118, ch = 176, gap = 22;
+                xmb_draw_eyebrow(X, sec, "Cast & Crew", XMB_TEXT_FAINT);
+                sec += UIS_H(42);
+                const int dia = UIS_H(64);          // the circle
+                const int cw  = UIS_W(92);          // the column it sits in
+                const int gap = UIS_W(12);
+                const int name_y = sec + dia + UIS_H(7);
                 for (int i = 0; i < detail.n_people; i++) {
                     int cxp = X + i * (cw + gap);
                     if (cxp + cw > (int)display_width - X) break;   // no h-scroll yet
-                    xmb_cpu_blit_thumb_scaled(detail.people[i].id, cxp, sec, cw, ch);
-                    info_clip_text(cxp, sec + ch + 8, detail.people[i].name,
-                                   14, XMB_TEXT, cw, true);
+                    // Centre the circle in its column; the labels stay flush
+                    // left under it, which is what the design shows.
+                    xmb_cpu_blit_thumb_circle(detail.people[i].id,
+                                              cxp, sec, dia, XMB_HAIRLINE);
+                    info_clip_text(cxp, name_y, detail.people[i].name,
+                                   UIS_TF(12), XMB_TEXT, cw, false, UI_FACE_TAB_REG);
                     if (detail.people[i].role[0])
-                        info_clip_text(cxp, sec + ch + 28, detail.people[i].role,
-                                       12, XMB_TEXT_DIM, cw, false);
+                        info_clip_text(cxp, name_y + UIS_H(16), detail.people[i].role,
+                                       UIS_TF(11.5f), XMB_TEXT_DIM, cw, false,
+                                       UI_FACE_TAB_REG);
                 }
-                sec += ch + 8 + 44;
+                sec += dia + UIS_H(7) + UIS_H(40);
             }
 
             // More Like This — recommended poster cards.  Left/right selects a
             // card (Cross opens it); the row scrolls horizontally to follow.
             if (n_similar > 0) {
-                drawTTF((u32)X, (u32)sec, "More Like This", 22, XMB_TEXT, true);
-                sec += 42;
-                const int cw = 148, ch = SIM_CH, gap = 22;
+                xmb_draw_eyebrow(X, sec, "More Like This", XMB_TEXT_FAINT);
+                sec += UIS_H(42);
+                const int cw = UIS_W(148), ch = SIM_CH, gap = UIS_W(22);
                 const int pitch = cw + gap;
                 const int window_w = (int)display_width - 2 * X;
                 // Keep the selected card within the visible window.
@@ -645,12 +709,12 @@ void xmb_show_item_info(const XMBItem *root) {
                     xmb_cpu_blit_thumb_scaled(similar[i].id, cxp, sec, cw, ch);
                     bool selected = (i == sim_sel && focus == FOCUS_SIM);
                     if (selected) {
-                        drawRect((u32)(cxp - 2), (u32)(sec - 2), (u32)(cw + 4), 2, XMB_KEY_SEL);
-                        drawRect((u32)(cxp - 2), (u32)(sec + ch),  (u32)(cw + 4), 2, XMB_KEY_SEL);
-                        drawRect((u32)(cxp - 2), (u32)(sec - 2), 2, (u32)(ch + 4), XMB_KEY_SEL);
-                        drawRect((u32)(cxp + cw), (u32)(sec - 2), 2, (u32)(ch + 4), XMB_KEY_SEL);
+                        drawRect((u32)(cxp - UIS_W(2)), (u32)(sec - UIS_H(2)), (u32)(cw + UIS_W(4)), UIS_H(2), XMB_FOCUS_RING);
+                        drawRect((u32)(cxp - UIS_W(2)), (u32)(sec + ch),  (u32)(cw + UIS_W(4)), UIS_H(2), XMB_FOCUS_RING);
+                        drawRect((u32)(cxp - UIS_W(2)), (u32)(sec - UIS_H(2)), UIS_W(2), (u32)(ch + UIS_H(4)), XMB_FOCUS_RING);
+                        drawRect((u32)(cxp + cw), (u32)(sec - UIS_H(2)), UIS_W(2), (u32)(ch + UIS_H(4)), XMB_FOCUS_RING);
                     }
-                    info_clip_text(cxp, sec + ch + 8, similar[i].name, 14,
+                    info_clip_text(cxp, sec + ch + UIS_H(8), similar[i].name, UIS_TF(14),
                                    selected ? XMB_WHITE : XMB_TEXT_DIM, cw,
                                    selected);
                 }
@@ -664,15 +728,15 @@ void xmb_show_item_info(const XMBItem *root) {
 
             // Scrollbar on the right edge when the page overflows.
             if (max_scroll > 0) {
-                int bx = (int)display_width - 10;
+                int bx = (int)display_width - UIS_W(10);
                 int ty0 = top, th = view_bottom - top;
-                drawRect((u32)bx, (u32)ty0, 3, (u32)th, XMB_TRACK);
+                drawRect((u32)bx, (u32)ty0, UIS_W(3), (u32)th, XMB_TRACK);
                 int total = content_bottom > 0 ? content_bottom : 1;
                 int thb = th * view_bottom / total;
                 if (thb < 26) thb = 26;
                 if (thb > th) thb = th;
                 int off = (th - thb) * scroll_y / max_scroll;
-                drawRect((u32)bx, (u32)(ty0 + off), 3, (u32)thb, XMB_ACCENT);
+                drawRect((u32)bx, (u32)(ty0 + off), UIS_W(3), (u32)thb, XMB_ACCENT);
             }
         }
         {
@@ -772,32 +836,32 @@ int xmb_resume_choice(const XMBItem *it) {
         drawRect((u32)px, (u32)py, 1, (u32)ph, XMB_HAIRLINE);
         drawRect((u32)(px + pw - 1), (u32)py, 1, (u32)ph, XMB_HAIRLINE);
 
-        int cx    = px + 32;
-        int max_w = pw - 64;
-        int y     = py + 30;
+        int cx    = px + UIS_W(32);
+        int max_w = pw - UIS_W(64);
+        int y     = py + UIS_H(30);
 
         // Item title, truncated to the panel width.
         {
             char tbuf[132];
             snprintf(tbuf, sizeof(tbuf), "%s", it->name);
             int len = (int)strlen(tbuf);
-            while (len > 1 && ttf_text_width(tbuf, 25, true) > max_w)
+            while (len > 1 && ttf_text_width(tbuf, UIS_TF(25), true) > max_w)
                 tbuf[--len] = '\0';
-            drawTTF((u32)cx, (u32)y, tbuf, 25, XMB_WHITE, true);
+            drawTTF((u32)cx, (u32)y, tbuf, UIS_TF(25), XMB_WHITE, true);
         }
         y += 40;
-        drawTTF((u32)cx, (u32)y, sub, 15, XMB_TEXT_DIM);
+        drawTTF((u32)cx, (u32)y, sub, UIS_TF(15), XMB_TEXT_DIM);
         y += 34;
 
         // Two option rows; the selected one gets the panel-hi fill + accent bar.
         int ow = max_w, oh = UIS_H(46);
         for (int i = 0; i < 2; i++) {
-            int oy = y + i * (oh + 10);
+            int oy = y + i * (oh + UIS_H(10));
             if (i == sel) {
                 drawRect((u32)cx, (u32)oy, (u32)ow, (u32)oh, XMB_PANEL_HI);
-                drawRect((u32)(cx - 4), (u32)oy, 3, (u32)oh, XMB_ACCENT);
+                drawRect((u32)(cx - UIS_W(4)), (u32)oy, UIS_W(3), (u32)oh, XMB_ACCENT);
             }
-            drawTTF_vcentered((u32)(cx + 16), oy + oh / 2, opts[i], 19,
+            drawTTF_vcentered((u32)(cx + UIS_W(16)), oy + oh / 2, opts[i], UIS_TF(19),
                               i == sel ? XMB_TEXT : XMB_TEXT_DIM);
         }
 
