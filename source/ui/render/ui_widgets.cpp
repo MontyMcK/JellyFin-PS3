@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+#include <math.h>
 
 #include "ui.h"
 #include "ui_visuals.h"
@@ -15,6 +16,7 @@
 #include "ps_buttons_png.h"
 #include "jfmark_png.h"
 #include "plog.h"
+#include "ui_tab_anim.h"
 
 // -------------------------------------------------------
 // Tab icon codepoints (Tabler Icons)
@@ -71,14 +73,70 @@ int xmb_nav_depth(void)
     return 0;
 }
 
+// The tab bar is a WHEEL: the active tab always sits at the centre and the
+// rest are placed round a circle by their ring distance from it, so they
+// bunch and shrink towards the edges and fade out before the point where the
+// ring wraps.  A switch turns the wheel (ui_tab_anim.h); the glow and the
+// underline stay put at the centre and the tabs pass under them.
+
+// Where the active tab sits in display order, or -1.
+static int xmb_tab_index(const int *enabled, int n, int tab)
+{
+    for (int i = 0; i < n; i++)
+        if (enabled[i] == tab) return i;
+    return -1;
+}
+
+// d reduced into [-n/2, n/2): the signed ring distance.
+static float tab_ring_wrap(float d, int n)
+{
+    const float h = 0.5f * (float)n;
+    while (d >= h) d -= (float)n;
+    while (d < -h) d += (float)n;
+    return d;
+}
+
+// The ring position the wheel is showing this frame.
+static float xmb_tab_wheel_pos(const int *enabled, int n)
+{
+    const int a = xmb_tab_index(enabled, n, g_active_tab);
+    if (a < 0) return 0.0f;
+    float p = tab_anim_ring_pos((float)a);
+    while (p >= (float)n) p -= (float)n;
+    while (p < 0.0f)      p += (float)n;
+    return p;
+}
+
+void xmb_tab_anim_begin(int old_tab, int new_tab)
+{
+    int enabled[XMB_TAB_COUNT];
+    const int n = xmb_tab_order(enabled);
+    const int b = xmb_tab_index(enabled, n, new_tab);
+    if (n <= 1 || b < 0) return;
+    // From what is on screen now (g_active_tab is still the old tab), which
+    // may be mid-turn -- so a quick second press never snaps back.
+    (void)old_tab;
+    const float from = xmb_tab_wheel_pos(enabled, n);
+    tab_anim_start(from, tab_ring_wrap((float)b - from, n));
+}
+
 int xmb_tab_focus_center(void)
 {
-    int enabled[XMB_TAB_COUNT], spacing, x0;
-    const int n = xmb_tab_layout(enabled, &spacing, &x0);
-
-    for (int i = 0; i < n; i++)
-        if (enabled[i] == g_active_tab) return x0 + i * spacing;
     return (int)display_width / 2;
+}
+
+// Mix a toward b by t in [0,1], per channel.
+static u32 tab_mix(u32 a, u32 b, float t)
+{
+    if (t <= 0.0f) return a;
+    if (t >= 1.0f) return b;
+    u32 out = 0;
+    for (int sh = 0; sh <= 16; sh += 8) {
+        const float ca = (float)((a >> sh) & 0xFF);
+        const float cb = (float)((b >> sh) & 0xFF);
+        out |= (u32)(ca + (cb - ca) * t + 0.5f) << sh;
+    }
+    return out;
 }
 
 // -------------------------------------------------------
@@ -274,18 +332,40 @@ void xmb_draw_tabs(void) {
     const int label_y = oy + UIS_H(TAB_LABEL_Y);
     const int rule_y  = oy + UIS_H(TAB_RULE_Y);
     const bool recessed = xmb_nav_depth() > 0;
-    const int focus_center = xmb_tab_focus_center();
+    const int   cx0   = (int)display_width / 2;
+    const float pos   = xmb_tab_wheel_pos(enabled, n);
+    const float half  = 0.5f * (float)n;
+    const u32   fadeto = XMB_BG_TOP;    // what "faded out" means up here
 
     for (int i = 0; i < n; i++) {
-        int  t      = enabled[i];
-        int  cx     = tab_group_x0 + i * spacing;
+        int   t   = enabled[i];
+        float d   = tab_ring_wrap((float)i - pos, n);
+        float th  = d * TAB_WHEEL_RAD;
+        if (th <= -1.55f || th >= 1.55f) continue;       // round the back
+        const float face = cosf(th);                     // 1 facing, 0 edge-on
+        // Fade to nothing over the last ring step before the wrap point, so a
+        // tab crossing from one end to the other is never seen to jump.
+        float vis = half - fabsf(d);
+        vis = vis < 0.0f ? 0.0f : vis > 1.0f ? 1.0f : vis;
+        vis *= face;
+        if (vis <= 0.02f) continue;
+
+        int  cx     = cx0 + tab_wheel_x(d);
         bool active = (t == g_active_tab);
-        int  dist   = active ? 0 : abs(i - (focus_center - tab_group_x0) / spacing);
-        int  icon_px = UIS_H(active && !recessed ? TAB_FOCUS_ICON_PX
-                                                  : TAB_IDLE_ICON_PX);
+        const float ad = fabsf(d);
+        // The centre slot is big and white; size and brightness fall off
+        // continuously with distance, so the wheel turning reads as motion.
+        const float near_c = ad < 1.0f ? 1.0f - ad : 0.0f;
+        int icon_px = UIS_H(TAB_IDLE_ICON_PX) +
+                      (int)((float)(UIS_H(recessed ? TAB_IDLE_ICON_PX
+                                                   : TAB_FOCUS_ICON_PX)
+                                    - UIS_H(TAB_IDLE_ICON_PX)) * near_c);
+        icon_px = (int)((float)icon_px * (0.75f + 0.25f * face));
         u32 icon_color = recessed ? XMB_ICON_IDLE
-                       : active   ? XMB_WHITE
-                       : dist == 1 ? XMB_ICON_IDLE : XMB_HAIRLINE;
+                       : tab_mix(tab_mix(XMB_HAIRLINE, XMB_ICON_IDLE,
+                                         ad < 2.0f ? 2.0f - ad : 0.0f),
+                                 XMB_WHITE, near_c);
+        icon_color = tab_mix(fadeto, icon_color, vis);
 
         drawIcon((u32)(cx - icon_px / 2), (u32)icon_y, tab_icon(t),
                  (float)icon_px, icon_color);
@@ -305,14 +385,21 @@ void xmb_draw_tabs(void) {
         int hi = (int)display_width - XMB_ITEM_PAD - lw;
         if (lx < lo) lx = lo;
         if (hi >= lo && lx > hi) lx = hi;
-        u32 label_color = recessed ? XMB_TEXT_FAINT : XMB_WHITE;
+        u32 label_color = recessed ? XMB_TEXT_FAINT
+                        : tab_mix(XMB_TEXT_DIM, XMB_WHITE, near_c);
+        label_color = tab_mix(fadeto, label_color, vis);
+        // Bold and the underline belong to whichever tab is AT the centre,
+        // not to g_active_tab: during a turn they hand over as the two tabs
+        // pass through the middle, instead of jumping on the button press.
+        const bool centred = near_c >= 0.5f;
         if (!strobe_test_disable_category_labels() &&
             (active || !strobe_test_disable_inactive_labels()))
             drawTTF_tracked((u32)lx, (u32)label_y, label, px, label_color,
-                            active ? UI_FACE_TAB : UI_FACE_TAB_REG, track);
-        if (active) {
+                            centred ? UI_FACE_TAB : UI_FACE_TAB_REG, track);
+        if (near_c > 0.0f) {
+            const u32 rule = recessed ? XMB_HAIRLINE : XMB_ACCENT;
             drawRect((u32)lx, (u32)rule_y, (u32)lw, (u32)UIS_H(TAB_RULE_H),
-                     recessed ? XMB_HAIRLINE : XMB_ACCENT);
+                     tab_mix(fadeto, rule, near_c * near_c));
         }
     }
 }

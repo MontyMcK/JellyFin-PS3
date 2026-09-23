@@ -480,6 +480,8 @@ void ui_text_stats_reset(void);
 void ui_text_stats_get(u32 *glyphs, u32 *blend_px, u32 *opaque_px);
 int  xmb_nav_depth(void);
 int  xmb_tab_focus_center(void);
+// Start the tab wheel turning from old_tab to new_tab (ui_widgets.cpp).
+void xmb_tab_anim_begin(int old_tab, int new_tab);
 void xmb_draw_tabs(void);
 void xmb_draw_meta(u32 x, u32 y, const XMBItem *it, float px = UIS_TF(14));
 

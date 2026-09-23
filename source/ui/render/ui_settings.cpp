@@ -15,6 +15,7 @@
 #include "statsovl.h"
 #include "subfont.h"
 #include "subcolor.h"
+#include "ui_tab_anim.h"
 
 static const char *SETTINGS_LABELS[XMB_SETTINGS_COUNT] =
     { "Log Out", "Debug Logging", "Screen Size", "1080p Playback (Alpha)",
@@ -107,7 +108,7 @@ static void fill_circle(int cx, int cy, int r, u32 color) {
 // CPU phase: account card, row highlight, confirm dialog panel.
 void xmb_cpu_draw_settings(void) {
     int W      = (int)display_width;
-    int list_x = (W - XMB_LIST_W) / 2;
+    int list_x = (W - XMB_LIST_W) / 2 + tab_anim_content_dx();
 
     if (g_settings_confirm) {
         int mx, my, mw, mh;
@@ -131,9 +132,12 @@ void xmb_cpu_draw_settings(void) {
         int last  = first + settings_visible_rows();
         for (int i = first; i < last; i++) {
             if (i != g_settings_sel) continue;
-            int iy = settings_row_y(i);
-            drawRect((u32)list_x, (u32)iy, (u32)XMB_LIST_W, SET_ROW_H, XMB_PANEL_HI);
-            drawRect((u32)(list_x - UIS_W(4)), (u32)iy, UIS_W(3), SET_ROW_H, XMB_ACCENT);
+            // The bar glides to the new row rather than jumping (focus_glide).
+            int bx = list_x, iy = settings_row_y(i);
+            int bw = XMB_LIST_W, bh = SET_ROW_H;
+            focus_glide(0x7FFF0000 | (g_active_tab << 4), &bx, &iy, &bw, &bh);
+            drawRect((u32)bx, (u32)iy, (u32)bw, (u32)bh, XMB_PANEL_HI);
+            drawRect((u32)(bx - UIS_W(4)), (u32)iy, UIS_W(3), (u32)bh, XMB_ACCENT);
         }
     }
 }
@@ -141,7 +145,7 @@ void xmb_cpu_draw_settings(void) {
 // RSX phase: account text, action labels, confirm prompt.
 void xmb_draw_settings(void) {
     int W      = (int)display_width;
-    int list_x = (W - XMB_LIST_W) / 2;
+    int list_x = (W - XMB_LIST_W) / 2 + tab_anim_content_dx();
 
     if (g_settings_confirm) {
         int mx, my, mw, mh;

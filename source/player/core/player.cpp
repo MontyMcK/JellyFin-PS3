@@ -167,7 +167,7 @@ void show_player(const JFItem *item, u32 resume_secs,
                  const char *media_source_id) {
     crash_log("p1 enter");
     plog("show_player: enter");
-    plog("show_player: BUILD=jellywave-ui-1");
+    plog("show_player: BUILD=xmb-sheets-1");
     init_btns();
 
 #if BUILD_FOR_RPCS3

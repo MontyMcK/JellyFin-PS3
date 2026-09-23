@@ -13,6 +13,7 @@
 #include "ui_text_gpu.h"
 #include "plog.h"
 #include "jf_paths.h"
+#include "ui_wave.h"          // ui_cpu_bg
 
 extern void crash_log(const char *msg);
 
@@ -85,18 +86,22 @@ static u32 s_st_runs, s_st_misses, s_st_bytes, s_st_flushes;
 
 // --- the gate -------------------------------------------------------------
 //
-// OPT-IN and off by default, for the same reason ui_card_gpu.cpp is: this
-// binds RSX textures from a part of the app that historically bound none, and
-// a bad bind on this hardware does not fail politely -- it wedges the GPU,
-// takes the console off the network and needs a power cycle.  Put "1" in
-// /dev_hdd0/tmp/jellyfin_gputext.txt to enable, delete the file to go back.
+// Gated, for the same reason ui_card_gpu.cpp is: this binds RSX textures
+// from a part of the app that historically bound none, and a bad bind on this
+// hardware does not fail politely -- it wedges the GPU, takes the console off
+// the network and needs a power cycle.  On by default now that the new UI is
+// built on it; put "0" in /dev_hdd0/tmp/jellyfin_gputext.txt to go back.
 #define GPUTEXT_FILE "jellyfin_gputext.txt"
 static bool gputext_enabled(void)
 {
+    // RPCS3 drops CPU writes into an RSX-owned frame, so the emulator keeps
+    // the whole frame on the CPU (see ui_cpu_bg in ui_wave.cpp).
+    if (ui_cpu_bg()) return false;
+    // Absent = on; write 0 to the file to fall back to the CPU path.
     FILE *f = fopen(jf_data_path(GPUTEXT_FILE), "r");
-    if (!f) return false;
-    int v = 0;
-    bool on = (fscanf(f, "%d", &v) == 1 && v == 1);
+    if (!f) return true;
+    int v = 1;
+    bool on = (fscanf(f, "%d", &v) != 1 || v == 1);
     fclose(f);
     return on;
 }
@@ -105,7 +110,7 @@ void ui_text_gpu_init(void)
 {
     if (s_ready) return;
     if (!gputext_enabled()) {
-        plog("text_gpu: disabled (jellyfin_gputext.txt absent) -- CPU glyph blits");
+        plog("text_gpu: disabled (jellyfin_gputext.txt = 0) -- CPU glyph blits");
         crash_log("text_gpu: OFF (CPU glyphs)");
         return;
     }

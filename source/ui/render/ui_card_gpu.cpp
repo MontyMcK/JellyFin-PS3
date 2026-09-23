@@ -12,6 +12,7 @@
 #include "ui_card_gpu.h"
 #include "plog.h"
 #include "jf_paths.h"
+#include "ui_wave.h"          // ui_cpu_bg
 
 extern void crash_log(const char *msg);
 #include <stdio.h>
@@ -25,7 +26,7 @@ static u32 *s_fp_buf = NULL;
 static u32  s_fp_off = 0;
 static bool s_ready  = false;
 
-// OPT-IN, and off by default.
+// Gated, and ON by default since the new UI (see the end of this note).
 //
 // This is a new RSX path in a part of the app that has never bound a texture
 // (the XMB draws zero of them today), and a bad texture bind does not fail
@@ -34,19 +35,22 @@ static bool s_ready  = false;
 // this session.
 //
 // So the switch lives in a file that can be flipped over FTP without
-// reflashing anything: put "1" in /dev_hdd0/tmp/jellyfin_gpucards.txt to use
-// the GPU path, delete it to go back to the CPU blit.  Same shape as
-// jellyfin_dtsma.txt and the other experimental gates.
+// reflashing anything: put "0" in /dev_hdd0/tmp/jellyfin_gpucards.txt to go
+// back to the CPU blit.  Same shape as jellyfin_dtsma.txt and the other gates.
 //
-// Once it has proven itself on hardware this default should flip, because the
-// CPU path costs 6.4 ms of every Home frame.
+// The default flipped to on with the JellyWave UI, which was built and tested
+// with it on; the CPU path costs 6.4 ms of every Home frame.
 #define GPUCARDS_FILE "jellyfin_gpucards.txt"
 static bool gpucards_enabled(void)
 {
+    // RPCS3 drops CPU writes into an RSX-owned frame, so the emulator keeps
+    // the whole frame on the CPU (see ui_cpu_bg in ui_wave.cpp).
+    if (ui_cpu_bg()) return false;
+    // Absent = on; write 0 to the file to fall back to the CPU path.
     FILE *f = fopen(jf_data_path(GPUCARDS_FILE), "r");
-    if (!f) return false;
-    int v = 0;
-    bool on = (fscanf(f, "%d", &v) == 1 && v == 1);
+    if (!f) return true;
+    int v = 1;
+    bool on = (fscanf(f, "%d", &v) != 1 || v == 1);
     fclose(f);
     return on;
 }
@@ -55,7 +59,7 @@ void ui_card_gpu_init(void)
 {
     if (s_ready) return;
     if (!gpucards_enabled()) {
-        plog("card_gpu: disabled (jellyfin_gpucards.txt absent) -- CPU blit path");
+        plog("card_gpu: disabled (jellyfin_gpucards.txt = 0) -- CPU blit path");
         crash_log("card_gpu: OFF (CPU blit)");
         return;
     }

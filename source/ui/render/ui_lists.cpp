@@ -13,6 +13,7 @@
 #include "circle_blit.h"
 #include "ui_card_gpu.h"
 #include "ui_strobe_test.h"
+#include "ui_tab_anim.h"
 
 // -------------------------------------------------------
 // CPU blits: main-memory bitmap -> framebuffer
@@ -265,7 +266,7 @@ static void grid_geom_core(XMBTabKind kind, bool portrait, GridGeom *gg) {
         gg->vis    = gg->cols * XMB_GRID_ROWS;
         gg->stride = card + XMB_MUSIC_TEXT_H + 6;
         gg->grid_w = gg->cols * card + (gg->cols - 1) * XMB_CARD_GAP_X;
-        gg->x0     = ((int)display_width - gg->grid_w) / 2;
+        gg->x0     = ((int)display_width - gg->grid_w) / 2 + tab_anim_content_dx();
         return;
     }
 
@@ -285,7 +286,7 @@ static void grid_geom_core(XMBTabKind kind, bool portrait, GridGeom *gg) {
     gg->vis    = gg->cols * XMB_GRID_ROWS;
     gg->stride = gg->card_h + XMB_CARD_TEXT_H + 6;
     gg->grid_w = gg->cols * gg->card_w + (gg->cols - 1) * XMB_CARD_GAP_X;
-    gg->x0     = ((int)display_width - gg->grid_w) / 2;
+    gg->x0     = ((int)display_width - gg->grid_w) / 2 + tab_anim_content_dx();
 }
 
 void xmb_grid_geom(int tab, GridGeom *gg) {
@@ -395,9 +396,19 @@ void xmb_draw_card(const char *item_id, int cx, int cy, int card_w, int card_h,
     // When the GPU pass is live it has already drawn the identical geometry
     // with blended quads, so skip it here rather than paying for it twice.
     if (selected && !ui_card_gpu_ready() &&
-        !strobe_test_disable_card_cpu_fallback()) {
+        !strobe_test_disable_card_cpu_fallback())
+        xmb_focus_ring_cpu(cx, cy, card_w, card_h);
+}
+
+int xmb_focus_ctx(void) {
+    return (g_active_tab << 12) | ((g_tv_depth & 15) << 8) |
+           ((g_col_depth & 3) << 6) | ((g_music_depth & 3) << 4) |
+           (g_music_subtab & 15);
+}
+
+void xmb_focus_ring_cpu(int cx, int cy, int w, int h) {
+    {
         const int T = 2, G = 2, O = G + T;
-        int w = card_w, h = card_h;
         drawRect((u32)(cx - O), (u32)(cy - O), (u32)(w + 2*O), T, XMB_FOCUS_RING);
         drawRect((u32)(cx - O), (u32)(cy + h + G), (u32)(w + 2*O), T, XMB_FOCUS_RING);
         drawRect((u32)(cx - O), (u32)(cy - G), T, (u32)(h + 2*G), XMB_FOCUS_RING);
@@ -428,6 +439,7 @@ bool xmb_card_gpu_one(const char *item_id, int cx, int cy,
 void xmb_grid_gpu(const GridGeom *gg, const XMBItem *items, int count,
                   int sel, int scroll, int y0) {
     if (!ui_card_gpu_ready()) return;
+    int rx = 0, ry = 0; bool have = false;
     for (int i = 0; i < gg->vis; i++) {
         int idx = scroll + i;
         if (idx >= count) break;
@@ -441,8 +453,13 @@ void xmb_grid_gpu(const GridGeom *gg, const XMBItem *items, int count,
         ThumbImg img = (!gg->portrait && !music && items[idx].has_thumb)
                      ? THUMB_IMG_THUMB : THUMB_IMG_PRIMARY;
         xmb_card_gpu_one(items[idx].id, cx, cy, gg->card_w, gg->card_h, img);
-        if (idx == sel)
-            ui_card_gpu_selection(cx, cy, gg->card_w, gg->card_h);
+        if (idx == sel) { rx = cx; ry = cy; have = true; }
+    }
+    // After every card, so the ring is never under a neighbour mid-glide.
+    if (have) {
+        int rw = gg->card_w, rh = gg->card_h;
+        focus_glide(xmb_focus_ctx(), &rx, &ry, &rw, &rh);
+        ui_card_gpu_selection(rx, ry, rw, rh);
     }
 }
 
@@ -450,6 +467,7 @@ void xmb_grid_gpu(const GridGeom *gg, const XMBItem *items, int count,
 // progress strips.
 void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
                   int sel, int scroll, int y0) {
+    int rx = 0, ry = 0; bool have = false;
     for (int i = 0; i < gg->vis; i++) {
         int idx = scroll + i;
         if (idx >= count) break;
@@ -462,8 +480,16 @@ void xmb_grid_cpu(const GridGeom *gg, const XMBItem *items, int count,
                      strcmp(ty, "MusicGenre")  == 0 ||
                      strcmp(ty, "Playlist")    == 0;
         xmb_draw_card(items[idx].id, cx, cy, gg->card_w, gg->card_h,
-                      items[idx].progress_pct, idx == sel,
+                      items[idx].progress_pct, false,
                       music ? items[idx].name : NULL);
+        if (idx == sel) { rx = cx; ry = cy; have = true; }
+    }
+    // The ring after every card (see xmb_grid_gpu); the GPU pass drew it
+    // already when it is live.
+    if (have && !ui_card_gpu_ready() && !strobe_test_disable_card_cpu_fallback()) {
+        int rw = gg->card_w, rh = gg->card_h;
+        focus_glide(xmb_focus_ctx(), &rx, &ry, &rw, &rh);
+        xmb_focus_ring_cpu(rx, ry, rw, rh);
     }
 
     // Prefetch the next page of thumbs past the visible window so paging

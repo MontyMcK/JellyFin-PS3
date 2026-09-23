@@ -21,3 +21,10 @@ void music_viz_push(const float *lr, int n_pairs);
 // When no new audio has arrived since the last call (paused / stalled /
 // stopped) the bands decay smoothly toward zero.
 void music_viz_bands(float *out);
+
+// The same bands BEFORE the per-frame normalisation, from the last
+// music_viz_bands() call (call that first): absolute magnitudes, so a kick
+// reads as the jump it is.  The normalised bands hide it -- bass is usually
+// the loudest band, so it sits near 1.0 with or without the kick.  Decays to
+// zero with no audio.  UI thread.
+void music_viz_raw(float *out);

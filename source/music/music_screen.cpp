@@ -1,6 +1,6 @@
 // Now Playing — the music player screen (see the mockup this implements):
-// big glowing album art on the left, the audio-reactive bar visualizer
-// above the track title, artist in accent violet, album/year and source
+// big glowing album art on the left, the track title (the background wave
+// is the visualiser -- it reacts to the music), artist in accent violet, album/year and source
 // info lines, an UP NEXT queue on the right, transport icons, and a seek
 // bar.  SELECT opens a queue overlay for jumping straight to a track.
 //
@@ -18,7 +18,6 @@
 #include "ui_wave.h"
 #include "music_screen.h"
 #include "music_player.h"
-#include "music_fft.h"
 #include "plog.h"
 #include "timing.h"
 
@@ -120,38 +119,6 @@ static void draw_breadcrumb4(int x, int y, const char *a, const char *b,
             drawIcon((u32)(x + UIS_W(4)), (u32)(y - 1), ICON_CHEVRON_RIGHT, UIS_TF(16.0f), XMB_TEXT_FAINT);
             x += UIS_W(24);
         }
-    }
-}
-
-// -------------------------------------------------------
-// The visualizer — the circled part of the mockup, with more and longer
-// bars as requested: MUSIC_VIZ_BANDS columns, up to VIZ_H px tall, violet
-// with a lighter cap so the peaks read at TV distance.
-// -------------------------------------------------------
-
-static void draw_visualizer(int x, int baseline, int width, int max_h) {
-    float bands[MUSIC_VIZ_BANDS];
-    music_viz_bands(bands);
-
-    // Geometry from the design's JFBars component (gap 4, 2px floor).  Its bar
-    // COUNT and motion are not copied: JFBars drives its bars from a sine
-    // stand-in, while this client has real FFT band levels from music_fft.cpp,
-    // which is strictly better data.  Only the presentation is taken across.
-    int gap = UIS_W(4);
-    int bw  = (width - gap * (MUSIC_VIZ_BANDS - 1)) / MUSIC_VIZ_BANDS;
-    if (bw < 4) bw = 4;
-
-    for (int i = 0; i < MUSIC_VIZ_BANDS; i++) {
-        int h = UIS_H(2) + (int)(bands[i] * (float)(max_h - 2));
-        int bx = x + i * (bw + gap);
-        int by = baseline - h;
-        drawRect((u32)bx, (u32)by, (u32)bw, (u32)h, XMB_ACCENT);
-        // Lighter 2px cap on any bar with real energy.  This was a hardcoded
-        // lilac (0x00C4B5F7) that ignored the theme entirely -- harmless under
-        // XMB wave, plainly wrong under Golden Age, where it put a purple cap
-        // on gold bars.  XMB_TEXT is the theme's light ink and tracks it.
-        if (h > 6)
-            drawRect((u32)bx, (u32)by, (u32)bw, UIS_H(2), XMB_TEXT);
     }
 }
 
@@ -433,7 +400,8 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
     int col_w     = up_x - UIS_W(30) - tx;
     int title_top = ay + (int)(H * 0.15f);
 
-    draw_visualizer(tx, title_top - 18, (int)(W * 0.265f), (int)(H * 0.11f));
+    // No bar visualiser: the background wave is the visualiser now -- it
+    // reads the same spectrum bands (see xw_update_bands in ui_wave.cpp).
 
     draw_clipped((u32)tx, (u32)title_top, t->name, UIS_TF(32), XMB_WHITE, col_w, true);
     if (t->artist[0])

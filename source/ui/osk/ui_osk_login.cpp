@@ -15,6 +15,28 @@
 #include "ui_visuals.h"
 #include "ui_wave.h"
 #include "timing.h"
+#include "ui_tab_anim.h"
+
+// Fraction of key [kx,ky,kw,kh] under the highlight [hx,hy,hw,hh], 0..1.
+static float osk_login_cover(int kx, int ky, int kw, int kh,
+                             int hx, int hy, int hw, int hh) {
+    int x0 = kx > hx ? kx : hx, y0 = ky > hy ? ky : hy;
+    int x1 = (kx + kw) < (hx + hw) ? (kx + kw) : (hx + hw);
+    int y1 = (ky + kh) < (hy + hh) ? (ky + kh) : (hy + hh);
+    if (x1 <= x0 || y1 <= y0 || kw <= 0 || kh <= 0) return 0.0f;
+    return (float)((x1 - x0) * (y1 - y0)) / (float)(kw * kh);
+}
+
+static u32 osk_login_mix(u32 a, u32 b, float t) {
+    if (t <= 0.0f) return a;
+    if (t >= 1.0f) return b;
+    u32 out = 0;
+    for (int sh = 0; sh <= 16; sh += 8) {
+        const float ca = (float)((a >> sh) & 0xFF), cb = (float)((b >> sh) & 0xFF);
+        out |= (u32)(ca + (cb - ca) * t + 0.5f) << sh;
+    }
+    return out;
+}
 
 namespace {
 
@@ -109,7 +131,9 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
     drawRect((u32)barx, (u32)(XMB_CONTENT_Y + UIS_H(8) + field_h - UIS_H(2)), (u32)total_w,
              UIS_H(2), XMB_ACCENT);
 
-    // Key cells (CPU rects).
+    // Key cells (CPU rects), then one highlight block that glides to the
+    // selected key (focus_glide) instead of the key just changing colour.
+    int hx = 0, hy = 0, hw = 0, hh = 0;
     for (int r = 0; r < nrows; r++) {
         int rw = orow_units(&rows[r]) * OSK_STEP_X - OSK_GAP;
         int cx = (W - rw) / 2;
@@ -117,12 +141,16 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
         for (int c = 0; c < rows[r].n; c++) {
             const OKey *k = &rows[r].keys[c];
             int kw  = k->cols * OSK_STEP_X - OSK_GAP;
-            u32 col = (r == sr && c == sc) ? XMB_KEY_SEL : XMB_KEY_NORMAL;
-            if (k->kind == OK_SHIFT && caps && !(r == sr && c == sc))
-                col = XMB_ACCENT_DEEP;
+            u32 col = (k->kind == OK_SHIFT && caps) ? XMB_ACCENT_DEEP : XMB_KEY_NORMAL;
             drawRect((u32)cx, (u32)ry, (u32)kw, OSK_KEY_H, col);
+            if (r == sr && c == sc) { hx = cx; hy = ry; hw = kw; hh = OSK_KEY_H; }
             cx += k->cols * OSK_STEP_X;
         }
+    }
+    if (hw > 0) {
+        // Snaps when the layout (row count) changes.
+        focus_glide(0x7EED0000 | nrows, &hx, &hy, &hw, &hh);
+        drawRect((u32)hx, (u32)hy, (u32)hw, (u32)hh, XMB_KEY_SEL);
     }
 
     // Brand + prompt.
@@ -167,9 +195,13 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
         for (int c = 0; c < rows[r].n; c++) {
             const OKey *k = &rows[r].keys[c];
             int  kw = k->cols * OSK_STEP_X - OSK_GAP;
-            bool sel = (r == sr && c == sc);
             int  ry  = y0 + r * OSK_STEP_Y;
-            u32  clr = sel ? XMB_KEY_LABEL_SEL : XMB_TEXT;
+            // Darkened by how much of this key the gliding highlight covers,
+            // so a label never goes dark before the block reaches it.
+            u32  clr = osk_login_mix(XMB_TEXT, XMB_KEY_LABEL_SEL,
+                                     hw > 0 ? osk_login_cover(cx, ry, kw, OSK_KEY_H,
+                                                              hx, hy, hw, hh)
+                                            : 0.0f);
             if (k->kind == OK_BACK) {
                 drawIcon((u32)(cx + (kw - UIS_W(22)) / 2),
                          (u32)(ry + (OSK_KEY_H - UIS_H(22)) / 2), ICON_BACKSPACE, UIS_TF(22.0f), clr);

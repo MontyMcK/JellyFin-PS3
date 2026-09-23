@@ -12,6 +12,7 @@
 #include "ui_card_gpu.h"
 #include "jellyfin_api.h"
 #include "music_screen.h"
+#include "ui_tab_anim.h"
 
 // -------------------------------------------------------
 // Model
@@ -90,7 +91,7 @@ static int row_strip_w(HomeRowKind k) {
 // cards, labels and chevrons so they all move together.
 static int row_origin_x(HomeRowKind k) {
     int x0 = ((int)display_width - row_strip_w(k)) / 2;
-    return x0 < HOME_SIDE_PAD ? HOME_SIDE_PAD : x0;
+    return (x0 < HOME_SIDE_PAD ? HOME_SIDE_PAD : x0) + tab_anim_content_dx();
 }
 
 // -------------------------------------------------------
@@ -244,6 +245,7 @@ void xmb_home_gpu_phase(void) {
 
     ui_card_gpu_clip(view_top(), view_bot());
 
+    int rx = 0, ry = 0, rw = 0, rh = 0; bool have = false;
     for (int r = 0; r < HOME_ROWS_N; r++) {
         HomeRow *row = &s_rows[r];
         int card_y;
@@ -258,9 +260,16 @@ void xmb_home_gpu_phase(void) {
             ThumbImg img = (row->kind == HROW_LANDSCAPE && row->items[c].has_thumb)
                          ? THUMB_IMG_THUMB : THUMB_IMG_PRIMARY;
             xmb_card_gpu_one(row->items[c].id, cx, card_y, cw, ch, img);
-            if (r == s_focus_row && c == s_focus_col)
-                ui_card_gpu_selection(cx, card_y, cw, ch);
+            if (r == s_focus_row && c == s_focus_col) {
+                rx = cx; ry = card_y; rw = cw; rh = ch; have = true;
+            }
         }
+    }
+    // After every row, so a ring gliding between cards (or between rows of
+    // different card sizes) is never drawn under a neighbour.
+    if (have) {
+        focus_glide(xmb_focus_ctx(), &rx, &ry, &rw, &rh);
+        ui_card_gpu_selection(rx, ry, rw, rh);
     }
 
     ui_card_gpu_clip(0, 0);
@@ -276,6 +285,7 @@ void xmb_home_cpu_phase(void) {
     g_cpu_clip_top = view_top();
     g_cpu_clip_bot = view_bot();
 
+    int rx = 0, ry = 0, rw = 0, rh = 0; bool have = false;
     for (int r = 0; r < HOME_ROWS_N; r++) {
         HomeRow *row = &s_rows[r];
         int card_y;
@@ -300,9 +310,15 @@ void xmb_home_cpu_phase(void) {
             ThumbImg img = (row->kind == HROW_LANDSCAPE && row->items[c].has_thumb)
                          ? THUMB_IMG_THUMB : THUMB_IMG_PRIMARY;
             xmb_draw_card(row->items[c].id, cx, card_y, cw, ch,
-                          row->items[c].progress_pct, sel,
+                          row->items[c].progress_pct, false,
                           r == HR_MUSIC ? row->items[c].name : NULL, img);
+            if (sel) { rx = cx; ry = card_y; rw = cw; rh = ch; have = true; }
         }
+    }
+    // The ring last (see the GPU phase); the GPU pass drew it when it is live.
+    if (have && !ui_card_gpu_ready()) {
+        focus_glide(xmb_focus_ctx(), &rx, &ry, &rw, &rh);
+        xmb_focus_ring_cpu(rx, ry, rw, rh);
     }
 
     g_cpu_clip_top = 0; g_cpu_clip_bot = 0;

@@ -1,6 +1,7 @@
 #include "../../build_config.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <rsx/rsx.h>
 #include <rsx/gcm_sys.h>
@@ -12,6 +13,8 @@
 #include "timing.h"
 #include "month_bg.h"
 #include "ui_wave_audio.h"
+#include "music_fft.h"         // spectrum bands: the sheets are the visualiser
+#include "music_player.h"      // music_is_active
 #include "ui_wave.h"
 #include "ui_visuals.h"
 #include "ui_strobe_test.h"
@@ -326,7 +329,8 @@ static u32       s_wave_vbuf_off[2] = { 0, 0 };
 static int       s_wave_vbuf_turn   = 0;
 static bool      s_wave_varray      = false;
 static bool      s_wave_blend       = false;   // mode 2
-static bool      s_wave_jelly       = false;   // mode 3
+static bool      s_wave_jelly       = false;   // mode 3 or 4 (shared pipeline)
+static bool      s_wave_sheets      = false;   // mode 4: XMB light sheets
 
 // JellyWave's CPU-side scratch: ONE layer's finished vertices, reused for each
 // of the three.  It is plain main memory, not the RSX buffer -- jw_vert is not
@@ -419,12 +423,12 @@ static int s_jw_have_geom = 0;     // 0 until the first build lands
 // sqrt(h), so a smaller dt puts in proportionally less broadband noise per
 // frame as well as advancing the travelling waves less.
 //
-// 50 (half speed) is the default rather than 100 because 100 is the rate that
-// was judged too fast on hardware. Override in /dev_hdd0/tmp/ without a
+// 9 is the default: 100 was judged too fast on hardware, and 50, 25 and 12
+// still read as busy against the XMB's slow drift. Override in /dev_hdd0/tmp/ without a
 // rebuild -- the whole point of the file is that "elegant" is a judgement made
 // on a TV, not at a compiler.
 #define JWSPEED_FILE  "jellyfin_jwspeed.txt"
-#define JW_SPEED_DEF  50
+#define JW_SPEED_DEF  9
 static float s_jw_speed = JW_SPEED_DEF / 100.0f;
 
 static int jwspeed_setting(void) {
@@ -478,7 +482,7 @@ static int jwrebuild_setting(void) {
 // Gate, with a mode rather than a second file so both can be flipped over FTP
 // without another lookup:
 //
-//   absent / 0  immediate mode, baked opaque colours   (the original path)
+//   0           immediate mode, baked opaque colours   (the original path)
 //   1           vertex arrays, baked opaque colours
 //   2           vertex arrays, GPU alpha blending      (see below)
 //
@@ -522,12 +526,15 @@ static int bgdither_setting(void) {
 // character away from mode 2 over FTP, with no reflash.
 #define GPUWAVE_FILE "jellyfin_gpuwave.txt"
 static int gpuwave_mode(void) {
+    // Absent = mode 4, the XMB light sheets the new UI is designed around.
+    // The file still overrides it: 3 is the JellyWave gel ribbons, 0 drops
+    // back to immediate mode with no reflash.
     FILE *f = fopen(jf_data_path(GPUWAVE_FILE), "r");
-    if (!f) return 0;
-    int v = 0;
-    if (fscanf(f, "%d", &v) != 1) v = 0;
+    if (!f) return 4;
+    int v = 4;
+    if (fscanf(f, "%d", &v) != 1) v = 4;
     fclose(f);
-    return (v >= 1 && v <= 3) ? v : 0;
+    return (v >= 1 && v <= 4) ? v : 0;
 }
 
 // Crest height (screen-space y) of ribbon li at horizontal position fx.
@@ -594,15 +601,32 @@ void wave_init(void) {
     memcpy(s_wave_fp_buf, fp_ucode, fp_size);
     rsxAddressToOffset(s_wave_fp_buf, &s_wave_fp_offset);
 
-    if (ui_cpu_bg()) return;          // emulator draws the background on the CPU
     const int mode = gpuwave_mode();
+    if (ui_cpu_bg()) {
+        // The emulator draws the background on the CPU (see ui_cpu_bg), but
+        // it still honours the JellyWave choice: wave_draw_cpu rasterises the
+        // same geometry in software.  No RSX buffers are needed for that.
+        s_wave_jelly  = (mode == 3 || mode == 4);
+        s_wave_sheets = (mode == 4);
+        if (s_wave_jelly) {
+            s_jw_speed         = (float)jwspeed_setting() / 100.0f;
+            s_jw_rebuild_every = jwrebuild_setting();
+            s_jw_rebuild_phase = 0;
+            s_jw_have_geom     = 0;
+        }
+        crash_log(s_wave_sheets ? "wave: CPU (XMB sheets, software raster)"
+                : s_wave_jelly  ? "wave: CPU (JellyWave, software raster)"
+                                : "wave: CPU (flat ribbons)");
+        return;
+    }
     if (mode == 0) {
-        plog("wave: vertex arrays disabled (jellyfin_gpuwave.txt absent/0) -- immediate mode");
+        plog("wave: vertex arrays disabled (jellyfin_gpuwave.txt = 0) -- immediate mode");
         crash_log("wave: OFF (immediate mode)");
         return;
     }
     s_wave_blend = (mode == 2 || mode == 3);
-    s_wave_jelly = (mode == 3);
+    s_wave_jelly  = (mode == 3 || mode == 4);
+    s_wave_sheets = (mode == 4);
     // Either both buffers allocate or the feature stays off; a half-allocated
     // pair would give one framebuffer a working path and the other a null one.
     for (int i = 0; i < 2; i++) {
@@ -616,7 +640,8 @@ void wave_init(void) {
     s_wave_varray = true;
     {
         char msg[144];
-        const char *what = s_wave_jelly ? "JellyWave 3D"
+        const char *what = s_wave_sheets ? "XMB sheets"
+                         : s_wave_jelly ? "JellyWave 3D"
                          : s_wave_blend ? "GPU blending" : "baked opaque";
         int verts = s_wave_jelly ? (int)JW_TOTAL_VERTS
                   : s_wave_blend ? (4 + 3 * WAVE_MAX_COLS * 2)
@@ -650,9 +675,603 @@ void wave_init(void) {
     // the plog line above is discarded on a cold boot.  ui_card_gpu_init() and
     // ui_text_gpu_init() were both moved out of ui_init() for exactly this;
     // until wave_init() follows them, crash_log is the instrument.
-    crash_log(s_wave_jelly ? "wave: ON (JellyWave 3D)"
+    crash_log(s_wave_sheets ? "wave: ON (XMB sheets)"
+            : s_wave_jelly ? "wave: ON (JellyWave 3D)"
             : s_wave_blend ? "wave: ON (vertex arrays + GPU blend)"
                            : "wave: ON (vertex arrays, baked)");
+}
+
+// Build the complete JellyWave body/rim stream into s_jw_stage, starting at
+// index n, and record each layer's draw ranges in s_jw_off / s_jw_cnt.
+// Returns the index one past the last vertex written.  Shared by the RSX path
+// (wave_draw) and the emulator's CPU rasteriser (wave_draw_cpu), so the two
+// cannot drift into drawing different geometry.
+static int jw_emit_stream(float W, float H, int n)
+{
+    #define JW_EMIT(Q, A, USE_RIM) do {                         \
+        const jw_vert *q_ = (Q);                                \
+        s_jw_stage[n].x = q_->x;                                \
+        s_jw_stage[n].y = q_->y;                                \
+        s_jw_stage[n].z = 0.0f;                                 \
+        s_jw_stage[n].w = 1.0f;                                 \
+        s_jw_stage[n].rgba = (USE_RIM)                         \
+            ? WAVE_RGBA(q_->rr, q_->rg, q_->rb, 255)            \
+            : WAVE_RGBA(q_->r, q_->g, q_->b, (A));              \
+        n++;                                                    \
+    } while (0)
+
+    for (int slot = 0; slot < JW_LAYERS; slot++) {
+        const int       li = JW_LAYERS - 1 - slot;
+        const jw_layer *L  = &JW_LAYER[li];
+        int order[JW_SECTION];
+        int pass, s, i;
+
+        s_jw_cnt[slot][0] = s_jw_cnt[slot][1] = 0;
+        s_jw_off[slot][0] = s_jw_off[slot][1] = 0;
+
+        // LINKED: every layer rides the near layer's displacement, so the
+        // three ribbons move as one stacked band.  Given a field each, they
+        // drifted independently and cut across one another, and the near
+        // layer (alpha 255) left a hard edge wherever it passed over the
+        // others.  Each layer keeps its own depth, offset, scale, phase and
+        // colour; the near layer's gain applies because it is the near
+        // layer's curve, and it lands every layer on the design's peak.
+        jw_layer Lk = *L;
+        Lk.disp_gain = JW_LAYER[0].disp_gain;
+        if (!jw_build_layer(&Lk, s_field.sy[0], WF_SAMPLES,
+                            W / H, s_jw, JW_VERTS))
+            continue;
+
+        {
+            int repaired = 0;
+            if (!jw_sanitize_layer(s_jw, &repaired)) {
+                s_jw_dropped++;
+                continue;
+            }
+            s_jw_repaired += (u32)repaired;
+        }
+
+        jw_strip_order(s_jw, order);
+
+        for (pass = 0; pass < 2; pass++) {
+            int started = 0;
+            const jw_vert *tail = NULL;
+
+            s_jw_off[slot][pass] = (u32)n;
+
+            for (s = 0; s < JW_SECTION; s++) {
+                const int j  = order[s];
+                const int j2 = (j + 1) % JW_SECTION;
+
+                if (pass == 1 && !jw_strip_has_rim(j))
+                    continue;
+
+                if (n + 2 * JW_STATIONS + 2 > WAVE_MAX_VERTS)
+                    break;
+
+                if (started) {
+                    /*
+                     * Degenerate join, entirely from CPU/main memory.
+                     * NEVER do v[n] = v[n-1] here: v is the RSX-local
+                     * destination and PPU readback from it is unsafe.
+                     */
+                    JW_EMIT(tail, L->alpha, pass);
+                    JW_EMIT(&s_jw[0 * JW_SECTION + j],
+                            L->alpha, pass);
+                }
+
+                started = 1;
+
+                for (i = 0; i < JW_STATIONS; i++) {
+                    JW_EMIT(&s_jw[i * JW_SECTION + j],
+                            L->alpha, pass);
+                    JW_EMIT(&s_jw[i * JW_SECTION + j2],
+                            L->alpha, pass);
+                }
+
+                tail = &s_jw[(JW_STATIONS - 1) * JW_SECTION + j2];
+            }
+
+            s_jw_cnt[slot][pass] =
+                (u32)n - s_jw_off[slot][pass];
+        }
+    }
+
+    #undef JW_EMIT
+    return n;
+}
+
+// --- JellyWave in software (emulator only) --------------------------------
+//
+// RPCS3 cannot present a frame that mixes RSX drawing with CPU writes into the
+// same bound colour buffer: it logs "Cannot invalidate a currently bound render
+// target!" every frame and shows one or the other, which reads as the wave
+// flickering or vanishing.  So under ui_cpu_bg() the whole frame stays on the
+// CPU, and JellyWave is drawn by rasterising the exact triangle strips the RSX
+// would get, with the same src-alpha / one-minus-src-alpha blend.  Never runs
+// on hardware, where the framebuffer is uncached VRAM.
+
+// Edge function for the directed edge a->b, evaluated at p.
+static inline float jw_edge(float ax, float ay, float bx, float by,
+                            float px, float py) {
+    return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+
+// Top-left fill rule for a triangle wound so its area is positive: a pixel
+// centre exactly on a shared edge belongs to one triangle only.  Without it,
+// adjacent triangles of a translucent strip would blend that pixel twice.
+static inline bool jw_top_left(float ax, float ay, float bx, float by) {
+    const float dx = bx - ax, dy = by - ay;
+    return (dy < 0.0f) || (dy == 0.0f && dx > 0.0f);
+}
+
+static inline u32 jw_div255(u32 t) { return (t + 1 + (t >> 8)) >> 8; }
+
+static void jw_raster_tri(u32 *fb, int W, int H,
+                          const WaveVert *va, const WaveVert *vb,
+                          const WaveVert *vc, bool additive) {
+    // NDC to pixels, y down -- the same mapping the viewport applies.
+    float ax = (va->x + 1.0f) * 0.5f * W, ay = (1.0f - va->y) * 0.5f * H;
+    float bx = (vb->x + 1.0f) * 0.5f * W, by = (1.0f - vb->y) * 0.5f * H;
+    float cx = (vc->x + 1.0f) * 0.5f * W, cy = (1.0f - vc->y) * 0.5f * H;
+    u32 ca = va->rgba, cb = vb->rgba, cc = vc->rgba;
+
+    float area = jw_edge(ax, ay, bx, by, cx, cy);
+    if (area > -1e-4f && area < 1e-4f) return;       // degenerate strip join
+    if (area < 0.0f) {                               // strips alternate winding
+        float t;
+        t = bx; bx = cx; cx = t;
+        t = by; by = cy; cy = t;
+        u32 tc = cb; cb = cc; cc = tc;
+        area = -area;
+    }
+
+    int y0 = (int)floorf(fminf(ay, fminf(by, cy)));
+    int y1 = (int)ceilf (fmaxf(ay, fmaxf(by, cy)));
+    if (y0 < 0) y0 = 0;
+    if (y1 > H) y1 = H;
+    if (y0 >= y1) return;
+
+    const bool tl[3] = { jw_top_left(bx, by, cx, cy),
+                         jw_top_left(cx, cy, ax, ay),
+                         jw_top_left(ax, ay, bx, by) };
+    const float inv = 1.0f / area;
+
+    // Each channel is a plane over the triangle: value = C + X*px + Y*py.
+    // Barycentric weight of a: w0/area, with w0 = e0x*px + e0y*py + e0c, etc.
+    const float ex[3] = { -(cy - by) * inv, -(ay - cy) * inv, -(by - ay) * inv };
+    const float ey[3] = {  (cx - bx) * inv,  (ax - cx) * inv,  (bx - ax) * inv };
+    const float ec[3] = { jw_edge(bx, by, cx, cy, 0.0f, 0.0f) * inv,
+                          jw_edge(cx, cy, ax, ay, 0.0f, 0.0f) * inv,
+                          jw_edge(ax, ay, bx, by, 0.0f, 0.0f) * inv };
+    float chX[4], chY[4], chC[4];
+    int   chLo[4], chHi[4];
+    for (int k = 0; k < 4; k++) {
+        const int sh = 24 - 8 * k;
+        const int ia_ = (int)((ca >> sh) & 0xFF);
+        const int ib_ = (int)((cb >> sh) & 0xFF);
+        const int ic_ = (int)((cc >> sh) & 0xFF);
+        const float va_ = (float)ia_, vb_ = (float)ib_, vc_ = (float)ic_;
+        chX[k] = ex[0] * va_ + ex[1] * vb_ + ex[2] * vc_;
+        chY[k] = ey[0] * va_ + ey[1] * vb_ + ey[2] * vc_;
+        chC[k] = ec[0] * va_ + ec[1] * vb_ + ec[2] * vc_;
+        // Interpolation can never leave the corners' range.  On a sliver
+        // (a sheet going edge-on) the plane is steep enough that a pixel
+        // centre just past the edge extrapolates far outside it -- that was
+        // the bright fleck where two edges met.
+        chLo[k] = ia_ < ib_ ? (ia_ < ic_ ? ia_ : ic_) : (ib_ < ic_ ? ib_ : ic_);
+        chHi[k] = ia_ > ib_ ? (ia_ > ic_ ? ia_ : ic_) : (ib_ > ic_ ? ib_ : ic_);
+    }
+
+    for (int y = y0; y < y1; y++) {
+        const float py = (float)y + 0.5f;
+        // The covered span on this row: each edge is linear in x, so solve
+        // for where all three weights are non-negative instead of scanning a
+        // bounding box -- the strips are long slanted slivers, and their boxes
+        // are mostly empty.
+        float lo = 0.0f, hi = (float)W;
+        bool empty = false;
+        for (int e = 0; e < 3 && !empty; e++) {
+            const float w0 = ec[e] + ey[e] * py;       // weight at px = 0
+            if (ex[e] > 0.0f) {
+                const float xr = -w0 / ex[e];          // w >= 0 for px >= xr
+                if (xr > lo) lo = xr;
+            } else if (ex[e] < 0.0f) {
+                const float xr = -w0 / ex[e];          // w >= 0 for px <= xr
+                if (xr < hi) hi = xr;
+            } else if (w0 < 0.0f || (w0 == 0.0f && !tl[e])) {
+                empty = true;
+            }
+        }
+        if (empty) continue;
+        // Pixel x is covered when its centre x+0.5 lies in [lo, hi).
+        int xs = (int)ceilf(lo - 0.5f);
+        int xe = (int)ceilf(hi - 0.5f);
+        if (xs < 0) xs = 0;
+        if (xe > W) xe = W;
+        if (xs >= xe) continue;
+
+        const float px = (float)xs + 0.5f;
+        float r = chC[0] + chX[0] * px + chY[0] * py;
+        float g = chC[1] + chX[1] * px + chY[1] * py;
+        float b = chC[2] + chX[2] * px + chY[2] * py;
+        float a = chC[3] + chX[3] * px + chY[3] * py;
+        u32 *row = fb + (u32)y * (u32)W;
+        for (int x = xs; x < xe; x++,
+             r += chX[0], g += chX[1], b += chX[2], a += chX[3]) {
+            int ai = (int)(a + 0.5f);
+            ai = ai < chLo[3] ? chLo[3] : ai > chHi[3] ? chHi[3] : ai;
+            if (ai <= 0) continue;
+            int ri = (int)(r + 0.5f), gi = (int)(g + 0.5f), bi = (int)(b + 0.5f);
+            ri = ri < chLo[0] ? chLo[0] : ri > chHi[0] ? chHi[0] : ri;
+            gi = gi < chLo[1] ? chLo[1] : gi > chHi[1] ? chHi[1] : gi;
+            bi = bi < chLo[2] ? chLo[2] : bi > chHi[2] ? chHi[2] : bi;
+            const u32 d  = row[x];
+            u32 nr, ng, nb;
+            if (additive) {                  // src*a + dst, clamped
+                nr = ((d >> 16) & 0xFF) + jw_div255((u32)ri * (u32)ai);
+                ng = ((d >>  8) & 0xFF) + jw_div255((u32)gi * (u32)ai);
+                nb = ( d        & 0xFF) + jw_div255((u32)bi * (u32)ai);
+                if (nr > 255) nr = 255;
+                if (ng > 255) ng = 255;
+                if (nb > 255) nb = 255;
+            } else {                         // src*a + dst*(1-a)
+                const u32 ia = 255u - (u32)ai;
+                nr = jw_div255((u32)ri * (u32)ai + ((d >> 16) & 0xFF) * ia);
+                ng = jw_div255((u32)gi * (u32)ai + ((d >>  8) & 0xFF) * ia);
+                nb = jw_div255((u32)bi * (u32)ai + ( d        & 0xFF) * ia);
+            }
+            row[x] = (nr << 16) | (ng << 8) | nb;
+        }
+    }
+}
+
+// Draw the current JellyWave stream (s_jw_stage + s_jw_off/s_jw_cnt) into fb,
+// layer by layer, body then rim -- the RSX path's draw order and blends.
+static void jw_raster_stream(u32 *fb, int W, int H) {
+    for (int slot = 0; slot < JW_LAYERS; slot++) {
+        for (int pass = 0; pass < 2; pass++) {
+            const u32 off = s_jw_off[slot][pass];
+            const u32 cnt = s_jw_cnt[slot][pass];
+            for (u32 i = 0; i + 2 < cnt; i++)
+                jw_raster_tri(fb, W, H, &s_jw_stage[off + i],
+                              &s_jw_stage[off + i + 1],
+                              &s_jw_stage[off + i + 2],
+                              pass == 1 || s_wave_sheets);
+        }
+    }
+}
+
+// --- mode 4: XMB light sheets ------------------------------------------------
+//
+// The PS3's own XMB wave, rather than JellyWave's lit gel tubes: several thin
+// translucent sheets of white light that cross one another freely.  Every
+// sheet is drawn ADDITIVELY, so an overlap only ever gets brighter -- there is
+// no draw order and no hard edge where one passes over another.  What the eye
+// reads as the wave's structure is the brightness at each sheet's two edges
+// and, above all, wherever a sheet twists edge-on to the viewer: there its
+// two edges meet (half-width through zero) and the whole sheet collapses into
+// a bright line, as in the XMB.
+//
+// Motion comes from the same spring field as every other mode (so the speed
+// file and the music reaction still drive it); each sheet reads a different
+// window of it so no two move in lockstep.  Output goes through the JellyWave
+// stream and draw ranges unchanged -- 6 sheets in the 3 x 2 [slot][pass]
+// ranges -- so the RSX path and the emulator's rasteriser both draw it.
+#define XW_SHEETS 6
+#define XW_COLS   96
+
+// Field layer l at u in [0,1], linearly interpolated and normalised so the
+// layer's nominal peak is about 1 (the layers are driven at different
+// strengths -- see the peaks measured in wave_gel.h).
+static inline float xw_field(int l, float u) {
+    static const float norm[3] = { 1.0f / 0.65f, 1.0f / 0.556f, 1.0f / 0.455f };
+    if (u < 0.0f) u = 0.0f;
+    if (u > 1.0f) u = 1.0f;
+    const float f = u * (float)(WF_SAMPLES - 1);
+    int k = (int)f;
+    if (k > WF_SAMPLES - 2) k = WF_SAMPLES - 2;
+    const float fr = f - (float)k;
+    const float *d = s_field.sy[l];
+    return (d[k] + (d[k + 1] - d[k]) * fr) * norm[l];
+}
+
+// The music visualiser, folded into the sheets.  Each sheet owns one slice of
+// the spectrum -- sheet 0 the deep bass up to sheet 5 the treble, out of the
+// same 28 FFT bands that used to drive the Now Playing bars -- and moves ONLY
+// with it: its shape deepens, it lifts through the middle (the ends stay put),
+// it widens and it brightens.  So a kick moves the bass sheet and a hi-hat the
+// treble one, independently.
+//
+// Each sheet is normalised against its own recent peak (a slow automatic
+// gain), because treble carries a fraction of the bass's energy and would
+// otherwise barely move.  Fast attack, slow release, per sheet.  With no music
+// the levels ease to zero and the sheets settle into their ordinary drift.
+// The bands are log-spaced 40 Hz - 16 kHz, ~1.24x apart, so band b starts
+// near 40 * 1.24^b Hz.  The bottom two sheets overlap on purpose so the kick
+// and bass region (roughly 40-200 Hz) has two sheets to move, not one sliver.
+static const int XW_BAND_LO[XW_SHEETS] = { 0, 4, 7, 11, 16, 21 };
+static const int XW_BAND_HI[XW_SHEETS] = { 5, 8, 11, 16, 21, 28 };   // exclusive
+// Extra gain per sheet: bass reads weak after the spectrum's per-frame
+// normalisation (it is always present, so it is rarely the frame's peak).
+static const float XW_SHEET_GAIN[XW_SHEETS] = { 1.6f, 1.3f, 1.0f, 1.0f, 1.0f, 1.0f };
+// A bass pulse shared by every sheet, from bands 0-6 (~40-150 Hz), so the whole
+// band thumps on a kick.  Its own peak forgets fast (~1 s) so a steady bass
+// line does not normalise itself away the way the per-sheet gain would.
+#define XW_BASS_HI      7
+#define XW_BASS_SHARE   0.35f
+static float s_xw_bass_peak = 0.0f;
+static float s_xw_lev[XW_SHEETS];    // smoothed, normalised 0..1
+static float s_xw_vel[XW_SHEETS];    // the spring's velocity
+
+// How far a sheet at full level moves.  All four in one place so the
+// sensitivity is one edit: shape deepening (fraction of the idle shape),
+// lift through the middle (fraction of screen height), widening and glow.
+#define XW_MUSIC_SHAPE 0.80f
+#define XW_MUSIC_LIFT  0.035f
+#define XW_MUSIC_SWELL 0.55f
+#define XW_MUSIC_GLOW  0.55f
+
+// Each sheet follows its level through a critically damped spring: quick to
+// track a change, but it glides into it -- no snap, no overshoot, no jitter.
+// A one-pole ease had to choose between following the beat and staying
+// smooth; the spring's momentum gets both.  XW_MUSIC_RATE is its natural
+// frequency in rad/s: higher follows tighter (a hit lands in ~4/rate s).
+#define XW_MUSIC_RATE  26.0f
+static float s_xw_peak[XW_SHEETS];   // slow per-sheet peak for the gain
+
+static void xw_update_bands(float dt) {
+    // ABSOLUTE band levels (music_viz_raw), each sheet normalised against its
+    // own recent peak.  The normalised bands the bars used divide every frame
+    // by its loudest band -- usually the bass -- which flattened the low end
+    // into a constant; on absolute levels a kick is the jump it really is.
+    float norm[MUSIC_VIZ_BANDS], raw[MUSIC_VIZ_BANDS];
+    const bool on = music_is_active();
+    if (on) { music_viz_bands(norm); music_viz_raw(raw); }
+    // A floor for every gain, relative to the loudest level heard lately, so
+    // a quiet passage cannot blow noise up to full scale.
+    static float s_all_peak = 0.0f;
+    float bass = 0.0f;
+    if (on) {
+        float mx = 0.0f;
+        for (int b = 0; b < MUSIC_VIZ_BANDS; b++) if (raw[b] > mx) mx = raw[b];
+        s_all_peak = mx > s_all_peak ? mx : s_all_peak * 0.999f;
+        float sum = 0.0f;
+        for (int b = 0; b < XW_BASS_HI; b++) sum += raw[b];
+        const float m = sum / (float)XW_BASS_HI;
+        s_xw_bass_peak = m > s_xw_bass_peak ? m : s_xw_bass_peak * 0.985f;
+        const float fl = 0.05f * s_all_peak;
+        bass = m / (s_xw_bass_peak > fl ? s_xw_bass_peak : fl);
+        // Emphasise the hit over the sustain: square it, so a kick at the
+        // peak drives fully and the body of the note sits well below.
+        bass *= bass;
+    }
+    for (int k = 0; k < XW_SHEETS; k++) {
+        float target = 0.0f;
+        if (on && s_all_peak > 0.0f) {
+            float sum = 0.0f;
+            for (int b = XW_BAND_LO[k]; b < XW_BAND_HI[k]; b++) sum += raw[b];
+            const float m = sum / (float)(XW_BAND_HI[k] - XW_BAND_LO[k]);
+            // ~1.5 s memory: long enough to hold a song's level, short
+            // enough that each hit still stands out from the one before.
+            s_xw_peak[k] = m > s_xw_peak[k] ? m : s_xw_peak[k] * 0.993f;
+            const float fl = 0.03f * s_all_peak;
+            target = m / (s_xw_peak[k] > fl ? s_xw_peak[k] : fl);
+            target = target * target;            // hits over sustain
+            target = target * XW_SHEET_GAIN[k] + XW_BASS_SHARE * bass;
+            if (target > 1.0f) target = 1.0f;
+        }
+        // Critically damped spring, in small steps so it stays stable
+        // across a slow frame.
+        const float w = XW_MUSIC_RATE;
+        float left = dt;
+        while (left > 0.0f) {
+            const float h = left > 0.008f ? 0.008f : left;
+            left -= h;
+            s_xw_vel[k] += (w * w * (target - s_xw_lev[k])
+                            - 2.0f * w * s_xw_vel[k]) * h;
+            s_xw_lev[k] += s_xw_vel[k] * h;
+        }
+        if (s_xw_lev[k] < 0.0f) { s_xw_lev[k] = 0.0f; s_xw_vel[k] = 0.0f; }
+        if (s_xw_lev[k] > 1.2f) s_xw_lev[k] = 1.2f;
+    }
+}
+
+// The scroll: a travelling wave in every sheet, advanced by the clock, so the
+// band keeps flowing across the screen whatever the spring field and the music
+// are doing.  The field alone mostly swells in place at these speeds, and with
+// the music reaction on top nothing read as moving.  Scaled by the speed file
+// relative to its default, so jellyfin_jwspeed.txt still governs it.
+#define XW_SCROLL_RAD_S 0.35f      // radians per second at the default speed
+static float s_xw_scroll  = 0.0f;
+static u64   s_xw_last_us = 0;
+
+static int xw_emit_sheets(float W, float H, int n) {
+    {
+        const u64 now = timing_get_us();
+        float dt = s_xw_last_us ? (float)(now - s_xw_last_us) * 1e-6f : 0.0f;
+        if (dt > 0.1f) dt = 0.1f;               // a stall must not jump it
+        s_xw_last_us = now;
+        xw_update_bands(dt);
+        s_xw_scroll += dt * XW_SCROLL_RAD_S
+                     * (s_jw_speed / ((float)JW_SPEED_DEF / 100.0f));
+        if (s_xw_scroll > 6283.2f) s_xw_scroll -= 6283.2f;   // keep sinf exact
+    }
+    // Rows across a sheet, bottom edge to top edge: position t in [-1, 1],
+    // and which way (if any) the row is pushed OUTSIDE the edge.  The two
+    // outer rows sit XW_AA_PX beyond each edge at alpha 0, so the bright edge
+    // line fades out over a couple of pixels instead of stopping on a
+    // polygon boundary -- anti-aliasing in the geometry itself, which the RSX
+    // and the emulator's rasteriser both draw the same way.  The edge rows
+    // are close to their inner neighbours so the edge is a thin line, not a
+    // wide ramp; the interior is faint.
+    #define XW_ROWS  7
+    #define XW_AA_PX 2.5f
+    static const float ROW_T[XW_ROWS]   = { -1.0f, -1.0f, -0.86f, 0.0f, 0.86f, 1.0f, 1.0f };
+    static const float ROW_OUT[XW_ROWS] = { -1.0f,  0.0f,  0.0f,  0.0f, 0.0f,  0.0f, 1.0f };
+    // Colour moves between the theme's accent (Jellyfin purple) and
+    // accent_alt (cyan) -- see the cycle below -- read per rebuild so a theme
+    // change follows.  Edge lines are lifted towards white so they read
+    // as light; the faint interior keeps the full tint.
+    const u32   ca = XMB_ACCENT, cb2 = XMB_ACCENT_ALT;
+    const float car = (float)((ca >> 16) & 0xFF), cag = (float)((ca >> 8) & 0xFF),
+                cab = (float)(ca & 0xFF);
+    const float cbr = (float)((cb2 >> 16) & 0xFF), cbg = (float)((cb2 >> 8) & 0xFF),
+                cbb = (float)(cb2 & 0xFF);
+
+    for (int k = 0; k < XW_SHEETS; k++) {
+        const int slot = k >> 1, pass = k & 1;
+        const int la = k % 3, lb = (k + 1) % 3;
+        // Each sheet reads its own window of the field and its own phase.
+        const float ua = 0.05f * (float)k;
+        const float ub = 0.28f - 0.045f * (float)k;
+        const float ph = 1.7f * (float)k;
+
+        s_jw_off[slot][pass] = (u32)n;
+        if (n + (XW_ROWS - 1) * (2 * XW_COLS + 2) > WAVE_MAX_VERTS) {
+            s_jw_cnt[slot][pass] = 0;
+            continue;
+        }
+
+        // Per column: centre and signed half-width, in pixels.
+        float yc[XW_COLS], hw[XW_COLS], xs[XW_COLS];
+        for (int c = 0; c < XW_COLS; c++) {
+            const float xn = -0.02f + 1.04f * (float)c / (float)(XW_COLS - 1);
+            xs[c] = xn;
+            // Higher on the left, lower on the right, as the XMB's band runs.
+            yc[c] = H * (0.60f + 0.14f * xn + 0.010f * ((float)k - 2.5f))
+                  + H * 0.075f * xw_field(la, ua + 0.70f * xn);
+            // Signed: where it passes through zero the sheet is edge-on.
+            // Each sheet scrolls at its own rate so they drift past each other.
+            const float sc = s_xw_scroll * (1.0f + 0.12f * (float)k);
+            yc[c] += H * 0.035f * sinf(6.2832f * 0.8f * xn - sc + ph);
+            hw[c] = H * 0.050f * (0.30f + 0.85f * xw_field(lb, ub + 0.70f * xn)
+                                  + 0.35f * sinf(6.2832f * (1.1f * xn) - 0.8f * sc + ph));
+            // Music: this sheet's own slice of the spectrum.  Its shape
+            // deepens, it lifts through the middle with the ends anchored,
+            // and it widens.
+            const float lev = s_xw_lev[k];
+            const float env = sinf(3.14159f * (xn < 0.0f ? 0.0f : xn > 1.0f ? 1.0f : xn));
+            yc[c] += H * 0.075f * XW_MUSIC_SHAPE * lev * xw_field(la, ua + 0.70f * xn);
+            yc[c] -= H * XW_MUSIC_LIFT * lev * env;
+            hw[c] *= 1.0f + XW_MUSIC_SWELL * lev;
+        }
+
+        const int first = n;
+        for (int r = 0; r < XW_ROWS - 1; r++) {
+            if (r > 0) {
+                // Degenerate join from the end of the last band to the
+                // start of this one: zero-area triangles, drawn as nothing.
+                s_jw_stage[n] = s_jw_stage[n - 1]; n++;
+            }
+            for (int c = 0; c < XW_COLS; c++) {
+                // How edge-on the sheet is here: 1 when its edges meet.
+                float thin = fabsf(hw[c]) / (H * 0.050f);
+                thin = thin > 1.0f ? 0.0f : (1.0f - thin);
+                thin *= thin;
+                for (int e = 0; e < 2; e++) {
+                    const int   ri = r + e;
+                    const float t  = ROW_T[ri];
+                    const float at = fabsf(t);
+                    float a;
+                    if (ROW_OUT[ri] != 0.0f) a = 0.0f;                  // AA fringe
+                    else if (at >= 0.999f)   a = 90.0f;                 // edge line
+                    else if (at > 0.5f)      a = 26.0f + 70.0f * thin;  // just inside
+                    else                     a = 16.0f + 90.0f * thin;  // interior
+                    a *= 1.0f + XW_MUSIC_GLOW * s_xw_lev[k];            // music
+                    // Fade the sheet out over its last few pixels as it
+                    // goes edge-on.  Thinner than a pixel, all its rows pile
+                    // onto one pixel (a blown-out fleck) or fall between
+                    // pixels (a gap) -- a speck-gap-speck at every twist.
+                    {
+                        float pin = fabsf(hw[c]) / 6.0f;
+                        if (pin > 1.0f) pin = 1.0f;
+                        a *= pin * pin * (3.0f - 2.0f * pin);
+                    }
+                    // Fade the ends so the band enters and leaves the screen
+                    // softly instead of being cut by its edges.
+                    const float xn = xs[c];
+                    float endf = 1.0f;
+                    if (xn < 0.06f)  endf = (xn + 0.02f) / 0.08f;
+                    if (xn > 0.94f)  endf = (1.02f - xn) / 0.08f;
+                    if (endf < 0.0f) endf = 0.0f;
+                    a *= endf;
+                    // Outward is the side the edge faces, which flips when
+                    // the half-width goes negative through a twist.  Ramped,
+                    // not a hard sign: flipping the fringe from one side to
+                    // the other between two columns crossed its triangles
+                    // into a bow-tie, a bright fleck at every twist.
+                    float sgn = hw[c] / XW_AA_PX;
+                    if (sgn >  1.0f) sgn =  1.0f;
+                    if (sgn < -1.0f) sgn = -1.0f;
+                    const float px = xn * W;
+                    const float py = yc[c] + t * hw[c]
+                                   + ROW_OUT[ri] * sgn * XW_AA_PX;
+                    // One left-to-right gradient for the whole band --
+                    // accent (purple) at the left, accent_alt (cyan) at the
+                    // right, the same on every sheet -- that scrolls
+                    // sideways.  Half a cosine cycle spans the screen, so it
+                    // is a loop: what leaves one side comes back in without
+                    // a jump.
+                    const float hx = 0.5f - 0.5f * cosf(3.14159f * xn
+                                                        - 0.6f * s_xw_scroll);
+                    const float lift = (at >= 0.999f) ? 0.35f : 0.20f;
+                    const float tr = car + (cbr - car) * hx;
+                    const float tg = cag + (cbg - cag) * hx;
+                    const float tb = cab + (cbb - cab) * hx;
+                    WaveVert *v = &s_jw_stage[n];
+                    v->x = (2.0f * px / W) - 1.0f;
+                    v->y = 1.0f - (2.0f * py / H);
+                    v->z = 0.0f;
+                    v->w = 1.0f;
+                    v->rgba = WAVE_RGBA((u8)(tr + (255.0f - tr) * lift),
+                                        (u8)(tg + (255.0f - tg) * lift),
+                                        (u8)(tb + (255.0f - tb) * lift),
+                                        (u8)(a > 255.0f ? 255.0f : a));
+                    if (r > 0 && c == 0 && e == 0) {
+                        // Second half of the join: repeat the band's start.
+                        s_jw_stage[n + 1] = *v;
+                        n++;
+                    }
+                    n++;
+                }
+            }
+        }
+        s_jw_cnt[slot][pass] = (u32)(n - first);
+    }
+    #undef XW_ROWS
+    #undef XW_AA_PX
+    return n;
+}
+
+// The emulator's JellyWave background, cached in main memory.  s_cpu_grad is
+// the dithered gradient alone, redrawn only when the theme's corners or the
+// display size change; s_cpu_bgc is gradient + wave, redrawn only when the
+// wave geometry is rebuilt (every s_jw_rebuild_every calls).  Every other call
+// is one copy into the framebuffer.  Without this the emulator spent ~60 ms a
+// call redrawing an image that had not changed.
+static u32    *s_cpu_grad = NULL;
+static u32    *s_cpu_bgc  = NULL;
+static int     s_cpu_w = 0, s_cpu_h = 0;
+static bg_quad s_cpu_key;
+static bool    s_cpu_grad_ok = false;
+
+// Make sure both caches exist at W x H.  False if they could not be had, in
+// which case the caller draws straight into the framebuffer as before.
+static bool jw_cpu_cache(int W, int H) {
+    if (s_cpu_grad && s_cpu_w == W && s_cpu_h == H) return true;
+    free(s_cpu_grad); free(s_cpu_bgc);
+    s_cpu_grad = (u32 *)malloc((size_t)W * H * sizeof(u32));
+    s_cpu_bgc  = (u32 *)malloc((size_t)W * H * sizeof(u32));
+    s_cpu_grad_ok = false;
+    if (!s_cpu_grad || !s_cpu_bgc) {
+        free(s_cpu_grad); free(s_cpu_bgc);
+        s_cpu_grad = s_cpu_bgc = NULL;
+        s_cpu_w = s_cpu_h = 0;
+        return false;
+    }
+    s_cpu_w = W; s_cpu_h = H;
+    return true;
 }
 
 // CPU rasterisation of the XMB background — gradient plus the three translucent
@@ -667,6 +1286,18 @@ static void wave_draw_cpu(void) {
     const int H = (int)display_height;
 
     wave_bg_refresh();
+    const u64 cpu_t0 = timing_get_us();
+
+    // JellyWave draws the gradient into its cache, and only when it changed.
+    const bool cached = s_wave_jelly && jw_cpu_cache(W, H);
+    u32 *gdst = cached ? s_cpu_grad : fb;
+    bool grad_changed = true;
+    if (cached) {
+        grad_changed = !s_cpu_grad_ok ||
+                       memcmp(&s_cpu_key, &s_bg, sizeof(s_bg)) != 0;
+        s_cpu_key     = s_bg;
+        s_cpu_grad_ok = true;
+    }
 
     // Four-corner gradient with an ordered dither, per pixel.
     //
@@ -686,10 +1317,10 @@ static void wave_draw_cpu(void) {
     // This path runs only under BUILD_FOR_RPCS3 (see ui_cpu_bg), where the
     // framebuffer is ordinary host memory -- it is not on the hardware frame
     // budget, where the RSX draws the same gradient as a gouraud quad.
-    for (int y = 0; y < H; y++) {
+    for (int y = 0; grad_changed && y < H; y++) {
         const float v = (H > 1) ? ((float)y / (float)(H - 1)) : 0.0f;
         float lr, lg, lb, rr, rg, rb, dr, dg, db;
-        u32 *row = fb + (u32)y * W;
+        u32 *row = gdst + (u32)y * W;
 
         bg_sample_f(&s_bg, 0.0f, v, &lr, &lg, &lb);
         bg_sample_f(&s_bg, 1.0f, v, &rr, &rg, &rb);
@@ -709,7 +1340,56 @@ static void wave_draw_cpu(void) {
     {
         float ts, pert, drv;
         wave_audio_frame(&ts, &pert, &drv);
-        wf_step(&s_field, WAVE_FIELD_DT * ts, pert, drv);
+        wf_step(&s_field,
+                WAVE_FIELD_DT * ts * (s_wave_jelly ? s_jw_speed : 1.0f),
+                pert, drv);
+    }
+
+    if (s_wave_jelly) {
+        // Same rebuild cadence as the RSX path: resample the geometry every
+        // s_jw_rebuild_every calls and redraw the last build in between.
+        bool rebuild = true;
+        // The sheets are cheap to build and carry the music, so they
+        // rebuild every call; the cadence is for JellyWave's gel geometry.
+        if (!s_wave_sheets && s_jw_rebuild_every > 1 && s_jw_have_geom) {
+            rebuild = (s_jw_rebuild_phase == 0);
+            if (++s_jw_rebuild_phase >= s_jw_rebuild_every)
+                s_jw_rebuild_phase = 0;
+        }
+        if (rebuild) {
+            s_jw_verts     = (u32)(s_wave_sheets
+                           ? xw_emit_sheets((float)W, (float)H, 0)
+                           : jw_emit_stream((float)W, (float)H, 0));
+            s_jw_have_geom = 1;
+        }
+        const u64 cpu_t1 = timing_get_us();
+        if (!cached) {
+            jw_raster_stream(fb, W, H);
+        } else {
+            if (rebuild || grad_changed) {
+                memcpy(s_cpu_bgc, s_cpu_grad, (size_t)W * H * sizeof(u32));
+                jw_raster_stream(s_cpu_bgc, W, H);
+            }
+            memcpy(fb, s_cpu_bgc, (size_t)W * H * sizeof(u32));
+        }
+        {
+            static u64 grad_us = 0, jw_us = 0, last_log = 0;
+            static u32 calls = 0;
+            const u64 now = timing_get_us();
+            grad_us += cpu_t1 - cpu_t0;
+            jw_us   += now - cpu_t1;
+            calls++;
+            if (now - last_log >= 1000000ULL) {
+                char msg[128];
+                snprintf(msg, sizeof(msg),
+                         "wave_cpu: grad+build=%lluus raster=%lluus per call (%u calls)",
+                         (unsigned long long)(grad_us / calls),
+                         (unsigned long long)(jw_us / calls), calls);
+                plog(msg);
+                grad_us = jw_us = 0; calls = 0; last_log = now;
+            }
+        }
+        return;
     }
 
     // Ribbons back-to-front, each composited over whatever is already in the
@@ -916,7 +1596,8 @@ void wave_draw(void) {
         // always did.  The first call after init must build whatever the
         // cadence says, or the first frames would draw an empty buffer.
         bool jw_rebuild = true;
-        if (jellywave && s_jw_rebuild_every > 1 && s_jw_have_geom) {
+        // Sheets rebuild every call (cheap, and they carry the music).
+        if (jellywave && !s_wave_sheets && s_jw_rebuild_every > 1 && s_jw_have_geom) {
             jw_rebuild = (s_jw_rebuild_phase == 0);
             if (++s_jw_rebuild_phase >= s_jw_rebuild_every)
                 s_jw_rebuild_phase = 0;
@@ -975,87 +1656,8 @@ void wave_draw(void) {
              * Nothing below reads from the RSX-local destination buffer.
              * This is deliberately separated from the upload step below.
              */
-            #define JW_EMIT(Q, A, USE_RIM) do {                         \
-                const jw_vert *q_ = (Q);                                \
-                s_jw_stage[n].x = q_->x;                                \
-                s_jw_stage[n].y = q_->y;                                \
-                s_jw_stage[n].z = 0.0f;                                 \
-                s_jw_stage[n].w = 1.0f;                                 \
-                s_jw_stage[n].rgba = (USE_RIM)                         \
-                    ? WAVE_RGBA(q_->rr, q_->rg, q_->rb, 255)            \
-                    : WAVE_RGBA(q_->r, q_->g, q_->b, (A));              \
-                n++;                                                    \
-            } while (0)
-
-            for (int slot = 0; slot < JW_LAYERS; slot++) {
-                const int       li = JW_LAYERS - 1 - slot;
-                const jw_layer *L  = &JW_LAYER[li];
-                int order[JW_SECTION];
-                int pass, s, i;
-
-                s_jw_cnt[slot][0] = s_jw_cnt[slot][1] = 0;
-                s_jw_off[slot][0] = s_jw_off[slot][1] = 0;
-
-                if (!jw_build_layer(L, s_field.sy[li], WF_SAMPLES,
-                                    W / H, s_jw, JW_VERTS))
-                    continue;
-
-                {
-                    int repaired = 0;
-                    if (!jw_sanitize_layer(s_jw, &repaired)) {
-                        s_jw_dropped++;
-                        continue;
-                    }
-                    s_jw_repaired += (u32)repaired;
-                }
-
-                jw_strip_order(s_jw, order);
-
-                for (pass = 0; pass < 2; pass++) {
-                    int started = 0;
-                    const jw_vert *tail = NULL;
-
-                    s_jw_off[slot][pass] = (u32)n;
-
-                    for (s = 0; s < JW_SECTION; s++) {
-                        const int j  = order[s];
-                        const int j2 = (j + 1) % JW_SECTION;
-
-                        if (pass == 1 && !jw_strip_has_rim(j))
-                            continue;
-
-                        if (n + 2 * JW_STATIONS + 2 > WAVE_MAX_VERTS)
-                            break;
-
-                        if (started) {
-                            /*
-                             * Degenerate join, entirely from CPU/main memory.
-                             * NEVER do v[n] = v[n-1] here: v is the RSX-local
-                             * destination and PPU readback from it is unsafe.
-                             */
-                            JW_EMIT(tail, L->alpha, pass);
-                            JW_EMIT(&s_jw[0 * JW_SECTION + j],
-                                    L->alpha, pass);
-                        }
-
-                        started = 1;
-
-                        for (i = 0; i < JW_STATIONS; i++) {
-                            JW_EMIT(&s_jw[i * JW_SECTION + j],
-                                    L->alpha, pass);
-                            JW_EMIT(&s_jw[i * JW_SECTION + j2],
-                                    L->alpha, pass);
-                        }
-
-                        tail = &s_jw[(JW_STATIONS - 1) * JW_SECTION + j2];
-                    }
-
-                    s_jw_cnt[slot][pass] =
-                        (u32)n - s_jw_off[slot][pass];
-                }
-            }
-
-            #undef JW_EMIT
+            n = s_wave_sheets ? xw_emit_sheets(W, H, n)
+                              : jw_emit_stream(W, H, n);
 
 
             s_jw_gen_us += timing_get_us() - jw_t0;
@@ -1223,6 +1825,16 @@ void wave_draw(void) {
                     if (!count)
                         continue;
 
+                    // Body: ordinary src-alpha blend.  Rim: ADDITIVE, src*a +
+                    // dst -- rimColor is a highlight that is black away from
+                    // the rolled edge, so an opaque blend (as 14428bb tried
+                    // while chasing the strobe) paints dark bands over the
+                    // ribbons instead of a glossy edge.
+                    rsxSetBlendFunc(context,
+                        GCM_SRC_ALPHA,
+                        (pass || s_wave_sheets) ? GCM_ONE : GCM_ONE_MINUS_SRC_ALPHA,
+                        GCM_SRC_ALPHA,
+                        (pass || s_wave_sheets) ? GCM_ONE : GCM_ONE_MINUS_SRC_ALPHA);
                     rsxDrawVertexArray(context,
                         GCM_TYPE_TRIANGLE_STRIP,
                         s_jw_off[slot][pass] - 4 + JW_VBASE,

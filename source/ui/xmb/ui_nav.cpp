@@ -18,6 +18,7 @@
 #include "subfont.h"
 #include "subcolor.h"
 #include "statsovl.h"
+#include "ui_tab_anim.h"
 
 // -------------------------------------------------------
 // Tab switching
@@ -37,6 +38,8 @@ void xmb_switch_tab(int new_tab) {
     }
     g_jumpbar_active = false;
     thumb_cache_retarget();
+    // Turn the tab wheel from wherever it is drawn right now (maybe mid-turn).
+    if (new_tab != old) xmb_tab_anim_begin(old, new_tab);
     g_active_tab = new_tab;
     g_sel = 0;
     g_scroll_top = 0;
