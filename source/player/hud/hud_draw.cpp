@@ -23,6 +23,7 @@
 #include "player_rsx.h"
 #include "ui.h"
 #include "ui_visuals.h"
+#include "trickplay.h"
 #include "rsxutil.h"
 #include "plog.h"
 #include "audio.h"   // audio_get_volume() for the volume slider
@@ -48,7 +49,7 @@ struct OvlKey {
     s32  focus, incr_idx;
     s32  menu_sel, menu_cur, menu_n;
     s32  vol_pct;
-    u8   paused, cc, menu_vis, title_on, vol_active;
+    u8   paused, cc, menu_vis, title_on, vol_active, scrubbing;
     char audio[64];
 };
 static OvlKey s_ovl_key;
@@ -277,7 +278,7 @@ static void draw_menu(int dw, int dh) {
         drawTTF((u32)(mx0 + MENU_PAD + MENU_DOT_COL),
                 (u32)(row_cy - (int)(ROW_TEXT_PX * 0.5f)),
                 g_hud.menu_items[i], ROW_TEXT_PX,
-                (i == g_hud.menu_sel) ? HUD_FOCUSED : 0x0099A0BCUL);
+                (i == g_hud.menu_sel) ? HUD_FOCUSED : XMB_TEXT_DIM);
     }
 }
 
@@ -285,7 +286,7 @@ static void draw_menu(int dw, int dh) {
 // hud_compose — render the full overlay into the staging buffer
 // -------------------------------------------------------
 
-static void hud_compose(u64 elapsed_us, bool paused) {
+static void hud_compose(u64 elapsed_us, bool paused, bool scrubbing) {
     // Wipe the rows the previous compose drew, then track this one's span.
     if (s_ovl_prev_y1 > s_ovl_prev_y0)
         memset(s_ovl_stage + (u32)s_ovl_prev_y0 * s_ovl_w, 0,
@@ -371,6 +372,30 @@ static void hud_compose(u64 elapsed_us, bool paused) {
     drawRect((u32)track_x0,            (u32)track_y, (u32)fill_w,             TRACK_H, HUD_ACCENT);
     drawRect((u32)(track_x0 + fill_w), (u32)track_y, (u32)(track_w - fill_w), TRACK_H, HUD_ACCENT_DIM);
     draw_circle(track_x0 + fill_w, track_y + TRACK_H / 2, SCRUB_R, HUD_ACCENT);
+
+    // ---- Trickplay scrub preview (only while actively hold-scrubbing) ----
+    // Never appears for a quick ±10s tap -- scrubbing is set from
+    // ps->seek.state == SEEK_SCRUB specifically, not from pending_secs, so an
+    // armed-but-not-yet-committed tap never shows it either. Absent-title and
+    // fetch-failure both just mean trickplay_current() returns NULL, which
+    // draws nothing here -- identical to today's plain bar, per design.
+    if (scrubbing) {
+        const TrickplayTile *tp = trickplay_current();
+        if (tp && tp->sheet_rgb && tp->tile_w > 0 && tp->tile_h > 0) {
+            int card_w = tp->tile_w + CARD_PAD * 2;
+            int card_h = tp->tile_h + CARD_PAD * 2;
+            int card_x = (track_x0 + fill_w) - card_w / 2;
+            if (card_x < lpad)               card_x = lpad;
+            if (card_x + card_w > dw - rpad) card_x = dw - rpad - card_w;
+            int card_y = track_y - CARD_GAP - card_h;
+
+            ovl_dim((u32)card_x, (u32)card_y, (u32)card_w, (u32)card_h, 235);
+            drawBitmapRect(tp->sheet_rgb, (u32)tp->sheet_w,
+                           (u32)tp->tile_x, (u32)tp->tile_y,
+                           (u32)tp->tile_w, (u32)tp->tile_h,
+                           (u32)(card_x + CARD_PAD), (u32)(card_y + CARD_PAD));
+        }
+    }
 
     // ---- Time labels (centred vertically on ctrl row) ----
     // drawTTF y ≈ top of glyph; shift up by half px to visually centre.
@@ -478,7 +503,7 @@ static void hud_compose(u64 elapsed_us, bool paused) {
 // about once a second (when the time string ticks) or on input.
 // -------------------------------------------------------
 
-void hud_draw(u64 elapsed_us, bool paused) {
+void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
     if (!g_hud.visible) return;
     if (!s_ovl_stage || !s_ovl_tex) return;   // alloc failed: no HUD
 
@@ -498,12 +523,13 @@ void hud_draw(u64 elapsed_us, bool paused) {
     key.title_on     = (paused && g_hud.title[0]) ? 1 : 0;
     key.vol_active   = g_hud.vol_active ? 1 : 0;
     key.vol_pct      = audio_get_volume();
+    key.scrubbing    = scrubbing ? 1 : 0;
     snprintf(key.audio, sizeof(key.audio), "%s", g_hud.audio_label);
 
     if (!s_ovl_key_valid || memcmp(&key, &s_ovl_key, sizeof(key)) != 0) {
         s_ovl_key       = key;
         s_ovl_key_valid = true;
-        hud_compose(elapsed_us, paused);
+        hud_compose(elapsed_us, paused, scrubbing);
     }
 
     rsx_draw_hud_overlay(s_ovl_tex_off, s_ovl_w, s_ovl_h);

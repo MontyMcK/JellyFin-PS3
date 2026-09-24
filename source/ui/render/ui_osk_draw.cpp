@@ -7,8 +7,9 @@
 #include "ui_render_internal.h"
 #include "thumbnail_cache.h"
 #include "timing.h"
+#include "ui_tab_anim.h"
 
-#define OSK_FIELD_H 40
+#define OSK_FIELD_H UIS_H(40)
 
 // -------------------------------------------------------
 // Search layout
@@ -41,82 +42,123 @@ int xmb_search_vis_rows(void) {
     return r < 0 ? 0 : r;
 }
 
+// The key highlight glides between keys (focus_glide) instead of the selected
+// key simply changing colour.  Keys are drawn plain, then one highlight block
+// over the selection; the rect drawn is kept here so the label pass can darken
+// each label by how much of its key the highlight is covering right now --
+// otherwise the new key's label would go dark before the block arrived.
+static int s_hl_x, s_hl_y, s_hl_w, s_hl_h;
+static bool s_hl_on = false;
+
+// Fraction of the key [kx,ky,kw,kh] under the highlight, 0..1.
+static float osk_hl_cover(int kx, int ky, int kw, int kh) {
+    if (!s_hl_on || kw <= 0 || kh <= 0) return 0.0f;
+    int x0 = kx > s_hl_x ? kx : s_hl_x;
+    int y0 = ky > s_hl_y ? ky : s_hl_y;
+    int x1 = (kx + kw) < (s_hl_x + s_hl_w) ? (kx + kw) : (s_hl_x + s_hl_w);
+    int y1 = (ky + kh) < (s_hl_y + s_hl_h) ? (ky + kh) : (s_hl_y + s_hl_h);
+    if (x1 <= x0 || y1 <= y0) return 0.0f;
+    return (float)((x1 - x0) * (y1 - y0)) / (float)(kw * kh);
+}
+
+static u32 osk_mix(u32 a, u32 b, float t) {
+    if (t <= 0.0f) return a;
+    if (t >= 1.0f) return b;
+    u32 out = 0;
+    for (int sh = 0; sh <= 16; sh += 8) {
+        const float ca = (float)((a >> sh) & 0xFF), cb = (float)((b >> sh) & 0xFF);
+        out |= (u32)(ca + (cb - ca) * t + 0.5f) << sh;
+    }
+    return out;
+}
+
 void xmb_cpu_draw_osk(void) {
     int W = (int)display_width;
     int total_w = 10 * OSK_STEP_X - OSK_GAP;
-    int osk_x0  = (W - total_w) / 2;
+    int osk_x0  = (W - total_w) / 2 + tab_anim_content_dx();
 
     // Search field: dark well with an accent underline.
-    drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + 8),
-             (u32)total_w, OSK_FIELD_H, 0x00131830UL);
-    drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + 8 + OSK_FIELD_H - 2),
-             (u32)total_w, 2, XMB_ACCENT);
+    drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + UIS_H(8)),
+             (u32)total_w, OSK_FIELD_H, XMB_TRACK);
+    drawRect((u32)osk_x0, (u32)(XMB_CONTENT_Y + UIS_H(8) + OSK_FIELD_H - UIS_H(2)),
+             (u32)total_w, UIS_H(2), XMB_ACCENT);
 
+    s_hl_on = false;
     if (g_search_focus_results) return;   // collapsed: field only, no keys
 
+    int hx = 0, hy = 0, hw = 0, hh = 0;
     for (int r = 0; r <= OSK_ROWS_N; r++) {
         if (r == OSK_ROWS_N) {
             int space_w = 5 * OSK_STEP_X - OSK_GAP;
             int sy = OSK_Y0 + r * OSK_STEP_Y;
-            bool sp_sel = (r == g_osk_row && g_osk_col == 0);
-            drawRect((u32)osk_x0, (u32)sy, (u32)space_w, OSK_KEY_H,
-                     sp_sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
+            drawRect((u32)osk_x0, (u32)sy, (u32)space_w, OSK_KEY_H, XMB_KEY_NORMAL);
             int bsx = osk_x0 + space_w + OSK_GAP;
-            bool bs_sel = (r == g_osk_row && g_osk_col == 1);
-            drawRect((u32)bsx, (u32)sy, OSK_KEY_W, OSK_KEY_H,
-                     bs_sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
+            drawRect((u32)bsx, (u32)sy, OSK_KEY_W, OSK_KEY_H, XMB_KEY_NORMAL);
             int clx = bsx + OSK_KEY_W + OSK_GAP;
-            bool cl_sel = (r == g_osk_row && g_osk_col == 2);
-            drawRect((u32)clx, (u32)sy, OSK_KEY_W, OSK_KEY_H,
-                     cl_sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
+            drawRect((u32)clx, (u32)sy, OSK_KEY_W, OSK_KEY_H, XMB_KEY_NORMAL);
+            if (r == g_osk_row) {
+                hy = sy; hh = OSK_KEY_H;
+                if      (g_osk_col == 0) { hx = osk_x0; hw = space_w; }
+                else if (g_osk_col == 1) { hx = bsx;    hw = OSK_KEY_W; }
+                else                     { hx = clx;    hw = OSK_KEY_W; }
+            }
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
             int rlen = (int)strlen(rows[r]);
             if (r == OSK_ROWS_N - 1) rlen++;
             int ry = OSK_Y0 + r * OSK_STEP_Y;
             for (int c = 0; c < rlen; c++) {
-                bool sel = (r == g_osk_row && c == g_osk_col);
                 drawRect((u32)(osk_x0 + c * OSK_STEP_X), (u32)ry,
-                         OSK_KEY_W, OSK_KEY_H,
-                         sel ? XMB_KEY_SEL : XMB_KEY_NORMAL);
+                         OSK_KEY_W, OSK_KEY_H, XMB_KEY_NORMAL);
+                if (r == g_osk_row && c == g_osk_col) {
+                    hx = osk_x0 + c * OSK_STEP_X; hy = ry;
+                    hw = OSK_KEY_W; hh = OSK_KEY_H;
+                }
             }
         }
     }
+
+    if (hw > 0) {
+        // Snaps when the layout changes (letters <-> symbols).
+        focus_glide(0x7EEE0000 | (g_osk_sym ? 1 : 0), &hx, &hy, &hw, &hh);
+        drawRect((u32)hx, (u32)hy, (u32)hw, (u32)hh, XMB_KEY_SEL);
+        s_hl_x = hx; s_hl_y = hy; s_hl_w = hw; s_hl_h = hh; s_hl_on = true;
+    }
 }
 
-// One key label, centered in a key cell, dark when the key is selected
-// (selected keys are white).
-static void osk_key_label(int kx, int kw, int ry, const char *lbl, bool sel) {
-    const float px = 20.0f;
+// One key label, centered in a key cell, darkened by how much of the key the
+// (gliding) highlight covers -- selected keys are white.
+static void osk_key_label(int kx, int kw, int ry, const char *lbl) {
+    const float px = UIS_TF(20.0f);
     int lw = ttf_text_width(lbl, px);
-    int ty = ry + (OSK_KEY_H - (int)px) / 2 - 2;
+    int ty = ry + (OSK_KEY_H - (int)px) / 2 - UIS_H(2);
     drawTTF((u32)(kx + (kw - lw) / 2), (u32)(ty > 0 ? ty : 0), lbl, px,
-            sel ? XMB_KEY_LABEL_SEL : XMB_TEXT);
+            osk_mix(XMB_TEXT, XMB_KEY_LABEL_SEL, osk_hl_cover(kx, ry, kw, OSK_KEY_H)));
 }
 
 void xmb_rsx_draw_osk(void) {
     int W = (int)display_width;
     int total_w = 10 * OSK_STEP_X - OSK_GAP;
-    int osk_x0  = (W - total_w) / 2;
+    int osk_x0  = (W - total_w) / 2 + tab_anim_content_dx();
 
     u64 us = timing_get_us();
     bool cursor = ((us / 500000) & 1) == 0;
 
     // Search field content: magnifier glyph, then typed text or ghost prompt.
     {
-        int fx = osk_x0 + 14;
-        int fy = XMB_CONTENT_Y + 8;
-        drawIcon((u32)fx, (u32)(fy + (OSK_FIELD_H - 20) / 2), ICON_SEARCH, 20.0f,
+        int fx = osk_x0 + UIS_W(14);
+        int fy = XMB_CONTENT_Y + UIS_H(8);
+        drawIcon((u32)fx, (u32)(fy + (OSK_FIELD_H - UIS_H(20)) / 2), ICON_SEARCH, UIS_TF(20.0f),
                  XMB_TEXT_FAINT);
-        int tx = fx + 30;
-        int ty = fy + (OSK_FIELD_H - 18) / 2 - 2;
+        int tx = fx + UIS_W(30);
+        int ty = fy + (OSK_FIELD_H - UIS_H(18)) / 2 - UIS_H(2);
         if (g_search_buf[0]) {
             char disp[68];
             snprintf(disp, sizeof(disp), "%s%s", g_search_buf, cursor ? "_" : "");
-            drawTTF((u32)tx, (u32)ty, disp, 18, XMB_TEXT);
+            drawTTF((u32)tx, (u32)ty, disp, UIS_TF(18), XMB_TEXT);
         } else {
-            if (cursor) drawTTF((u32)tx, (u32)ty, "_", 18, XMB_TEXT);
-            drawTTF((u32)(tx + 14), (u32)ty, "Search your library", 17,
+            if (cursor) drawTTF((u32)tx, (u32)ty, "_", UIS_TF(18), XMB_TEXT);
+            drawTTF((u32)(tx + UIS_W(14)), (u32)ty, "Search your library", UIS_TF(17),
                     XMB_TEXT_FAINT);
         }
     }
@@ -130,16 +172,14 @@ void xmb_rsx_draw_osk(void) {
             int space_w = 5 * OSK_STEP_X - OSK_GAP;
             int bsx = osk_x0 + space_w + OSK_GAP;
             int clx = bsx + OSK_KEY_W + OSK_GAP;
-            osk_key_label(osk_x0, space_w, ry, "Space",
-                          r == g_osk_row && g_osk_col == 0);
+            osk_key_label(osk_x0, space_w, ry, "Space");
             {   // Backspace: Material icon, centered in the key.
-                bool sel = (r == g_osk_row && g_osk_col == 1);
-                drawIcon((u32)(bsx + (OSK_KEY_W - 22) / 2),
-                         (u32)(ry + (OSK_KEY_H - 22) / 2), ICON_BACKSPACE, 22.0f,
-                         sel ? XMB_KEY_LABEL_SEL : XMB_TEXT);
+                drawIcon((u32)(bsx + (OSK_KEY_W - UIS_W(22)) / 2),
+                         (u32)(ry + (OSK_KEY_H - UIS_H(22)) / 2), ICON_BACKSPACE, UIS_TF(22.0f),
+                         osk_mix(XMB_TEXT, XMB_KEY_LABEL_SEL,
+                                 osk_hl_cover(bsx, ry, OSK_KEY_W, OSK_KEY_H)));
             }
-            osk_key_label(clx, OSK_KEY_W, ry, "Clear",
-                          r == g_osk_row && g_osk_col == 2);
+            osk_key_label(clx, OSK_KEY_W, ry, "Clear");
         } else {
             const char **rows = g_osk_sym ? OSK_SYMBOLS : OSK_LETTERS;
             const char  *row  = rows[r];
@@ -147,13 +187,11 @@ void xmb_rsx_draw_osk(void) {
 
             for (int c = 0; c < base_len; c++) {
                 char label[2] = { row[c], '\0' };
-                osk_key_label(osk_x0 + c * OSK_STEP_X, OSK_KEY_W, ry, label,
-                              r == g_osk_row && c == g_osk_col);
+                osk_key_label(osk_x0 + c * OSK_STEP_X, OSK_KEY_W, ry, label);
             }
             if (r == OSK_ROWS_N - 1) {
                 osk_key_label(osk_x0 + base_len * OSK_STEP_X, OSK_KEY_W, ry,
-                              g_osk_sym ? "ABC" : "#+=",
-                              r == g_osk_row && g_osk_col == base_len);
+                              g_osk_sym ? "ABC" : "#+=");
             }
         }
     }
@@ -162,40 +200,43 @@ void xmb_rsx_draw_osk(void) {
     int count     = g_search_results_count;
     int vis_r     = xmb_search_vis_rows();
     {
-        int sr_list_x = ((int)display_width - XMB_LIST_W) / 2;
-        int sr_tx     = sr_list_x + 16 + XMB_THUMB_W + 16;
+        int sr_list_x = ((int)display_width - XMB_LIST_W) / 2 + tab_anim_content_dx();
+        int sr_tx     = sr_list_x + UIS_W(16) + XMB_THUMB_W + UIS_W(16);
         for (int i = 0; i < vis_r; i++) {
             int idx = g_search_scroll + i;
             if (idx >= count) break;
             const XMBItem *it = &g_search_results[idx];
             int iy = results_y + i * XMB_ROW_STRIDE;
             bool sel = g_search_focus_results && idx == g_search_sel;
-            drawTTF((u32)sr_tx, (u32)(iy + 18), it->name, 19,
+            drawTTF((u32)sr_tx, (u32)(iy + UIS_H(18)), it->name, UIS_TF(19),
                     sel ? XMB_WHITE : XMB_TEXT, sel);
-            xmb_draw_meta((u32)sr_tx, (u32)(iy + 46), it, 14);
+            xmb_draw_meta((u32)sr_tx, (u32)(iy + UIS_H(46)), it, UIS_TF(14));
         }
     }
     // Only a real query gets to say "No results".  A term that is too short
-    // was never sent, and one inside the typing pause is about to be; both
+    // was never sent, and one inside the typing pause or out on the search
+    // worker (this server takes 2.5-8.4 s to answer) is about to be; both
     // used to print "No results" and made a working search look dead.
-    if (g_search_buf[0] && g_search_state == SEARCH_TOO_SHORT) {
+    if (count == 0 && g_search_buf[0] && g_search_state == SEARCH_TOO_SHORT) {
         char msg[64];
         snprintf(msg, sizeof(msg), "Type at least %d letters", SEARCH_MIN_CHARS);
-        int mw = ttf_text_width(msg, 16);
-        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + 10),
-                msg, 16, XMB_TEXT_FAINT);
-    } else if (g_search_buf[0] && (g_search_state == SEARCH_PENDING ||
-                                   g_search_state == SEARCH_QUERYING)) {
-        const char *msg = "Searching...";
-        int mw = ttf_text_width(msg, 16);
-        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + 10),
-                msg, 16, XMB_TEXT_FAINT);
+        int mw = ttf_text_width(msg, UIS_TF(16));
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(10)),
+                msg, UIS_TF(16), XMB_TEXT_DIM);
+    } else if (count == 0 && g_search_buf[0] &&
+               (g_search_state == SEARCH_PENDING ||
+                g_search_state == SEARCH_QUERYING || xmb_search_in_flight())) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Searching for \"%s\"...", g_search_buf);
+        int mw = ttf_text_width(msg, UIS_TF(16));
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(10)),
+                msg, UIS_TF(16), XMB_TEXT_DIM);
     } else if (count == 0 && g_search_buf[0] && g_search_state == SEARCH_DONE) {
         char msg[96];
         snprintf(msg, sizeof(msg), "No results for \"%s\"", g_search_buf);
-        int mw = ttf_text_width(msg, 16);
-        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + 10),
-                msg, 16, XMB_TEXT_FAINT);
+        int mw = ttf_text_width(msg, UIS_TF(16));
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(10)),
+                msg, UIS_TF(16), XMB_TEXT_FAINT);
     } else if (count > 0 && vis_r == 0) {
         // Hits exist but the keyboard leaves no room to list them (every mode
         // below 1080p).  Without this the screen looks identical to "no
@@ -203,11 +244,11 @@ void xmb_rsx_draw_osk(void) {
         // exactly how the invisible list went unnoticed.  One line fits in
         // the ~60px under the keyboard even at 480i.
         char msg[64];
-        snprintf(msg, sizeof(msg), "%d result%s \xB7 press Down to browse",
+        snprintf(msg, sizeof(msg), "%d result%s \xC2\xB7 press Down to browse",
                  count, count == 1 ? "" : "s");
-        int mw = ttf_text_width(msg, 15);
-        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + 6),
-                msg, 15, XMB_ACCENT);
+        int mw = ttf_text_width(msg, UIS_TF(15));
+        drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(6)),
+                msg, UIS_TF(15), XMB_ACCENT);
     }
 }
 
@@ -216,7 +257,7 @@ void xmb_cpu_draw_search_results(void) {
     int results_y = xmb_search_results_y();
     int count     = g_search_results_count;
     int vis_r     = xmb_search_vis_rows();
-    int list_x = ((int)display_width - XMB_LIST_W) / 2;
+    int list_x = ((int)display_width - XMB_LIST_W) / 2 + tab_anim_content_dx();
     for (int i = 0; i < vis_r; i++) {
         int idx = g_search_scroll + i;
         if (idx >= count) break;
@@ -224,11 +265,11 @@ void xmb_cpu_draw_search_results(void) {
         if (g_search_focus_results && idx == g_search_sel) {
             drawRect((u32)list_x, (u32)iy,
                      (u32)XMB_LIST_W, (u32)XMB_ROW_H, XMB_PANEL_HI);
-            drawRect((u32)(list_x - 4), (u32)iy,
-                     3, (u32)XMB_ROW_H, XMB_ACCENT);
+            drawRect((u32)(list_x - UIS_W(4)), (u32)iy,
+                     UIS_W(3), (u32)XMB_ROW_H, XMB_ACCENT);
         }
         xmb_cpu_blit_thumb_scaled(g_search_results[idx].id,
-                                  list_x + 16,
+                                  list_x + UIS_W(16),
                                   iy + (XMB_ROW_H - XMB_THUMB_H) / 2,
                                   XMB_THUMB_W, XMB_THUMB_H);
     }

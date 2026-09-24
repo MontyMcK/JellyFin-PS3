@@ -9,8 +9,10 @@
 
 #include "ui_internal.h"
 #include "ui_render_internal.h"
+#include "ui_card_gpu.h"
 #include "jellyfin_api.h"
 #include "music_screen.h"
+#include "ui_tab_anim.h"
 
 // -------------------------------------------------------
 // Model
@@ -41,9 +43,9 @@ static bool    s_inited    = false;
 // Layout metrics (resolution-independent, computed each call)
 // -------------------------------------------------------
 
-#define HOME_HEADER_H 30          // row-title band above the cards
-#define HOME_LABEL_H  26          // card-title band beneath the cards
-#define HOME_ROW_GAP  14          // gap between rows
+#define HOME_HEADER_H UIS_H(30)          // row-title band above the cards
+#define HOME_LABEL_H  UIS_H(26)          // card-title band beneath the cards
+#define HOME_ROW_GAP  UIS_H(14)          // gap between rows
 #define HOME_SIDE_PAD XMB_ITEM_PAD
 #define HOME_CARD_GAP XMB_CARD_GAP_X
 
@@ -89,7 +91,7 @@ static int row_strip_w(HomeRowKind k) {
 // cards, labels and chevrons so they all move together.
 static int row_origin_x(HomeRowKind k) {
     int x0 = ((int)display_width - row_strip_w(k)) / 2;
-    return x0 < HOME_SIDE_PAD ? HOME_SIDE_PAD : x0;
+    return (x0 < HOME_SIDE_PAD ? HOME_SIDE_PAD : x0) + tab_anim_content_dx();
 }
 
 // -------------------------------------------------------
@@ -216,10 +218,10 @@ static void home_clip_text(int x, int y, const char *s, float px, u32 color,
 
 static void home_sel_frame(int cx, int cy, int w, int h) {
     const int T = 2, G = 2, O = G + T;
-    drawRect((u32)(cx - O), (u32)(cy - O),     (u32)(w + 2*O), T, XMB_KEY_SEL);
-    drawRect((u32)(cx - O), (u32)(cy + h + G), (u32)(w + 2*O), T, XMB_KEY_SEL);
-    drawRect((u32)(cx - O), (u32)(cy - G),     T, (u32)(h + 2*G), XMB_KEY_SEL);
-    drawRect((u32)(cx + w + G), (u32)(cy - G), T, (u32)(h + 2*G), XMB_KEY_SEL);
+    drawRect((u32)(cx - O), (u32)(cy - O),     (u32)(w + 2*O), T, XMB_FOCUS_RING);
+    drawRect((u32)(cx - O), (u32)(cy + h + G), (u32)(w + 2*O), T, XMB_FOCUS_RING);
+    drawRect((u32)(cx - O), (u32)(cy - G),     T, (u32)(h + 2*G), XMB_FOCUS_RING);
+    drawRect((u32)(cx + w + G), (u32)(cy - G), T, (u32)(h + 2*G), XMB_FOCUS_RING);
 }
 
 // True when row r's card band touches the viewport (cheap vertical cull).
@@ -232,6 +234,47 @@ static bool row_on_screen(int r, int *out_vy, int *out_card_y) {
     return !(card_y + ch < view_top() || vy > view_bot());
 }
 
+// GPU phase (BEFORE rsxSync): card images only, from their VRAM mirrors.
+// Mirrors xmb_home_cpu_phase's walk exactly -- same rows, same visibility
+// test, same ThumbImg choice -- so a card either gets drawn here and skipped
+// there, or missed here and blitted there.  Divergence between the two walks
+// would show up as a card drawn twice or not at all.
+void xmb_home_gpu_phase(void) {
+    if (!ui_card_gpu_ready()) return;
+    home_init_once();
+
+    ui_card_gpu_clip(view_top(), view_bot());
+
+    int rx = 0, ry = 0, rw = 0, rh = 0; bool have = false;
+    for (int r = 0; r < HOME_ROWS_N; r++) {
+        HomeRow *row = &s_rows[r];
+        int card_y;
+        if (!row_on_screen(r, NULL, &card_y)) continue;
+        if (row->kind == HROW_STUB) continue;      // a CPU rect, not an image
+        int cw = row_card_w(row->kind), ch = row_card_h(row->kind);
+        int x0 = row_origin_x(row->kind);
+
+        int vis = row_visible_cols(row->kind);
+        for (int c = row->scroll; c < row->scroll + vis && c < row->count; c++) {
+            int cx = x0 + (c - row->scroll) * (cw + HOME_CARD_GAP);
+            ThumbImg img = (row->kind == HROW_LANDSCAPE && row->items[c].has_thumb)
+                         ? THUMB_IMG_THUMB : THUMB_IMG_PRIMARY;
+            xmb_card_gpu_one(row->items[c].id, cx, card_y, cw, ch, img);
+            if (r == s_focus_row && c == s_focus_col) {
+                rx = cx; ry = card_y; rw = cw; rh = ch; have = true;
+            }
+        }
+    }
+    // After every row, so a ring gliding between cards (or between rows of
+    // different card sizes) is never drawn under a neighbour.
+    if (have) {
+        focus_glide(xmb_focus_ctx(), &rx, &ry, &rw, &rh);
+        ui_card_gpu_selection(rx, ry, rw, rh);
+    }
+
+    ui_card_gpu_clip(0, 0);
+}
+
 void xmb_home_cpu_phase(void) {
     home_init_once();
     home_step_load();
@@ -242,6 +285,7 @@ void xmb_home_cpu_phase(void) {
     g_cpu_clip_top = view_top();
     g_cpu_clip_bot = view_bot();
 
+    int rx = 0, ry = 0, rw = 0, rh = 0; bool have = false;
     for (int r = 0; r < HOME_ROWS_N; r++) {
         HomeRow *row = &s_rows[r];
         int card_y;
@@ -266,9 +310,15 @@ void xmb_home_cpu_phase(void) {
             ThumbImg img = (row->kind == HROW_LANDSCAPE && row->items[c].has_thumb)
                          ? THUMB_IMG_THUMB : THUMB_IMG_PRIMARY;
             xmb_draw_card(row->items[c].id, cx, card_y, cw, ch,
-                          row->items[c].progress_pct, sel,
+                          row->items[c].progress_pct, false,
                           r == HR_MUSIC ? row->items[c].name : NULL, img);
+            if (sel) { rx = cx; ry = card_y; rw = cw; rh = ch; have = true; }
         }
+    }
+    // The ring last (see the GPU phase); the GPU pass drew it when it is live.
+    if (have && !ui_card_gpu_ready()) {
+        focus_glide(xmb_focus_ctx(), &rx, &ry, &rw, &rh);
+        xmb_focus_ring_cpu(rx, ry, rw, rh);
     }
 
     g_cpu_clip_top = 0; g_cpu_clip_bot = 0;
@@ -290,39 +340,40 @@ void xmb_home_text_phase(void) {
 
         // Row header, with a dim item count when the row overflows the screen
         // (replaces the old horizontal scrollbar as the "there's more" cue).
-        drawTTF((u32)x0, (u32)(vy + 4), row->title, 18,
-                row_focused ? XMB_TEXT : XMB_TEXT_DIM, true);
+        // v1.0: row titles are eyebrows -- Microgramma, uppercase, 0.18em.
+        int hw = xmb_draw_eyebrow(x0, vy + UIS_H(4), row->title,
+                                  row_focused ? XMB_TEXT : XMB_TEXT_FAINT);
         if (row->kind != HROW_STUB && row->count > row_visible_cols(row->kind)) {
             char cnt[8];
             snprintf(cnt, sizeof(cnt), "%d", row->count);
-            drawTTF((u32)(x0 + ttf_text_width(row->title, 18, true) + 10),
-                    (u32)(vy + 9), cnt, 13, XMB_TEXT_FAINT);
+            drawTTF((u32)(x0 + hw + UIS_W(10)),
+                    (u32)(vy + UIS_H(2)), cnt, UIS_TF(11), XMB_TEXT_FAINT);
         }
 
         if (row->kind == HROW_STUB) {
             const char *msg = "Coming soon";
-            int tw = ttf_text_width(msg, 16);
+            int tw = ttf_text_width(msg, UIS_TF(16));
             drawTTF((u32)(x0 + (cw - tw) / 2),
-                    (u32)(card_y + ch / 2 - 8), msg, 16, XMB_TEXT_FAINT);
+                    (u32)(card_y + ch / 2 - UIS_H(8)), msg, UIS_TF(16), XMB_TEXT_FAINT);
             continue;
         }
 
         if (row->count == 0) {
             // drawTTF is Latin-1, so plain "..." (no UTF-8 ellipsis).
             const char *msg = row->loaded ? "Nothing here yet" : "Loading...";
-            drawTTF((u32)x0, (u32)(card_y + ch / 2 - 8), msg, 15, XMB_TEXT_FAINT);
+            drawTTF((u32)x0, (u32)(card_y + ch / 2 - UIS_H(8)), msg, UIS_TF(15), XMB_TEXT_FAINT);
             continue;
         }
 
         int vis = row_visible_cols(row->kind);
         for (int c = row->scroll; c < row->scroll + vis && c < row->count; c++) {
             int cx = x0 + (c - row->scroll) * (cw + HOME_CARD_GAP);
-            int ty = card_y + ch + 5;
+            int ty = card_y + ch + UIS_H(5);
             bool sel = (row_focused && c == s_focus_col);
-            home_clip_text(cx, ty, row->items[c].name, 15,
+            home_clip_text(cx, ty, row->items[c].name, UIS_TF(15),
                            sel ? XMB_WHITE : XMB_TEXT_DIM, cw, sel);
             if (sel && row->items[c].year_str[0])
-                drawTTF((u32)cx, (u32)(ty + 19), row->items[c].year_str, 13, XMB_TEXT_FAINT);
+                drawTTF((u32)cx, (u32)(ty + UIS_H(19)), row->items[c].year_str, UIS_TF(13), XMB_TEXT_FAINT);
         }
 
     }

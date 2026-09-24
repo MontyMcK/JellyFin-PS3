@@ -8,6 +8,7 @@
 #include <sysutil/video.h>
 
 #include "rsxutil.h"
+#include "../build_config.h"
 #include "plog.h"
 
 extern void crash_log(const char *msg);
@@ -193,8 +194,35 @@ void rsxSync(void)
 	++sLabelVal;
 }
 
+#if BUILD_FOR_RPCS3
+// Emulator-only frame grab for automated testing: create
+// /dev_hdd0/tmp/jf_shot.req and the next checked flip writes the frame about to
+// be shown to jf_shot.raw (XRGB, big-endian, display_width x display_height)
+// and deletes the request.  Checked every 30 flips so the stat costs nothing.
+static void rpcs3_frame_grab(void)
+{
+	static int n = 0;
+	if (++n < 30) return;
+	n = 0;
+	FILE *req = fopen("/dev_hdd0/tmp/jf_shot.req", "r");
+	if (!req) return;
+	fclose(req);
+	remove("/dev_hdd0/tmp/jf_shot.req");
+	rsxSync();   // the RSX's part of the frame must have landed first
+	FILE *f = fopen("/dev_hdd0/tmp/jf_shot.raw", "wb");
+	if (!f) return;
+	fwrite(color_buffer[curr_fb], 1, (size_t)color_pitch * display_height, f);
+	fclose(f);
+	f = fopen("/dev_hdd0/tmp/jf_shot.txt", "w");
+	if (f) { fprintf(f, "%u %u\n", display_width, display_height); fclose(f); }
+}
+#endif
+
 void flip()
 {
+#if BUILD_FOR_RPCS3
+	rpcs3_frame_grab();
+#endif
 	if(first_fb) gcmResetFlipStatus();
 
 	gcmSetFlip(context,curr_fb);

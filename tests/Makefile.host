@@ -30,6 +30,8 @@ DTS_MAP_SRC  = ../source/audio/dts_map.c
 DTS_EXSS_SRC = ../source/audio/dts_exss.c
 DTS_STREAM_SRC = ../source/audio/dts_stream.c
 TRACK_SRC    = ../source/util/track_codec.c
+PGS_SRC      = ../source/player/subtitles_pgs.c
+TRICKPLAY_INFO_SRC = ../source/api/trickplay_info.c
 
 # Vendored FFmpeg MLP/TrueHD decoder: mlp_api.c is the whole decoder in one
 # translation unit (source/audio/mlp/PROVENANCE.md), so only it and the
@@ -50,10 +52,14 @@ DCAHD_SRCS = ../source/audio/dcahd_api.c ../source/audio/dcahd_xll.c \
 DTS_HD_DEPS = $(DTS_STREAM_SRC) $(DTS_MAP_SRC) $(DTS_EXSS_SRC) $(DCA_SRCS) \
               ../source/audio/truehd_map.c $(DCAHD_SRCS)
 
-all: test_ac3_map test_ac3_decode test_media_sources \
+all: test_ac3_map test_ac3_decode test_media_sources test_subtitles \
+     test_subtitles_pgs test_trickplay_info \
      test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
      test_truehd_map test_truehd_decode \
-     test_dts_hd test_dts_xll_dump
+     test_dts_hd test_dts_xll_dump test_text_runs test_utf8 test_theme test_layout test_circle_blit \
+     test_wave_kernel test_wave_spline test_wave_ribbon test_wave_field \
+     test_wave_audio test_wave_motion test_wave_layers test_bg_gradient test_month_bg \
+     test_wave_cam test_wave_light test_wave_gel
 
 test_ac3_map: test_ac3_map.c $(MAP_SRC)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
@@ -85,8 +91,19 @@ test_truehd_map: test_truehd_map.c ../source/audio/truehd_map.c
 test_truehd_decode: test_truehd_decode.c $(TRUEHD_SRCS)
 	$(CC) $(MLP_CFLAGS) $(CFLAGS) -o $@ $^ -lm
 
+# subtitles.cpp is compiled straight into the test with its console-only
+# dependencies stubbed, so what is tested is the code the PS3 runs.
+test_subtitles: test_subtitles.cpp ../source/player/subtitles.cpp $(PGS_SRC)
+	$(CXX) $(CXXFLAGS) -o $@ test_subtitles.cpp $(PGS_SRC)
+
 test_media_sources: test_media_sources.cpp ../source/api/media_sources.cpp
 	$(CXX) $(CXXFLAGS) -o $@ $^
+
+test_subtitles_pgs: test_subtitles_pgs.c $(PGS_SRC)
+	$(CC) $(CFLAGS) -o $@ $^
+
+test_trickplay_info: test_trickplay_info.c $(TRICKPLAY_INFO_SRC)
+	$(CC) $(CFLAGS) -o $@ $^
 
 test_dts_hd: test_dts_hd.c $(DTS_HD_DEPS)
 	$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o $@ $^ -lm
@@ -111,6 +128,57 @@ test_dts_hd: test_dts_hd.c $(DTS_HD_DEPS)
 #   qemu-ppc64 ./dump_be dtsma.dts be.pcm && cmp be.pcm dtsma.ref
 test_dts_xll_dump: test_dts_xll_dump.c $(DTS_HD_DEPS)
 	$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o $@ $^ -lm
+
+# ---------------------------------------------------------------------------
+# Byte-order agreement -- `make -f Makefile.host endian`
+# ---------------------------------------------------------------------------
+# The DTS-HD MA path spent a while suspected of a big-endian bug that could
+# only be found "with hardware in the loop".  It was not endianness at all
+# (see ../source/audio/dcahd/PROVENANCE.md), but the way that was PROVED is
+# worth keeping runnable instead of leaving it as a shell command in a note:
+# build the identical decoder for big-endian PPC64, run it under qemu, and
+# compare byte for byte with the host build.
+#
+# test_dts_xll_dump writes every sample explicitly little-endian, byte by
+# byte, so the output file encodes VALUES rather than the host's byte order.
+# The two runs therefore match if and only if the two builds compute the same
+# numbers.
+#
+# The big-endian build deliberately uses -O3 -maltivec, which is what the PS3
+# Makefile gives these objects (dcahd_api.o / dcahd_xll.o / dcahd_compat.o get
+# -O3, and -mcpu=cell implies AltiVec).  That matters: -O3 turns on
+# -ftree-vectorize, and auto-vectorised big-endian PowerPC is exactly where a
+# byte-order bug would hide.  Building at -O2 would test the wrong thing.
+#
+# ENDIAN_FIXTURE defaults to the synthesised core-only tones, which exercises
+# the CORE path -- and the core is on the lossless critical path, because
+# DTS-HD MA is usually residual-encoded (lossless = core + residual).  To cover
+# XLL itself, point it at a fixture extracted from a real disc rip:
+#
+#   make -f Makefile.host endian ENDIAN_FIXTURE=dtsma.dts
+#
+PPC64CC        ?= powerpc64-linux-gnu-gcc
+QEMU_PPC64     ?= qemu-ppc64
+ENDIAN_FIXTURE ?= tones51.dts
+
+.PHONY: endian
+endian: $(ENDIAN_FIXTURE)
+	@echo "== building little-endian (host) =="
+	@$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o dump_le test_dts_xll_dump.c $(DTS_HD_DEPS) -lm
+	@echo "== building big-endian ppc64, -O3 -maltivec (the console's flags) =="
+	@$(PPC64CC) $(DCAHD_CFLAGS) $(CFLAGS) -O3 -maltivec -mabi=altivec -static \
+	    -o dump_be test_dts_xll_dump.c $(DTS_HD_DEPS) -lm
+	@echo "== little-endian run =="
+	@./dump_le $(ENDIAN_FIXTURE) out_le.pcm
+	@echo "== big-endian run (under qemu) =="
+	@$(QEMU_PPC64) ./dump_be $(ENDIAN_FIXTURE) out_be.pcm
+	@if cmp -s out_le.pcm out_be.pcm; then \
+	    echo "PASS: byte-identical across byte orders ($(ENDIAN_FIXTURE))"; \
+	else \
+	    echo "FAIL: the two byte orders disagree --"; \
+	    cmp -l out_le.pcm out_be.pcm | wc -l; \
+	    exit 1; \
+	fi
 
 tones51.ac3:
 	ffmpeg -y -loglevel error \
@@ -163,11 +231,297 @@ check: all tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 	./test_truehd_decode tones51.thd tones51.thd.ref
 	./test_dts_hd tones51.dts
 	./test_media_sources
+	./test_subtitles
+	./test_subtitles_pgs
+	./test_trickplay_info
+	./test_text_runs
+	./test_utf8
+	./test_circle_blit
+	./test_theme
+	./test_layout
+	./test_wave_kernel
+	./test_wave_spline
+	./test_wave_ribbon
+	./test_wave_field
+	./test_wave_audio
+	./test_wave_motion
+	./test_wave_layers
+	./test_bg_gradient
+	./test_month_bg
+	./test_wave_cam
+	./test_wave_light
+	./test_wave_gel
 
 clean:
-	rm -f test_ac3_map test_ac3_decode test_media_sources \
+	rm -f test_ac3_map test_ac3_decode test_media_sources test_subtitles \
+	      test_subtitles_pgs test_trickplay_info \
 	      test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
 	      test_truehd_map test_truehd_decode test_dts_hd test_dts_xll_dump \
+	      test_text_runs test_utf8 test_theme test_layout test_circle_blit \
+	      test_wave_kernel test_wave_spline test_wave_ribbon test_wave_field \
+	      test_wave_audio test_wave_motion test_wave_layers test_bg_gradient \
+	      test_wave_cam test_wave_light test_wave_gel \
 	      tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 
 .PHONY: all check clean
+
+# ---------------------------------------------------------------------------
+# GPU text runs vs. the per-glyph blit they replace.
+#
+# ui_text.cpp is compiled ON THE HOST here, with hoststub/ standing in for the
+# PSL1GHT headers it includes (types, plus no-op RSX transfer calls the TTF
+# path never reaches).  That is deliberate: the point is to run the REAL glyph
+# walk against the REAL run walk, not a host reimplementation of either, so a
+# divergence in kerning, pen truncation or coverage combining shows up here
+# instead of as text that shifts a pixel when the gate is flipped.
+# See the header comment in test_text_runs.cpp.
+TEXT_INC = -Ihoststub -I../source/ui -I../source/ui/render -I../source/ui/fonts \
+           -I../source/gfx -I../source/util -I../source
+test_text_runs: test_text_runs.cpp ../source/ui/render/ui_text.cpp
+	$(CXX) $(CXXFLAGS) $(TEXT_INC) -o $@ test_text_runs.cpp -lm
+
+# Runtime theming (Phase 1 of the XMB revamp).  Compiles the REAL theme.cpp --
+# hoststub/sys/file.h maps the three LV2 directory syscalls theme_scan() uses
+# onto POSIX opendir/readdir -- and checks it against the REAL themes/*.ini the
+# package ships, so a mistyped built-in or a regression in the inline-comment
+# stripping fails here rather than on the console.
+THEME_INC = -Ihoststub -I../source/ui -I../source/util
+test_theme: test_theme.cpp ../source/ui/theme.cpp ../themes/xmb-wave.ini
+	$(CXX) $(CXXFLAGS) $(THEME_INC) -o $@ test_theme.cpp
+
+# XMB layout sanity across resolutions.  Guards the class of mistake that is
+# invisible in source and obvious on a TV: a chrome band that grows into the
+# content, a negative card height, a hints bar overlapping the grid.
+LAYOUT_INC = -Ihoststub -I../source/ui -I../source/ui/render -I../source/ui/fonts -I../source/gfx -I../source/util -I../source
+test_layout: test_layout.cpp ../source/ui/ui_visuals.h ../source/ui/theme.h
+	$(CXX) $(CXXFLAGS) $(LAYOUT_INC) -o $@ test_layout.cpp
+
+# Handoff section 3.0 typefaces, verified against this client's stb_truetype
+# rather than against a browser -- see the header comment in test_fonts.cpp.
+FONTS_INC = -Ihoststub -I../source/gfx
+test_fonts: test_fonts.cpp ../source/gfx/stb_truetype.h
+	$(CXX) $(CXXFLAGS) $(FONTS_INC) -Wno-unused-function -o $@ test_fonts.cpp -lm
+
+# ---------------------------------------------------------------------------
+# Wave geometry pipeline -- four header-only scalar kernels, four tests.
+#
+#   wave_kernel.h  damped spring chain      -> node positions
+#   wave_spline.h  uniform cubic B-spline   -> dense smooth polyline
+#   wave_ribbon.h  strip generation         -> WaveVert-compatible vertices
+#   wave_field.h   three animated layers    -> the seam ui_wave.cpp samples
+#
+# These are portable scalar C with no libm, no PS3 headers and no RSX state,
+# so the host build compiles the SAME code the console runs rather than a
+# stand-in for it -- which is the point, because the numerical contracts
+# between the three stages are exactly what is easy to get subtly wrong and
+# impossible to debug on a TV.
+#
+# The tests link -lm: the KERNELS may not use libm, but the tests checking
+# them may, and comparing wk_sinf and wr_rsqrt against the real sinf/sqrtf is
+# a far better check than a table of hand-written expected values.
+#
+# test_wave_ribbon.c also asserts the vertex struct's offsets, its 20-byte
+# payload, its 24-byte stride and its 8-byte alignment.  ui_wave.cpp explains
+# what an unpadded 20-byte version costs: a merged 64-bit store landing
+# misaligned in RSX local memory wedges the GPU and needs a power cycle.  That
+# is worth a compile-time guard and a runtime one.
+WAVE_HDRS = ../source/ui/render/wave_kernel.h \
+            ../source/ui/render/wave_spline.h \
+            ../source/ui/render/wave_ribbon.h \
+            ../source/ui/render/wave_field.h
+
+test_wave_kernel: test_wave_kernel.c ../source/ui/render/wave_kernel.h
+	$(CC) $(CFLAGS) -o $@ test_wave_kernel.c -lm
+
+test_wave_spline: test_wave_spline.c ../source/ui/render/wave_kernel.h \
+                  ../source/ui/render/wave_spline.h
+	$(CC) $(CFLAGS) -o $@ test_wave_spline.c -lm
+
+test_wave_ribbon: test_wave_ribbon.c $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -o $@ test_wave_ribbon.c -lm
+
+# The background: four-corner gradient, day/night crossfade, ordered dither.
+# Its first job is to prove the OLD two-stop ramp still comes out unchanged,
+# so this runs on every build rather than only when the header moves.
+test_bg_gradient: test_bg_gradient.c ../source/ui/render/bg_gradient.h
+	$(CC) $(CFLAGS) -o $@ test_bg_gradient.c -lm
+
+# The month table's parser and selection.  Also parses the generated
+# outputs/jellyfin_months.ini when it is present, so the format the generator
+# writes and the format the client reads cannot drift apart unnoticed.
+test_month_bg: test_month_bg.c ../source/ui/render/month_bg_table.h ../source/ui/render/bg_gradient.h
+	$(CC) $(CFLAGS) -o $@ test_month_bg.c -lm
+
+# The seam itself: three chains through one adapter.  This is the only wave
+# test that exercises the COMBINATION -- bounded together, distinct from each
+# other, pinned at the screen edges, reproducible from a seed -- which is what
+# the renderer actually depends on and what no single stage test can see.
+test_wave_field: test_wave_field.c $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -o $@ test_wave_field.c -lm
+
+# ---------------------------------------------------------------------------
+# JellyWave -- the approved translucent-gel design, three more header-only
+# scalar kernels and three tests.
+#
+#   wave_cam.h    world -> clip, through ONE fixed camera
+#   wave_light.h  one shared light, two LUTs, ACES tone map
+#   wave_gel.h    the stadium section lofted along the solver's spine
+#
+# These SIT ON TOP of the geometry pipeline rather than replacing any of it:
+# wave_kernel.h, wave_spline.h, wave_field.h and wave_ribbon.h are all
+# untouched, and wave_gel.h consumes wf_field's sy[] exactly as ui_wave.cpp's
+# existing path does.  The design's own undulation term is what the solver
+# replaces; everything else about the silhouette is the design's.
+#
+# Why each test exists, in one line each:
+#
+#   test_wave_cam    the basis is nine hard-coded numbers that were solved
+#                    offline, and one wrong digit skews every vertex in a way
+#                    that looks like broken geometry rather than a bad camera.
+#                    It is re-derived here from its own definition.
+#
+#   test_wave_light  both LUTs are literal tables (a generated one would be
+#                    file-scope dynamic initialisation, which this target does
+#                    not want), so they are re-derived from their documented
+#                    formulas -- and the SHAPES are asserted separately,
+#                    because a flat-topped rim and a narrow specular core are
+#                    the two things a pow() cannot give and the whole reason
+#                    the tables exist.
+#
+#   test_wave_gel    runs the REAL solver into the REAL loft and checks the
+#                    four things that cannot be seen in source: the section is
+#                    convex (which is what makes the painter's sort EXACT with
+#                    no depth buffer), the band lands low and diagonal instead
+#                    of across the card grid, it overruns both screen edges at
+#                    16:9 and 4:3, and the rolled edge keeps real on-screen
+#                    thickness -- without which this is a flat ribbon with
+#                    expensive colours on it.
+JW_HDRS = ../source/ui/render/wave_cam.h \
+          ../source/ui/render/wave_light.h \
+          ../source/ui/render/wave_gel.h
+
+test_wave_cam: test_wave_cam.c ../source/ui/render/wave_cam.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_cam.c -lm
+
+test_wave_light: test_wave_light.c ../source/ui/render/wave_light.h \
+                 ../source/ui/render/wave_cam.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_light.c -lm
+
+test_wave_gel: test_wave_gel.c $(JW_HDRS) $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_gel.c -lm
+
+# ---------------------------------------------------------------------------
+# Audio-reactive wave -- three more header-only scalar kernels, three tests.
+#
+#   wave_audio.h   PCM -> musical features   (filterbank, envelopes, onsets)
+#   wave_motion.h  features -> parameters    (smoothing + SLEW LIMITING)
+#   wave_layers.h  parameters -> per-layer geometry and colour
+#
+# See docs/wave-audio-spec.md.  These attach to the geometry pipeline
+# WITHOUT modifying it: the motion stage's drive, perturb and timescale go
+# into wk_step (or wf_step) through arguments those already take, and the
+# layer stage is a post-transform on ws_build's output feeding wr_build
+# unchanged.
+#
+# Each test has ONE assertion it exists for, and each of the three caught a
+# real defect that every other check in its own file passed against:
+#
+#   test_wave_audio    every band's maximum must be its OWN band.  A
+#                      three-pole cascade is sharper on paper and moves
+#                      every band's peak into the band above it;
+#                      boundedness and finiteness both pass against that.
+#
+#   test_wave_motion   every slew-limited parameter must move by at most
+#                      its declared rate times dt, on every frame, under
+#                      deliberately hostile input.  That is what makes the
+#                      wave's calm a property of the code rather than of
+#                      having picked good envelope constants.
+#
+#   test_wave_layers   the layers must actually CROSS, and the amplitude
+#                      budget must have real MARGIN rather than leaning on
+#                      the clamp.  Four parallel ribbons satisfy every
+#                      other assertion in that file and look like a bar
+#                      chart -- the first run found exactly that.
+#
+# test_wave_layers runs the WHOLE pipeline, PCM in and vertices out, for
+# about twelve minutes of simulated playback: a few seconds natively, and a
+# while under emulation.  The other two are instant.
+AUDIO_HDRS = ../source/ui/render/wave_audio.h \
+             ../source/ui/render/wave_motion.h \
+             ../source/ui/render/wave_layers.h
+
+test_wave_audio: test_wave_audio.c ../source/ui/render/wave_audio.h
+	$(CC) $(CFLAGS) -o $@ test_wave_audio.c -lm
+
+test_wave_motion: test_wave_motion.c ../source/ui/render/wave_audio.h \
+                  ../source/ui/render/wave_motion.h
+	$(CC) $(CFLAGS) -o $@ test_wave_motion.c -lm
+
+test_wave_layers: test_wave_layers.c $(AUDIO_HDRS) $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -o $@ test_wave_layers.c -lm
+
+
+# The colour is packed into one u32, so its BYTE order in the vertex buffer is
+# a property of the target, not of the source -- and the target is big-endian
+# PowerPC while this host is not.  test_wave_ribbon.c checks the packed value
+# (which is target-independent) and then checks the bytes against whichever
+# endianness it was built for, so running it under qemu for ppc64 verifies the
+# order the RSX will actually see.  Same toolchain the `endian` target above
+# uses.
+#
+# VERIFIED: on ppc64 the bytes at +16 come out 11 22 33 FF for
+# wr_put(r=0x11, g=0x22, b=0x33) -- r,g,b,a in that order, which is exactly
+# what the GCM_VERTEX_DATA_TYPE_U8 binding at vo+16 reads.  sizeof is 24 and
+# alignof is 8 on both byte orders.
+#
+# Ribbon first, then spline, then kernel, because that is both fastest-first
+# and most-relevant-first: the ribbon test carries every layout and byte-order
+# assertion plus the memcpy bit-pun in wr_rsqrt, and it finishes in seconds.
+# The kernel test runs on the order of a hundred million node updates (a dt
+# sweep, a 40k-step energy decay and a 108k-step run) -- under four seconds
+# natively, but several minutes under emulation.  Expect this target to take a
+# while for that last step.
+#
+#   make -f Makefile.host wave-endian
+.PHONY: wave-endian
+wave-endian:
+	@echo "== building the wave tests big-endian ppc64 =="
+	@$(PPC64CC) $(CFLAGS) -static -o wave_ribbon_be test_wave_ribbon.c -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_spline_be test_wave_spline.c -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_kernel_be test_wave_kernel.c -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_field_be  test_wave_field.c  -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_audio_be  test_wave_audio.c  -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_motion_be test_wave_motion.c -lm
+	@echo "== running them under qemu (the kernel one is slow) =="
+	@$(QEMU_PPC64) ./wave_ribbon_be
+	@$(QEMU_PPC64) ./wave_spline_be
+	@$(QEMU_PPC64) ./wave_kernel_be
+	@$(QEMU_PPC64) ./wave_field_be
+	@$(QEMU_PPC64) ./wave_audio_be
+	@$(QEMU_PPC64) ./wave_motion_be
+	@rm -f wave_kernel_be wave_spline_be wave_ribbon_be wave_field_be \
+	       wave_audio_be wave_motion_be
+
+# ---------------------------------------------------------------------------
+# Does the text path read UTF-8?
+#
+# Same harness as test_text_runs: the REAL ui_text.cpp and ui_draw.cpp compiled
+# against hoststub/, because the thing being checked is that FIVE separate
+# string walks (measure, blit, run box, run raster, vcentered measure) plus the
+# JSON escape decoder all agree on where one character ends and the next begins.
+# A host reimplementation would agree with itself and prove nothing.
+test_utf8: test_utf8.cpp ../source/ui/render/ui_text.cpp \
+           ../source/ui/render/ui_draw.cpp
+	$(CXX) $(CXXFLAGS) $(TEXT_INC) -o $@ test_utf8.cpp -lm
+
+# ---------------------------------------------------------------------------
+# The circular headshot blit (v1.0 cast row).
+#
+# render/circle_blit.h is header-only scalar C with no PS3 headers, so the test
+# compiles the SAME rasteriser the console runs.  What it is really guarding is
+# that nothing outside the circle is ever written: the headshots sit over the
+# animated wave, and the anti-aliasing is done against the source image rather
+# than the framebuffer precisely so the blit never reads video memory (`bpx`
+# must stay 0).  That trade only holds if the write mask is exact.
+test_circle_blit: test_circle_blit.c ../source/ui/render/circle_blit.h
+	$(CC) $(CFLAGS) -o $@ test_circle_blit.c -lm

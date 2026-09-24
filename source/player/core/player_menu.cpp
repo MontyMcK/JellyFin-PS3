@@ -5,10 +5,47 @@
 // dance, just different URL params.
 
 #include <stdio.h>
+#include <string.h>
 
 #include "player_internal.h"
 #include "plog.h"
+#include "subtitles.h"
 #include "slog.h"
+
+// ---- Remembered track preference (see player_internal.h) ------------------
+static char s_pref_audio_label[64] = "";
+static char s_pref_sub_label[64]   = "";
+static bool s_pref_sub_have        = false;   // user has chosen a sub state
+static bool s_pref_sub_off         = false;   // and that choice was "Off"
+
+void track_pref_note_audio(const JFStream *s) {
+    if (!s) return;
+    snprintf(s_pref_audio_label, sizeof(s_pref_audio_label), "%s", s->label);
+}
+
+void track_pref_note_sub(const JFStream *s) {
+    s_pref_sub_have = true;
+    s_pref_sub_off  = (s == NULL);
+    if (s) snprintf(s_pref_sub_label, sizeof(s_pref_sub_label), "%s", s->label);
+    else   s_pref_sub_label[0] = '\0';
+}
+
+int track_pref_find_audio(const JFTracks *tracks) {
+    if (!s_pref_audio_label[0]) return -1;
+    for (int i = 0; i < tracks->n_audio; i++)
+        if (strcmp(tracks->audio[i].label, s_pref_audio_label) == 0)
+            return i;
+    return -1;
+}
+
+int track_pref_find_sub(const JFTracks *tracks) {
+    if (!s_pref_sub_have || s_pref_sub_off || !s_pref_sub_label[0]) return -1;
+    for (int i = 0; i < tracks->n_subs; i++)
+        if (strcmp(tracks->subs[i].label, s_pref_sub_label) == 0 &&
+            jf_sub_is_text(tracks->subs[i].codec))
+            return i;
+    return -1;
+}
 
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
     if (act == HUD_ACTION_AUDIO_TRACK) {
@@ -41,6 +78,7 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
         if (ps->menu_kind == PLAYER_MENU_AUDIO &&
             sel >= 0 && sel < ps->tracks.n_audio && sel != ps->cur_audio) {
             ps->cur_audio = sel;
+            track_pref_note_audio(&ps->tracks.audio[ps->cur_audio]);
             act = HUD_ACTION_SEEK;     // 0-delta reopen applies the track
             char buf[96];
             snprintf(buf, sizeof(buf), "hud: audio -> [%d] %s",
@@ -55,6 +93,57 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
                    sel - 1 != ps->cur_sub) {
             ps->cur_sub = sel - 1;     // entry 0 = "Off" -> -1
             hud_set_cc_active(ps->cur_sub >= 0);
+
+            // A TEXT or PGS track is fetched and drawn here, so it needs no
+            // reopen at all -- the video stream is untouched and carries on.
+            // Only a track this app cannot decode itself (VOBSUB, or a
+            // fetch failure) changes the URL to ask for burn-in, and only
+            // that case is worth interrupting playback for.
+            ps->sub_is_text = false;
+            ps->sub_is_pgs  = false;
+            if (ps->cur_sub >= 0) {
+                const JFStream *st = &ps->tracks.subs[ps->cur_sub];
+                ps->sub_is_text = jf_sub_is_text(st->codec);
+                if (ps->sub_is_text) {
+                    const char *msid = ps->source.id;
+                    if (subs_load(ps->item->id, msid, st->index) > 0) {
+                        ps->menu_kind = PLAYER_MENU_NONE;
+                        track_pref_note_sub(st);
+                        char b[112];
+                        snprintf(b, sizeof(b),
+                                 "subs: drawing [%d] %.40s on-device, no reopen",
+                                 st->index, st->label);
+                        plog(b);
+                        return act;            // nothing to re-negotiate
+                    }
+                    // Could not fetch it: fall through to the burn-in path
+                    // rather than silently showing nothing.
+                    plog("subs: on-device load failed, asking the server to burn in");
+                    ps->sub_is_text = false;
+                } else if (jf_sub_is_pgs(st->codec)) {
+                    const char *msid = ps->source.id;
+                    if (subs_load_pgs(ps->item->id, msid, st->index) > 0) {
+                        ps->sub_is_pgs = true;
+                        ps->menu_kind  = PLAYER_MENU_NONE;
+                        // Not remembered via track_pref_note_sub(): that
+                        // preference match requires jf_sub_is_text() (see
+                        // player_internal.h), so a PGS pick is deliberately
+                        // never auto-applied to the next title -- it would
+                        // have to fetch a whole .sup speculatively to find
+                        // out whether the match was even right.
+                        char b[112];
+                        snprintf(b, sizeof(b),
+                                 "subs: drawing pgs [%d] %.40s on-device, no reopen",
+                                 st->index, st->label);
+                        plog(b);
+                        return act;
+                    }
+                    plog("subs: pgs load failed, asking the server to burn in");
+                }
+            } else {
+                subs_clear();
+                track_pref_note_sub(NULL);
+            }
             act = HUD_ACTION_SEEK;     // 0-delta reopen applies the sub
             char buf[96];
             if (ps->cur_sub >= 0)

@@ -37,6 +37,7 @@ static bool  s_tables_ok = false;
 
 // ---- smoothing state (UI thread only) ----
 static float s_smooth[MUSIC_VIZ_BANDS];
+static float s_raw_abs[MUSIC_VIZ_BANDS];   // pre-normalisation, see music_viz_raw
 static u64   s_last_count = 0;
 
 static void viz_build_tables(void) {
@@ -75,6 +76,10 @@ static void viz_build_tables(void) {
     s_tables_ok = true;
 }
 
+void music_viz_raw(float *out) {
+    for (int i = 0; i < MUSIC_VIZ_BANDS; i++) out[i] = s_raw_abs[i];
+}
+
 void music_viz_reset(void) {
     viz_build_tables();
     if (!s_mtx_ok) {
@@ -89,6 +94,7 @@ void music_viz_reset(void) {
     s_tap_count = 0;
     sysMutexUnlock(s_mtx);
     memset(s_smooth, 0, sizeof(s_smooth));
+    memset(s_raw_abs, 0, sizeof(s_raw_abs));
     s_last_count = 0;
 }
 
@@ -163,6 +169,10 @@ void music_viz_bands(float *out) {
             }
             if (raw[i] > mx) mx = raw[i];
         }
+        // Keep the absolute levels for music_viz_raw() -- gated by the same
+        // silence floor so noise never reaches it either.
+        for (int i = 0; i < MUSIC_VIZ_BANDS; i++)
+            s_raw_abs[i] = mx < 0.25f ? 0.0f : raw[i];
         // Normalize to the frame max (MediaWave's full-scale dance), with an
         // absolute floor so digital silence doesn't amplify noise into bars.
         if (mx < 0.25f) {
@@ -175,6 +185,7 @@ void music_viz_bands(float *out) {
         }
     } else {
         memset(raw, 0, sizeof(raw));
+        for (int i = 0; i < MUSIC_VIZ_BANDS; i++) s_raw_abs[i] *= 0.9f;
     }
 
     for (int i = 0; i < MUSIC_VIZ_BANDS; i++) {

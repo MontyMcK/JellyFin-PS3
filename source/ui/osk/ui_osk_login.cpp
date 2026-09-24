@@ -15,6 +15,28 @@
 #include "ui_visuals.h"
 #include "ui_wave.h"
 #include "timing.h"
+#include "ui_tab_anim.h"
+
+// Fraction of key [kx,ky,kw,kh] under the highlight [hx,hy,hw,hh], 0..1.
+static float osk_login_cover(int kx, int ky, int kw, int kh,
+                             int hx, int hy, int hw, int hh) {
+    int x0 = kx > hx ? kx : hx, y0 = ky > hy ? ky : hy;
+    int x1 = (kx + kw) < (hx + hw) ? (kx + kw) : (hx + hw);
+    int y1 = (ky + kh) < (hy + hh) ? (ky + kh) : (hy + hh);
+    if (x1 <= x0 || y1 <= y0 || kw <= 0 || kh <= 0) return 0.0f;
+    return (float)((x1 - x0) * (y1 - y0)) / (float)(kw * kh);
+}
+
+static u32 osk_login_mix(u32 a, u32 b, float t) {
+    if (t <= 0.0f) return a;
+    if (t >= 1.0f) return b;
+    u32 out = 0;
+    for (int sh = 0; sh <= 16; sh += 8) {
+        const float ca = (float)((a >> sh) & 0xFF), cb = (float)((b >> sh) & 0xFF);
+        out |= (u32)(ca + (cb - ca) * t + 0.5f) << sh;
+    }
+    return out;
+}
 
 namespace {
 
@@ -94,7 +116,7 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
     int total_w = 10 * OSK_STEP_X - OSK_GAP;
     int barx    = (W - total_w) / 2;
     int y0      = XMB_CONTENT_Y + UIS_H(80);
-    const int field_h = 40;
+    const int field_h = UIS_H(40);
 
     waitflip();
     clearScreen(XMB_BG);
@@ -104,12 +126,14 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
     xmb_draw_divider();
 
     // Input field: dark well with an accent underline.
-    drawRect((u32)barx, (u32)(XMB_CONTENT_Y + 8), (u32)total_w, field_h,
-             0x00131830UL);
-    drawRect((u32)barx, (u32)(XMB_CONTENT_Y + 8 + field_h - 2), (u32)total_w,
-             2, XMB_ACCENT);
+    drawRect((u32)barx, (u32)(XMB_CONTENT_Y + UIS_H(8)), (u32)total_w, field_h,
+             XMB_TRACK);
+    drawRect((u32)barx, (u32)(XMB_CONTENT_Y + UIS_H(8) + field_h - UIS_H(2)), (u32)total_w,
+             UIS_H(2), XMB_ACCENT);
 
-    // Key cells (CPU rects).
+    // Key cells (CPU rects), then one highlight block that glides to the
+    // selected key (focus_glide) instead of the key just changing colour.
+    int hx = 0, hy = 0, hw = 0, hh = 0;
     for (int r = 0; r < nrows; r++) {
         int rw = orow_units(&rows[r]) * OSK_STEP_X - OSK_GAP;
         int cx = (W - rw) / 2;
@@ -117,23 +141,27 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
         for (int c = 0; c < rows[r].n; c++) {
             const OKey *k = &rows[r].keys[c];
             int kw  = k->cols * OSK_STEP_X - OSK_GAP;
-            u32 col = (r == sr && c == sc) ? XMB_KEY_SEL : XMB_KEY_NORMAL;
-            if (k->kind == OK_SHIFT && caps && !(r == sr && c == sc))
-                col = XMB_ACCENT_DEEP;
+            u32 col = (k->kind == OK_SHIFT && caps) ? XMB_ACCENT_DEEP : XMB_KEY_NORMAL;
             drawRect((u32)cx, (u32)ry, (u32)kw, OSK_KEY_H, col);
+            if (r == sr && c == sc) { hx = cx; hy = ry; hw = kw; hh = OSK_KEY_H; }
             cx += k->cols * OSK_STEP_X;
         }
     }
+    if (hw > 0) {
+        // Snaps when the layout (row count) changes.
+        focus_glide(0x7EED0000 | nrows, &hx, &hy, &hw, &hh);
+        drawRect((u32)hx, (u32)hy, (u32)hw, (u32)hh, XMB_KEY_SEL);
+    }
 
     // Brand + prompt.
-    drawTTF(XMB_ITEM_PAD, 20, "Jellyfin", 22, XMB_TEXT, true);
-    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", 22, true) + 8, 27, "PS3",
-            13, XMB_ACCENT, true);
+    drawTTF(XMB_ITEM_PAD, UIS_H(20), "Jellyfin", UIS_TF(22), XMB_TEXT, true);
+    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", UIS_TF(22), true) + UIS_W(8), UIS_H(27), "PS3",
+            UIS_TF(13), XMB_ACCENT, true);
     {
-        int pw = ttf_text_width(prompt, 18);
+        int pw = ttf_text_width(prompt, UIS_TF(18));
         int px = W / 2 - pw / 2;
         if (px < (int)XMB_ITEM_PAD) px = (int)XMB_ITEM_PAD;
-        drawTTF((u32)px, (u32)(XMB_DIVIDER_Y - 34), prompt, 18, XMB_TEXT_DIM);
+        drawTTF((u32)px, (u32)(XMB_DIVIDER_Y - UIS_H(34)), prompt, UIS_TF(18), XMB_TEXT_DIM);
     }
 
     // Current text (masked for passwords) with a blinking cursor.
@@ -151,11 +179,11 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
         bool cur = ((timing_get_us() / 500000) & 1) == 0;
         char disp[96];
         snprintf(disp, sizeof(disp), "%s%s", shown, cur ? "_" : " ");
-        const float typed_px = 22.0f;
+        const float typed_px = UIS_TF(22.0f);
         int tw = ttf_text_width(disp, typed_px);
         int tx = W / 2 - tw / 2;
         if (tx < barx + 14) tx = barx + 14;
-        drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + 8 + (field_h - (int)typed_px) / 2),
+        drawTTF((u32)tx, (u32)(XMB_CONTENT_Y + UIS_H(8) + (field_h - (int)typed_px) / 2),
                 disp, typed_px, XMB_TEXT);
     }
 
@@ -167,16 +195,20 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
         for (int c = 0; c < rows[r].n; c++) {
             const OKey *k = &rows[r].keys[c];
             int  kw = k->cols * OSK_STEP_X - OSK_GAP;
-            bool sel = (r == sr && c == sc);
             int  ry  = y0 + r * OSK_STEP_Y;
-            u32  clr = sel ? XMB_KEY_LABEL_SEL : XMB_TEXT;
+            // Darkened by how much of this key the gliding highlight covers,
+            // so a label never goes dark before the block reaches it.
+            u32  clr = osk_login_mix(XMB_TEXT, XMB_KEY_LABEL_SEL,
+                                     hw > 0 ? osk_login_cover(cx, ry, kw, OSK_KEY_H,
+                                                              hx, hy, hw, hh)
+                                            : 0.0f);
             if (k->kind == OK_BACK) {
-                drawIcon((u32)(cx + (kw - 22) / 2),
-                         (u32)(ry + (OSK_KEY_H - 22) / 2), ICON_BACKSPACE, 22.0f, clr);
+                drawIcon((u32)(cx + (kw - UIS_W(22)) / 2),
+                         (u32)(ry + (OSK_KEY_H - UIS_H(22)) / 2), ICON_BACKSPACE, UIS_TF(22.0f), clr);
             } else {
                 char chbuf[2] = { k->ch, '\0' };
                 const char *lbl = (k->kind == OK_CHAR) ? chbuf : k->label;
-                float lbl_px = (k->kind == OK_CHAR) ? osk_lbl_px() : 18.0f;
+                float lbl_px = (k->kind == OK_CHAR) ? osk_lbl_px() : UIS_TF(18.0f);
                 int lw = ttf_text_width(lbl, lbl_px);
                 int lx = cx + (kw - lw) / 2;
                 int ly = ry + (OSK_KEY_H - (int)lbl_px) / 2;

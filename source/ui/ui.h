@@ -45,7 +45,11 @@ extern ButtonState btn_prev;
 
 // Auto-repeat for held navigation (menus).  True on the initial press, then again
 // at a steady rate while the button stays held — for scrolling lists/grids.
-enum { NAV_up, NAV_down, NAV_left, NAV_right, NAV_REPEAT_SLOTS };
+// square is in here because the search screen uses it as backspace, and a
+// backspace you cannot hold down is barely a backspace -- fixing a typo four
+// letters back would be four separate presses.  The slots array is sized by
+// NAV_REPEAT_SLOTS, so adding one is all that is needed.
+enum { NAV_up, NAV_down, NAV_left, NAV_right, NAV_square, NAV_REPEAT_SLOTS };
 #define NAV_DELAY_US   350000ULL   // hold this long before repeat kicks in
 #define NAV_REPEAT_US  140000ULL   // then ~7 steps/sec (raise to slow it down)
 bool btn_nav_repeat(bool held, int slot);
@@ -90,6 +94,21 @@ void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color);
 // framebuffer per pixel, which is slow on RSX local memory — keep the area
 // small (hairlines, thin frames); never large fills.
 void drawRectBlend(u32 x, u32 y, u32 w, u32 h, u32 color, u8 alpha);
+// Opaque blit of a sub-rectangle [sx,sy,sw,sh) from a src bitmap (src_stride
+// pixels per row, 0x00RRGGBB, no alpha) to (dx,dy) on the current CPU draw
+// target. Same target/scissor rules as drawRect -- honours cpu_rt_begin, so
+// it draws into the HUD's offscreen overlay texture when that is bound, or
+// the framebuffer otherwise. No source scaling: callers crop, they don't resize.
+void drawBitmapRect(const u32 *src, u32 src_stride,
+                    u32 sx, u32 sy, u32 sw, u32 sh, u32 dx, u32 dy);
+// Same crop as drawBitmapRect, but each SOURCE pixel's own alpha byte
+// (0xAARRGGBB) drives per-pixel coverage against the destination instead of
+// a flat overwrite -- for real (non-uniform) transparency, e.g. a PGS
+// subtitle bitmap's anti-aliased glyph edges. Src pixels with alpha 0 are
+// skipped entirely (cheap early-out for the fully-transparent background
+// most subtitle bitmaps are mostly made of).
+void drawBitmapRectAlpha(const u32 *src, u32 src_stride,
+                         u32 sx, u32 sy, u32 sw, u32 sh, u32 dx, u32 dy);
 void cpuClearFb(u32 color);   // clear entire framebuffer
 
 // Vertical scissor for the CPU draw primitives (drawRect/drawRectBlend,

@@ -148,18 +148,31 @@ If playback stutters, drop to **Very High** before anything else.
 
 ---
 
-## Surround 5.1 (Alpha)
+## Surround sound
 
-Movies can play with **5.1 surround sound**: the app decodes the audio on the
-PS3 and plays it as 6-channel LPCM through an 8-channel audio port. It is
-**off by default** — **Settings → Surround 5.1 (Alpha)** cycles through three
-states:
+Movies can play in **surround**: the app decodes the audio on the PS3 and
+sends it out as multichannel LPCM. It is **off by default** — **Settings →
+Audio Output** cycles through:
 
-| Setting | What it asks the server for |
+| Setting | What it does |
 |---|---|
-| **Off**   | Stereo MP3 — the shipped path, untouched. |
-| **AC-3**  | Transcode the audio to AC-3 (Dolby Digital) 5.1 at 640 kbps. Works with any source. |
-| **HD**    | Send the source's own HD audio track untouched (no audio transcode) and decode it on the PS3. **TrueHD / Dolby Atmos** plays **losslessly** in 5.1 or 7.1. **DTS-HD MA** also plays **losslessly** — its XLL extension is decoded, verified bit-exact against ffmpeg on both x86 and the PPU's own big-endian PowerPC. **DTS, DTS-HD HRA, DTS-ES and DTS:X** play from their 5.1 core at up to 1509 kbps (no free decoder exists for those extensions). Anything else — including Dolby Digital Plus — falls back to the AC-3 request, so HD never plays worse than AC-3. |
+| **Stereo** | Stereo MP3 — the shipped path, untouched. The default. |
+| **5.1** | Sends the source's own HD audio track untouched (no audio transcode) and decodes it here. **TrueHD / Dolby Atmos** plays **losslessly**. **DTS-HD MA** also plays **losslessly** — its XLL extension is decoded, verified bit-exact against ffmpeg on x86 *and* on the PPU's own big-endian PowerPC. **DTS, DTS-HD HRA, DTS-ES and DTS:X** play from their 5.1 core at up to 1509 kbps. Anything else, including Dolby Digital Plus, falls back to an AC-3 5.1 transcode — so this never plays worse than asking for AC-3 directly, which is why there is no separate AC-3 option. |
+| **7.1** | The same, at eight channels. **Only offered when your receiver reports that it accepts 8-channel LPCM** — the app asks the connected display rather than guessing, so most soundbars correctly see only Stereo and 5.1. |
+
+**No dialogue, or a silent centre speaker?** On 5.1 the app also corrects a
+fault that silences dialogue on some receivers. The PS3's audio port is 8
+channels wide and its HDMI output is 6, so the console folds 8→6 on the way
+out — and that fold can lose the centre channel, which is where nearly all the
+dialogue in a film mix lives. This is not a setting; there is nothing for a
+listener to decide, and it is on whenever 5.1 is. **Nothing is compressed to
+achieve it** — the audio on the wire stays uncompressed LPCM, verified by
+reading the output's actual state rather than the value that was requested.
+
+**Dialogue still too quiet?** **Settings → Dialogue Boost** (Off / +3 / +6 /
++10 dB). None of these decoders applies dynamic range compression, so a film
+mix's full cinema range can leave dialogue well below effects on a compact
+system. It is a level control, not a routing one.
 
 For actual surround output you must also tell the PS3 your setup can take it:
 
@@ -171,13 +184,17 @@ For actual surround output you must also tell the PS3 your setup can take it:
 
 Notes and limitations:
 
-- In AC-3 mode the audio stream is AC-3 at 640 kbps. If the server refuses AC-3
-  (old ffmpeg, transcode settings), playback falls back to the shipped stereo
-  MP3 path.
+- If the server cannot produce the fallback AC-3 5.1 transcode (old ffmpeg, or
+  transcoding disabled), playback falls back to the shipped stereo MP3 path.
 - Stereo-only sources still play in stereo (front speakers), as they should.
-- There is **no bitstream passthrough** on this platform — nothing in PSL1GHT
-  can hand a receiver an encoded stream — so everything is decoded on the PS3
-  and sent out as LPCM. That sets what each format can be:
+- There is **no bitstream passthrough** for homebrew on this platform, and that
+  is now measured rather than assumed. PSL1GHT never bound `cellAudioOut`, so
+  the request could not even be expressed; this app binds it directly and asks.
+  The console reports **0 channels available** for TrueHD, DTS-HD MA and DD+,
+  and when asked for AC-3 it accepts the request while leaving plain LPCM on
+  the wire. Real passthrough appears to be tied to the Blu-ray player's
+  privileged path. So everything is decoded on the PS3 and sent out as LPCM,
+  and that sets what each format can be:
   - **TrueHD / Dolby Atmos: lossless.** The full 5.1 or 7.1 bed plays, bit for
     bit. Atmos *objects* are not rendered (no free renderer exists, and the
     app cannot know your speaker layout), so an Atmos track plays as its bed.
@@ -193,8 +210,9 @@ Notes and limitations:
 - HD mode streams the original audio track over your network instead of a
   640 kbps transcode — a TrueHD or DTS-HD MA track can be several Mbps on top
   of the video. That is fine on a LAN and a bad idea over the internet.
-- 7.1 output needs **Linear PCM 7.1 Ch.** ticked in the PS3's Sound Settings,
-  the same way 5.1 does.
+- 7.1 needs **Linear PCM 7.1 Ch.** ticked in the PS3's Sound Settings, the same
+  way 5.1 does — and the app only offers 7.1 at all when the connected chain
+  reports it will take eight channels.
 - Music playback is stereo by design and ignores this switch.
 - The **Player Stats Overlay** shows the negotiated result while playing:
   `truehd 8/8` is a lossless 7.1 bed, `truehd 6/8` a lossless 5.1 one,
@@ -218,7 +236,7 @@ Notes and limitations:
 
 **[⬇ JellyFin-PS3.pkg — latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)**
 
-Direct link to the current build: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/download/v1.0/JellyFin-PS3.pkg).  
+Direct link to the current build: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest/download/JellyFin-PS3.pkg).  
 The same file is mirrored in [`release/`](release/) in the repo.
 
 Then either:

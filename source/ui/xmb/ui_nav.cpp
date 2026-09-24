@@ -15,7 +15,10 @@
 #include "hd1080.h"
 #include "surround.h"
 #include "centermix.h"
+#include "subfont.h"
+#include "subcolor.h"
 #include "statsovl.h"
+#include "ui_tab_anim.h"
 
 // -------------------------------------------------------
 // Tab switching
@@ -35,6 +38,8 @@ void xmb_switch_tab(int new_tab) {
     }
     g_jumpbar_active = false;
     thumb_cache_retarget();
+    // Turn the tab wheel from wherever it is drawn right now (maybe mid-turn).
+    if (new_tab != old) xmb_tab_anim_begin(old, new_tab);
     g_active_tab = new_tab;
     g_sel = 0;
     g_scroll_top = 0;
@@ -169,8 +174,14 @@ static bool xmb_input_settings(void) {
             surround_cycle();    // Stereo -> 5.1 -> [7.1 where offered]
         if (g_settings_sel == 5)                                        // Dialogue Boost
             centermix_cycle();   // Off -> +3 -> +6 -> +10
+        if (g_settings_sel == 6)                                        // Subtitle Font
+            subfont_cycle();     // Open Sans -> Noto Sans -> Roboto Cond.
+        if (g_settings_sel == 7)                                        // Subtitle Colour
+            subcolor_cycle();    // White -> Soft Yellow -> Soft Grey
+        if (g_settings_sel == 8)                                        // Theme
+            theme_cycle();       // XMB wave -> Golden Age -> any USRDIR/tmp .ini
 #if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 6)                                        // Player Stats Overlay
+        if (g_settings_sel == 9)                                        // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());
 #endif
     }

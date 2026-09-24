@@ -65,6 +65,10 @@ int  xmb_slide_col_sub_backward(void);
 // -------------------------------------------------------
 bool xmb_handle_input_browse(void);
 bool xmb_handle_input_search(void);
+// Join the search worker.  Call before leaving the XMB.
+// (xmb_search_in_flight() lives in ui_visuals.h, beside the search state, so
+// the results-list drawing can see it too.)
+void xmb_search_shutdown(void);
 bool xmb_handle_input_home(void);
 
 // Launch the player for one list item (xmb/ui_nav.cpp).  resume_secs > 0
@@ -100,5 +104,6 @@ int xmb_resume_choice(const XMBItem *it);
 // (Continue Watching, Next Up, Recently Added Movies/Shows, Music stub).
 // -------------------------------------------------------
 void xmb_home_on_enter(void);     // reset focus + mark dynamic rows for refetch
+void xmb_home_gpu_phase(void);    // card images as RSX quads (BEFORE rsxSync)
 void xmb_home_cpu_phase(void);    // card images / placeholders / selection (after rsxSync)
 void xmb_home_text_phase(void);   // row titles, labels, chevrons
