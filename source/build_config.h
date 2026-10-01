@@ -68,3 +68,17 @@
 // =========================================================================
 
 #define SHOW_PLAYLISTS_TAB 0
+
+// =========================================================================
+//  CRT DISPLAY MODE
+// =========================================================================
+//  0 = tuned for flat-panel / LCD (gamma-2.0 AA, Open Sans Regular for body)
+//  1 = tuned for CRT / interlaced displays (gamma-2.2 AA, bold weight for
+//      text at or below the minimum size).  Thicker strokes cut interlace
+//      flicker; the slightly higher gamma matches CRT phosphor response.
+//
+//  This is a COMPILE-TIME switch.  If someone ships both builds they should
+//  version the PKG filename so users know which to grab.
+// =========================================================================
+
+#define CRT_DISPLAY 1
