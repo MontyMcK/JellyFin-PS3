@@ -111,6 +111,7 @@ void xmb_play_item(const XMBItem *it, u32 resume_secs,
     strncpy(jf.name, it->name, sizeof(jf.name)-1);
     strncpy(jf.type, it->type, sizeof(jf.type)-1);
     show_player(&jf, resume_secs, media_source_id);
+    xmb_resume_note(it->id, player_last_position_secs(), player_last_total_secs());
 }
 
 // Play items[idx] and keep advancing through the list while the user
@@ -744,7 +745,7 @@ bool xmb_handle_input_browse(void) {
         } else {
             // The Continue Watching row still launches straight at the saved
             // position.
-            int resume = (int)it->resume_secs;
+            int resume = (int)xmb_resume_for(it->id, it->resume_secs);
             if (resume >= 0) {
                 if (strcmp(it->type, "Episode") == 0)
                     xmb_play_episode_with_next(it, (u32)resume);

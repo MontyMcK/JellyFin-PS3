@@ -12,6 +12,7 @@
 #include "video_shaders.h"
 #include "player_rsx.h"
 #include "video.h"      // vid_frame_bytes()
+#include "../core/player_picture.h"   // picture_get(): the width/height the user set
 
 // -------------------------------------------------------
 // Video GPU blit state (allocated per playback session)
@@ -49,6 +50,7 @@ volatile bool s_vid_b_present   = false;
 // vid_gpu_draw compares against this and rebuilds, otherwise the frame is
 // stretched onto the stale full-screen quad.
 static u32 s_vid_quad_fw = 0, s_vid_quad_fh = 0;
+static PicSize s_vid_quad_pic = { PIC_DEFAULT, PIC_DEFAULT };   // and the picture size it carries
 
 // -------------------------------------------------------
 // vid_gpu_build_quad — aspect-correct letterbox fit of a fw×fh frame
@@ -81,6 +83,14 @@ static void vid_gpu_build_quad(u32 fw, u32 fh) {
     float cx1 = (float)(ox0v + sw) / display_width  * 2.0f - 1.0f;
     float cy0 = 1.0f - (float)oy0v / display_height * 2.0f;
     float cy1 = 1.0f - (float)(oy0v + sh) / display_height * 2.0f;
+
+    // The user's picture size (L1 in the player): the fitted picture scaled about
+    // the screen centre, each axis on its own.
+    const PicSize pic = picture_get();
+    const float kx = (float)pic.w / 100.0f, ky = (float)pic.h / 100.0f;
+    cx0 *= kx; cx1 *= kx;
+    cy0 *= ky; cy1 *= ky;
+    s_vid_quad_pic = pic;
 
     float *v = (float*)s_vid_vbuf;
     v[0]=cx0; v[1]=cy0; v[2]=0.f; v[3]=1.f; v[4]=0.f; v[5]=0.f;      // TL
@@ -183,7 +193,9 @@ void vid_gpu_draw(bool render_blend, float blend_factor, u32 fw, u32 fh) {
     // The decoder corrects the jbuf dimensions on the first decoded frame
     // (and that happens during pre-fill, before the first draw reads the
     // quad) — refit the letterbox instead of stretching into the old one.
-    if (fw != s_vid_quad_fw || fh != s_vid_quad_fh)
+    const PicSize pic = picture_get();
+    if (fw != s_vid_quad_fw || fh != s_vid_quad_fh ||
+        pic.w != s_vid_quad_pic.w || pic.h != s_vid_quad_pic.h)
         vid_gpu_build_quad(fw, fh);
     rsx_draw_frame(render_blend, blend_factor, fw, fh);
 }

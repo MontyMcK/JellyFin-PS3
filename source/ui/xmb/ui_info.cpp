@@ -441,7 +441,7 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
 
             thumb_cache_retarget();     // cast headshots come from the card cache
 
-            const bool has_resume = it->resume_secs >= 10;
+            const bool has_resume = xmb_resume_for(it->id, it->resume_secs) >= 10;
             n0 = 0;
             if (has_resume) { row0[n0++] = F3_RESUME; row0[n0++] = F3_START; }
             else            { row0[n0++] = F3_PLAY; }
@@ -536,7 +536,7 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
             if (BTN_PRESSED(up)   && frow == 1)           { frow = 0; if (fcol >= n0) fcol = n0 - 1; }
             if (frow != 2 && BTN_PRESSED(cross)) {
                 if (focus == F3_RESUME || focus == F3_PLAY || focus == F3_START) {
-                    const u32 at = focus == F3_RESUME ? it->resume_secs : 0;
+                    const u32 at = focus == F3_RESUME ? xmb_resume_for(it->id, it->resume_secs) : 0;
                     const char *source_id = versions.n_sources > 0
                         ? versions.source[version_sel].id : NULL;
                     if (strcmp(it->type, "Episode") == 0)
@@ -905,7 +905,7 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
             const int id = row0[i];
             char lab[40];
             if (id == F3_RESUME) {
-                const u32 s = it->resume_secs;
+                const u32 s = xmb_resume_for(it->id, it->resume_secs);
                 snprintf(lab, sizeof lab, TR("Resume %u:%02u:%02u"),
                          s / 3600u, (s / 60u) % 60u, s % 60u);
             } else if (id == F3_PLAY)    snprintf(lab, sizeof lab, TR("Play"));
@@ -1726,11 +1726,11 @@ void xmb_show_item_info(const XMBItem *root) {
 // Items with no meaningful resume point (< 10 s watched) skip the prompt and
 // return 0 (start from the beginning) so a fresh item plays immediately.
 int xmb_resume_choice(const XMBItem *it) {
-    if (!it || it->resume_secs < 10) return 0;
+    if (!it || xmb_resume_for(it->id, it->resume_secs) < 10) return 0;
 
     // Format the saved position as H:MM:SS / M:SS.
     char tstr[16];
-    u32 s = it->resume_secs;
+    u32 s = xmb_resume_for(it->id, it->resume_secs);
     if (s >= 3600) snprintf(tstr, sizeof(tstr), "%u:%02u:%02u",
                             s / 3600, (s % 3600) / 60, s % 60);
     else           snprintf(tstr, sizeof(tstr), "%u:%02u", s / 60, s % 60);
@@ -1758,7 +1758,7 @@ int xmb_resume_choice(const XMBItem *it) {
             if (BTN_PRESSED(up))     sel = 0;
             if (BTN_PRESSED(down))   sel = 1;
             if (BTN_PRESSED(cross)) {
-                int r = (sel == 0) ? (int)it->resume_secs : 0;
+                int r = (sel == 0) ? (int)xmb_resume_for(it->id, it->resume_secs) : 0;
                 init_btns();
                 return r;
             }

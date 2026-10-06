@@ -4,6 +4,7 @@
 // between the xmb/ source files.
 
 #include "ui.h"
+#include "xmb/ui_resume.h"  // xmb_resume_for()
 #include "ui_visuals.h"
 #include "livetv.h"       // JFChannel: the Live TV tab
 

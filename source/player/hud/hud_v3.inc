@@ -94,6 +94,31 @@ static void v3_rrect(int x, int y, int w, int h, int r, int t,
     ovl_span(y, y + h);
 }
 
+// The banner: what a channel change lands on, or the picture-size readout,
+// top left.
+static void v3_draw_banner(void) {
+    const u32 WHITE = 0x00FFFFFF;
+    if (g_hud.banner[0] && timing_get_us() < g_hud.banner_until_us) {
+        const float p1 = UIS_TF(26.0f), p2 = UIS_TF(14.0f);
+        char l1[96], l2[96];
+        snprintf(l1, sizeof l1, "%s", g_hud.banner);
+        snprintf(l2, sizeof l2, "%s", g_hud.banner_sub);
+        const int maxw = v3x(900) - v3x(57);
+        int n1 = (int)strlen(l1), n2 = (int)strlen(l2);
+        while (n1 > 1 && ttf_text_width(l1, p1, true) > maxw) l1[--n1] = 0;
+        while (n2 > 1 && ttf_text_width(l2, p2) > maxw) l2[--n2] = 0;
+        int w1 = ttf_text_width(l1, p1, true), w2 = l2[0] ? ttf_text_width(l2, p2) : 0;
+        const int bw3 = (w1 > w2 ? w1 : w2) + UIS_W(40);
+        const int bh3 = UIS_H(l2[0] ? 84 : 56);
+        const int bx3 = v3x(57), by3 = v3y(48);
+        v3_rrect(bx3, by3, bw3, bh3, UIS_H(12), 1, 0x000A0C18, 205, WHITE, 40);
+        drawTTF((u32)(bx3 + UIS_W(20)), (u32)(by3 + UIS_H(12)), l1, p1, WHITE, true);
+        if (l2[0])
+            drawTTF((u32)(bx3 + UIS_W(20)), (u32)(by3 + UIS_H(50)), l2, p2, 0x00C2C2C2);
+        ovl_span(by3, by3 + bh3);
+    }
+}
+
 static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
     const int W = (int)s_ovl_w;
     const u32 WHITE = 0x00FFFFFF;
@@ -354,26 +379,7 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
         ovl_span(v3y(660), (int)s_ovl_h);
     }
 
-    // The channel banner: what a channel change lands on, top left.
-    if (g_hud.banner[0] && timing_get_us() < g_hud.banner_until_us) {
-        const float p1 = UIS_TF(26.0f), p2 = UIS_TF(14.0f);
-        char l1[96], l2[96];
-        snprintf(l1, sizeof l1, "%s", g_hud.banner);
-        snprintf(l2, sizeof l2, "%s", g_hud.banner_sub);
-        const int maxw = v3x(900) - v3x(57);
-        int n1 = (int)strlen(l1), n2 = (int)strlen(l2);
-        while (n1 > 1 && ttf_text_width(l1, p1, true) > maxw) l1[--n1] = 0;
-        while (n2 > 1 && ttf_text_width(l2, p2) > maxw) l2[--n2] = 0;
-        int w1 = ttf_text_width(l1, p1, true), w2 = l2[0] ? ttf_text_width(l2, p2) : 0;
-        const int bw3 = (w1 > w2 ? w1 : w2) + UIS_W(40);
-        const int bh3 = UIS_H(l2[0] ? 84 : 56);
-        const int bx3 = v3x(57), by3 = v3y(48);
-        v3_rrect(bx3, by3, bw3, bh3, UIS_H(12), 1, 0x000A0C18, 205, WHITE, 40);
-        drawTTF((u32)(bx3 + UIS_W(20)), (u32)(by3 + UIS_H(12)), l1, p1, WHITE, true);
-        if (l2[0])
-            drawTTF((u32)(bx3 + UIS_W(20)), (u32)(by3 + UIS_H(50)), l2, p2, 0x00C2C2C2);
-        ovl_span(by3, by3 + bh3);
-    }
+    v3_draw_banner();
 
     // The track menu, lifted above the chips instead of sitting on the strip.
     if (g_hud.menu_visible && g_hud.menu_n > 0)

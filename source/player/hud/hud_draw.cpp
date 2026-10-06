@@ -53,7 +53,7 @@ struct OvlKey {
     s32  vol_pct;
     s32  live_permille;
     u32  live_epoch;
-    u8   paused, cc, menu_vis, title_on, vol_active, scrubbing, live, banner_on;
+    u8   paused, cc, menu_vis, title_on, vol_active, scrubbing, live, banner_on, solo;
     char audio[64];
 };
 static OvlKey s_ovl_key;
@@ -491,8 +491,9 @@ static void hud_compose(u64 elapsed_us, bool paused, bool scrubbing) {
 
     cpu_rt_begin(s_ovl_stage, s_ovl_w, s_ovl_h);
 
-    if (g_spine_on) hud_body_v3(elapsed_us, paused, scrubbing);
-    else            hud_body_v2(elapsed_us, paused, scrubbing);
+    if (g_hud.banner_solo)  v3_draw_banner();       // the bar itself stays away
+    else if (g_spine_on)    hud_body_v3(elapsed_us, paused, scrubbing);
+    else                    hud_body_v2(elapsed_us, paused, scrubbing);
 
     cpu_rt_end();
 
@@ -526,7 +527,7 @@ static void hud_compose(u64 elapsed_us, bool paused, bool scrubbing) {
 // -------------------------------------------------------
 
 void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
-    if (!g_hud.visible) return;
+    if (!g_hud.visible && !g_hud.banner_solo) return;
     if (!s_ovl_stage || !s_ovl_tex) return;   // alloc failed: no HUD
 
     OvlKey key;
@@ -549,6 +550,7 @@ void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
     key.live         = g_hud.live ? 1 : 0;
     key.live_permille = g_hud.live_permille;
     key.live_epoch   = g_hud.live_epoch;
+    key.solo         = g_hud.banner_solo ? 1 : 0;
     key.banner_on    = (g_hud.banner[0] && timing_get_us() < g_hud.banner_until_us) ? 1 : 0;
     snprintf(key.audio, sizeof(key.audio), "%s", g_hud.audio_label);
 

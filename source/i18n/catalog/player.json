@@ -89,5 +89,9 @@
   "UP NEXT": {"ja": "次に再生", "pt-BR": "A SEGUIR", "de": "ALS NÄCHSTES", "fr": "À SUIVRE", "es": "A CONTINUACIÓN"},
   "Track %d of %d": {"ja": "%d / %d曲目", "pt-BR": "Faixa %d de %d", "de": "Titel %d von %d", "fr": "Piste %d sur %d", "es": "Pista %d de %d"},
   "Visualizer: %s": {"ja": "ビジュアライザー：%s", "pt-BR": "Visualizador: %s", "de": "Visualisierung: %s", "fr": "Visualiseur : %s", "es": "Visualizador: %s"},
-  "Visualizer: Canyon - %s": {"ja": "ビジュアライザー：Canyon - %s", "pt-BR": "Visualizador: Canyon - %s", "de": "Visualisierung: Canyon - %s", "fr": "Visualiseur : Canyon - %s", "es": "Visualizador: Canyon - %s"}
+  "Visualizer: Canyon - %s": {"ja": "ビジュアライザー：Canyon - %s", "pt-BR": "Visualizador: Canyon - %s", "de": "Visualisierung: Canyon - %s", "fr": "Visualiseur : Canyon - %s", "es": "Visualizador: Canyon - %s"},
+  "Picture size": {"ja": "画面サイズ", "pt-BR": "Tamanho da imagem", "de": "Bildgröße", "fr": "Taille de l'image", "es": "Tamaño de imagen"},
+  "Width": {"ja": "幅", "pt-BR": "Largura", "de": "Breite", "fr": "Largeur", "es": "Ancho"},
+  "Height": {"ja": "高さ", "pt-BR": "Altura", "de": "Höhe", "fr": "Hauteur", "es": "Alto"},
+  "D-pad adjust  Triangle reset  O done": {"ja": "十字キー：調整　△：リセット　○：完了", "pt-BR": "Direcional: ajustar  Triângulo: redefinir  O: concluir", "de": "Steuerkreuz: anpassen  Dreieck: zurücksetzen  O: fertig", "fr": "Croix : ajuster  Triangle : réinitialiser  O : terminé", "es": "Cruceta: ajustar  Triángulo: restablecer  O: listo"}
 }

@@ -50,6 +50,7 @@ void hud_init(u32 total_secs, const char *audio_label) {
     g_hud.live_epoch    = 0;
     g_hud.banner[0] = g_hud.banner_sub[0] = '\0';
     g_hud.banner_until_us = 0;
+    g_hud.banner_solo     = false;
     hud_gpu_init();
 }
 
@@ -58,7 +59,7 @@ void hud_shutdown(void) {
     hud_gpu_shutdown();
 }
 
-bool hud_is_visible(void) { return g_hud.visible; }
+bool hud_is_visible(void) { return g_hud.visible || g_hud.banner_solo; }
 int  hud_seek_delta(void) { return g_hud.seek_delta; }
 
 void hud_set_audio_label(const char *label) {
@@ -95,6 +96,28 @@ void hud_set_banner(const char *line1, const char *line2, u64 until_us) {
     g_hud.banner_until_us = until_us;
     g_hud.live_epoch++;
     hud_show();
+}
+
+void hud_hide(void) {
+    g_hud.visible      = false;
+    g_hud.focus        = -1;
+    g_hud.menu_visible = false;
+    g_hud.vol_active   = false;
+}
+
+void hud_set_picture_banner(const char *line1, const char *line2) {
+    snprintf(g_hud.banner,     sizeof g_hud.banner,     "%s", line1 ? line1 : "");
+    snprintf(g_hud.banner_sub, sizeof g_hud.banner_sub, "%s", line2 ? line2 : "");
+    g_hud.banner_until_us = ~0ULL;
+    g_hud.banner_solo     = true;
+    g_hud.live_epoch++;
+}
+
+void hud_clear_picture_banner(void) {
+    g_hud.banner[0] = g_hud.banner_sub[0] = '\0';
+    g_hud.banner_until_us = 0;
+    g_hud.banner_solo     = false;
+    g_hud.live_epoch++;
 }
 
 void hud_open_menu(const char *title, const char *const *items,
@@ -156,20 +179,48 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
             return HUD_ACTION_SEEK;
         }
     }
-    if (BTN_PRESSED(info)) {
+    // The remote's INFO key and a click of either stick toggle the stats
+    // overlay, bar up or not; the overlay is its own layer, so the bar stays
+    // as it is.
+    if (BTN_PRESSED(info) || BTN_PRESSED(l3) || BTN_PRESSED(r3)) {
 #if ENABLE_PLAYER_STATS
         statsovl_set_enabled(!statsovl_enabled());
 #endif
-        hud_show();
         return HUD_ACTION_NONE;
     }
 
-    // Any button activity wakes the HUD.
+    // D-pad left/right with the bar away skip 10 s back / ahead.  The bar
+    // comes up to show where it landed; until the next other button, further
+    // presses keep skipping instead of moving the focus cursor, so a run of
+    // taps is a run of skips.
+    static bool s_skip_reveal = false;
+    if (!g_hud.visible) s_skip_reveal = false;
+    else if (BTN_PRESSED(cross) || BTN_PRESSED(circle) || BTN_PRESSED(square) ||
+             BTN_PRESSED(triangle) || BTN_PRESSED(up) || BTN_PRESSED(down) ||
+             BTN_PRESSED(l1) || BTN_PRESSED(r1) || l2_pressed || r2_pressed)
+        s_skip_reveal = false;
+    if (!g_hud.live && (!g_hud.visible || s_skip_reveal) &&
+        (BTN_PRESSED(left) || BTN_PRESSED(right))) {
+        g_hud.seek_delta = BTN_PRESSED(left) ? -s_incr_vals[0] : s_incr_vals[0];
+        s_skip_reveal = true;
+        hud_show();
+        return HUD_ACTION_SEEK;
+    }
+
+    // Any button press wakes the HUD, and a held one keeps it up.  A hold must
+    // not WAKE it: Square puts the bar away, and the finger is still down on
+    // the next frame, which used to bring it straight back.
     bool was_hidden = !g_hud.visible;
-    if (btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
+    const bool pressed_any =
+        BTN_PRESSED(cross) || BTN_PRESSED(circle) || BTN_PRESSED(square) ||
+        BTN_PRESSED(triangle) || BTN_PRESSED(l1) || BTN_PRESSED(r1) ||
+        BTN_PRESSED(up) || BTN_PRESSED(down) || BTN_PRESSED(left) ||
+        BTN_PRESSED(right) || l2_pressed || r2_pressed;
+    const bool held_any =
+        btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
         btn_cur.l1 || btn_cur.r1 || btn_cur.l2 || btn_cur.r2 ||
-        l2_pressed || r2_pressed ||
-        btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right) {
+        btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right;
+    if (pressed_any || (held_any && !was_hidden)) {
         hud_show();
         // First button while the bar was hidden just reveals it, with the
         // play/pause control focused by default.

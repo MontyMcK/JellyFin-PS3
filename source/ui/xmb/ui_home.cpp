@@ -826,7 +826,7 @@ static void home_activate(void) {
     // Continue Watching resumes; everything else plays from the start.
     // Episodes get the NEXT prompt / auto-advance no matter which row
     // they came from.
-    u32 resume = (s_focus_row == HR_CONTINUE) ? it->resume_secs : 0;
+    u32 resume = (s_focus_row == HR_CONTINUE) ? xmb_resume_for(it->id, it->resume_secs) : 0;
     if (strcmp(it->type, "Episode") == 0)
         xmb_play_episode_with_next(it, resume);
     else

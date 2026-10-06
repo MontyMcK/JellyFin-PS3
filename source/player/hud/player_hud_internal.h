@@ -93,6 +93,7 @@ struct HudState {
     char banner[96];
     char banner_sub[96];
     u64  banner_until_us;
+    bool banner_solo;       // the banner alone, no bar (hud_set_picture_banner)
 
     // Popup menu state.  Items are caller-owned pointers (track labels live
     // in the player's static JFTracks, so they outlive the menu).

@@ -67,6 +67,14 @@ void      hud_set_live_programme(const char *title, const char *times, int permi
 // Shows the HUD.
 void      hud_set_banner(const char *line1, const char *line2, u64 until_us);
 
+// Put the bar away at once (the auto-hide does it after a few seconds).
+void      hud_hide(void);
+
+// The picture-size readout: the banner box alone, with no bar, until
+// hud_clear_picture_banner().  It needs the redesigned HUD (spine gate).
+void      hud_set_picture_banner(const char *line1, const char *line2);
+void      hud_clear_picture_banner(void);
+
 // Open a popup menu above the control bar (e.g. track selection).  The HUD
 // copies the item POINTERS only — the strings must outlive the menu.
 // current marks the active entry (accent dot); it is also the initial cursor.

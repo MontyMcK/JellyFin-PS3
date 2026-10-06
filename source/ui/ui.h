@@ -13,6 +13,7 @@ typedef struct {
     u8 cross, circle, square, triangle;
     u8 start, select;
     u8 l1, r1, l2, r2;
+    u8 l3, r3;              // stick clicks (pad only)
     // Media keys, from the Blu-ray remote and keyboards (see ui_input.cpp).
     // No pad sets these, and they never borrow a pad button: START already
     // means stop in the player.

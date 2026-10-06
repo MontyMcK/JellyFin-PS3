@@ -9,9 +9,9 @@ extern const int i18n_n;
 extern const char *const i18n_keys[];
 extern const char *const *const i18n_text[LANG__COUNT];
 
-const int i18n_n = 458;
+const int i18n_n = 462;
 
-const char *const i18n_keys[458] = {
+const char *const i18n_keys[462] = {
     "  %s  %s free",
     "  (can't be decoded yet)",
     "%.40s video (can't play on PS3)",
@@ -119,6 +119,7 @@ const char *const i18n_keys[458] = {
     "Couldn't update favourites",
     "Cross  Save        Circle  Cancel",
     "D-pad Left / Right to adjust",
+    "D-pad adjust  Triangle reset  O done",
     "Day / Night Palette",
     "Debug Logging",
     "Default",
@@ -164,6 +165,7 @@ const char *const i18n_keys[458] = {
     "Guide",
     "HDD: %s free \302\267 downloads keep %s free",
     "HDD: free space unknown \302\267 downloads are paused",
+    "Height",
     "Hide",
     "High",
     "Home",
@@ -266,6 +268,7 @@ const char *const i18n_keys[458] = {
     "Paused while streaming",
     "Paused: the HDD is down to %s free",
     "Paused: the HDD is down to its free-space reserve",
+    "Picture size",
     "Play",
     "Play from start",
     "Play from the start",
@@ -448,6 +451,7 @@ const char *const i18n_keys[458] = {
     "Wave Intensity",
     "When the picture returns, press X if you can read this. O or 15 s = no.",
     "White",
+    "Width",
     "Write a diagnostic log to /dev_hdd0/tmp/player_log.txt (on by default).\nUse Send Log to Server when reporting a problem.",
     "Wrong server URL or path.",
     "Wrong username or password.",
@@ -472,7 +476,7 @@ const char *const i18n_keys[458] = {
     "\342\200\271 back %ds",
 };
 
-static const char *const i18n_text_ja[458] = {
+static const char *const i18n_text_ja[462] = {
     "  %s  %s \347\251\272\343\201\215",
     "  \357\274\210\343\201\276\343\201\240\343\203\207\343\202\263\343\203\274\343\203\211\343\201\247\343\201\215\343\201\276\343\201\233\343\202\223\357\274\211",
     "%.40s \343\201\256\346\230\240\345\203\217\357\274\210PS3\343\201\247\343\201\257\345\206\215\347\224\237\343\201\247\343\201\215\343\201\276\343\201\233\343\202\223\357\274\211",
@@ -580,6 +584,7 @@ static const char *const i18n_text_ja[458] = {
     "\343\201\212\346\260\227\343\201\253\345\205\245\343\202\212\343\202\222\346\233\264\346\226\260\343\201\247\343\201\215\343\201\276\343\201\233\343\202\223\343\201\247\343\201\227\343\201\237",
     "\303\227 \344\277\235\345\255\230        \342\227\213 \343\202\255\343\203\243\343\203\263\343\202\273\343\203\253",
     "\346\226\271\345\220\221\343\202\255\343\203\274\345\267\246\345\217\263\343\201\247\350\252\277\346\225\264",
+    "\345\215\201\345\255\227\343\202\255\343\203\274\357\274\232\350\252\277\346\225\264\343\200\200\342\226\263\357\274\232\343\203\252\343\202\273\343\203\203\343\203\210\343\200\200\342\227\213\357\274\232\345\256\214\344\272\206",
     "\346\230\274\345\244\234\343\203\221\343\203\254\343\203\203\343\203\210",
     "\343\203\207\343\203\220\343\203\203\343\202\260\343\203\255\343\202\260",
     "\346\250\231\346\272\226",
@@ -625,6 +630,7 @@ static const char *const i18n_text_ja[458] = {
     "\347\225\252\347\265\204\350\241\250",
     "HDD\357\274\232\347\251\272\343\201\215 %s \302\267 \343\203\200\343\202\246\343\203\263\343\203\255\343\203\274\343\203\211\343\201\257 %s \343\202\222\347\251\272\343\201\221\343\201\246\343\201\212\343\201\215\343\201\276\343\201\231",
     "HDD\357\274\232\347\251\272\343\201\215\345\256\271\351\207\217\343\201\214\344\270\215\346\230\216 \302\267 \343\203\200\343\202\246\343\203\263\343\203\255\343\203\274\343\203\211\343\201\257\344\270\200\346\231\202\345\201\234\346\255\242\344\270\255",
+    "\351\253\230\343\201\225",
     "\351\232\240\343\201\231",
     "\351\253\230",
     "\343\203\233\343\203\274\343\203\240",
@@ -727,6 +733,7 @@ static const char *const i18n_text_ja[458] = {
     "\345\206\215\347\224\237\344\270\255\343\201\256\343\201\237\343\202\201\344\270\200\346\231\202\345\201\234\346\255\242",
     "\344\270\200\346\231\202\345\201\234\346\255\242\357\274\232HDD\343\201\256\347\251\272\343\201\215\343\201\214 %s \343\201\253\343\201\252\343\202\212\343\201\276\343\201\227\343\201\237",
     "\344\270\200\346\231\202\345\201\234\346\255\242\357\274\232HDD\343\201\256\347\251\272\343\201\215\343\201\214\347\242\272\344\277\235\345\210\206\343\201\276\343\201\247\346\270\233\343\202\212\343\201\276\343\201\227\343\201\237",
+    "\347\224\273\351\235\242\343\202\265\343\202\244\343\202\272",
     "\345\206\215\347\224\237",
     "\346\234\200\345\210\235\343\201\213\343\202\211\345\206\215\347\224\237",
     "\346\234\200\345\210\235\343\201\213\343\202\211\345\206\215\347\224\237",
@@ -909,6 +916,7 @@ static const char *const i18n_text_ja[458] = {
     "\343\202\246\343\202\247\343\203\274\343\203\226\343\201\256\345\274\267\343\201\225",
     "\346\230\240\345\203\217\343\201\214\346\210\273\343\201\243\343\201\237\343\202\211\343\200\201\343\201\223\343\202\214\343\201\214\350\252\255\343\202\201\343\202\214\343\201\260X\343\202\222\346\212\274\343\201\227\343\201\246\343\201\217\343\201\240\343\201\225\343\201\204\343\200\202\342\227\213\343\201\276\343\201\237\343\201\25715\347\247\222\343\201\247\343\200\214\343\201\204\343\201\204\343\201\210\343\200\215\343\200\202",
     "\347\231\275",
+    "\345\271\205",
     "\350\250\272\346\226\255\343\203\255\343\202\260\343\202\222 /dev_hdd0/tmp/player_log.txt \343\201\253\346\233\270\343\201\215\350\276\274\343\201\277\343\201\276\343\201\231\357\274\210\345\210\235\346\234\237\350\250\255\345\256\232\343\201\257\343\202\252\343\203\263\357\274\211\343\200\202\n\345\225\217\351\241\214\343\202\222\345\240\261\345\221\212\343\201\231\343\202\213\343\201\250\343\201\215\343\201\257\343\200\214\343\203\255\343\202\260\343\202\222\343\202\265\343\203\274\343\203\220\343\203\274\343\201\270\351\200\201\344\277\241\343\200\215\343\202\222\344\275\277\343\201\243\343\201\246\343\201\217\343\201\240\343\201\225\343\201\204\343\200\202",
     "\343\202\265\343\203\274\343\203\220\343\203\274\343\201\256URL\343\201\276\343\201\237\343\201\257\343\203\221\343\202\271\343\201\214\351\201\225\343\201\204\343\201\276\343\201\231\343\200\202",
     "\343\203\246\343\203\274\343\202\266\343\203\274\345\220\215\343\201\276\343\201\237\343\201\257\343\203\221\343\202\271\343\203\257\343\203\274\343\203\211\343\201\214\351\201\225\343\201\204\343\201\276\343\201\231\343\200\202",
@@ -933,7 +941,7 @@ static const char *const i18n_text_ja[458] = {
     "\342\200\271 %d\347\247\222\346\210\273\343\202\213",
 };
 
-static const char *const i18n_text_pt_BR[458] = {
+static const char *const i18n_text_pt_BR[462] = {
     "  %s  %s livres",
     "  (ainda n\303\243o pode ser decodificado)",
     "V\303\255deo %.40s (n\303\243o reproduz no PS3)",
@@ -1041,6 +1049,7 @@ static const char *const i18n_text_pt_BR[458] = {
     "N\303\243o foi poss\303\255vel atualizar os favoritos",
     "X  Salvar        C\303\255rculo  Cancelar",
     "Esquerda / Direita no direcional para ajustar",
+    "Direcional: ajustar  Tri\303\242ngulo: redefinir  O: concluir",
     "Paleta dia/noite",
     "Log de depura\303\247\303\243o",
     "Padr\303\243o",
@@ -1086,6 +1095,7 @@ static const char *const i18n_text_pt_BR[458] = {
     "Guia",
     "HD: %s livres \302\267 os downloads mant\303\252m %s livres",
     "HD: espa\303\247o livre desconhecido \302\267 downloads pausados",
+    "Altura",
     "Ocultar",
     "Alta",
     "In\303\255cio",
@@ -1188,6 +1198,7 @@ static const char *const i18n_text_pt_BR[458] = {
     "Pausado durante a reprodu\303\247\303\243o",
     "Pausado: restam %s livres no HD",
     "Pausado: o HD chegou \303\240 reserva de espa\303\247o livre",
+    "Tamanho da imagem",
     "Reproduzir",
     "Reproduzir do in\303\255cio",
     "Reproduzir do in\303\255cio",
@@ -1370,6 +1381,7 @@ static const char *const i18n_text_pt_BR[458] = {
     "Intensidade da onda",
     "Quando a imagem voltar, pressione X se conseguir ler isto. O ou 15 s = n\303\243o.",
     "Branco",
+    "Largura",
     "Grava um log de diagn\303\263stico em /dev_hdd0/tmp/player_log.txt (ligado por padr\303\243o).\nUse Enviar log ao servidor ao relatar um problema.",
     "URL ou caminho do servidor incorreto.",
     "Usu\303\241rio ou senha incorretos.",
@@ -1394,7 +1406,7 @@ static const char *const i18n_text_pt_BR[458] = {
     "\342\200\271 voltar %ds",
 };
 
-static const char *const i18n_text_de[458] = {
+static const char *const i18n_text_de[462] = {
     "  %s  %s frei",
     "  (kann noch nicht decodiert werden)",
     "%.40s-Video (auf der PS3 nicht abspielbar)",
@@ -1502,6 +1514,7 @@ static const char *const i18n_text_de[458] = {
     "Favoriten konnten nicht aktualisiert werden",
     "Kreuz  Speichern        Kreis  Abbrechen",
     "Steuerkreuz Links / Rechts zum Anpassen",
+    "Steuerkreuz: anpassen  Dreieck: zur\303\274cksetzen  O: fertig",
     "Tag-/Nacht-Palette",
     "Debug-Protokoll",
     "Standard",
@@ -1547,6 +1560,7 @@ static const char *const i18n_text_de[458] = {
     "Programm",
     "HDD: %s frei \302\267 Downloads lassen %s frei",
     "HDD: freier Speicher unbekannt \302\267 Downloads pausiert",
+    "H\303\266he",
     "Ausblenden",
     "Hoch",
     "Start",
@@ -1649,6 +1663,7 @@ static const char *const i18n_text_de[458] = {
     "Pausiert w\303\244hrend der Wiedergabe",
     "Pausiert: auf der HDD sind nur noch %s frei",
     "Pausiert: Die HDD ist bei ihrer Speicherreserve angekommen",
+    "Bildgr\303\266\303\237e",
     "Abspielen",
     "Von vorn abspielen",
     "Von vorn abspielen",
@@ -1831,6 +1846,7 @@ static const char *const i18n_text_de[458] = {
     "Wellenst\303\244rke",
     "Wenn das Bild zur\303\274ckkehrt, dr\303\274cken Sie X, falls Sie dies lesen k\303\266nnen. O oder 15 s = nein.",
     "Wei\303\237",
+    "Breite",
     "Schreibt ein Diagnoseprotokoll nach /dev_hdd0/tmp/player_log.txt (standardm\303\244\303\237ig an).\nNutzen Sie \342\200\236Protokoll an Server senden\342\200\234, wenn Sie ein Problem melden.",
     "Server-URL oder Pfad falsch.",
     "Benutzername oder Passwort falsch.",
@@ -1855,7 +1871,7 @@ static const char *const i18n_text_de[458] = {
     "\342\200\271 %ds zur\303\274ck",
 };
 
-static const char *const i18n_text_fr[458] = {
+static const char *const i18n_text_fr[462] = {
     "  %s  %s libres",
     "  (ne peut pas encore \303\252tre d\303\251cod\303\251)",
     "Vid\303\251o %.40s (non lisible sur PS3)",
@@ -1963,6 +1979,7 @@ static const char *const i18n_text_fr[458] = {
     "Impossible de mettre \303\240 jour les favoris",
     "Croix  Enregistrer        Rond  Annuler",
     "Croix directionnelle gauche / droite pour r\303\251gler",
+    "Croix : ajuster  Triangle : r\303\251initialiser  O : termin\303\251",
     "Palette jour / nuit",
     "Journal de d\303\251bogage",
     "Par d\303\251faut",
@@ -2008,6 +2025,7 @@ static const char *const i18n_text_fr[458] = {
     "Guide",
     "Disque : %s libres \302\267 les t\303\251l\303\251chargements en gardent %s",
     "Disque : espace libre inconnu \302\267 t\303\251l\303\251chargements en pause",
+    "Hauteur",
     "Masquer",
     "\303\211lev\303\251e",
     "Accueil",
@@ -2110,6 +2128,7 @@ static const char *const i18n_text_fr[458] = {
     "En pause pendant la lecture",
     "En pause : il ne reste que %s sur le disque",
     "En pause : le disque est \303\240 sa r\303\251serve d'espace libre",
+    "Taille de l'image",
     "Lire",
     "Lire depuis le d\303\251but",
     "Lire depuis le d\303\251but",
@@ -2292,6 +2311,7 @@ static const char *const i18n_text_fr[458] = {
     "Intensit\303\251 de la vague",
     "Quand l'image revient, appuyez sur X si vous pouvez lire ceci. O ou 15 s = non.",
     "Blanc",
+    "Largeur",
     "\303\211crit un journal de diagnostic dans /dev_hdd0/tmp/player_log.txt (activ\303\251 par d\303\251faut).\nUtilisez Envoyer le journal au serveur pour signaler un probl\303\250me.",
     "URL ou chemin du serveur incorrect.",
     "Nom d'utilisateur ou mot de passe incorrect.",
@@ -2316,7 +2336,7 @@ static const char *const i18n_text_fr[458] = {
     "\342\200\271 reculer de %ds",
 };
 
-static const char *const i18n_text_es[458] = {
+static const char *const i18n_text_es[462] = {
     "  %s  %s libres",
     "  (a\303\272n no se puede decodificar)",
     "V\303\255deo %.40s (no se puede reproducir en la PS3)",
@@ -2424,6 +2444,7 @@ static const char *const i18n_text_es[458] = {
     "No se pudieron actualizar los favoritos",
     "Cruz  Guardar        C\303\255rculo  Cancelar",
     "Cruceta izquierda / derecha para ajustar",
+    "Cruceta: ajustar  Tri\303\241ngulo: restablecer  O: listo",
     "Paleta d\303\255a / noche",
     "Registro de depuraci\303\263n",
     "Predeterminado",
@@ -2469,6 +2490,7 @@ static const char *const i18n_text_es[458] = {
     "Gu\303\255a",
     "Disco: %s libres \302\267 las descargas reservan %s",
     "Disco: espacio libre desconocido \302\267 descargas en pausa",
+    "Alto",
     "Ocultar",
     "Alta",
     "Inicio",
@@ -2571,6 +2593,7 @@ static const char *const i18n_text_es[458] = {
     "En pausa mientras se reproduce",
     "En pausa: al disco le quedan %s libres",
     "En pausa: el disco ha llegado a su reserva de espacio libre",
+    "Tama\303\261o de imagen",
     "Reproducir",
     "Reproducir desde el inicio",
     "Reproducir desde el inicio",
@@ -2753,6 +2776,7 @@ static const char *const i18n_text_es[458] = {
     "Intensidad de la onda",
     "Cuando vuelva la imagen, pulsa X si puedes leer esto. O o 15 s = no.",
     "Blanco",
+    "Ancho",
     "Escribe un registro de diagn\303\263stico en /dev_hdd0/tmp/player_log.txt (activado por defecto).\nUsa Enviar registro al servidor al informar de un problema.",
     "URL o ruta del servidor incorrecta.",
     "Usuario o contrase\303\261a incorrectos.",

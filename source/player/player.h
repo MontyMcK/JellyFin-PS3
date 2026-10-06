@@ -31,6 +31,8 @@ bool show_player_file(const char *path, const char *title, u32 resume_secs,
 // Where the last playback ended, in whole seconds (0 for none).  The Media browser stores it
 // as the resume point.
 u32 player_last_position_secs(void);
+// The runtime of that playback in seconds (0 = unknown).
+u32 player_last_total_secs(void);
 
 // End-of-item auto-advance.  Arm before show_player() when the item has a
 // follower: during the last 90 s of playback the player shows a popup badge

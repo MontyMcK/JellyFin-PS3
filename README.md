@@ -380,9 +380,11 @@ resumes it; `O` goes up a folder, `L2`/`R2` page through a long one.
 |-----------------|-------------------------------------------------------------------|
 | O / Start       | Stop / exit player (O closes an open track menu first)            |
 | Square          | Hide the player bar before its timeout                            |
-| Left / Right    | Move focus across the bar (Play/Pause · Audio · Volume · Subtitles) |
+| Left / Right    | Bar hidden: skip -10 s / +10 s. Bar showing: move focus across it (Play/Pause · Audio · Volume · Subtitles) |
 | X               | Activate the focused control; skip an intro or recap when offered |
 | Triangle        | Audio and subtitle tracks                                         |
+| L1              | Picture size: Left/Right = width, Up/Down = height, Triangle resets, L1/X/O done |
+| L3 / R3 (stick click) | Show / hide the player stats                                |
 | R2 / L2 (tap)   | Skip +10 s / -10 s (taps within 1 s batch into one seek)          |
 | R2 / L2 (hold)  | Pause and scrub the seek bar; seek fires once on release          |
 | Select          | Jump to the next episode/movie (during the NEXT prompt, last 90 s)|

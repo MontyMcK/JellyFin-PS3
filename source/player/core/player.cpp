@@ -33,6 +33,7 @@
 #include "timing.h"
 #include "player.h"
 #include "player_hud.h"
+#include "player_picture.h"
 #include "player_internal.h"
 #include "player_stats.h"
 #include "ui.h"
@@ -480,6 +481,8 @@ static char s_live_last_id[40] = "";
 const char *player_live_last_channel(void) { return s_live_last_id; }
 
 static u32 s_last_pos_secs = 0;
+static u32 s_last_total_secs = 0;
+u32 player_last_total_secs(void) { return s_last_total_secs; }
 u32 player_last_position_secs(void) { return s_last_pos_secs; }
 
 // "5  BBC One": the number when the channel has one.
@@ -564,7 +567,9 @@ void show_player(const JFItem *item, u32 resume_secs,
 void show_player_run(const JFItem *item, u32 resume_secs,
                      const char *media_source_id, const PlayerLocal *local) {
     crash_log("p1 enter");
+    picture_load();                  // once; the saved picture size
     s_last_pos_secs = 0;             // a playback that never gets going leaves no position behind
+    s_last_total_secs = 0;
     exit_reports_join();
     music_join_stale();
     plog("show_player: enter");
@@ -1326,7 +1331,10 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         const double seg_pos = (double)(ps.play_base_us + audio_get_clock_us()) / 1e6;
         const MediaSegment *skip_seg = (ps.paused || live) ? NULL : segments_at(seg_pos);
         hud_set_skip_offered(skip_seg != NULL);
-        HudAction act = hud_handle_input(l2_pressed, r2_pressed, ps.paused);
+        // L1 opens the picture-size mode, which then owns the buttons.
+        HudAction act = picture_mode_input()
+                      ? HUD_ACTION_NONE
+                      : hud_handle_input(l2_pressed, r2_pressed, ps.paused);
         // Settings > Auto Skip: intros and recaps go by themselves.  Credits
         // stay: they run the next episode's countdown.
         if (act == HUD_ACTION_NONE && skip_seg && skip_seg->type != SEG_OUTRO &&
@@ -1511,7 +1519,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right ||
             btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
             btn_cur.start || btn_cur.select ||
-            btn_cur.l1 || btn_cur.r1 || btn_cur.l2 || btn_cur.r2;
+            btn_cur.l1 || btn_cur.r1 || btn_cur.l2 || btn_cur.r2 || btn_cur.l3 || btn_cur.r3;
         // Keep flipping while the system overlay is up: it is drawn on our
         // flips, so idling here would hide it while it still takes input.
         if (ps.paused && !any_input && act == HUD_ACTION_NONE && !g_sys_overlay &&
@@ -1621,12 +1629,14 @@ void show_player_run(const JFItem *item, u32 resume_secs,
 
     timing_shutdown();
     segments_stop();
+    picture_session_end();
     hud_shutdown();
 
     // Final position for the server's resume bookmark — read before the
     // audio clock is torn down.
     u64 final_pos_ticks = live ? 0ULL : (ps.play_base_us + audio_get_clock_us()) * 10ULL;
     s_last_pos_secs = (u32)(final_pos_ticks / 10000000ULL);
+    s_last_total_secs = ps.total_secs;
 
     // Signal all threads to stop, join in order: decode → audio → upload
     ps.playing = false;

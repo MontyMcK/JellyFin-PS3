@@ -53,11 +53,23 @@
 - **Send Log to Server.** Settings → System → Send Log to Server uploads the
   diagnostic log to your Jellyfin server (Dashboard → Logs), so you can attach
   it to a bug report without FTP. Diagnostic logging is now on by default.
+- **Picture size.** `L1` in the player resizes the picture, width with `←`/`→`
+  and height with `↑`/`↓`, each on its own (`△` resets, `O` or `L1` done). For
+  a CRT that overscans: shrink the picture until the whole frame is on screen.
+  A flat-panel TV can leave it alone. The setting is kept for every video.
+- **Skip with the D-pad.** With the player bar hidden, `←`/`→` jump 10 s back
+  or ahead.
+- **Player stats from the pad.** Click either stick in the player to show or
+  hide the stats overlay.
 - **Settings has sections** — Playback, Audio, Subtitles, Downloads, Display and
   System. `L2`/`R2` jump between sections, and `←`/`→` change a value in either
   direction (`X` still steps forward).
 
 ### Fixes
+- Leaving a film part way and opening it again from its page started it over
+  instead of where you stopped; it now resumes.
+- Square put the player bar away only if you pressed it very quickly: held for
+  a moment, the bar came straight back. A press now hides it for good.
 - Pressing the PS button while a video was paused could leave the player
   looking frozen; the system menu now appears.
 - Some items opened to an empty details page and then hung on retry when the

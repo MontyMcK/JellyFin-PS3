@@ -62,7 +62,7 @@ all: test_wave_scope test_ac3_map test_ac3_decode test_iec61937 test_media_sourc
      test_wave_cam test_wave_light test_wave_gel test_spine test_depth test_facts test_stream_budget \
      test_experience test_json_unescape test_boot_seq test_wave_motes \
      test_wave_nav test_daynight test_canyon test_display_mode test_wave_look test_wave_drop test_offline test_stream_request test_jbuf_order \
-     test_settings_model test_settings_model_nostats test_userdata test_livetv test_live_watch test_mohasi_fs test_lfs_path test_lfs test_h264_sps test_mkv_demux test_mkv_ts test_local_probe test_local_play test_local_names test_local_resume test_resample test_aac test_flac test_lossless test_sub_conv test_local_subs test_local_tags test_local_audio test_local_music test_music_engine test_i18n test_i18n_text test_line_break test_clock_fmt
+     test_settings_model test_settings_model_nostats test_userdata test_livetv test_live_watch test_picture_resume test_mohasi_fs test_lfs_path test_lfs test_h264_sps test_mkv_demux test_mkv_ts test_local_probe test_local_play test_local_names test_local_resume test_resample test_aac test_flac test_lossless test_sub_conv test_local_subs test_local_tags test_local_audio test_local_music test_music_engine test_i18n test_i18n_text test_line_break test_clock_fmt
 
 test_iec61937: test_iec61937.c ../source/audio/iec61937.c $(A52_SRCS)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
@@ -186,6 +186,9 @@ test_livetv: test_livetv.cpp ../source/api/livetv.cpp ../source/api/livetv.h \
 	$(CXX) $(CXXFLAGS) -Wextra -I../source/api -o $@ test_livetv.cpp ../source/api/livetv.cpp
 
 # Live TV: when the player has to ask for a fresh stream (header-only rules).
+test_picture_resume: test_picture_resume.cpp ../source/player/core/picture_size.h ../source/ui/xmb/ui_resume.cpp ../source/ui/xmb/ui_resume.h
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/player/core -I../source/ui/xmb -o $@ test_picture_resume.cpp ../source/ui/xmb/ui_resume.cpp
+
 test_live_watch: test_live_watch.c ../source/player/core/live_watch.h
 	$(CC) $(CFLAGS) -Wextra -I../source/player/core -o $@ test_live_watch.c
 
@@ -523,6 +526,7 @@ check: all tones51.ac3 tones51.spdif tones51.dts tones51.thd tones51.thd.ref
 	./test_userdata
 	./test_livetv
 	./test_live_watch
+	./test_picture_resume
 	./test_lfs_path
 	./test_lfs
 	./test_h264_sps
@@ -562,7 +566,7 @@ clean:
 	      test_wave_audio test_wave_motion test_wave_layers \
 	      test_wave_cam test_wave_light test_wave_gel test_spine test_depth test_facts test_stream_budget test_experience test_json_unescape test_boot_seq test_wave_motes test_display_mode \
 	      test_offline test_stream_request track_codec_host.o \
-	      test_settings_model test_settings_model_nostats test_userdata test_livetv test_live_watch \
+	      test_settings_model test_settings_model_nostats test_userdata test_livetv test_live_watch test_picture_resume \
 	      test_mohasi_fs test_mohasi_fs_be test_lfs_path \
 	      tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 
