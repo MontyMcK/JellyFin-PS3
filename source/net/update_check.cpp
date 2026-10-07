@@ -29,13 +29,10 @@
 #include "timing.h"
 #include "plog.h"
 
-// Point straight at the current repo.  The old "Tuggs-Bunny" name only resolved
-// via GitHub's rename 301 -> /repositories/<id>/... redirect; RPCS3 follows that
-// transparently but the console's firmware HTTP client is far less reliable at
-// re-driving a redirected HTTPS request, so on real hardware the check could die
-// on the hop and the update popup never appeared.  A direct URL is one plain
-// request — no redirect for the firmware stack to choke on.
-#define UPDATE_URL "https://api.github.com/repos/MontyMcK/JellyFin-PS3/releases/latest"
+// This fork's own releases.  Use the repo's exact current name: a renamed repo
+// answers with a 301 redirect, which the console's firmware HTTP client does
+// not reliably follow, and the update popup would silently never appear.
+#define UPDATE_URL "https://api.github.com/repos/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest"
 #define UPDATE_TIMEOUT_US (2 * 1000 * 1000)
 
 #define UPDATE_LOG_PATH "/dev_hdd0/tmp/update_detection.txt"
@@ -47,6 +44,7 @@ static bool             s_started = false;
 // so readers polling update_check_result() only ever see a complete result.
 static volatile bool s_done  = false;
 static bool          s_newer = false;
+static bool          s_ok    = false;   // a release tag was read, newer or not
 static char          s_latest[64];
 
 // The tag_name field sits near the front of the response; 16K is plenty even
@@ -290,6 +288,7 @@ static void do_check(void) {
             ulog("FAIL no tag_name in response");
             goto cleanup;
         }
+        s_ok = true;
         int cmp = ver_cmp(tag, APP_VERSION);
         ulog("tag=%s app=%s cmp=%d -> %s", tag, APP_VERSION, cmp,
              cmp > 0 ? "UPDATE AVAILABLE" : "up to date");
@@ -356,4 +355,23 @@ bool update_check_result(char *out, int out_size) {
 
 bool update_check_done(void) {
     return s_done;
+}
+
+int update_check_state(void) {
+    if (!s_started && !s_done) return UPD_IDLE;
+    if (!s_done)  return UPD_CHECKING;
+    if (s_newer)  return UPD_AVAILABLE;
+    return s_ok ? UPD_CURRENT : UPD_FAILED;
+}
+
+bool update_check_again(void) {
+    if (s_started && !s_done) return false;   // one at a time
+    update_check_shutdown();                  // reap the finished worker
+    s_done  = false;
+    s_newer = false;
+    s_ok    = false;
+    s_log_started = false;                    // a fresh trace file
+    __sync_synchronize();
+    update_check_start();
+    return s_started;
 }

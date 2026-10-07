@@ -32,6 +32,10 @@
 #define ICON_LABEL_GAP        6
 #define AUDIO_SEP            16            // horizontal gap between audio btn and CC btn
 
+// Trickplay scrub-preview card (shown above the seek bar while hold-scrubbing)
+#define CARD_PAD              6             // backdrop margin around the tile
+#define CARD_GAP             14             // gap between card bottom and the track
+
 // Volume slider (shown above the speaker control while adjusting)
 #define VOL_STEP              5            // % per d-pad step
 #define VOL_TRACK_W           6            // slider track width

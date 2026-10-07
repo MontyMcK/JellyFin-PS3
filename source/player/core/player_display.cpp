@@ -13,6 +13,17 @@
 #include "plog.h"
 #include "player_stats.h"
 #include "rsxutil.h"
+#include "ui.h"          // drawTTF
+#include "ui_visuals.h" // ttf_text_width
+#include "subtitles.h"
+#include "display_diag.h"
+#include "subfont.h"
+#include "subcolor.h"
+#include <string.h>
+
+// Longest single rendered line. Cues are capped well below this in
+// subtitles.cpp; this is only the on-stack row buffer.
+#define SUB_ROW_MAX 208
 
 // A/B test knob: define to disable the temporal crossfade entirely (every
 // frame displays as pure-A, Bresenham pulldown only).  Ghosting on flat-color
@@ -26,6 +37,7 @@ static void check_fps_fallback(PlayerState *ps) {
         plog("fps_detect: timeout, fallback 30fps");
         timing_init(30, 1);
         s_timing_ready = true;
+        display_diag_session(30, 1, DM_FPS_TIMEOUT, jbuf_fw(), jbuf_fh());
     }
 }
 
@@ -87,36 +99,6 @@ static void stats_on_picture_shown(void) {
     s_last_seq = seq;
     player_stats_on_frame_shown();
 }
-
-// Retire content for vblanks that elapsed WITHOUT a display step.
-//
-// The gate below consumes exactly one vblank period per call, which is correct
-// only while the loop actually runs once per vblank.  When it overruns, the
-// vsync-locked flip pushes the next iteration a whole refresh out and that time
-// is otherwise never accounted for -- video slips behind real time by exactly
-// the frames it dropped, permanently, because the retire ceiling is one frame
-// per call and there is no way to catch up.  Draining the surplus here holds
-// real time by dropping frames instead of accumulating a backlog, which is what
-// keeps the jitter buffer off its cap and the decode thread reading the socket
-// (audio rides that same socket -- a saturated jbuf is what starves it).
-//
-// Frames retired here are never displayed, so there is nothing to blend; each
-// carries its spill into the next slot so no time leaks.  Always leaves one
-// frame for the caller to display.
-static void gate_drain_backlog(s64 budget_us) {
-    while (budget_us > 0 && jbuf_count() > 1) {
-        s64 dur = jbuf_peek_dur();
-        if (dur < 0) dur = 0;              // already exhausted; pop it
-        if (dur > budget_us) {
-            jbuf_consume_dur(budget_us);
-            break;
-        }
-        jbuf_consume_dur(dur);             // exhaust front, carry the remainder
-        budget_us -= dur;
-        jbuf_advance();
-    }
-}
-
 void player_display_frame(PlayerState *ps) {
     check_fps_fallback(ps);
     log_refresh_rate();
@@ -133,24 +115,6 @@ void player_display_frame(PlayerState *ps) {
     static int  s_pure_count = 0;
     static int  s_mid_count  = 0;
     static s64  s_spill_max  = 0;
-    static int  s_catchup_vb = 0;
-
-    // Account for refreshes this loop missed before consuming the current one.
-    u32 vsyncs = timing_vsyncs_elapsed();
-    if (vsyncs > 1 && !ps->paused && s_timing_ready && jbuf_count() > 1) {
-        gate_drain_backlog(vblank_period_us * (s64)(vsyncs - 1));
-        s_catchup_vb += (int)(vsyncs - 1);
-        // Throttled: a sustained overrun trips this every iteration, and the
-        // log ring is 256 entries deep.
-        static int s_catchup_n = 0;
-        if (s_catchup_n < 40 || (s_catchup_n % 60) == 0) {
-            char buf[80];
-            snprintf(buf, sizeof(buf), "gate_catchup: missed=%u q=%d total_vb=%d",
-                     vsyncs - 1, jbuf_count(), s_catchup_vb);
-            plog(buf);
-        }
-        s_catchup_n++;
-    }
 
     bool  do_pop       = false;
     bool  render_blend = false;
@@ -171,10 +135,109 @@ void player_display_frame(PlayerState *ps) {
         }
     }
 
-    if (!ps->paused && s_vid_frame_ready && s_timing_ready && jbuf_count() > 0) {
+    // ---- 1:1 (24p output of 24p film): frame-locked ----
+    // Exactly one picture per vblank, never blended.  The duration gate below
+    // is wrong here: its A/V bias nudges the per-vblank period by up to 5 ms,
+    // which at 59.94 only shifts a crossfade but at 1:1 repeats or skips a
+    // frame every few frames -- constant judder (hardware, 2026-09-27).  A/V
+    // is corrected instead by one whole repeat/skip when the smoothed offset
+    // passes 25 ms: that moves it by one frame (41.7 ms), landing inside
+    // +/-17 ms, so it cannot oscillate.
+    const bool one_to_one = timing_is_1to1();
+    if (one_to_one) {
+        static u64 s_d_t = 0; static int s_d_calls = 0, s_d_pops = 0, s_d_notready = 0, s_d_empty = 0;
+        static int s_d_fr0 = 0;
+        s_d_calls++;
+        if (!s_vid_frame_ready) s_d_notready++;
+        if (jbuf_count() == 0) s_d_empty++;
+        const u64 now = timing_get_us();
+        if (!s_d_t) { s_d_t = now; s_d_fr0 = ps->frame_count; }
+        if (now - s_d_t >= 1000000ULL) {
+            s_d_pops = ps->frame_count - s_d_fr0;
+            char b[160];
+            snprintf(b, sizeof b, "1to1: 1s calls=%d pops=%d notready=%d empty=%d q=%d paused=%d",
+                     s_d_calls, s_d_pops, s_d_notready, s_d_empty, jbuf_count(), (int)ps->paused);
+            plog(b);
+            s_d_t = now; s_d_fr0 = ps->frame_count;
+            s_d_calls = s_d_notready = s_d_empty = 0;
+        }
+    }
+    if (one_to_one && !ps->paused && s_vid_frame_ready && s_timing_ready && jbuf_count() > 0) {
+        // The RAW offset of the frame about to show decides the big moves;
+        // the smoothed one lags ~10 frames, and acting on it after a reopen
+        // (video ~1 s ahead of the new stream's sound) repeated a frame every
+        // third vblank for two seconds -- stutter -- and overshot (2026-09-27).
+        const s64 raw = avsync_compute_diff(jbuf_peek_pts_us(), ps->play_base_us);
+        static int  s_settle = 0;         // vblanks before another SMALL correction
+        static bool s_holding = false;
+        const s64 sm = avsync_get_smoothed_diff();
+        if (s_settle > 0) s_settle--;
+        if (raw > 60000 && raw < 3000000 && (s_holding || raw > 150000)) {
+            // Far ahead: hold this picture, cleanly, until the sound reaches
+            // it (down to 60 ms, so it does not stop short and stutter on).
+            if (!s_holding) {
+                s_holding = true;
+                char b[80]; snprintf(b, sizeof b, "1to1: hold (video +%lld us)", (long long)raw); plog(b);
+            }
+        } else {
+            s_holding = false;
+            if (raw < -150000 && raw > -10000000 && jbuf_count() > 1) {
+                // Far behind -- a stall starved the picture while the sound
+                // played on.  Drop every frame already late, at once: one
+                // jump instead of seconds of frame-skipping judder.  Runs
+                // every vblank until caught up.  Was capped at 3 s: a start
+                // 4.9 s behind fell through to one skip per 2 s and stayed
+                // 3+ s out of lip sync for the whole film (2026-09-27).
+                int dropped = 0;
+                while (jbuf_count() > 1) {
+                    const s64 d = avsync_compute_diff(jbuf_peek_pts_us(), ps->play_base_us);
+                    if (d > -40000) break;
+                    jbuf_consume_dur(jbuf_peek_dur());
+                    jbuf_advance();
+                    dropped++;
+                }
+                s_settle = 24;
+                char b[80]; snprintf(b, sizeof b, "1to1: caught up (video %lld us), dropped %d",
+                                     (long long)raw, dropped); plog(b);
+            } else if (s_settle == 0 && sm < -25000 && raw < -25000 && jbuf_count() > 1) {
+                // A little behind: drop one.
+                jbuf_consume_dur(jbuf_peek_dur());
+                jbuf_advance();
+                s_settle = 48;
+                char b[80]; snprintf(b, sizeof b, "1to1: skip (video %lld us)", (long long)sm); plog(b);
+            } else if (s_settle == 0 && sm > 25000 && raw > 25000) {
+                // A little ahead: show this picture one more vblank.
+                s_settle = 48;
+                char b[80]; snprintf(b, sizeof b, "1to1: repeat (video +%lld us)", (long long)sm); plog(b);
+                goto one_to_one_done;
+            }
+            jbuf_consume_dur(jbuf_peek_dur());
+            jbuf_advance();
+            do_pop = true;                // render_blend stays false: pure A
+        }
+one_to_one_done: ;
+    } else if (!one_to_one && !ps->paused && s_vid_frame_ready && s_timing_ready && jbuf_count() > 0) {
         // Measurement only — result discarded; EMA updated for logging.
         // play_base lets avsync fold out an absolute (sub-burn) video PTS.
-        { u64 vpts = jbuf_peek_pts_us(); (void)avsync_compute_diff(vpts, ps->play_base_us); }
+        const s64 raw60 = avsync_compute_diff(jbuf_peek_pts_us(), ps->play_base_us);
+        // Far behind (a stall or a slow start starved the picture while the
+        // sound played on): drop the frames that are already late at once,
+        // as the 1:1 path does.  The duration gate's bias moves at most 5 ms
+        // a vblank, so a second behind took seconds to close (2026-09-27).
+        if (raw60 < -150000 && raw60 > -10000000 && jbuf_count() > 1) {
+            int dropped = 0;
+            while (jbuf_count() > 1) {
+                const s64 d = avsync_compute_diff(jbuf_peek_pts_us(), ps->play_base_us);
+                if (d > -40000) break;
+                jbuf_consume_dur(jbuf_peek_dur());
+                jbuf_advance();
+                dropped++;
+            }
+            if (dropped) {
+                char b[80]; snprintf(b, sizeof b, "avsync: caught up (video %lld us), dropped %d",
+                                     (long long)raw60, dropped); plog(b);
+            }
+        }
 
         s64  dur_a = jbuf_peek_dur();
 #ifdef VID_DISABLE_BLEND
@@ -185,9 +248,16 @@ void player_display_frame(PlayerState *ps) {
 
         if (!b_ok || dur_a >= vblank_period_us) {
             // Pure-A: consume one vblank period, pop if frame exhausted
+            const u32 seq0 = jbuf_peek_seq();
             jbuf_consume_dur(vblank_period_us);
             jbuf_advance();
-            silent_flip = true;
+            // A pop here is a NEW picture and must count as one.  At 59.94 a
+            // film frame always ends in the crossfade branch below, so this
+            // never mattered; at a 1:1 cadence (24p output, 2026-09-27) EVERY
+            // frame ends here, frame_count stayed 0, and the video -- drawn
+            // only once frame_count > 0 -- was never drawn: audio, black screen.
+            if (jbuf_peek_seq() != seq0) do_pop = true;
+            else                         silent_flip = true;
             s_pure_count++;
         } else {
             // Crossfade: dur_a < vblank, B available — blend A→B
@@ -219,6 +289,17 @@ void player_display_frame(PlayerState *ps) {
             if (spill > s_spill_max) s_spill_max = spill;
         }
     }
+
+    // Clearing s_vid_frame_ready hands the texture shown until now to the
+    // upload thread, which starts overwriting it at once, so the GPU must be
+    // done reading it first.  A flip queued inside a seek (the reopen's
+    // spinner) left the flip wait one frame behind for the rest of the
+    // session: the CPU ran a frame ahead, the upload landed while the
+    // previous draw was still sampling, and frames came out as two pictures
+    // torn together -- the zig-zag on motion after a seek at 24p (2026-09-27).
+    if (do_pop || (silent_flip && s_vid_frame_ready) ||
+        (ps->show_seek_frame && ps->paused && s_vid_frame_ready))
+        rsxSync();
 
     if (do_pop) {
         u32 disp_seq = jbuf_peek_seq();
@@ -293,7 +374,6 @@ void player_display_frame(PlayerState *ps) {
 
     // Re-draw every vblank. s_vid_disp_idx advances on do_pop or silent_flip.
     if (ps->frame_count > 0) {
-        if (do_pop) rsxSync();
         u32 fw = jbuf_fw(), fh = jbuf_fh();
         vid_gpu_draw(render_blend, blend_factor, fw, fh);
     }
@@ -341,6 +421,98 @@ void player_display_frame(PlayerState *ps) {
         }
     }
 
+    // Subtitles.  Drawn BEFORE the HUD and outside its visibility gate: the
+    // seek bar comes and goes, subtitles must not.  They also use the clock
+    // WITHOUT the seek preview offset that the HUD applies below -- while a
+    // seek is armed the bar should show where you are going, but the words on
+    // screen still belong to the frame actually being displayed.
+    if (subs_active() && ps->frame_count > 0 && subs_is_pgs()) {
+        const u64 now_ms = (ps->play_base_us + audio_get_clock_us()) / 1000ULL;
+        const PgsBitmap *bmp = subs_pgs_at(now_ms);
+        if (bmp && bmp->rgba && bmp->frame_w > 0 && bmp->frame_h > 0) {
+            // Position scales from the PG stream's OWN authored coordinate
+            // space (bmp->frame_w/h -- typically 1920x1080 for a BD disc)
+            // into the actual display output. SIZE DOES NOT: drawBitmapRect-
+            // Alpha is a crop, not a resize (see ui.h), so the bitmap is
+            // drawn at its own decoded pixel dimensions regardless of
+            // display resolution. For a PS3 set to output at the disc's
+            // native resolution (the common 1080p BD -> 1080p output case)
+            // that scale factor is 1:1 and this is exactly right; at a
+            // lower output resolution (e.g. 720p) an authored-1080p bitmap
+            // will render oversized relative to the frame. Flagged rather
+            // than silently wrong -- a scaling blit is the fix if hardware
+            // testing shows this matters in practice.
+            int dx = (int)((s64)bmp->x * (s64)display_width  / bmp->frame_w);
+            int dy = (int)((s64)bmp->y * (s64)display_height / bmp->frame_h);
+            drawBitmapRectAlpha(bmp->rgba, (u32)bmp->width,
+                                0, 0, (u32)bmp->width, (u32)bmp->height,
+                                (u32)dx, (u32)dy);
+        }
+    } else if (subs_active() && ps->frame_count > 0) {
+        const u64 now_ms = (ps->play_base_us + audio_get_clock_us()) / 1000ULL;
+        const char *line = subs_text_at(now_ms);
+        if (line && *line) {
+            // Bottom-centred, one line above the other, inside the title-safe
+            // area so an overscanning CRT or plasma does not clip the text.
+            // TYPEFACE AND WEIGHT.
+            //
+            // The fonts people associate with subtitles -- Arial, Helvetica,
+            // Netflix Sans, Tiresias -- are all proprietary and cannot ship in
+            // a GPLv3 package. Open Sans, already bundled here for the UI, is
+            // the open face closest to them: a humanist sans with a large
+            // x-height and open apertures, which is what actually drives
+            // legibility at a distance.
+            //
+            // Weight matters more than which humanist sans it is, and every
+            // broadcaster and streaming service sets subtitles semibold or
+            // bolder. The bold face is already loaded, so this costs nothing
+            // and is the single biggest readability win available.
+            const int W  = (int)display_width;
+            const int px = (display_height >= 720) ? 32 : 22;
+            const int lh = px + 8;
+            // Fill, outline and outline weight all come from the chosen
+            // look -- they are not independent. A pale fill needs a heavier
+            // outline than a saturated one to hold its edge, and a
+            // translucent fill needs a thin one or the outline ends up more
+            // solid than the letters it surrounds. See subcolor.h.
+            const u32 fill    = subcolor_fill();
+            const u32 outline = subcolor_outline();
+            const int ow      = subcolor_outline_px(display_height);
+            int nlines = 1;
+            for (const char *q = line; *q; q++) if (*q == '\n') nlines++;
+            int y = (int)display_height - (int)(display_height / 12) - nlines * lh;
+
+            const char *p2 = line;
+            char row[SUB_ROW_MAX];
+            while (*p2) {
+                const char *nl = strchr(p2, '\n');
+                int len = nl ? (int)(nl - p2) : (int)strlen(p2);
+                if (len > SUB_ROW_MAX - 1) len = SUB_ROW_MAX - 1;
+                memcpy(row, p2, len); row[len] = '\0';
+
+                const int face = subfont_face();
+                const int tw   = ttf_text_width_face(row, (float)px, face);
+                const int x  = (W - tw) / 2;
+                // Outline in every direction.  Film subtitles sit over
+                // whatever happens to be on screen, and white on a bright
+                // scene is unreadable without one; offset draws cost far less
+                // than a shadow texture and need no extra GPU state. The
+                // glyph cache means the repeats are cheap -- each glyph is
+                // rasterized once and blitted nine times.
+                for (int dy = -ow; dy <= ow; dy++)
+                    for (int dx = -ow; dx <= ow; dx++)
+                        if (dx || dy)
+                            drawTTF_face((u32)(x + dx), (u32)(y + dy), row,
+                                         (float)px, outline, face);
+                drawTTF_face((u32)x, (u32)y, row, (float)px, fill, face);
+
+                y += lh;
+                if (!nl) break;
+                p2 = nl + 1;
+            }
+        }
+    }
+
     // HUD overlay.
     // The HUD is composed into a texture and drawn as one alpha-blended GPU
     // quad (hud_draw.cpp): no CPU writes into the framebuffer, so no rsxSync
@@ -364,7 +536,7 @@ void player_display_frame(PlayerState *ps) {
             s64 prev = (s64)hud_elapsed + (s64)ps->seek.pending_secs * 1000000LL;
             hud_elapsed = prev < 0 ? 0 : (u64)prev;
         }
-        hud_draw(hud_elapsed, ps->paused);
+        hud_draw(hud_elapsed, ps->paused, ps->seek.state == SEEK_SCRUB);
         { static int s_hg2 = 0; if (s_hg2 < 12) { plog("hud_gate: draw returned"); s_hg2++; } }
     }
 

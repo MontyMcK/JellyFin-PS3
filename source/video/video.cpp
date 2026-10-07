@@ -64,6 +64,7 @@ static void video_route_audio(int ready, int alen) {
                 s_audio_pes_out[2], s_audio_pes_out[3], alen);
             plog(buf);
         }
+        { extern volatile const char *g_dec_stage; g_dec_stage = "adec_push_pes"; }
         adec_push_pes(s_audio_pes_out, alen);
     }
 }

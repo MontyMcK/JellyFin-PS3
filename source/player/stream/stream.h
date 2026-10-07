@@ -21,14 +21,6 @@ void stream_set_wait_cb(stream_wait_fn cb);
 // Open an HTTP connection to url and read the response headers.
 // Returns a connected socket fd on success, -1 on failure.
 int stream_open(const char *url);
-// Same, with an explicit socket receive buffer in KB (0 = the video default,
-// jellyfin_rcvbuf.txt or 512).  libnet funds every socket's buffers from one
-// 128 KB pool, so a stream that asks for more than the pool can starve every
-// OTHER socket while its buffer sits full -- and a socket the app is not
-// draining (music: the server produces a transcode far faster than real
-// time) sits full permanently.  Streams that do not need the throughput
-// should ask for less and leave the pool for the API calls.
-int stream_open_rcvbuf(const char *url, int rcvbuf_kb);
 
 // Why the last stream_open() failed, in words fit for the error screen
 // ("Server returned HTTP 400", "Could not connect to 192.168.0.5:8096",
@@ -44,8 +36,16 @@ const char *stream_last_error(void);
 //           0 = timed out (call again after checking buttons)
 //          -1 = disconnect or terminal chunk
 int stream_read(int sock, u8 *buf, int size);
+// True when stream_read() has something to return without blocking (see stream.cpp).
+bool stream_readable(int sock, int timeout_ms);
 
 // Cumulative receive stats since process start: bytes delivered by netRecv,
 // microseconds spent blocked inside it, and how many times it was called.
 // The heartbeat diffs these to report throughput and blocked-time share.
 void stream_rx_stats(u64 *bytes, u64 *wait_us, u32 *calls);
+
+// One-line, non-consuming description of the socket for the lifecycle trace
+// (see lclog.h): whether the peer has closed it, whether data is waiting, and
+// what stream_read still holds in its own buffers.  Must not be called while
+// another thread is reading the socket.
+void stream_probe(int sock, char *out, int outsz);

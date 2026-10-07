@@ -70,6 +70,11 @@ typedef struct {
     char studios[256];         // "Universal Pictures, Original Film"
     JFPerson people[JF_MAX_PEOPLE];  // top-billed cast + key crew
     int      n_people;
+    // Episodes: where they live (the details page's "Back to Season" button).
+    char     series_id[64];
+    char     series_name[128];
+    char     season_id[64];
+    int      season_num;             // ParentIndexNumber; -1 unknown, 0 = Specials
 } XMBItemDetail;
 
 bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
@@ -83,7 +88,21 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
 typedef struct {
     int  index;       // Jellyfin MediaStream Index (for AudioStreamIndex= etc.)
     char label[64];   // DisplayTitle, e.g. "English - EAC3 - 5.1 - Default"
+    char codec[16];   // "subrip", "ass", "pgssub" ... -- see jf_sub_is_text()
+    unsigned bitrate; // MediaStream BitRate, bits/s (audio; 0 = not reported).
+                      // Budgeted inside the quality step (stream_budget.h).
 } JFStream;
+
+// Can this subtitle be drawn on the console, or must the server burn it in?
+// Text formats are fetched as SubRip and rendered by player/subtitles.cpp;
+// bitmap ones (PGS, VOBSUB) have no text to fetch and still cost a transcode.
+bool jf_sub_is_text(const char *codec);
+
+// PGS is also drawn on the console now (source/player/subtitles_pgs.h), via
+// the raw .sup elementary stream rather than SubRip -- a separate check from
+// jf_sub_is_text() because the fetch and decode paths are entirely
+// different. VOBSUB ("dvdsub") is neither: still burn-in only.
+bool jf_sub_is_pgs(const char *codec);
 
 typedef struct {
     JFStream audio[JF_MAX_STREAMS];
@@ -101,6 +120,7 @@ typedef struct {
     char     id[96];             // MediaSourceId used by stream.ts
     char     live_stream_id[96]; // populated after opening remote/live sources
     char     label[128];         // MediaSource.Name (HUD display text)
+    char     summary[96];        // "1080p · REMUX · DTS-HD MA 7.1 · 38.8 GB" (api/version_summary.h)
     unsigned runtime_secs;
     JFTracks tracks;
 } JFMediaSource;
@@ -163,6 +183,21 @@ void jellyfin_report_progress(const char *item_id, const char *session_id,
                               unsigned long long pos_ticks, bool paused);
 void jellyfin_report_stopped(const char *item_id, const char *session_id,
                              unsigned long long pos_ticks);
+
+// The same progress report, handed to a worker thread instead of being waited
+// on.  For callers that must not block: the music pump thread (it is the only
+// thing refilling a 683 ms PCM ring) and anything on the render loop.
+//
+// One-slot mailbox -- a report is absolute state, so a newer one replaces an
+// unsent older one rather than queueing behind it.  Call jellyfin_report_flush()
+// before tearing a session down.
+// Call once, from a single-threaded moment, before any async report.  Without
+// it the first report falls back to the blocking path rather than racing two
+// threads through a lazy init.
+void jellyfin_report_init(void);
+void jellyfin_report_progress_async(const char *item_id, const char *session_id,
+                                    unsigned long long pos_ticks, bool paused);
+void jellyfin_report_flush(void);
 
 // Log out of the current session.  Best-effort notifies the server
 // (POST /Sessions/Logout), clears the in-memory credentials, and removes the

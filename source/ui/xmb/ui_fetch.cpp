@@ -182,6 +182,29 @@ void xmb_detect_tabs(void) {
       plog(b); }
 }
 
+// Runs on the boot worker (boot_anim_run) while the main thread only draws,
+// so nothing else is using responseBuffer, g_tabs or the Home rows.  The
+// Home prefetch is skipped when no library came back: that is a server that
+// is not answering, and five more requests at up to 29 s each would hold the
+// boot for minutes.  The XMB then loads the rows itself, as it always did,
+// and its background detect_tabs retry takes over.
+static volatile bool s_prepared = false;
+
+void xmb_prepare(void) {
+    xmb_detect_tabs();
+    bool have_lib = false;
+    for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
+        if (g_tabs[t].enabled) { have_lib = true; break; }
+    if (have_lib) xmb_home_prefetch();
+    s_prepared = true;
+}
+
+bool xmb_take_prepared(void) {
+    bool p = s_prepared;
+    s_prepared = false;
+    return p;
+}
+
 static void xmb_build_items_url(char *url, int url_size, int tab,
                                   int start_index, int limit) {
     const char *filt = g_tab_name_filter[tab];
@@ -259,7 +282,7 @@ static void xmb_build_items_url(char *url, int url_size, int tab,
     snprintf(url, url_size,
         "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
         "&SortBy=SortName&SortOrder=Ascending%s"
-        "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Container,Tags",
         g_server, g_userid, lid, start_index, limit, name_filt);
 }
 
@@ -276,7 +299,7 @@ void xmb_fetch_tab_items(int tab) {
         snprintf(url, sizeof(url),
             "%s/Users/%s/Items/Resume?Limit=%d&Recursive=true"
             "&MediaTypes=Video"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
+            "&Fields=Genres,RunTimeTicks,ProductionYear,Container,Tags",
             g_server, g_userid, XMB_ITEMS_MAX);
         int status = http_request(0, url, NULL, g_token,
                                   responseBuffer, RESPONSE_SIZE);
@@ -309,7 +332,7 @@ int xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
     char url[512];
     snprintf(url, sizeof(url),
         "%s/Shows/%s/Seasons?userId=%s&StartIndex=%d&Limit=%d"
-        "&Fields=ProductionYear,RunTimeTicks",
+        "&Fields=ProductionYear,RunTimeTicks,Tags",
         g_server, series_id, g_userid, start_index, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;
@@ -327,7 +350,7 @@ int xmb_fetch_episodes(const char *series_id, const char *season_id,
     snprintf(url, sizeof(url),
         "%s/Shows/%s/Episodes?seasonId=%s&userId=%s"
         "&StartIndex=%d&Limit=%d"
-        "&Fields=ProductionYear,RunTimeTicks,Genres,Container",
+        "&Fields=ProductionYear,RunTimeTicks,Genres,Container,Tags",
         g_server, series_id, season_id, g_userid, start_index, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;
@@ -358,7 +381,7 @@ bool xmb_fetch_next_episode(const char *episode_id, XMBItem *out) {
 
     snprintf(url, sizeof(url),
         "%s/Shows/%s/Episodes?userId=%s&StartItemId=%s&Limit=2"
-        "&Fields=ProductionYear,RunTimeTicks,Genres,Container",
+        "&Fields=ProductionYear,RunTimeTicks,Genres,Container,Tags",
         g_server, series_id, g_userid, episode_id);
     status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return false;
@@ -400,7 +423,7 @@ int xmb_fetch_playlist_items(const char *playlist_id, XMBItem *arr, int max,
     char url[512];
     snprintf(url, sizeof(url),
         "%s/Playlists/%s/Items?userId=%s&StartIndex=0&Limit=%d"
-        "&Fields=Genres,RunTimeTicks,ProductionYear",
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Tags",
         g_server, playlist_id, g_userid, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;
@@ -417,7 +440,7 @@ int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, int max,
     snprintf(url, sizeof(url),
         "%s/Users/%s/Items?ParentId=%s"
         "&StartIndex=%d&Limit=%d"
-        "&Fields=Genres,RunTimeTicks,ProductionYear,Container"
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Container,Tags"
         "&SortBy=SortName&SortOrder=Ascending",
         g_server, g_userid, collection_id, start_index, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
@@ -435,7 +458,7 @@ int xmb_fetch_similar(const char *item_id, XMBItem *arr, int max) {
     char url[512];
     snprintf(url, sizeof(url),
         "%s/Items/%s/Similar?userId=%s&limit=%d"
-        "&Fields=Genres,RunTimeTicks,ProductionYear",
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Tags",
         g_server, item_id, g_userid, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;

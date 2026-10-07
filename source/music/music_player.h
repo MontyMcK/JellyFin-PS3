@@ -34,6 +34,8 @@ bool music_start(const MusicTrack *tracks, int count, int start_idx);
 // Stop playback and tear everything down (joins threads, closes the audio
 // port, restores the video pipeline's PCM source).  Safe to call twice.
 void music_stop(void);
+// Join a music stream thread left finishing by music_stop(), if any.
+void music_join_stale(void);
 
 // ---- controls (UI thread, non-blocking) ----
 void music_toggle_pause(void);

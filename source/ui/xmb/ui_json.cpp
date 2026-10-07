@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "ui_internal.h"
+#include "json_unescape.h"   // \u0027 & co. -> UTF-8
 
 int xmb_json_str_range(const char *start, int len,
                         const char *key, char *out, int out_size) {
@@ -15,12 +16,45 @@ int xmb_json_str_range(const char *start, int len,
     while (p + slen <= end) {
         if (memcmp(p, search, slen) == 0) {
             p += slen;
-            int i = 0;
-            while (p < end && *p != '"' && i < out_size-1) out[i++] = *p++;
-            out[i] = '\0';
+            json_unescape(p, end, out, out_size);
             return 1;
         }
         p++;
+    }
+    out[0] = '\0';
+    return 0;
+}
+
+// As xmb_json_str_range, but only the object's OWN key (depth 1 of the
+// object at start), never one inside a nested object or array.  A search
+// reply carries each title's MediaSources inline, and their streams'
+// "Type":"Video" came before the title's "Type":"Movie" -- so a film found by
+// search read as a "Video" and its details page never offered versions
+// (2026-09-27).
+static int xmb_json_top_str_range(const char *start, int len,
+                                  const char *key, char *out, int out_size) {
+    char search[64];
+    snprintf(search, sizeof(search), "\"%s\":\"", key);
+    const int slen = strlen(search);
+    const char *p = start, *end = start + len;
+    int depth = 0;
+    bool in_str = false, esc = false;
+    for (; p < end; p++) {
+        const char c = *p;
+        if (in_str) {
+            if (esc) esc = false;
+            else if (c == '\\') esc = true;
+            else if (c == '"') in_str = false;
+            continue;
+        }
+        if (c == '{' || c == '[') { depth++; continue; }
+        if (c == '}' || c == ']') { depth--; continue; }
+        if (c != '"') continue;
+        if (depth == 1 && p + slen <= end && memcmp(p, search, slen) == 0) {
+            json_unescape(p + slen, end, out, out_size);
+            return 1;
+        }
+        in_str = true;
     }
     out[0] = '\0';
     return 0;
@@ -73,9 +107,7 @@ int xmb_json_first_arr_str(const char *start, int len,
     while (p + slen <= end) {
         if (memcmp(p, search, slen) == 0) {
             p += slen;
-            int i = 0;
-            while (p < end && *p != '"' && i < out_size-1) out[i++] = *p++;
-            out[i] = '\0';
+            json_unescape(p, end, out, out_size);
             return 1;
         }
         p++;
@@ -84,7 +116,33 @@ int xmb_json_first_arr_str(const char *start, int len,
     return 0;
 }
 
+// Gelato's per-stream items.  When Gelato (the debrid plugin feeding this
+// server's libraries) syncs a title's streams -- which it does the moment the
+// title is opened, taking 6-8 s -- it creates one hidden-ish item PER STREAM
+// (16 for a film), tagged "gelato-stream", with the film's own name, poster
+// and provider ids and a null DateCreated.  For a while they list as ordinary
+// children of the library, so the Movies grid showed a recently opened film
+// sixteen times over, and every copy failed to play (PlaybackInfo on a stream
+// item hits Gelato's .strm-path bug: HTTP 500).  They are never something to
+// browse: the title's own item carries every stream as a version.  So they
+// are dropped here, for every list -- which is why the listing queries ask
+// for Tags.  Bounded search; the object is not NUL-terminated at olen.
+static bool is_gelato_stream(const char *obj, int olen) {
+    static const char pat[] = "\"gelato-stream\"";
+    const int n = (int)sizeof(pat) - 1;
+    for (int i = 0; i + n <= olen; i++)
+        if (obj[i] == '"' && memcmp(obj + i, pat, (size_t)n) == 0) return true;
+    return false;
+}
+static unsigned s_gelato_dropped = 0;
+unsigned xmb_gelato_streams_dropped(void) { return s_gelato_dropped; }
+
 int parse_xmb_items(const char *json, XMBItem *arr, int max) {
+    return parse_xmb_items_each(json, arr, max, NULL, NULL);
+}
+
+int parse_xmb_items_each(const char *json, XMBItem *arr, int max,
+                         XMBItemEach each, void *ctx) {
     const char *p = strstr(json, "\"Items\":[");
     if (!p) return 0;
     p += 9;
@@ -106,10 +164,13 @@ int parse_xmb_items(const char *json, XMBItem *arr, int max) {
         }
         int olen = (int)(p - obj);
 
+        if (is_gelato_stream(obj, olen)) { s_gelato_dropped++; continue; }
+
         XMBItem it; memset(&it, 0, sizeof(it));
         xmb_json_str_range(obj, olen, "Id",   it.id,   sizeof(it.id));
         xmb_json_str_range(obj, olen, "Name", it.name, sizeof(it.name));
-        xmb_json_str_range(obj, olen, "Type", it.type, sizeof(it.type));
+        if (!xmb_json_top_str_range(obj, olen, "Type", it.type, sizeof(it.type)))
+            xmb_json_str_range(obj, olen, "Type", it.type, sizeof(it.type));
         if (!it.id[0]) continue;
 
         // ImageTags carries a "Thumb" only when the item really has wide banner
@@ -187,6 +248,7 @@ int parse_xmb_items(const char *json, XMBItem *arr, int max) {
         decode_unicode_escapes(it.name);
         decode_unicode_escapes(it.genre);
         decode_unicode_escapes(it.artist);
+        if (each) each(count, obj, olen, ctx);
         arr[count++] = it;
     }
     return count;

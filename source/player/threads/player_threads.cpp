@@ -21,6 +21,7 @@
 #include "player_internal.h"
 #include "player_stats.h"
 #include "jellyfin_api.h"
+#include "lclog.h"
 
 extern u32 running;
 
@@ -34,7 +35,7 @@ extern u32 running;
 // The decode thread used to stop reading the socket entirely whenever the
 // jitter buffer was full:
 //
-//     if (jbuf_used() >= jbuf_cap()) { usleep(1000); continue; }
+//     if (jbuf_count() >= jbuf_cap()) { usleep(1000); continue; }
 //
 // That made the decoded-frame jitter buffer the ONLY shock absorber, and at
 // 1080p it holds sixteen frames — about half a second.  A server transcoding
@@ -131,7 +132,7 @@ bool player_spawn_decode(PlayerState *ps) {
     int trc = sysThreadCreate(&ps->dec_tid, decode_thread_fn,
                               (void *)&ps->dec_ctx,
                               800, 128 * 1024,
-                              0, "jf_decode");
+                              THREAD_JOINABLE, "jf_decode");
     if (trc != 0) {
         char buf[64];
         snprintf(buf, sizeof(buf), "player: dec thread_create FAILED rc=%d", trc);
@@ -146,6 +147,10 @@ bool player_spawn_decode(PlayerState *ps) {
 // Decode thread  (Steps 2, 5c, 8b)
 // -------------------------------------------------------
 
+// Where the decode thread is, for the watchdog in progress_thread_fn.
+volatile const char *g_dec_stage = "start";
+volatile u32         g_dec_iter  = 0;
+
 void decode_thread_fn(void *arg) {
     DecodeCtx     *ctx         = (DecodeCtx*)arg;
     volatile bool *playing     = ctx->playing;
@@ -159,17 +164,30 @@ void decode_thread_fn(void *arg) {
     long stall_ep_dur_total_us = 0;
     u64  hb_last_us            = timing_get_us();
     int  hb_fr_last            = 0;
+    bool lc_got_pkt            = false;
+    u64  lc_zero_since_us      = 0;     // first rd==0 of the current quiet spell
+    u64  lc_zero_next_us       = 0;
+
+    lc_logf("decode: thread running playing=%d", (int)*playing);
 
     while (running && *playing && *ctx->dec_run && !s_vdec_error) {
-        // "Room" is measured with jbuf_used(), not jbuf_count(): frames the
-        // reorder hold is still sorting own slots too, and testing only the
-        // displayable count would keep feeding the decoder into a buffer
-        // with nowhere to put the picture.
+        g_dec_iter++;
+        g_dec_stage = "ring_feed";
         // Buffered video first, in arrival order, while there is room for it.
-        while (s_ring_n > 0 && jbuf_used() < jbuf_cap()) {
+        // Decoded pictures are collected AS it feeds (2026-09-27).  They used
+        // to be pulled only after this loop, and the loop only stops once the
+        // jitter buffer is full -- which only pulling fills.  With a full ring
+        // (the start of every film, after the 24p switch, and after any
+        // stall) it fed seconds of video into a decoder nobody was emptying:
+        // each AU waited on the decoder, the picture ran dry while the sound
+        // played on, and 1:1 then dropped frames to catch up.
+        while (s_ring_n > 0 && jbuf_count() < jbuf_cap()) {
             video_feed_ts(s_ring + (size_t)s_ring_rd * TS_PACKET_SIZE);
             s_ring_rd = (s_ring_rd + 1) % s_ring_cap;
             s_ring_n--;
+            while (s_frames_ready > 0 && jbuf_count() < jbuf_cap()) {
+                if (!vdec_pull_frame()) break;
+            }
         }
 
         // Keep reading until the RING is full, not just until the jitter
@@ -185,7 +203,7 @@ void decode_thread_fn(void *arg) {
         // audio has to fit in the compressed-audio queue: overrun it and the
         // oldest PES is dropped, which is heard as a jump.  So the reserve is
         // whichever of the two runs out first.
-        const bool jbuf_full = jbuf_used() >= jbuf_cap();
+        const bool jbuf_full = jbuf_count() >= jbuf_cap();
         const bool ring_full = (s_ring_cap == 0) || (s_ring_n >= s_ring_cap);
         if (jbuf_full && (ring_full || !adec_pes_queue_hungry())) {
             usleep(1000);
@@ -195,18 +213,50 @@ void decode_thread_fn(void *arg) {
         for (int batch = 0; batch < 128; batch++) {
             // Stop the batch when neither the jitter buffer nor the ring can
             // take any more.
-            if (jbuf_used() >= jbuf_cap() &&
+            if (jbuf_count() >= jbuf_cap() &&
                 (s_ring_cap == 0 || s_ring_n >= s_ring_cap ||
                  !adec_pes_queue_hungry()))
                 break;
 
+            // Nothing waiting on the socket: go back and feed the ring and
+            // pull frames instead of blocking here.  The watchdog caught this
+            // loop 16 s inside stream_read with 100k packets queued in the
+            // ring and an empty jitter buffer (24p output, 2026-09-27): the
+            // server pauses its transcode when the client is far ahead.
+            g_dec_stage = "poll";
+            if (!stream_readable(ctx->sock, 2)) { g_dec_iter++; break; }
+            g_dec_stage = "stream_read";
             int rd = stream_read(ctx->sock, ts_pkt, TS_PACKET_SIZE);
+            g_dec_stage = "batch";
+            g_dec_iter++;
             if (rd < 0) {
                 plog("playing=0 reason=stream_eof");
+                lc_logf("decode: stream_read FAILED -> playing=0 (got_any_pkt=%d)",
+                        (int)lc_got_pkt);
                 *ctx->playing = false;
                 break;
             }
-            if (rd == 0) { usleep(1000); continue; }
+            if (rd == 0) {
+                // Quiet socket: the stream is alive but nothing is arriving.
+                // Logged once per second of silence, so a server that stopped
+                // sending (A) is told apart from one that closed (E).
+                const u64 now = timing_get_us();
+                if (!lc_zero_since_us) {
+                    lc_zero_since_us = now;
+                    lc_zero_next_us  = now + 1000000ULL;
+                } else if (now >= lc_zero_next_us) {
+                    lc_logf("decode: no data for %llums (socket open)",
+                            (unsigned long long)((now - lc_zero_since_us) / 1000ULL));
+                    lc_zero_next_us += 1000000ULL;
+                }
+                usleep(1000);
+                continue;
+            }
+            lc_zero_since_us = 0;
+            if (!lc_got_pkt) {
+                lc_got_pkt = true;
+                lc_logf("decode: first packet after spawn");
+            }
 
             if (in_stall) {
                 in_stall = false;
@@ -219,7 +269,7 @@ void decode_thread_fn(void *arg) {
             // Keep the buffered video moving as soon as room appears.  This
             // has to happen inside the batch, not just once per outer
             // iteration: the jitter buffer drains mid-batch.
-            while (s_ring_n > 0 && jbuf_used() < jbuf_cap()) {
+            while (s_ring_n > 0 && jbuf_count() < jbuf_cap()) {
                 video_feed_ts(s_ring + (size_t)s_ring_rd * TS_PACKET_SIZE);
                 s_ring_rd = (s_ring_rd + 1) % s_ring_cap;
                 s_ring_n--;
@@ -232,16 +282,18 @@ void decode_thread_fn(void *arg) {
             // PES wrong — which looks like constant macroblock artifacts
             // rather than like a queueing bug.  A packet only goes straight
             // through when the ring is empty.
-            if (s_ring_n == 0 && jbuf_used() < jbuf_cap()) {
+            if (s_ring_n == 0 && jbuf_count() < jbuf_cap()) {
+                g_dec_stage = "feed_ts";
                 video_feed_ts(ts_pkt);          // normal path, unchanged
-            } else if (!video_feed_ts_audio_only(ts_pkt)) {
+            } else if (g_dec_stage = "feed_audio_only", !video_feed_ts_audio_only(ts_pkt)) {
                 if (s_ring_cap > 0 && s_ring_n < s_ring_cap) ring_push(ts_pkt);
                 else                                         break;
             }
         }
 
         // Drain all decoded frames from VDEC into the jitter buffer
-        while (s_frames_ready > 0 && jbuf_used() < jbuf_cap()) {
+        g_dec_stage = "pull_frame";
+        while (s_frames_ready > 0 && jbuf_count() < jbuf_cap()) {
             if (!vdec_pull_frame()) break;
         }
 
@@ -350,6 +402,8 @@ void decode_thread_fn(void *arg) {
         }
     }
 
+    lc_logf("decode: thread exit running=%u playing=%d dec_run=%d vdec_err=%d",
+            running, (int)*playing, (int)*ctx->dec_run, (int)s_vdec_error);
     sysThreadExit(0);
 }
 
@@ -362,8 +416,11 @@ void audio_thread_fn(void *arg) {
     volatile bool *playing = ctx->playing;
     volatile bool *paused  = ctx->paused;
 
+    bool was_paused = false;
     while (running && *playing) {
-        if (*paused || !audio_write_pcm())
+        const bool p = *paused;
+        if (p != was_paused) { audio_pause_output(p); was_paused = p; }
+        if (p || !audio_write_pcm())
             usleep(1000);
     }
 
@@ -375,20 +432,45 @@ void audio_thread_fn(void *arg) {
 // Progress reporter — POST position to Jellyfin every ~10 s
 // -------------------------------------------------------
 
+ProgressShared g_prog;
+
 void progress_thread_fn(void *arg) {
-    PlayerState *ps = (PlayerState*)arg;
+    const u32 gen = (u32)(uintptr_t)arg;
+    char item[64], sess[64];
+    #define PROG_LIVE() (running && g_prog.gen == gen && g_prog.playing)
+
+    // The start report, off the display thread (see show_player).
+    snprintf(item, sizeof item, "%s", g_prog.item);
+    snprintf(sess, sizeof sess, "%s", g_prog.sess);
+    if (PROG_LIVE()) jellyfin_report_playing(item, sess, g_prog.base_us * 10ULL);
 
     int tick = 0;
-    while (running && ps->playing) {
+    u32 wd_iter = g_dec_iter;
+    int wd_still = 0;
+    while (PROG_LIVE()) {
         usleep(250000);              // 250 ms granularity for a quick exit
+        if (!PROG_LIVE()) break;
+        // Decode-thread watchdog: no progress for 2 s -> say where it is.
+        if (!g_prog.paused && g_prog.pos_valid) {
+            const u32 it = g_dec_iter;
+            if (it == wd_iter) {
+                if (++wd_still % 8 == 0) {
+                    char b[128];
+                    snprintf(b, sizeof b, "decode WATCHDOG: stuck %d ms in '%s' jbuf=%d ring=%d frames_ready=%d",
+                             wd_still * 250, (const char *)g_dec_stage, jbuf_count(), s_ring_n,
+                             (int)s_frames_ready);
+                    plog(b);
+                }
+            } else { wd_iter = it; wd_still = 0; }
+        }
         if (++tick < 40) continue;   // report every ~10 s
         tick = 0;
-        if (!ps->playing) break;
-        if (!ps->dec_tid) continue;  // mid-seek flush: position unstable
-        u64 pos_ticks = (ps->play_base_us + audio_get_clock_us()) * 10ULL;
-        jellyfin_report_progress(ps->item->id, ps->session_id,
-                                 pos_ticks, ps->paused);
+        if (!g_prog.pos_valid) continue;  // mid-seek flush: position unstable
+        u64 pos_ticks = (g_prog.base_us + audio_get_clock_us()) * 10ULL;
+        snprintf(sess, sizeof sess, "%s", g_prog.sess);   // re-minted per seek
+        jellyfin_report_progress(item, sess, pos_ticks, g_prog.paused);
     }
+    #undef PROG_LIVE
 
     sysThreadExit(0);
 }

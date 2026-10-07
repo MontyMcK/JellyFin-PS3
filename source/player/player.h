@@ -19,4 +19,12 @@ void show_player(const JFItem *item, u32 resume_secs = 0,
 // The armed state is consumed by the next show_player() call;
 // player_take_next_request() returns and clears the flag.
 void player_arm_next(const char *label, const char *hint);
+
+// Episode chains (2026-09-26): what the last playback used, so the next
+// episode keeps the same audio LANGUAGE and a matching version.
+// player_chain_begin() clears it; each show_player() records into it and, if
+// a chain is running, prefers the recorded language over the server default.
+void        player_chain_begin(void);
+void        player_chain_end(void);
+const char *player_chain_source_label(void);   // "" when none
 bool player_take_next_request(void);

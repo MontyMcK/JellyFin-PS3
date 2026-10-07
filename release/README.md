@@ -2,8 +2,10 @@
 
 **[⬇ Download the latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)** — the recommended link.
 
-Direct file: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/download/v1.0/JellyFin-PS3.pkg). This folder mirrors it so the
-repo always carries an installable build alongside the source it was made from.
+Direct file: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest/download/JellyFin-PS3.pkg)
+— that link always resolves to the current release, so it cannot go stale the
+way a version-pinned one does. This folder mirrors the same build, so the repo
+always carries an installable package alongside the source it was made from.
 
 ## Install
 
@@ -27,6 +29,10 @@ Two settings do almost all the work:
 | **Quality** | Triangle on a title → Quality row | **Max** |
 | **Audio Output** | Settings → Audio Output | **5.1** |
 
+The Quality row runs **360p → 480p → 720p → High** (10 Mbps) **→ Very High**
+(20) **→ Max** (25), with the bitrate shown beside each name. Your choice is
+remembered per title, so a heavy remux and a light episode each keep their own.
+
 **Audio Output** is Stereo / 5.1 / 7.1. 7.1 only appears if your receiver
 actually accepts eight channels of LPCM — most soundbars cap at six, and the
 app asks yours rather than guessing.
@@ -43,12 +49,17 @@ compression, so dialogue can sit well below effects on a compact system.
 
 For actual multichannel output the PS3 itself must also be told your setup can
 take it: *Settings → Sound Settings → Audio Output Settings → HDMI → Manual*,
-then tick **Dolby Digital 5.1 Ch** and **Linear PCM 5.1 Ch** (and 7.1 if your
-receiver does 7.1).
+then tick **Linear PCM 5.1 Ch** (and 7.1 if your receiver does 7.1).
+
+Tick **Dolby Digital 5.1 Ch** as well even though nothing here sends Dolby
+Digital. The centre-channel fix works by asking the console to treat the output
+as 5.1, and it can only ask in a form the chain has said it accepts — the audio
+that actually goes down the cable stays uncompressed LPCM either way.
 
 Stuttering? Drop to **Very High** before changing anything else. The console
-can only pull about 20-25 Mbps over HTTP, which is why **Max** stops at 25 —
-see the main [README](../README.md#recommended-settings) for the measurements.
+can only receive about 25 Mbps sustained, which is why **Max** stops there —
+see the main [README](../README.md#recommended-settings) for the measurements,
+including why asking for 30 actually delivers *less*.
 
 ## Verifying the download
 

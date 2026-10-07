@@ -79,6 +79,10 @@ static void plog_thread_fn(void *arg) {
 
 void plog_start(void) {
     if (s_plog_running) return;
+    // Keep the last run's log: a session that ended in a black screen or a
+    // hard power-off is exactly the one worth reading, and "w" wiped it.
+    remove("/dev_hdd0/tmp/player_log.prev.txt");
+    rename("/dev_hdd0/tmp/player_log.txt", "/dev_hdd0/tmp/player_log.prev.txt");
     s_plog_file    = fopen("/dev_hdd0/tmp/player_log.txt", "w");
     s_plog_running = true;
     sysThreadCreate(&s_plog_tid, plog_thread_fn, NULL,

@@ -29,6 +29,13 @@ extern u32 depth_offset;
 void setRenderTarget(u32 index);
 void init_screen(void *host_addr,u32 size);
 void waitflip();
+// waitflip() with a deadline: false if the flip did not complete in time
+// (the display head is not delivering vblanks).  Never blocks past it.
+bool waitflip_timeout(u32 timeout_us);
+// Re-register the two scan-out buffers and flip mode exactly as
+// init_screen() did after its videoConfigure().  For use after a display
+// mode change, which may drop the registration.
+void rsx_rebind_display(void);
 void flip();
 void rsxSync(void); // flush + stall until RSX has finished all queued commands
 

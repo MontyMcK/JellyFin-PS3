@@ -6,6 +6,7 @@
 #include "ui.h"
 #include "ui_visuals.h"
 #include "ui_wave.h"
+#include "ui_card_gpu.h"
 
 extern void crash_log(const char *msg);
 
@@ -20,8 +21,12 @@ void ui_init(void) {
     setRenderTarget(curr_fb);
     crash_log("6.3 ttf_init");
     ttf_init();
-    crash_log("6.4 wave_init");
-    wave_init();
+    // wave_init() deliberately NOT called here -- see main.cpp.  It reads a
+    // gate file and reports which submission path is live, and from here that
+    // line was written before plog_load_setting() had opened the log, so it
+    // was silently discarded.  ui_card_gpu_init() and ui_text_gpu_init() were
+    // moved out for the same reason; this one followed them after a measured
+    // session was spent reading crash_log breadcrumbs instead of the log.
     crash_log("6.5 ui_init done");
 }
 

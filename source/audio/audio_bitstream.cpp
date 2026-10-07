@@ -129,11 +129,96 @@ static u8 coding_for(int mode)
 	}
 }
 
+// CRASH-SAFE.  The output configuration is a CONSOLE-WIDE setting that
+// outlives this process.  2026-09-25: the app died with it changed (the
+// paced-writer hang), audio_bitstream_end() never ran, and the console was
+// left on AC-3 at 2 channels -- silent menus, silent music, in every later
+// session, because each one read that broken state as "what it was before"
+// and faithfully restored it.  So the state we change FROM is journalled to
+// a file before the change and the file removed after the restore; a launch
+// that finds the file knows the last session died mid-change and puts the
+// journalled state back (audio_bitstream_recover()).
+#define JOURNAL_FILE "jellyfin_audioout.txt"
+
+static void journal_write(void)
+{
+	FILE *f = fopen(jf_data_path(JOURNAL_FILE), "w");
+	if (!f) return;
+	fprintf(f, "%u %u %u\n", (unsigned)s_saved_encoder, (unsigned)s_saved_channel,
+	        (unsigned)s_saved_downmix);
+	fclose(f);
+}
+
+static void journal_clear(void)
+{
+	remove(jf_data_path(JOURNAL_FILE));
+}
+
+static s32 configure_lpcm(u8 ch, u32 downmix)
+{
+	audioOutConfiguration c;
+	memset(&c, 0, sizeof(c));
+	c.channel   = ch;
+	c.encoder   = AUDIO_OUT_CODING_LPCM;
+	c.downMixer = downmix;
+	return audioOutConfigure(AUDIO_OUT_PRIMARY, &c, NULL, 1);
+}
+
+void audio_bitstream_recover(void)
+{
+	char b[160];
+	unsigned enc = 0, ch = 0, dm = 0;
+	FILE *f = fopen(jf_data_path(JOURNAL_FILE), "r");
+	if (f) {
+		const int got = fscanf(f, "%u %u %u", &enc, &ch, &dm);
+		fclose(f);
+		if (got == 3) {
+			audioOutConfiguration back;
+			memset(&back, 0, sizeof(back));
+			back.encoder   = (u8)enc;
+			back.channel   = (u8)(ch ? ch : 8);
+			back.downMixer = dm;
+			const s32 rc = audioOutConfigure(AUDIO_OUT_PRIMARY, &back, NULL, 1);
+			snprintf(b, sizeof(b), "bitstream: last session died mid-change -- "
+			         "restored encoder=%u ch=%u rc=%d", enc, ch, (int)rc);
+			plog(b);
+		}
+		journal_clear();
+		return;
+	}
+	// No journal, but the output is on a compressed coding anyway: the
+	// session that set it predates the journal (the 2026-09-25 case).  Put it
+	// back on LPCM, as wide as the chain accepts.
+	{
+		audioOutConfiguration cur;
+		memset(&cur, 0, sizeof(cur));
+		if (audioOutGetConfiguration(AUDIO_OUT_PRIMARY, &cur, NULL) != 0) return;
+		if (cur.encoder == AUDIO_OUT_CODING_LPCM) return;
+		static const u8 WIDTHS[3] = { 8, 6, 2 };
+		s32 rc = -1;
+		unsigned used = 0;
+		for (int i = 0; i < 3 && rc != 0; i++) {
+			rc = configure_lpcm(WIDTHS[i], AUDIO_OUT_DOWNMIXER_NONE);
+			used = WIDTHS[i];
+		}
+		snprintf(b, sizeof(b), "bitstream: output was left on encoder=%u ch=%u -- "
+		         "reset to LPCM ch=%u rc=%d", (unsigned)cur.encoder,
+		         (unsigned)cur.channel, used, (int)rc);
+		plog(b);
+	}
+}
+
 void audio_bitstream_begin(int port_channels)
 {
 	const int mode = bitstream_mode();
 	if (mode == BITSTREAM_OFF) return;
 	if (s_engaged) return;
+	// Only for a multichannel program.  The routing fix exists for a 5.1
+	// centre channel; a stereo port (music, stereo video) has none, and the
+	// reconfigure itself is not free: the TV or receiver drops and re-locks
+	// the HDMI audio on every change, which is the silent first seconds of
+	// every music session.
+	if (port_channels < 6) return;
 
 	// Remember exactly what we are changing, so the revert is a restore of the
 	// real previous state rather than an assumption about what it was.
@@ -146,6 +231,7 @@ void audio_bitstream_begin(int port_channels)
 	s_saved_encoder = cur.encoder;
 	s_saved_channel = cur.channel;
 	s_saved_downmix = cur.downMixer;
+	journal_write();          // before the change, so a crash can undo it
 
 	char b[144];
 	snprintf(b, sizeof(b), "bitstream: requesting %s (was encoder=%u ch=%u)",
@@ -290,6 +376,7 @@ void audio_bitstream_end(void)
 	// off switch still makes one.
 	if (!s_applied) {
 		s_engaged = false;
+		journal_clear();
 		return;
 	}
 
@@ -307,6 +394,28 @@ void audio_bitstream_end(void)
 	}
 	s_engaged = false;
 	s_applied = false;
+	journal_clear();
+}
+
+void audio_bitstream_reassert(const char *why)
+{
+	if (!s_applied) return;
+	const int mode = bitstream_mode();
+	if (mode == BITSTREAM_OFF) return;
+	audioOutConfiguration want;
+	memset(&want, 0, sizeof(want));
+	want.channel   = 6;
+	want.encoder   = coding_for(mode);
+	want.downMixer = AUDIO_OUT_DOWNMIXER_NONE;
+	const s32 rc = audioOutConfigure(AUDIO_OUT_PRIMARY, &want, NULL, 1);
+	audioOutState st;
+	memset(&st, 0, sizeof(st));
+	audioOutGetState(AUDIO_OUT_PRIMARY, 0, &st);
+	char b[128];
+	snprintf(b, sizeof(b), "bitstream: re-asserted after %s rc=%d -> wire type=%u ch=%u",
+	         why ? why : "?", (int)rc, (unsigned)st.soundMode.type,
+	         (unsigned)st.soundMode.channel);
+	plog(b);
 }
 
 bool audio_bitstream_engaged(void) { return s_engaged; }

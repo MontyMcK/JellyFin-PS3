@@ -32,7 +32,23 @@ void audio_thread_fn(void *arg);
 void upload_thread_fn(void *arg);
 
 // Playback-state reporter — posts position to Jellyfin every ~10 s so the
-// server's Continue Watching list tracks PS3 playback.  arg = PlayerState*.
+// server's Continue Watching list tracks PS3 playback.
+//
+// It is detached and a report can block for up to ~24 s, so it may outlive
+// show_player().  It therefore reads only g_prog -- static storage the
+// display loop keeps current -- never the PlayerState on show_player's stack.
+// arg = the g_prog.gen it was started for; a new playback bumps gen and an
+// old thread still finishing a report then exits instead of reporting on.
+struct ProgressShared {
+    volatile u32  gen;
+    volatile bool playing;
+    volatile bool paused;
+    volatile bool pos_valid;    // false mid-seek: the position is unstable
+    volatile u64  base_us;      // PlayerState.play_base_us
+    char          item[64];
+    char          sess[64];
+};
+extern ProgressShared g_prog;
 void progress_thread_fn(void *arg);
 
 // -------------------------------------------------------
@@ -71,6 +87,15 @@ struct PlayerState {
     bool     have_tracks;
     int      cur_audio;
     int      cur_sub;
+    // True when cur_sub names a TEXT track this app draws itself rather than
+    // one the server has to burn in.  Decided from the stream's Codec at
+    // selection time; see build_stream_url() for why it changes the URL.
+    bool     sub_is_text;
+    // Same idea for a PGS bitmap track drawn on-device (subtitles_pgs.h) --
+    // a separate flag rather than folding into sub_is_text because the
+    // fetch/decode/draw paths are entirely different, but build_stream_url()
+    // treats both identically: either one means "do not ask for burn-in".
+    bool     sub_is_pgs;
     int      menu_kind;          // PLAYER_MENU_*
 
     // The version chosen before playback.  Only the active source is retained;
@@ -136,6 +161,24 @@ void player_prefill(PlayerState *ps, bool fatal_on_eof, int guard_max);
 // reopen, otherwise HUD_ACTION_NONE (or act unchanged if not menu-related).
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act);
 
+// Remembered audio/subtitle track choice, for the rest of this app run (not
+// persisted to disk -- a binge session is the whole point; surviving a
+// relaunch is not). Matched by exact JFTracks label rather than index or
+// language, because Jellyfin's DisplayTitle is stable across episodes of the
+// same show while stream indices are not, and a fuzzy match risks silently
+// landing on the wrong track. Only ever set from a track the user actually
+// picked (see player_menu.cpp), so applying it can never surprise the user
+// with a track they did not choose themselves at some point this session.
+void track_pref_note_audio(const JFStream *s);
+void track_pref_note_sub(const JFStream *s);   // NULL = "subtitles off"
+
+// Index into tracks->audio[]/subs[] matching the remembered preference, or
+// -1 if there is none yet or nothing in this title matches. The subtitle
+// match additionally requires a TEXT codec (jf_sub_is_text) -- a remembered
+// preference must never silently trigger the burn-in transcode path.
+int  track_pref_find_audio(const JFTracks *tracks);
+int  track_pref_find_sub(const JFTracks *tracks);
+
 // -------------------------------------------------------
 // core/player_seek.cpp — seek input machine + seek execution
 // -------------------------------------------------------
@@ -191,3 +234,7 @@ extern volatile bool  s_vid_b_present;
 void vid_gpu_init(u32 fw, u32 fh);
 void vid_gpu_free(void);
 void vid_gpu_draw(bool render_blend, float blend_factor, u32 fw, u32 fh);
+// The loading spinner over the video (player.cpp), GPU phase; and the seek
+// reopen's stream_open wait callback that draws it (Circle cancels).
+void player_spinner_gpu(float t);
+bool player_seek_wait(unsigned elapsed_ms);

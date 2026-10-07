@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+"""Generate source/ui/render/jd_bell_geom.h -- the JellyDrop ring.
+
+A straight port of design-import-jellydrop/drop/jd-logo.js: the Jellyfin bell
+(the lockup path in JFChrome.dc.html, 72x72 viewBox, evenodd outer bell + inner
+hole), its ring centreline, half-width and radial frame found by casting rays
+from C0 = (36, 44) against both contours, resampled by arc length into
+JW_STATIONS stations round the WHOLE bell (the design's 'full' segment, seam at
+the lower-left corner) and softened by six closed-loop Laplacian passes.
+
+Local frame, as the design's: X = x - 36, Y = 38 - y (y up).
+
+Run from the repo root:  python3 tools/gen_jd_bell.py > source/ui/render/jd_bell_geom.h
+"""
+import math
+
+N = 80            # JW_STATIONS -- the ring uses the wave's own station count
+HOLE_K = 24       # points round the core
+
+OUTER = [(0.481861, 64.9951),
+         ((-4.19479, 55.6047), (26.4765, 0), (36, 0)),
+         ((45.5328, 0), (76.153, 55.713), (71.5274, 64.9951)),
+         ((66.9018, 74.2773), (5.15852, 74.3856), (0.481861, 64.9951))]
+HOLE = [(12.7358, 56.847),
+        ((15.8005, 62.9995), (56.2536, 62.9314), (59.2843, 56.847)),
+        ((62.3149, 50.761), (42.2515, 14.2605), (36.0093, 14.2605)),
+        ((29.767, 14.2605), (9.67118, 50.6944), (12.7358, 56.847))]
+
+
+def sample(path, per):
+    pts = []
+    p0 = path[0]
+    for c1, c2, p1 in path[1:]:
+        for i in range(per):
+            t = i / per
+            u = 1 - t
+            a, b, d, e = u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t
+            pts.append((a * p0[0] + b * c1[0] + d * c2[0] + e * p1[0],
+                        a * p0[1] + b * c1[1] + d * c2[1] + e * p1[1]))
+        p0 = p1
+    return pts
+
+
+outer_pts, hole_pts = sample(OUTER, 120), sample(HOLE, 120)
+C0 = (36.0, 44.0)
+
+
+def ray_hit(poly, dx, dy):
+    best = math.inf
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        ex, ey = b[0] - a[0], b[1] - a[1]
+        det = ex * dy - dx * ey
+        if abs(det) < 1e-9:
+            continue
+        wx, wy = a[0] - C0[0], a[1] - C0[1]
+        t = (ex * wy - wx * ey) / det
+        s = (dx * wy - dy * wx) / det
+        if 0 <= s <= 1 and 0 < t < best:
+            best = t
+    return best
+
+
+NB = 720
+RO = [ray_hit(outer_pts, math.cos(k / NB * 2 * math.pi), math.sin(k / NB * 2 * math.pi)) for k in range(NB)]
+RI = [ray_hit(hole_pts, math.cos(k / NB * 2 * math.pi), math.sin(k / NB * 2 * math.pi)) for k in range(NB)]
+
+
+def polar(T, a):
+    f = ((a / (2 * math.pi)) % 1 + 1) % 1 * NB
+    i = int(math.floor(f)) % NB
+    j = (i + 1) % NB
+    f -= math.floor(f)
+    return T[i] + (T[j] - T[i]) * f
+
+
+def ring_at(a):
+    ro, ri = polar(RO, a), polar(RI, a)
+    dx, dy = math.cos(a), math.sin(a)
+    r = (ro + ri) / 2
+    return {'x': C0[0] + dx * r, 'y': C0[1] + dy * r, 'hw': (ro - ri) / 2, 'rx': dx, 'ry': dy}
+
+
+BL = math.pi - 0.567
+a0, a1 = BL, BL + 2 * math.pi
+S = 400
+pts, acc = [], [0.0]
+for i in range(S + 1):
+    p = ring_at(a0 + (a1 - a0) * (i / S))
+    pts.append(p)
+    if i:
+        acc.append(acc[i - 1] + math.hypot(p['x'] - pts[i - 1]['x'], p['y'] - pts[i - 1]['y']))
+L = acc[S]
+out = []
+k = 0
+for i in range(N):
+    target = i / (N - 1) * L
+    while k < S - 1 and acc[k + 1] < target:
+        k += 1
+    f = (target - acc[k]) / max(1e-6, acc[k + 1] - acc[k])
+    out.append(ring_at(a0 + (a1 - a0) * ((k + f) / S)))
+
+for _ in range(6):     # closed-loop Laplacian: soften the corners a little more
+    cp = [dict(p) for p in out]
+    for i in range(N - 1):
+        a, c, p = cp[(i - 1 + N - 1) % (N - 1)], cp[(i + 1) % (N - 1)], out[i]
+        p['x'] = (a['x'] + 2 * p['x'] + c['x']) / 4
+        p['y'] = (a['y'] + 2 * p['y'] + c['y']) / 4
+        p['hw'] = (a['hw'] + 2 * p['hw'] + c['hw']) / 4
+    out[N - 1] = dict(out[0])
+
+rows = []
+for i in range(N):
+    p = out[i]
+    q = out[(i + 1) % (N - 1)]
+    o = out[(i - 1 + N - 1) % (N - 1)]
+    tx, ty = q['x'] - o['x'], -(q['y'] - o['y'])
+    sx, sy = p['rx'], -p['ry']
+    sgn = 1 if (sy * tx + (-sx) * ty) >= 0 else -1
+    rows.append((p['x'] - 36, 38 - p['y'], p['hw'], sx * sgn, sy * sgn, p['rx'], -p['ry'], float(sgn), i / (N - 1)))
+
+# The core: the hole contour scaled 0.5 about (36, 50), as the design's pillow.
+ring = sample(HOLE, 40)
+tot = [0.0]
+for i in range(1, len(ring) + 1):
+    a, b = ring[i - 1], ring[i % len(ring)]
+    tot.append(tot[i - 1] + math.hypot(b[0] - a[0], b[1] - a[1]))
+Ltot = tot[len(ring)]
+core = []
+for kk in range(HOLE_K):
+    s = kk / HOLE_K * Ltot
+    i = 0
+    while tot[i + 1] < s:
+        i += 1
+    f = (s - tot[i]) / (tot[i + 1] - tot[i])
+    a, b = ring[i], ring[(i + 1) % len(ring)]
+    x = a[0] + (b[0] - a[0]) * f
+    y = a[1] + (b[1] - a[1]) * f
+    core.append((36 + (x - 36) * 0.5, 50 + (y - 50) * 0.5))
+cx = sum(p[0] for p in core) / HOLE_K
+cy = sum(p[1] for p in core) / HOLE_K
+
+
+def f6(v):
+    return '%10.6ff' % v
+
+
+print('// GENERATED by tools/gen_jd_bell.py -- do not edit.')
+print('// The JellyDrop ring: the Jellyfin bell from the lockup path')
+print('// (design-import-jellydrop/drop/jd-logo.js, JFChrome.dc.html), sampled at')
+print('// JD_RING_N stations round the whole bell, seam at the lower-left corner.')
+print('// Local frame X = x - 36, Y = 38 - y (y up), in the 72-unit viewBox.')
+print('#ifndef JD_BELL_GEOM_H')
+print('#define JD_BELL_GEOM_H')
+print()
+print('#define JD_RING_N %d' % N)
+print('#define JD_CORE_K %d' % HOLE_K)
+print()
+print('// { X, Y, hw, sx, sy, rx, ry, sgn, loop }: the centreline, the tube half-width,')
+print('// the outward side axis (sign chosen so the frame is a rotation of the')
+print("// ribbon's, never a reflection), the radial direction and the ring parameter.")
+print('static const float JD_RING[JD_RING_N][9] = {')
+for r in rows:
+    print('    { ' + ', '.join(f6(v) for v in r) + ' },')
+print('};')
+print()
+print('// The core: the hole contour at half size, local frame, and its centroid.')
+print('static const float JD_CORE_C[2] = { %s, %s };' % (f6(cx - 36), f6(38 - cy)))
+print('static const float JD_CORE[JD_CORE_K][2] = {')
+for p in core:
+    print('    { %s, %s },' % (f6(p[0] - 36), f6(38 - p[1])))
+print('};')
+print()
+print('#endif // JD_BELL_GEOM_H')

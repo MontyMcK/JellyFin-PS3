@@ -70,7 +70,49 @@ typedef struct {
     SlotState state;
     u32       last_touch;     // s_frame when something on screen last wanted it
     u8        img;            // ThumbImg — part of the identity, not just the URL
+
+    // VRAM mirror the RSX samples (ui/render/ui_card_gpu.cpp).
+    //
+    // bmp.pixels stays in MAIN memory and is still the truth: the decoder
+    // writes it, and cpu_blit_bitmap_scaled() and the letter-tile path read
+    // it.  Moving it into video memory would make those CPU *reads* run at
+    // the 7.7 MB/s this hardware manages there, which is far worse than the
+    // copy it would save.  So the slot keeps both, and the copy happens once
+    // per decode rather than once per frame per visible card.
+    u32      *vram;           // rsxMemalign'd, s_vram_bytes
+    u32       vram_off;       // RSX offset for rsxLoadTexture
+    u32       vram_pitch;     // BYTES per row -- 64-byte aligned, see below
+    bool      vram_valid;     // mirror matches bmp for the CURRENT contents
+
+    // Integrity stamps (thumb_cache_verify): 16 words from the top, middle
+    // and bottom rows of the decoded pixels and of the VRAM mirror, taken
+    // when each was written.
+    u32       px_sum;
+    u32       vram_sum;
+
+    // bmp.pixels holds THIS slot's image.  False for a slot that came through
+    // a playback on its VRAM mirror alone (thumb_cache_shutdown frees the
+    // pixels; see there): the RSX draws it as before, thumb_get() does not
+    // hand it out, and the fetch thread refills the pixels when it is idle.
+    bool      px_valid;
 } ThumbSlot;
+
+static inline u32 head_sum(const u32 *p) {
+    u32 h = 0x9E3779B9u;
+    for (int i = 0; i < 16; i++) h = (h ^ p[i]) * 16777619u;
+    return h;
+}
+
+// The stamp of a w x h image whose rows are row_words apart: 16 words at the
+// start of the first, middle and last rows.  48 words, so reading it back from
+// VRAM (slow for the PPU) costs ~200 bytes a slot.
+static inline u32 img_stamp(const u32 *p, u32 row_words, u32 w, u32 h) {
+    if (!p || w < 16 || h < 1) return 0;
+    const u32 a = head_sum(p);
+    const u32 b = head_sum(p + (size_t)(h / 2) * row_words);
+    const u32 c = head_sum(p + (size_t)(h - 1) * row_words);
+    return a ^ (b * 3u) ^ (c * 7u);
+}
 
 // Path segment for each ThumbImg.
 static const char *img_name(u8 img) {
@@ -84,6 +126,11 @@ static volatile int     s_lock       = 0;
 static sys_ppu_thread_t s_thread     = 0;
 static volatile bool    s_running    = false;
 static size_t           s_max_px     = 0;            // pixel capacity per slot
+static size_t           s_vram_bytes = 0;            // padded capacity of a VRAM mirror
+
+// Row pitch in bytes for a w-pixel-wide ARGB texture, rounded up to the
+// RSX's 64-byte linear-texture requirement.
+#define VRAM_PITCH(w) ((((u32)(w) * 4u) + 63u) & ~63u)
 static uint8_t          s_fetch_buf[FETCH_BUF_SIZE];
 
 static void lock_acquire(void) { while (!__sync_bool_compare_and_swap(&s_lock, 0, 1)) ; }
@@ -194,6 +241,22 @@ static void fetch_thread_fn(void *arg) {
                 si = i; best_touch = s_slots[i].last_touch;
             }
         }
+        // Nothing queued: refill the pixels of a slot that is on screen from
+        // its VRAM mirror alone (it came through a playback), so the CPU
+        // readers -- search thumbs, cast cards, Now Playing, the artwork
+        // colour -- get it too.  Lowest priority, most recently wanted first.
+        bool refill = false;
+        if (si < 0) {
+            for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
+                const ThumbSlot *sl = &s_slots[i];
+                if (sl->state != SLOT_READY || sl->px_valid || !sl->bmp.pixels) continue;
+                if (fail_listed(sl->item_id, sl->img)) continue;
+                if (si < 0 || (s32)(sl->last_touch - best_touch) > 0) {
+                    si = i; best_touch = sl->last_touch;
+                }
+            }
+            refill = si >= 0;
+        }
         bool got = (si >= 0);
         int tw = 0, th = 0;
         u8  img = THUMB_IMG_PRIMARY;
@@ -227,7 +290,8 @@ static void fetch_thread_fn(void *arg) {
             glogf("fetch FAIL %s bytes=%d url=%.120s", item_id, bytes, url);
             lock_acquire();
             fail_note(item_id, img);
-            if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
+            // A refill that fails keeps its VRAM image: it is still right.
+            if (!refill && strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
             continue;
@@ -261,7 +325,7 @@ static void fetch_thread_fn(void *arg) {
             img_arena_end();
             lock_acquire();
             fail_note(item_id, img);
-            if (strncmp(s_slots[si].item_id, item_id, 64) == 0)
+            if (!refill && strncmp(s_slots[si].item_id, item_id, 64) == 0)
                 s_slots[si].state = SLOT_EMPTY;
             lock_release();
             continue;
@@ -272,7 +336,9 @@ static void fetch_thread_fn(void *arg) {
         lock_acquire();
         bool still_ours = (strncmp(s_slots[si].item_id, item_id, 64) == 0 &&
                            s_slots[si].img == img &&
-                           s_slots[si].state == SLOT_QUEUED);
+                           (refill ? (s_slots[si].state == SLOT_READY &&
+                                      !s_slots[si].px_valid)
+                                   : s_slots[si].state == SLOT_QUEUED));
         lock_release();
         if (!still_ours) {
             stbi_image_free(px);
@@ -303,7 +369,18 @@ static void fetch_thread_fn(void *arg) {
         lock_acquire();
         bool published = (strncmp(s_slots[si].item_id, item_id, 64) == 0 &&
                           s_slots[si].img == img);
-        if (published) s_slots[si].state = SLOT_READY;
+        if (published) {
+            s_slots[si].state    = SLOT_READY;
+            s_slots[si].px_sum   = img_stamp(bmp->pixels, bmp->width, bmp->width, bmp->height);
+            s_slots[si].px_valid = true;
+            // The decode just rewrote bmp; the mirror is stale until
+            // thumb_gpu_texture() copies it on the render thread.  Uploading
+            // here would be a main->VRAM write from the FETCH thread while
+            // the render thread may be mid-frame, and the RSX could sample a
+            // half-written texture.  A REFILL leaves the mirror alone: it
+            // already holds this image (it is what brought the slot back).
+            if (!refill) s_slots[si].vram_valid = false;
+        }
         lock_release();
 
         d_fetch_ok++;
@@ -322,10 +399,26 @@ void thumb_cache_init(void) {
     // allocated below, and a plain memset here would drop (and leak) any
     // buffer that survived.  thumb_cache_shutdown frees them on the way into
     // the player, so coming back out this re-allocates them.
+    //
+    // Slots that came through the playback on their VRAM mirror keep their
+    // identity and mirror (thumb_cache_shutdown); everything else resets.
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
-        u32 *px = s_slots[i].bmp.pixels;
+        ThumbSlot keep = s_slots[i];
+        const bool survivor = keep.state == SLOT_READY && keep.vram && keep.vram_valid;
         memset(&s_slots[i], 0, sizeof(s_slots[i]));
-        s_slots[i].bmp.pixels = px;
+        s_slots[i].bmp.pixels = keep.bmp.pixels;
+        s_slots[i].vram       = keep.vram;
+        s_slots[i].vram_off   = keep.vram_off;
+        if (survivor) {
+            memcpy(s_slots[i].item_id, keep.item_id, sizeof keep.item_id);
+            s_slots[i].bmp.width  = keep.bmp.width;
+            s_slots[i].bmp.height = keep.bmp.height;
+            s_slots[i].img        = keep.img;
+            s_slots[i].vram_pitch = keep.vram_pitch;
+            s_slots[i].vram_sum   = keep.vram_sum;
+            s_slots[i].vram_valid = true;
+            s_slots[i].state      = SLOT_READY;    // px_valid stays false
+        }
     }
     s_frame = 0;
     // Reset the fetch cooldown too.  s_fetch_hold is a FUTURE frame stamp
@@ -344,21 +437,108 @@ void thumb_cache_init(void) {
     size_t pp = (size_t)gp.card_w * gp.card_h;
     size_t pl = (size_t)gl.card_w * gl.card_h;
     s_max_px  = (pp > pl) ? pp : pl;
+    // The spine's Home queue shows its focused poster larger than any grid
+    // card (200x300 authored), and fetches every queue item at that one size
+    // so an item keeps its slot as it travels from the back of the queue to
+    // the front.  xmb_queue_src() caps that at a budget, so this can grow the
+    // slots by at most ~6% over what 1080p already allocates.
+    int qw = 0, qh = 0;
+    xmb_queue_src(&qw, &qh);
+    if ((size_t)qw * qh > s_max_px) s_max_px = (size_t)qw * qh;
+
+    // The VRAM mirror is a TEXTURE, and the RSX requires a linear texture's
+    // pitch to be 64-byte aligned.  A card is 230 px wide at 1080p, so its
+    // natural pitch is 920 bytes -- not a multiple of 64, and binding it that
+    // way gives a skewed or garbage image.  So each mirror row is padded to
+    // the next 64-byte boundary and the copy goes row by row.
+    //
+    // Size for the worse of the two orientations rather than assuming which
+    // one is bigger: portrait is taller, landscape is wider, and which needs
+    // more padded bytes depends on the resolution.
+    {
+        size_t bp = (size_t)VRAM_PITCH(gp.card_w) * gp.card_h;
+        size_t bl = (size_t)VRAM_PITCH(gl.card_w) * gl.card_h;
+        size_t bq = qw > 0 ? (size_t)VRAM_PITCH(qw) * qh : 0;
+        s_vram_bytes = (bp > bl) ? bp : bl;
+        if (bq > s_vram_bytes) s_vram_bytes = bq;
+        // Home's square row (music) takes the queue's AREA as a square
+        // (q_src in ui_home_stage.inc), and a square's padded pitch can be
+        // larger: at 720p 244x244 needs 249,856 bytes against 200x300's
+        // 249,600, so its mirror copy ran 256 bytes into the next slot's.
+        // Size for the largest square any request can make.
+        {
+            int e = 1;
+            while ((size_t)(e + 1) * (size_t)(e + 1) <= s_max_px) e++;
+            size_t bs = (size_t)VRAM_PITCH(e) * e;
+            if (bs > s_vram_bytes) s_vram_bytes = bs;
+        }
+    }
     // Pixels live in MAIN memory (not RSX local): the UI blits cards with
     // the CPU every frame, and CPU reads of RSX-local memory are far too
     // slow (and the GPU transfer engine proved freeze-prone for this).
-    int failed = 0;
+    int failed = 0, vram_failed = 0;
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         Bitmap *b = &s_slots[i].bmp;
-        b->width  = 0;
-        b->height = 0;
+        if (s_slots[i].state != SLOT_READY) {
+            b->width  = 0;
+            b->height = 0;
+        }
         if (!b->pixels) b->pixels = (u32*)memalign(16, s_max_px * 4);
         if (!b->pixels) failed++;
         b->offset = 0;
+        // VRAM mirror.  32 slots x ~455 KB is ~14.6 MB of the 256 MB of RSX
+        // local memory, against ~41 MB already in use -- affordable, and it
+        // buys back 6.4 ms of every Home frame.  A failure here is not fatal:
+        // vram stays NULL, the card falls back to its CPU blit, and the UI
+        // looks identical.
+        if (!s_slots[i].vram) {
+            s_slots[i].vram = (u32*)rsxMemalign(128, s_vram_bytes);
+            if (s_slots[i].vram)
+                rsxAddressToOffset(s_slots[i].vram, &s_slots[i].vram_off);
+            else
+                vram_failed++;
+        }
+        if (s_slots[i].state != SLOT_READY) {
+            s_slots[i].vram_pitch = 0;
+            s_slots[i].vram_valid = false;
+        }
+    }
+    // Check every survivor's mirror against the stamp taken when it was
+    // uploaded.  Anything the playback touched is dropped and refetched.
+    {
+        int kept = 0, damaged = 0;
+        for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
+            ThumbSlot *sl = &s_slots[i];
+            if (sl->state != SLOT_READY) continue;
+            const u32 pitch = VRAM_PITCH(sl->bmp.width);
+            const bool ok = sl->vram &&
+                (size_t)pitch * sl->bmp.height <= s_vram_bytes &&
+                (size_t)sl->bmp.width * sl->bmp.height <= s_max_px &&
+                img_stamp(sl->vram, pitch / 4, sl->bmp.width, sl->bmp.height) == sl->vram_sum;
+            if (ok) { kept++; continue; }
+            damaged++;
+            sl->state = SLOT_EMPTY;
+            sl->item_id[0] = '\0';
+            sl->vram_valid = false;
+            sl->bmp.width = sl->bmp.height = 0;
+        }
+        if (kept || damaged) {
+            char b[96];
+            snprintf(b, sizeof b, "thumb: kept %d posters through playback (damaged %d)",
+                     kept, damaged);
+            plog(b);
+        }
     }
     if (failed) {
         char buf[64];
         snprintf(buf, sizeof(buf), "thumb_cache: %d of %d slots FAILED", failed, THUMB_CACHE_SIZE);
+        plog(buf);
+    }
+    if (vram_failed) {
+        char buf[96];
+        snprintf(buf, sizeof(buf),
+                 "thumb_cache: %d of %d VRAM mirrors FAILED (those cards use the CPU blit)",
+                 vram_failed, THUMB_CACHE_SIZE);
         plog(buf);
     }
     s_running = true;
@@ -396,13 +576,27 @@ void thumb_cache_shutdown(void) {
     // drop straight back into the holes they left.  claim_slot() skips any
     // slot whose re-alloc did fail, so a partial recovery degrades to fewer
     // thumbnails rather than a crash.
+    //
+    // 2026-09-24: a slot whose VRAM mirror is valid keeps its identity and its
+    // mirror (the mirrors are never freed, and nothing else writes there).
+    // thumb_cache_init() checks each against its stamp on the way back and
+    // keeps the intact ones, so the screen the user returns to has its
+    // posters at once instead of refetching every one of them -- "all the
+    // poster art disappeared" after backing out of a film.  Their pixels are
+    // refilled in the background (px_valid).
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         if (s_slots[i].bmp.pixels) {
             free(s_slots[i].bmp.pixels);
             s_slots[i].bmp.pixels = NULL;
         }
-        s_slots[i].state = SLOT_EMPTY;
-        s_slots[i].item_id[0] = '\0';
+        s_slots[i].px_valid = false;
+        const bool keep = s_slots[i].state == SLOT_READY &&
+                          s_slots[i].vram && s_slots[i].vram_valid;
+        if (!keep) {
+            s_slots[i].state = SLOT_EMPTY;
+            s_slots[i].item_id[0] = '\0';
+            s_slots[i].vram_valid = false;
+        }
     }
 }
 
@@ -425,6 +619,8 @@ void thumb_request(const char *item_id, int w, int h, ThumbImg img) {
     s_slots[si].bmp.height = (u32)h;
     s_slots[si].img        = (u8)img;
     s_slots[si].state      = SLOT_QUEUED;
+    s_slots[si].px_valid   = false;
+    s_slots[si].vram_valid = false;
     s_slots[si].last_touch = s_frame;
     d_claim_ok++;
     lock_release();
@@ -445,6 +641,8 @@ const Bitmap *thumb_get(const char *item_id, int w, int h, ThumbImg img) {
             s_slots[i].img == (u8)img &&
             strncmp(s_slots[i].item_id, item_id, 64) == 0) {
             s_slots[i].last_touch = s_frame;
+            // A slot on its VRAM mirror alone has no pixels to hand out yet.
+            if (!s_slots[i].px_valid) break;
             d_get_hit++;
             return &s_slots[i].bmp;
         }
@@ -465,18 +663,122 @@ const Bitmap *thumb_get(const char *item_id, int w, int h, ThumbImg img) {
 // unloaded on the next tick — except anything the new tab draws this same
 // frame, which re-touches its slots and survives.  Also arms a short fetch
 // cooldown so flipping through tabs quickly costs nothing.
-#define THUMB_SWITCH_COOLDOWN 20   // frames (~0.3 s) before fetches resume
+#define THUMB_SWITCH_COOLDOWN 4    // frames before fetches resume (was 20: the blank moment on a tab switch)
 #define THUMB_TTL_FRAMES      180  // ~3 s at 60 fps
 
 void thumb_cache_retarget(void) {
     lock_acquire();
+    // Half the TTL, not all of it (2026-09-27): the tab just left keeps its
+    // art ~1.5 s, so flicking back and forth never blanks the posters, while
+    // anything the new tab does not touch is still freed soon after.
     for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
         if (s_slots[i].state == SLOT_EMPTY) continue;
-        s_slots[i].last_touch = s_frame - THUMB_TTL_FRAMES;
+        const u32 aged = s_frame - THUMB_TTL_FRAMES / 2;
+        if ((s32)(s_slots[i].last_touch - aged) > 0) s_slots[i].last_touch = aged;
     }
     s_fetch_hold = s_frame + THUMB_SWITCH_COOLDOWN;
     lock_release();
     glogf("RETARGET frame=%u -> hold=%u", s_frame, s_fetch_hold);
+}
+
+bool thumb_gpu_texture(const char *item_id, int w, int h,
+                       u32 *out_offset, u32 *out_pitch, ThumbImg img)
+{
+    if (!item_id || !out_offset || !out_pitch || w <= 0 || h <= 0) return false;
+
+    lock_acquire();
+    int si = find_slot(item_id, w, h, (u8)img);
+    if (si < 0 || s_slots[si].state != SLOT_READY || !s_slots[si].vram) {
+        lock_release();
+        return false;
+    }
+    s_slots[si].last_touch = s_frame;
+    bool need_copy = !s_slots[si].vram_valid;
+    if (need_copy && !s_slots[si].px_valid) {    // nothing valid to copy from
+        lock_release();
+        return false;
+    }
+    u32 *src   = s_slots[si].bmp.pixels;
+    u32 *dst   = s_slots[si].vram;
+    u32  bw    = s_slots[si].bmp.width;
+    u32  bh    = s_slots[si].bmp.height;
+    u32  pitch = VRAM_PITCH(bw);
+    u32  off   = s_slots[si].vram_off;
+    s_slots[si].vram_pitch = pitch;
+    lock_release();
+
+    // Outside the lock: the copy is the slow part and the fetch thread must
+    // not be blocked behind it.  Racing a re-fetch of this same slot can only
+    // mean the mirror gets the newer pixels or is marked stale again and
+    // re-copied next frame -- never a torn *card*, because a slot is only
+    // reused after its identity changes and that path clears vram_valid.
+    if (need_copy) {
+        // Row by row: the destination rows are padded to pitch, the source
+        // rows are not.  Writing main->VRAM runs at ~767 MB/s on this
+        // hardware, so a 455 KB card costs about 0.6 ms -- once, when it
+        // decodes, not once per frame per visible card.
+        const u8 *sp = (const u8 *)src;
+        u8       *dp = (u8 *)dst;
+        for (u32 row = 0; row < bh; row++)
+            memcpy(dp + (size_t)row * pitch, sp + (size_t)row * bw * 4, bw * 4);
+        __asm__ __volatile__ ("sync" ::: "memory");
+        // 48 words read back from VRAM (~200 bytes): the integrity stamp.
+        const u32 vs = img_stamp(dst, pitch / 4, bw, bh);
+        lock_acquire();
+        if (find_slot(item_id, w, h, (u8)img) == si) {
+            s_slots[si].vram_valid = true;
+            s_slots[si].vram_sum   = vs;
+        }
+        lock_release();
+    }
+
+    *out_offset = off;
+    *out_pitch  = pitch;
+    return true;
+}
+
+// After a screen that ran its own loop for a long time (the music player):
+// check every cached image against the stamps taken when it was written, log
+// what changed, and drop the whole cache so everything on screen next is
+// fetched and uploaded fresh.
+//
+// Why: after playing an album, Home's posters were reported blank while the
+// same titles showed in the TV tab.  Home keeps re-touching its own cache
+// entries (at the queue's size), so a damaged entry is never refetched; the
+// TV tab asks at the grid size and gets fresh ones.  Dropping the cache here
+// means nothing damaged can outlive the music screen, and the log line says
+// whether anything was (px = the decoded pixels in main memory, vram = the
+// mirror the RSX draws).  Costs ~2 KB of VRAM reads and a refetch of what is
+// on screen.
+void thumb_cache_verify_and_flush(const char *why) {
+    // 2026-09-24: five hardware runs of this after an album all read
+    // "damaged px=0 vram=0" (the real fault was the mirror sizing, fixed with
+    // it), while flushing everything made every poster refetch on the way out
+    // of the music screen.  So it now drops only what fails its stamp.
+    int bad_px = 0, bad_vram = 0, ready = 0;
+    lock_acquire();
+    for (int i = 0; i < THUMB_CACHE_SIZE; i++) {
+        ThumbSlot *sl = &s_slots[i];
+        if (sl->state != SLOT_READY) continue;
+        ready++;
+        const u32 w = sl->bmp.width, h = sl->bmp.height;
+        bool bad = false;
+        if (sl->px_valid && sl->bmp.pixels &&
+            img_stamp(sl->bmp.pixels, w, w, h) != sl->px_sum) { bad_px++; bad = true; }
+        if (sl->vram && sl->vram_valid &&
+            img_stamp(sl->vram, VRAM_PITCH(w) / 4, w, h) != sl->vram_sum) { bad_vram++; bad = true; }
+        if (bad) {
+            sl->state = SLOT_EMPTY;
+            sl->item_id[0] = '\0';
+            sl->vram_valid = false;
+            sl->px_valid = false;
+        }
+    }
+    lock_release();
+    char b[128];
+    snprintf(b, sizeof b, "thumb: verify after %s: ready=%d damaged px=%d vram=%d (dropped)",
+             why ? why : "?", ready, bad_px, bad_vram);
+    plog(b);
 }
 
 void thumb_cache_tick(void) {

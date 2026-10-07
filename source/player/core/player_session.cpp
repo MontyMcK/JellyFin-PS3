@@ -19,11 +19,24 @@
 #include "ui_visuals.h"
 #include "rsxutil.h"
 #include "jellyfin_api.h"
+#include "jf_paths.h"
+#include "stream_budget.h"
+
+// jellyfin_abudget.txt: 0 = ask for the step as VIDEO bitrate, the way every
+// build before 2026-09-24 did; missing or anything else = budget the audio
+// inside the step.  Read per request (a seek rebuilds the URL), which is rare.
+static bool stream_budget_enabled(void) {
+    FILE *f = fopen(jf_data_path("jellyfin_abudget.txt"), "r");
+    if (!f) return true;
+    int v = 1;
+    if (fscanf(f, "%d", &v) != 1) v = 1;
+    fclose(f);
+    return v != 0;
+}
 
 // -------------------------------------------------------
 // Helper — wait for O with error message
 // -------------------------------------------------------
-
 void show_error(const char *line1, const char *line2) {
 #if !BUILD_FOR_RPCS3
     drawHeader();
@@ -188,12 +201,36 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     // re-encoding an 8 Mbps file down to a 10 Mbps target for no reason. This
     // is strictly better at every setting: it can only turn a transcode into
     // a copy, never the reverse.
+    //
+    // The step is the WHOLE stream, not just its video (stream_budget.h): the
+    // audio that rides with it -- a lossless track copied untouched above all
+    // -- and the TS framing come out of it.  Measured 2026-09-24: a 25 Mbps
+    // step with DTS-HD MA copied put 27.6 Mbps on the wire against this
+    // console's ~25 Mbps receive ceiling, and the ring drained until the
+    // picture stalled.  jellyfin_abudget.txt = 0 puts the old request back.
+    unsigned vreq = vbitrate;
+    if (vbitrate != 0 && stream_budget_enabled()) {
+        int kind = STREAM_AUDIO_TRANSCODE;
+        unsigned reported = abitrate;
+        if (hd_codec) {
+            kind = strcmp(hd_codec, "truehd") == 0 ? STREAM_AUDIO_COPY_TRUEHD
+                                                   : STREAM_AUDIO_COPY_DTS;
+            reported = ps->tracks.audio[ps->cur_audio].bitrate;
+        }
+        const unsigned acost = stream_audio_cost(kind, reported);
+        vreq = stream_video_budget(vbitrate, acost);
+        char lb[128];
+        snprintf(lb, sizeof(lb),
+                 "stream budget: step=%u video=%u audio=%u (%s, reported %u)",
+                 vbitrate, vreq, acost, hd_codec ? hd_codec : acodec, reported);
+        plog(lb);
+    }
     char vparams[96];
-    if (vbitrate == 0)
+    if (vreq == 0)
         snprintf(vparams, sizeof(vparams), "&AllowVideoStreamCopy=true");
     else
         snprintf(vparams, sizeof(vparams),
-                 "&VideoBitrate=%u&AllowVideoStreamCopy=true", vbitrate);
+                 "&VideoBitrate=%u&AllowVideoStreamCopy=true", vreq);
 
     int n = snprintf(url, url_sz,
         "%s/Videos/%s/stream.ts"
@@ -208,7 +245,13 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
         "&DeviceId=%s&Static=false"
         "&MediaSourceId=%s"
         "&StartTimeTicks=%llu",
-        g_server, ps->item->id, profile, level, ps->req_w, ps->req_h, vparams,
+        // The version's own id in the path, not the title's (2026-09-27):
+        // Gelato keeps every version as an item of its own, and asking
+        // /Videos/<title id>/stream.ts?MediaSourceId=<version> answers 404 --
+        // every play from Search, which lists the title, failed; Home lists
+        // the version and worked.  For an ordinary item the two ids are the
+        // same, and a stock Jellyfin alternate version is an item too.
+        g_server, source_id, profile, level, ps->req_w, ps->req_h, vparams,
         aparams, copy_audio,
         jf_device_id(), encoded_source, (unsigned long long)start_ticks);
     if (source && source->live_stream_id[0] && n > 0 && n < url_sz) {
@@ -218,7 +261,16 @@ void build_stream_url(char *url, int url_sz, const PlayerState *ps,
     }
     if (audio_idx >= 0 && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
-    if (sub_idx >= 0 && n > 0 && n < url_sz)
+    // Only a subtitle this app cannot decode itself goes to the server to be
+    // burned in.  Asking for Encode forces a full video transcode, which
+    // throws away the stream-copy path and with it the source's lossless
+    // audio -- so a track drawn on-device (text via player/subtitles.cpp,
+    // or PGS via subtitles_pgs.h) must not appear in this URL at all.
+    // sub_is_text/sub_is_pgs are decided from the stream's Codec when the
+    // track is chosen; anything unrecognised (VOBSUB, or either fetch
+    // failing) counts as a bitmap and keeps the burn-in that has always
+    // worked.
+    if (sub_idx >= 0 && !ps->sub_is_text && !ps->sub_is_pgs && n > 0 && n < url_sz)
         n += snprintf(url + n, url_sz - n,
                       "&SubtitleStreamIndex=%d&SubtitleMethod=Encode", sub_idx);
     if (ps->session_id[0] && n > 0 && n < url_sz) {
@@ -234,10 +286,7 @@ void player_prefill(PlayerState *ps, bool fatal_on_eof, int guard_max) {
     u8   ts_pkt[TS_PACKET_SIZE];
     bool first_pkt = true;
     int  guard     = 0;
-    // Counted with jbuf_used(): pictures the reorder hold has not released yet
-    // are decoded and buffered, and on the 8-slot 1080p path the displayable
-    // count alone can never reach the target while the hold owns half of it.
-    while (jbuf_used() < jbuf_prefill_target() && running && !s_vdec_error &&
+    while (jbuf_count() < jbuf_prefill_target() && running && !s_vdec_error &&
            guard < guard_max) {
         sysUtilCheckCallback();
         int rd = stream_read(ps->sock, ts_pkt, TS_PACKET_SIZE);

@@ -142,7 +142,7 @@ int do_login(void) {
     drawTTF(40, 96, "Signing in...", 18, XMB_TEXT);
     {
         char line[320];
-        snprintf(line, sizeof(line), "%s  \xB7  %s", g_username, g_server);
+        snprintf(line, sizeof(line), "%s  \xC2\xB7  %s", g_username, g_server);
         drawTTF(40, 128, line, 14, XMB_TEXT_DIM);
     }
     flip();
@@ -153,14 +153,9 @@ int do_login(void) {
              g_username, password);
 
     {
-        // Diagnostic trace of the sign-in request.  /dev_hdd0/tmp is readable
-        // by anyone on the LAN through webMAN's anonymous FTP, so the request
-        // body must NEVER be written verbatim: it carried the password in
-        // plaintext.  Log the URL, the username and the body length only.
         FILE *dbg = fopen("/dev_hdd0/tmp/jf_debug.txt", "w");
         if (dbg) {
-            fprintf(dbg, "URL: %s\nBody(%d): {\"Username\":\"%s\",\"Pw\":\"<redacted>\"}\n",
-                    url, (int)strlen(body), g_username);
+            fprintf(dbg, "URL: %s\nBody(%d): %s\n", url, (int)strlen(body), body);
             fclose(dbg);
         }
     }

@@ -10,6 +10,8 @@
 #include "ui.h"
 #include "timing.h"
 #include "audio.h"
+#include "ui_visuals.h"   // g_spine_on: the redesigned HUD's buttons
+#include "statsovl.h"
 
 HudState g_hud;
 
@@ -77,8 +79,47 @@ void hud_open_menu(const char *title, const char *const *items,
 
 int hud_menu_choice(void) { return g_hud.menu_choice; }
 
+static bool s_skip_offered = false;
+void hud_set_skip_offered(bool offered) { s_skip_offered = offered; }
+
 HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     g_hud.seek_delta = 0;
+
+    // The skip badge only shows while the bar is hidden, and then X is its
+    // button -- checked before anything else so the press does not also
+    // reveal the bar.
+    if (s_skip_offered && !g_hud.visible && BTN_PRESSED(cross))
+        return HUD_ACTION_SKIP_SEGMENT;
+    // Media keys (Blu-ray remote, keyboard) act at once, bar shown or not, as
+    // on a disc player -- no reveal press first.  PLAY only resumes and PAUSE
+    // only pauses, so pressing either twice is harmless.  There are no
+    // chapters for NEXT/PREV to skip between, so they jump by the largest HUD
+    // increment; SCAN repeats while held.
+    if (BTN_PRESSED(playpause) || (BTN_PRESSED(play) && paused) ||
+        (BTN_PRESSED(pause) && !paused)) {
+        hud_show();
+        return HUD_ACTION_TOGGLE_PAUSE;
+    }
+    if (BTN_PRESSED(stop))     return HUD_ACTION_STOP;
+    if (BTN_PRESSED(audio))    return HUD_ACTION_AUDIO_TRACK;
+    if (BTN_PRESSED(subtitle)) return HUD_ACTION_SUBTITLE;
+    {
+        const bool scan = btn_nav_repeat(btn_cur.ffwd || btn_cur.rew, NAV_media);
+        const bool skip = BTN_PRESSED(next) || BTN_PRESSED(prev);
+        if (scan || skip) {
+            const int step = skip ? s_incr_vals[2] : s_incr_vals[g_hud.incr_idx];
+            g_hud.seek_delta = (btn_cur.rew || btn_cur.prev) ? -step : step;
+            hud_show();
+            return HUD_ACTION_SEEK;
+        }
+    }
+    if (BTN_PRESSED(info)) {
+#if ENABLE_PLAYER_STATS
+        statsovl_set_enabled(!statsovl_enabled());
+#endif
+        hud_show();
+        return HUD_ACTION_NONE;
+    }
 
     // Any button activity wakes the HUD.
     bool was_hidden = !g_hud.visible;
@@ -128,6 +169,19 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
         return HUD_ACTION_NONE;
     }
 
+    // O stops playback, bar up or not, as START does: O backs out of
+    // everything on the XMB and people reach for it (tester, 2026-09-27).
+    // A popup menu or the volume slider, above, takes O as "close" first.
+    if (BTN_PRESSED(circle)) return HUD_ACTION_STOP;
+
+    // Square with the bar already up puts it away without waiting for the
+    // timeout; the press that brings it up only does that.
+    if (BTN_PRESSED(square) && !was_hidden) {
+        g_hud.visible = false;
+        g_hud.focus   = -1;
+        return HUD_ACTION_NONE;
+    }
+
     // D-pad left/right move the focus cursor across the control row, in screen
     // order: REW · PLAY/PAUSE · FF · AUDIO · VOLUME · CC.  This is how you reach
     // the AUDIO, VOLUME and CC controls.  R2/L2 (handled in the main loop) scrub.
@@ -137,13 +191,27 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
         if (BTN_PRESSED(left)) {
             if (g_hud.focus < 0)      g_hud.focus = FOCUS_PP;
             else if (g_hud.focus > 0) g_hud.focus--;
+            // The redesigned HUD has no REW / FF buttons: those stops only
+            // said "back 10s" / "ahead 10s" and confused (user, 09-27).
+            // L2 / R2 seek.  Step over them.
+            if (g_spine_on && g_hud.focus == FOCUS_FF)  g_hud.focus = FOCUS_PP;
+            if (g_spine_on && g_hud.focus == FOCUS_REW) g_hud.focus = FOCUS_PP;
             return HUD_ACTION_NONE;
         }
         if (BTN_PRESSED(right)) {
             if (g_hud.focus < 0)                   g_hud.focus = FOCUS_PP;
             else if (g_hud.focus < FOCUS_COUNT - 1) g_hud.focus++;
+            if (g_spine_on && g_hud.focus == FOCUS_FF)  g_hud.focus = FOCUS_AUDIO;
             return HUD_ACTION_NONE;
         }
+    }
+
+    // The redesigned HUD (design-import-v3 "07 · Player HUD") names Triangle
+    // Tracks in its hint cluster.  Only with the spine gate on, and not on the
+    // press that revealed the bar.  (O and Square are handled above for both
+    // HUDs; the stats overlay is on DISPLAY and in Settings.)
+    if (g_spine_on && !was_hidden) {
+        if (BTN_PRESSED(triangle)) return HUD_ACTION_AUDIO_TRACK;
     }
 
     // X (cross) activates the focused control.

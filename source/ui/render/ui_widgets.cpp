@@ -9,9 +9,13 @@
 #include "ui.h"
 #include "ui_visuals.h"
 #include "ui_wave.h"
+#include "ui_strobe_test.h"
+#include "ui_spine.h"    // frame clock for the A-Z rail's glide
+#include "boot_anim.h"
 #include "icons.h"
 #include "stb_image.h"
 #include "ps_buttons_png.h"
+#include "jfmark_png.h"
 #include "plog.h"
 
 // -------------------------------------------------------
@@ -45,42 +49,260 @@ static int tab_icon(int tab) {
     }
 }
 
+static int xmb_tab_layout(int *enabled, int *spacing, int *x0)
+{
+    const int n = xmb_tab_order(enabled);
+    const int avail = (int)display_width - 2 * XMB_ITEM_PAD;
+    int step = UIS_H(136);
+
+    if (n > 1 && (n - 1) * step > avail) {
+        step = avail / (n - 1);
+        const int floor_px = UIS_H(32) + UIS_H(8);
+        if (step < floor_px) step = floor_px;
+    }
+    *spacing = step;
+    *x0 = (int)display_width / 2 - (n - 1) * step / 2;
+    return n;
+}
+
+int xmb_nav_depth(void)
+{
+    if (g_tv_depth > 0) return g_tv_depth;
+    if (g_col_depth > 0) return g_col_depth;
+    if (g_music_depth > 0) return g_music_depth;
+    return 0;
+}
+
+int xmb_tab_focus_center(void)
+{
+    int enabled[XMB_TAB_COUNT], spacing, x0;
+    const int n = xmb_tab_layout(enabled, &spacing, &x0);
+
+    for (int i = 0; i < n; i++)
+        if (enabled[i] == g_active_tab) return x0 + i * spacing;
+    return (int)display_width / 2;
+}
+
 // -------------------------------------------------------
 // Top bar: brand on the left, clock on the right (XMB style)
 // -------------------------------------------------------
 
-void xmb_draw_topbar(void) {
-    const int oy = XMB_OY;   // shift the top bar down out of the CRT overscan
-    // Brand: "Jellyfin" + accent "PS3" tag on a shared baseline.
-    drawTTF(XMB_ITEM_PAD, (u32)(20 + oy), "Jellyfin", 22, XMB_TEXT, true);
-    drawTTF(XMB_ITEM_PAD + ttf_text_width("Jellyfin", 22, true) + 8,
-            (u32)(27 + oy), "PS3", 13, XMB_ACCENT, true);
+// Top bar: lockup left, clock right, both on the same 24px row at y=20
+// (handoff section 8's Phase 2 block).  Scales with the UI scale so it stays
+// proportional inside the chrome band above the tab strip.
+//
+// This is the design's lockup now: the rasterised mark (gfx/jfmark_png.h) and
+// "JELLYFIN" in Mata Bold running the theme's wordmark ramp.  v1.0's sizes --
+// mark 21px, wordmark 14px, gap 6 -- and no "PS3" tag, because the mark
+// carries the PS3 icon itself.
+//
+// Two deviations from the canvas, both deliberate:
+//
+//   * NO skewX(-7deg) scaleX(0.88).  Shearing would mean rasterising the word
+//     into a scratch buffer and blitting it row-shifted, which is real work
+//     every frame for a 1.7px lean at 14px.  Revisit it if it reads as wrong
+//     on a TV beside the mark, which is where this has to be judged anyway.
+//   * Not the canvas's stack of five shadows: a short extrusion instead --
+//     two layers of the ramp, darkened, stepping down-right under the face,
+//     over one hard drop shadow.  It keeps the wordmark legible over the
+//     wave and gives it a little depth (xmb_draw_topbar).
+void xmb_lockup_geom(XmbLockupGeom *g) {
+    const int oy    = XMB_OY;   // shift the top bar down out of the CRT overscan
+    const int row_y = oy + UIS_H(20);            // the shared 24px row
+    g->cy      = row_y + UIS_H(24) / 2;
+    g->mark_px = UIS_H(21);
+    g->mark_x  = (int)XMB_ITEM_PAD;
+    g->mark_y  = g->cy - g->mark_px / 2;
+    // The wordmark's ink is centred on the same line as the mark rather than
+    // being given a y of its own: 14px type against a 21px mark is exactly the
+    // case where an eyeballed offset stops being right at the next scale.
+    g->word_px = UIS_TF(14.0f);
+    g->track   = g->word_px * 0.02f;             // the design's 0.02em
+    g->word_x  = g->mark_x + g->mark_px + UIS_H(6);
+    g->word_y  = g->cy;
+    g->word_ok = ttf_center_y("JELLYFIN", g->word_px, UI_FACE_LOCKUP, g->cy,
+                              &g->word_y);
+}
 
-    // Clock: "13/6  21:34" right-aligned, date dimmer than time.
+// The wordmark's depth: the ramp itself, darkened, as a short extrusion under
+// the face -- so the edge carries the gradient (a solid letter seen slightly
+// from above) rather than reading as a flat shadow.  k scales each channel.
+static void lk_ramp_shade(const u32 *in, u32 *out, float k) {
+    for (int i = 0; i < 4; i++) {
+        const u32 c = in[i];
+        const u32 r = (u32)((float)((c >> 16) & 0xFF) * k);
+        const u32 g = (u32)((float)((c >> 8) & 0xFF) * k);
+        const u32 b = (u32)((float)(c & 0xFF) * k);
+        out[i] = (c & 0xFF000000u) | (r << 16) | (g << 8) | b;
+    }
+}
+
+// The lockup's opacity (2026-09-27): the music screen fades it in focus mode.
+// Mixed toward the background in sixteenths, so the cached text runs are
+// reused; the mark is an image and takes real alpha.
+float g_topbar_logo_a = 1.0f;
+static u32 lk_fade(u32 c, float a) {
+    u32 out = 0;
+    for (int sh = 0; sh <= 16; sh += 8) {
+        const int cb = (int)((XMB_BG >> sh) & 0xFF), cc = (int)((c >> sh) & 0xFF);
+        out |= (u32)(cb + (int)((float)(cc - cb) * a)) << sh;
+    }
+    return out;
+}
+
+void xmb_draw_topbar(void) {
+    const int oy    = XMB_OY;
+    const float la  = (float)(int)(g_topbar_logo_a * 16.0f + 0.5f) / 16.0f;
+    const int row_y = oy + UIS_H(20);            // the shared 24px row
+
+    XmbLockupGeom lk;
+    xmb_lockup_geom(&lk);
+
+    // During a cold boot the lockup is ASSEMBLED rather than drawn: the boot
+    // animation hands back a pose saying which parts exist yet and where.
+    // NULL -- every frame after the boot, and every boot with the animation
+    // off -- is the static lockup, drawn by exactly the calls it always was.
+    const BootLockupPose *pose = boot_anim_lockup_pose();
+
+    if (la > 0.03f && (!pose || pose->show_mark)) {
+        if (!pose && la < 0.999f)
+            xmb_draw_mark_a(lk.mark_x, lk.mark_y, lk.mark_px, (u8)(la * 255.0f + 0.5f));
+        else if (pose && pose->mark_posed)
+            xmb_draw_mark(pose->mark_x, pose->mark_y, pose->mark_bell);
+        else
+            xmb_draw_mark(lk.mark_x, lk.mark_y, lk.mark_px);
+    }
+
+    const u32 ramp[4] = { XMB_LK_WORD_A, XMB_LK_WORD_B,
+                          XMB_LK_WORD_C, XMB_LK_WORD_D };
+    // Back to front: the drop shadow, two extruded layers stepping down-right
+    // (deepest first), then the face.  One step is a device pixel at least.
+    u32 deep[4], mid[4];
+    lk_ramp_shade(ramp, deep, 0.28f);
+    lk_ramp_shade(ramp, mid,  0.50f);
+    u32 rampf[4];
+    for (int i = 0; i < 4; i++) {
+        rampf[i] = lk_fade(ramp[i], la); deep[i] = lk_fade(deep[i], la); mid[i] = lk_fade(mid[i], la);
+    }
+    #define ramp rampf
+    const u32 st = UIS_H(1) > 1 ? (u32)UIS_H(1) : 1u;
+    if (lk.word_ok && la > 0.03f && (!pose || pose->show_word)) {
+        const u32 wx = (u32)lk.word_x, wy = (u32)lk.word_y;
+        if (xmb_nav_depth() > 0) {
+            drawTTF_tracked(wx, wy, "JELLYFIN", lk.word_px,
+                            lk_fade(XMB_TEXT_FAINT, la), UI_FACE_LOCKUP, lk.track);
+        } else if (pose && pose->word_posed) {
+            // Same passes as below, each letter at its pose.  NULL stops is
+            // a flat black run: the shadow and the extrusion travel with
+            // their letter.
+            drawTTF_ramp_posed(wx + st, wy + 3 * st, "JELLYFIN", lk.word_px,
+                               NULL, 0, UI_FACE_LOCKUP, lk.track,
+                               pose->word_reveal, pose->word_alpha,
+                               BOOT_WORD_LETTERS, pose->word_slide_px);
+            drawTTF_ramp_posed(wx + st, wy + 2 * st, "JELLYFIN", lk.word_px,
+                               deep, 4, UI_FACE_LOCKUP, lk.track,
+                               pose->word_reveal, pose->word_alpha,
+                               BOOT_WORD_LETTERS, pose->word_slide_px);
+            drawTTF_ramp_posed(wx, wy + st, "JELLYFIN", lk.word_px,
+                               mid, 4, UI_FACE_LOCKUP, lk.track,
+                               pose->word_reveal, pose->word_alpha,
+                               BOOT_WORD_LETTERS, pose->word_slide_px);
+            drawTTF_ramp_posed(wx, wy, "JELLYFIN", lk.word_px,
+                               ramp, 4, UI_FACE_LOCKUP, lk.track,
+                               pose->word_reveal, pose->word_alpha,
+                               BOOT_WORD_LETTERS, pose->word_slide_px);
+        } else {
+            drawTTF_tracked(wx + st, wy + 3 * st, "JELLYFIN", lk.word_px,
+                            lk_fade(0x00000000, la), UI_FACE_LOCKUP, lk.track);
+            drawTTF_ramp(wx + st, wy + 2 * st, "JELLYFIN", lk.word_px,
+                         deep, 4, UI_FACE_LOCKUP, lk.track);
+            drawTTF_ramp(wx, wy + st, "JELLYFIN", lk.word_px,
+                         mid, 4, UI_FACE_LOCKUP, lk.track);
+            drawTTF_ramp(wx, wy, "JELLYFIN", lk.word_px,
+                         ramp, 4, UI_FACE_LOCKUP, lk.track);
+        }
+    }
+
+    #undef ramp
+    // Clock, right-aligned, with the date dimmer beside it.
     time_t now = time(NULL);
     struct tm *tm = localtime(&now);
     if (!tm) return;
     char t_str[8], d_str[8];
     snprintf(t_str, sizeof(t_str), "%d:%02d", tm->tm_hour, tm->tm_min);
     snprintf(d_str, sizeof(d_str), "%d/%d", tm->tm_mday, tm->tm_mon + 1);
-    int tw = ttf_text_width(t_str, 19);
-    int dw = ttf_text_width(d_str, 13);
+    // v1.0 moved BOTH of these onto --font-tab (Satoshi).  The clock used to be
+    // one of two things the display face was allowed; it is not any more, which
+    // matters now that the display face is a subset with no colon -- a clock on
+    // it would have rendered "1334" and nobody would have known why.
+    const float time_px = UIS_TF(16.0f);         // Satoshi 700
+    const float date_px = UIS_TF(11.0f);         // Satoshi 500
+    int tw = ttf_text_width_face(t_str, time_px, UI_FACE_TAB);
+    int dw = ttf_text_width_face(d_str, date_px, UI_FACE_TAB_REG);
     int tx = (int)display_width - (int)XMB_ITEM_PAD - tw;
-    drawTTF((u32)tx, (u32)(22 + oy), t_str, 19, XMB_TEXT_DIM);
-    drawTTF((u32)(tx - dw - 10), (u32)(27 + oy), d_str, 13, XMB_TEXT_FAINT);
+    drawTTF_face((u32)tx, (u32)(row_y + UIS_H(2)), t_str, time_px,
+                 XMB_TEXT, UI_FACE_TAB);
+    drawTTF_face((u32)(tx - dw - UIS_H(10)), (u32)(row_y + UIS_H(7)),
+                 d_str, date_px, XMB_TEXT_FAINT, UI_FACE_TAB_REG);
 }
 
-// Faded hairline under the tab bar — bright at the center, dissolving
-// toward the edges instead of a hard full-width line.
-void xmb_draw_divider(void) {
-    int W = (int)display_width;
-    u32 *row = color_buffer[curr_fb] + (u32)XMB_DIVIDER_Y * display_width;
-    const u32 c_r = 0x8A, c_g = 0x93, c_b = 0xC8;
-    for (int x = 0; x < W; x++) {
-        // Triangular falloff, peak alpha ~72/255 at center.
-        int d = x < W / 2 ? x : W - x;
-        u32 a = (u32)(72 * d * 2 / W);
-        if (a == 0) continue;
+
+// Section eyebrow — the small uppercase label above a row.
+//
+// v1.0 gives these their own token, `--font-eyebrow`: Microgramma at 11px,
+// weight 400, UPPERCASE, 0.18em tracking.  In the canvas they are "Continue
+// watching", "Recently added · Movies", "Search library", "Results", "Up next";
+// this client has a few more of its own ("Cast & Crew", "More Like This") and
+// they get the same treatment, because the design's rule is about what the
+// label IS, not which screen it happens to be on.
+//
+// Microgramma carried the DISPLAY role before v1.0 and was already embedded, so
+// the new role costs nothing.  Uppercasing is ASCII-only (ui_upper_ascii) — the
+// text can be a server row title.
+//
+// Returns the advance, so a caller can put a count or a chevron after it.
+int xmb_draw_eyebrow(int x, int y, const char *text, u32 color)
+{
+    char up[96];
+    snprintf(up, sizeof up, "%s", text);
+    ui_upper_ascii(up);
+    const float px    = UIS_TF(11.0f);
+    const float track = px * 0.18f;
+    drawTTF_tracked((u32)x, (u32)y, up, px, color, UI_FACE_EYEBROW, track);
+    return ttf_text_width_tracked(up, px, UI_FACE_EYEBROW, track);
+}
+
+int xmb_eyebrow_width(const char *text)
+{
+    char up[96];
+    snprintf(up, sizeof up, "%s", text);
+    ui_upper_ascii(up);
+    const float px = UIS_TF(11.0f);
+    return ttf_text_width_tracked(up, px, UI_FACE_EYEBROW, px * 0.18f);
+}
+// One 1px rule of the divider stack: x 40 -> 1240, flat across the middle and
+// fading to nothing over the outer 12% at each end.
+//
+// The canvas spells it as a gradient stop list --
+//   linear-gradient(90deg, transparent, hair 12%, hair 88%, transparent)
+// -- which is a flat line with two ramps, NOT the triangular falloff this used
+// to draw.  The old version was also full-bleed and a hardcoded 8A93C8, which
+// is within a shade of `hairline` composited over the shipping background but
+// would have stayed blue on a gold screen.
+static void divider_rule(int y, u32 color, u32 alpha) {
+    if (y < 0 || (u32)y >= display_height || !alpha) return;
+    const int x0 = (int)XMB_ITEM_PAD;
+    const int x1 = (int)display_width - (int)XMB_ITEM_PAD;
+    const int w  = x1 - x0;
+    if (w <= 0) return;
+    const int fade = w * 12 / 100;               // the outer 12%, each end
+
+    u32 *row = color_buffer[curr_fb] + (u32)y * display_width;
+    const u32 c_r = (color >> 16) & 0xFF, c_g = (color >> 8) & 0xFF, c_b = color & 0xFF;
+    for (int x = x0; x < x1; x++) {
+        int d = x - x0 < x1 - 1 - x ? x - x0 : x1 - 1 - x;
+        u32 a = (fade > 0 && d < fade) ? alpha * (u32)d / (u32)fade : alpha;
+        if (!a) continue;
         u32 bg = row[x];
         row[x] = (((a*c_r + (255-a)*((bg>>16)&0xFF))/255) << 16) |
                  (((a*c_g + (255-a)*((bg>> 8)&0xFF))/255) <<  8) |
@@ -88,64 +310,101 @@ void xmb_draw_divider(void) {
     }
 }
 
+// The divider under the tab bar: the hairline, and the trim rule 4px below it
+// that the canvas draws with `--jf-trim2`.  That second line is transparent
+// under the shipping theme (trim_alpha 0) and brass under Golden Age, which is
+// the first time the `trim` token has been drawn by anything.
+void xmb_draw_divider(void) {
+    divider_rule(XMB_DIVIDER_Y, XMB_HAIRLINE, 255);
+    if (g_theme.trim_alpha)
+        divider_rule(XMB_DIVIDER_Y + UIS_H(4), XMB_TRIM, g_theme.trim_alpha);
+}
+
 // -------------------------------------------------------
 // Tab bar
 // -------------------------------------------------------
 
+// Tab strip geometry is MEASURED, from handoff section 3.1 and the Phase 2
+// block at the end of section 8.  The handoff states outright that those
+// numbers win over any revision note, because they were read off the rendered
+// JFChrome frame rather than projected:
+//
+//   7 items, width 70, gap 66, stride 136, row starts x=275
+//   focused icon 32x32 at y=61 · label y=96 · underline 2px y=110
+//   divider y=144
+//
+// The "nav band 80->68px" note is NOT a stride and was never one: it describes
+// the flex container holding the row. The row still starts at y=61 and the
+// divider still sits at y=144, so XMB_TABBAR_H stays as it was and nothing
+// below the chrome moves.
+//
+// The numbers are authored at 1280x720 and go through UIS_T, which scales both
+// ways -- see ui_visuals.h.  At 1080p that is 1.5x, which is what keeps the
+// strip proportional and consistent with the hints bar.  The vertical anchors
+// stay RELATIVE to XMB_TOPBAR_H so the strip cannot drift away from the bar
+// above it if that ever changes.
+#define TAB_FOCUS_ICON_PX 32
+#define TAB_IDLE_ICON_PX  24
+#define TAB_ITEM_W      70
+#define TAB_GAP         66
+#define TAB_STRIDE      (TAB_ITEM_W + TAB_GAP)   // 136
+#define TAB_ICON_Y      61   // from the top of the frame, 720p
+#define TAB_LABEL_Y     96
+#define TAB_RULE_Y     110
+#define TAB_RULE_H       2
+
 void xmb_draw_tabs(void) {
-    const int oy      = XMB_OY;                          // overscan shift
-    const int icon_cy = oy + XMB_TOPBAR_H + UIS_H(30);   // icon centerline
+    const int oy = XMB_OY;                       // overscan shift
 
     // Display order (Search, Home, libraries, Settings) — NOT array order,
     // since Settings keeps a low index but renders last.
-    int enabled[XMB_TAB_COUNT];
-    int n = xmb_tab_order(enabled);
+    int enabled[XMB_TAB_COUNT], spacing, tab_group_x0;
+    int n = xmb_tab_layout(enabled, &spacing, &tab_group_x0);
     if (n == 0) return;
 
-    // Spacing has to adapt now that the tab count follows the server's
-    // library count instead of being fixed at 7.  The authored 72px is kept
-    // whenever the row fits; past that it shrinks to whatever divides the
-    // usable width, floored so icons never overlap.  A 720px SD framebuffer
-    // fits 7 tabs at full spacing and ~11 at the floor.
-    const int avail = (int)display_width - 2 * XMB_ITEM_PAD;
-    int spacing = 72;
-    if (n > 1 && (n - 1) * spacing > avail) {
-        spacing = avail / (n - 1);
-        if (spacing < 34) spacing = 34;   // icon width + breathing room
-    }
+    const int icon_y  = oy + UIS_H(TAB_ICON_Y);
+    const int label_y = oy + UIS_H(TAB_LABEL_Y);
+    const int rule_y  = oy + UIS_H(TAB_RULE_Y);
+    const bool recessed = xmb_nav_depth() > 0;
+    const int focus_center = xmb_tab_focus_center();
 
-    const int group_w      = (n - 1) * spacing;
-    const int tab_group_x0 = (int)display_width / 2 - group_w / 2;
-
-    // Uniform icon row; the active tab is white with its label and a short
-    // accent underline beneath (no size jump, no L1/R1 chips — the bumpers
-    // still switch tabs, the hints bar can advertise that where relevant).
     for (int i = 0; i < n; i++) {
         int  t      = enabled[i];
         int  cx     = tab_group_x0 + i * spacing;
         bool active = (t == g_active_tab);
-        int icon_px = active ? 30 : 26;
-        int icon_x  = cx - icon_px / 2;
-        int icon_y  = icon_cy - icon_px / 2;
+        int  dist   = active ? 0 : abs(i - (focus_center - tab_group_x0) / spacing);
+        int  icon_px = UIS_H(active && !recessed ? TAB_FOCUS_ICON_PX
+                                                  : TAB_IDLE_ICON_PX);
+        u32 icon_color = recessed ? XMB_ICON_IDLE
+                       : active   ? XMB_WHITE
+                       : dist == 1 ? XMB_ICON_IDLE : XMB_HAIRLINE;
 
-        drawIcon((u32)icon_x, (u32)icon_y, tab_icon(t), (float)icon_px,
-                 active ? XMB_WHITE : XMB_ICON_IDLE);
+        drawIcon((u32)(cx - icon_px / 2), (u32)icon_y, tab_icon(t),
+                 (float)icon_px, icon_color);
 
+        // Profile 1 suppresses only inactive labels; profile 2 suppresses
+        // the entire category-label path. All other profiles preserve the
+        // reconstructed strip exactly, including its tracked label layout.
+        const float px    = UIS_TF(11.5f);
+        const float track = px * 0.04f;
+        char label[sizeof(g_tabs[t].label)];
+        snprintf(label, sizeof label, "%s", g_tabs[t].label);
+        ui_upper_ascii(label);
+
+        int lw = ttf_text_width_tracked(label, px, UI_FACE_TAB, track);
+        int lx = cx - lw / 2;
+        int lo = XMB_ITEM_PAD;
+        int hi = (int)display_width - XMB_ITEM_PAD - lw;
+        if (lx < lo) lx = lo;
+        if (hi >= lo && lx > hi) lx = hi;
+        u32 label_color = recessed ? XMB_TEXT_FAINT : XMB_WHITE;
+        if (!strobe_test_disable_category_labels() &&
+            (active || !strobe_test_disable_inactive_labels()))
+            drawTTF_tracked((u32)lx, (u32)label_y, label, px, label_color,
+                            active ? UI_FACE_TAB : UI_FACE_TAB_REG, track);
         if (active) {
-            // Labels are server library names now, so they can be long and
-            // the active tab can sit at either end of the row.  Centre under
-            // the icon, then clamp into the safe area so a wide name is never
-            // pushed off-screen.
-            int lw = ttf_text_width(g_tabs[t].label, 14);
-            int lx = cx - lw / 2;
-            int lo = XMB_ITEM_PAD;
-            int hi = (int)display_width - XMB_ITEM_PAD - lw;
-            if (lx < lo) lx = lo;
-            if (hi >= lo && lx > hi) lx = hi;
-            drawTTF((u32)lx, (u32)(oy + XMB_TOPBAR_H + UIS_H(52)),
-                    g_tabs[t].label, 14, XMB_TEXT);
-            drawRect((u32)(cx - 13), (u32)(oy + XMB_TOPBAR_H + UIS_H(74)), 26, 3,
-                     XMB_ACCENT);
+            drawRect((u32)lx, (u32)rule_y, (u32)lw, (u32)UIS_H(TAB_RULE_H),
+                     recessed ? XMB_HAIRLINE : XMB_ACCENT);
         }
     }
 }
@@ -153,27 +412,148 @@ void xmb_draw_tabs(void) {
 // Alphabetical jump bar rendered to the left of the item list.
 // Always visible on library tabs at depth 0; letters are dimmed when unfocused,
 // the selected entry pops white while g_jumpbar_active is true.
+// The A-Z rail as an XMB list -- used whenever the spine is on.
+//
+// WHY NOT THE DESIGN'S STATIC RAIL.  README 3.3 draws all 27 entries at once.
+// Under the spine that is physically capped: 27 rows have to fit between the
+// grid's top and the hints bar, which at 1080p is ~22 px a row, so the letters
+// can never be much above 19 px however the constants are tuned -- and the TV
+// report after that tuning was still "tiny".  So the rail becomes what the
+// rest of the UI now is: a window of JB_WIN letters centred on the current one,
+// on a pitch roomy enough for 25 px type, fading toward its ends and gliding
+// (the spine's approach) as the current letter changes.  At the ends the
+// window stops rather than showing empty rows.  This IS a departure from the
+// canvas and is recorded in SPINE-PLAN.md.
+//
+// The current letter is the jump cursor while the rail is focused, otherwise
+// the focused item's section.  Size is constant (cached runs stay cached);
+// only colour steps, in sixteenths, so a settled rail uploads nothing.
+#define JB_WIN       15      // letters visible
+#define JB_PITCH     24      // authored px per letter
+#define JB_FONT      17.0f   // authored px
+
+static spine_approach s_jb;
+static unsigned       s_jb_frame = 0;
+
+static u32 jb_mix(u32 a, u32 b, float t) {
+    int k = (int)(t * 16.0f + 0.5f);
+    if (k < 0) k = 0;
+    if (k > 16) k = 16;
+    u32 out = 0;
+    for (int sh = 0; sh <= 16; sh += 8) {
+        int ca = (int)((a >> sh) & 0xFF), cb = (int)((b >> sh) & 0xFF);
+        out |= (u32)(ca + (cb - ca) * k / 16) << sh;
+    }
+    return out;
+}
+
+static void xmb_draw_jumpbar_window(int tab, int jbar_x, int bar_top, int avail,
+                                    const char * const *labels) {
+    // The letter the window centres on.
+    int cur = 0;
+    if (g_jumpbar_active) {
+        cur = g_jumpbar_sel;
+    } else if (g_sel >= 0 && g_sel < g_item_count[tab]) {
+        char c = g_items[tab][g_sel].name[0];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+        cur = (c >= 'A' && c <= 'Z') ? 1 + (c - 'A') : 0;
+    }
+    const int half = JB_WIN / 2;
+    float centre = (float)cur;
+    if (centre < (float)half) centre = (float)half;
+    if (centre > (float)(JBAR_ENTRIES - 1 - half)) centre = (float)(JBAR_ENTRIES - 1 - half);
+
+    // Glide once per frame; snap on the first frame after the rail was absent.
+    const unsigned id = spine_frame_id();
+    if (id != s_jb_frame) {
+        if (s_jb_frame + 1 < id) spine_approach_init(&s_jb, centre, SPINE_CATEGORY_MS);
+        spine_approach_set(&s_jb, centre);
+        spine_approach_step(&s_jb, spine_frame_dt_us());
+        s_jb_frame = id;
+    }
+    const float c = s_jb.value;
+
+    float pitch = (float)UIS_H(JB_PITCH);
+    if (pitch * JB_WIN > (float)avail) pitch = (float)avail / JB_WIN;
+    float font_px = UIS_TF(JB_FONT);
+    if (font_px > pitch * 0.85f) font_px = pitch * 0.85f;
+    float wide = (float)ttf_text_width("W", font_px, true);
+    if (wide > (float)JBAR_W) font_px *= (float)JBAR_W / wide;
+
+    const u32 bg = XMB_BG;
+    for (int i = 0; i < JBAR_ENTRIES; i++) {
+        const float d = (float)i - c;                 // rows from the centre
+        if (d < -(float)half - 0.5f || d > (float)half + 0.5f) continue;
+        const int ty = bar_top + (int)(((float)half + d) * pitch
+                                       + (pitch - font_px) * 0.5f);
+        if (ty < 0 || (u32)ty >= display_height) continue;
+
+        const bool sel  = g_jumpbar_active && i == g_jumpbar_sel;
+        const bool here = !g_jumpbar_active && i == cur;
+        const u32  base = sel ? XMB_ACCENT_ALT : here ? XMB_TEXT : XMB_TEXT_DIM;
+        float a = d < 0.0f ? -d : d;
+        a = a / ((float)half + 0.5f);                 // 0 centre .. 1 at the edge
+        const u32 colour = jb_mix(base, bg, a * a * 0.85f);
+
+        const int lw = ttf_text_width(labels[i], font_px, sel || here);
+        drawTTF((u32)(jbar_x + (JBAR_W - lw) / 2), (u32)ty, labels[i],
+                font_px, colour, sel || here);
+    }
+}
+
 void xmb_draw_jumpbar(int tab) {
     GridGeom gg;
     xmb_grid_geom(tab, &gg);
-    int bar_top = XMB_GRID_Y0
-                + (xmb_kind(tab) == TABKIND_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
-    int bar_bot = bar_top + XMB_GRID_ROWS * gg.stride - XMB_CARD_TEXT_H;
-    int bar_h   = bar_bot - bar_top;
-    int jbar_x  = gg.x0 - JBAR_GAP * 3 - JBAR_W;
+    const int bar_top = XMB_GRID_Y0
+                      + (xmb_kind(tab) == TABKIND_MUSIC ? XMB_MUSIC_SUBTAB_H : 0);
+    int jbar_x = gg.x0 - JBAR_GAP * 3 - JBAR_W;
     if (jbar_x < 0) jbar_x = 0;
 
-    // Step height evenly divides the bar; font fills each slot (1.2× gives glyph ascender
-    // room without adjacent letters visually overlapping on TV at viewing distance).
-    float entry_h = (float)bar_h / (float)JBAR_ENTRIES;
-    float font_px = entry_h * 1.2f;
-    if (font_px < 12.0f) font_px = 12.0f;
-    if (font_px > 28.0f) font_px = 28.0f;
+    // A FIXED PITCH, not a share of the grid.  This used to divide two grid
+    // rows' height by 27, so the letters were only ever as big as the cards
+    // left room for: when the spine moved the divider down 70 px the grid got
+    // shorter, and on the Music tab (smaller square cards, a sub-tab header
+    // above them) the letters fell to ~12 px at 1080p.  The design's rail
+    // (README 3.3) is a type ladder with its own stride -- mono 11 at a 15 px
+    // pitch -- set here one step larger (13 / 17), because the rail was
+    // reported unreadable on the TV.  Only a screen too short for 27 of those
+    // shrinks it, and then against the room actually below the grid's top
+    // rather than two card rows.
+    // From the REST top: the rail's pitch is a size, and must not change while
+    // the content glides in (it would re-rasterise every letter per frame).
+    const int avail = (int)display_height - XMB_BOTTOM_PAD
+                    - (bar_top - spine_content_dy());
+    float entry_h = (float)UIS_H(17);
+    if (entry_h * JBAR_ENTRIES > (float)avail) entry_h = (float)avail / JBAR_ENTRIES;
+    float font_px = UIS_TF(13);
+    if (font_px > entry_h * 0.9f) font_px = entry_h * 0.9f;
+    if (font_px < UIS_TF(8)) font_px = UIS_TF(8);
+
+    // The column is still the hard constraint: 'W' is the widest label, and
+    // the advance scales linearly with px, so one division is exact.
+    float wide = (float)ttf_text_width("W", font_px, false);
+    if (wide > (float)JBAR_W) font_px *= (float)JBAR_W / wide;
 
     static const char * const jbar_labels[JBAR_ENTRIES] = {
         "#","A","B","C","D","E","F","G","H","I","J","K","L","M",
         "N","O","P","Q","R","S","T","U","V","W","X","Y","Z"
     };
+
+    if (g_spine_on) {
+        xmb_draw_jumpbar_window(tab, jbar_x, bar_top, avail, jbar_labels);
+        return;
+    }
+
+    // README 3.3's three states: the letter heading the focused item's section
+    // in `text`, the jump cursor in `accent_alt`, everything else `text_faint`.
+    // Every letter used to be `hairline`, a shade off the background, which is
+    // most of why the rail read as too small to see.
+    int here = -1;
+    if (g_sel >= 0 && g_sel < g_item_count[tab]) {
+        char c = g_items[tab][g_sel].name[0];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+        here = (c >= 'A' && c <= 'Z') ? 1 + (c - 'A') : 0;
+    }
 
     for (int i = 0; i < JBAR_ENTRIES; i++) {
         int ey = bar_top + (int)(i * entry_h);
@@ -181,10 +561,12 @@ void xmb_draw_jumpbar(int tab) {
         if (ty < 0) ty = 0;
         if ((u32)ty >= display_height) continue;
         bool sel = g_jumpbar_active && (i == g_jumpbar_sel);
-        u32 color = sel ? XMB_WHITE
-                  : g_jumpbar_active ? XMB_ICON_IDLE
-                  : 0x00363D63UL;
-        drawTTF((u32)jbar_x, (u32)ty, jbar_labels[i], font_px, color, sel);
+        u32 color = sel               ? XMB_ACCENT_ALT
+                  : (i == here)       ? XMB_TEXT
+                  :                     XMB_TEXT_FAINT;
+        int lw = ttf_text_width(jbar_labels[i], font_px, sel);
+        drawTTF((u32)(jbar_x + (JBAR_W - lw) / 2), (u32)ty, jbar_labels[i],
+                font_px, color, sel);
     }
 }
 
@@ -195,7 +577,7 @@ void xmb_draw_jumpbar(int tab) {
 void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
     static const char *labels[MUSIC_ST_COUNT] =
         { "Albums", "Artists", "Playlists", "Genres", "Songs" };
-    const float px = 16.0f;
+    const float px = UIS_TF(16.0f);
     for (int i = 0; i < MUSIC_ST_COUNT; i++) {
         bool is_active = (i == active);
         u32 color = is_active ? (focused ? XMB_WHITE : XMB_TEXT)
@@ -203,7 +585,7 @@ void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
         drawTTF((u32)x, (u32)y, labels[i], px, color, is_active);
         int w = ttf_text_width(labels[i], px, is_active);
         if (is_active)
-            drawRect((u32)x, (u32)(y + 24), (u32)w, 3,
+            drawRect((u32)x, (u32)(y + UIS_H(24)), (u32)w, UIS_H(3),
                      focused ? XMB_KEY_SEL : XMB_ACCENT);
         x += w + 34;
     }
@@ -300,18 +682,16 @@ int ps_btn_width(char glyph, int h) {
     return s_ps_w[i] * h / s_ps_h[i];
 }
 
-// Blit one button sprite scaled to height h, vertically centred on cy.
-// bright scales the sprite's RGB (255 = as-authored) so the HUD can dim
-// unfocused controls the way ctrl_color() dims its vector glyphs.
-void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
-    ps_sprites_load();
-    int i = ps_tile_idx(glyph);
-    if (s_ps_state != 1 || i < 0 || !s_ps_px[i] || h <= 0) return;
-    const u32 *m = s_ps_px[i];
-    int mw = s_ps_w[i], mh = s_ps_h[i];
-    int dw = mw * h / mh, dh = h;
-    if (dw <= 0) return;
-    int dx0 = (int)x, dy0 = cy - dh / 2;
+// Blit an ARGB master into the current CPU draw target, scaled to dw x dh with
+// an area-average filter.  bright scales RGB (255 = as-authored) so the HUD can
+// dim unfocused controls the way ctrl_color() dims its vector glyphs.
+//
+// Shared by the button sprites and the brand mark: both are small ARGB images
+// that are authored once at a master size and drawn at whatever the current UI
+// scale asks for, and neither wants a per-size cache for it.
+static void blit_argb_scaled(const u32 *m, int mw, int mh,
+                             int dx0, int dy0, int dw, int dh, u32 bright) {
+    if (!m || mw <= 0 || mh <= 0 || dw <= 0 || dh <= 0) return;
     bool rt  = cpu_rt_on();
     u32  tw_ = cpu_draw_w();
     for (int oy = 0; oy < dh; oy++) {
@@ -354,9 +734,142 @@ void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
     }
 }
 
+void draw_ps_button_vcentered(u32 x, int cy, char glyph, int h, u32 bright) {
+    ps_sprites_load();
+    int i = ps_tile_idx(glyph);
+    if (s_ps_state != 1 || i < 0 || !s_ps_px[i] || h <= 0) return;
+    int mw = s_ps_w[i], mh = s_ps_h[i];
+    int dw = mw * h / mh;
+    blit_argb_scaled(s_ps_px[i], mw, mh, (int)x, cy - h / 2, dw, h, bright);
+}
+
+// -------------------------------------------------------
+// Brand mark — the lockup's jellyfish, from gfx/jfmark_png.h
+// -------------------------------------------------------
+// The design's mark is an SVG with a bevel, an edge stroke and a clipped
+// image, so it arrives here already rasterised (see that header for why, and
+// for the geometry constants used below).  Two variants exist because the
+// gradient is baked in; the loaded theme picks between them.
+//
+// Each decodes on first use and stays: 80x80x4 is 25 KB, and a theme that is
+// never selected never costs its variant.
+
+#define JFMARK_COOL 0
+#define JFMARK_GOLD 1
+
+static u32 *s_mark_px[2];
+static int  s_mark_state[2];          // 0 = untried, 1 = ok, -1 = failed
+
+static void mark_load(int v) {
+    if (s_mark_state[v]) return;
+    s_mark_state[v] = -1;
+    int w, h, comp;
+    unsigned char *img = stbi_load_from_memory(
+        v == JFMARK_GOLD ? jfmark_gold_png : jfmark_cool_png,
+        (int)(v == JFMARK_GOLD ? jfmark_gold_png_len : jfmark_cool_png_len),
+        &w, &h, &comp, 4);
+    if (!img) return;
+    if (w != JFMARK_MASTER || h != JFMARK_MASTER) { stbi_image_free(img); return; }
+    u32 *m = (u32 *)malloc((size_t)w * h * 4);
+    if (!m) { stbi_image_free(img); return; }
+    for (int i = 0; i < w * h; i++)
+        m[i] = ((u32)img[i*4+3] << 24) | ((u32)img[i*4] << 16) |
+               ((u32)img[i*4+1] << 8) | img[i*4+2];
+    stbi_image_free(img);
+    s_mark_px[v] = m;
+    s_mark_state[v] = 1;
+}
+
+// Which raster this theme gets.  The ramp is baked in, so the only question a
+// theme can answer is which of the two it is NEARER: a warm mark colour (Golden
+// Age's E8B45C) takes the gold PS logo, a cool one (XMB wave's AA5CC3) takes
+// the soft one.  Red against blue is the whole test -- a hue angle would be
+// more words for the same two answers.
+static int mark_variant(void) {
+    u32 c = XMB_LK_MARK_A;
+    return (((c >> 16) & 0xFF) > (c & 0xFF)) ? JFMARK_GOLD : JFMARK_COOL;
+}
+
+int xmb_mark_variant(void) { return mark_variant(); }
+
+// Draw the mark with its BELL that many pixels wide, its top-left at (x,y).
+// The raster is wider than the bell -- it carries the design's drop shadow in
+// a padded box -- so both the size and the origin are adjusted here rather
+// than at the call site.
+void xmb_draw_mark_a(int x, int y, int bell_px, u8 alpha) {
+    if (bell_px <= 0 || !alpha) return;
+    int v = mark_variant();
+    mark_load(v);
+    if (s_mark_state[v] != 1) return;
+    int box = bell_px * JFMARK_SPAN_U / JFMARK_BELL_U;
+    int off = bell_px * JFMARK_PAD_U  / JFMARK_BELL_U;
+    blit_argb_scaled(s_mark_px[v], JFMARK_MASTER, JFMARK_MASTER,
+                     x - off, y - off, box, box, alpha);
+}
+
+void xmb_draw_mark(int x, int y, int bell_px) {
+    if (bell_px <= 0) return;
+    int v = mark_variant();
+    mark_load(v);
+    if (s_mark_state[v] != 1) return;
+    int box = bell_px * JFMARK_SPAN_U / JFMARK_BELL_U;
+    int off = bell_px * JFMARK_PAD_U  / JFMARK_BELL_U;
+    blit_argb_scaled(s_mark_px[v], JFMARK_MASTER, JFMARK_MASTER,
+                     x - off, y - off, box, box, 255);
+}
+
 // -------------------------------------------------------
 // Controller-hints bar — sprite buttons + labels, bottom-right
 // -------------------------------------------------------
+
+// Shoulder-button badge — handoff section 3.1: "26x22 rounded rects (radius 6,
+// 1.5px text_dim border, mono 10.5 label)".
+//
+// Outline only, drawn as four OPAQUE rects.  A real radius-6 corner needs
+// coverage blending, and blended CPU rects read video memory at ~700ns/pixel
+// (see UI-BRIEF.md) -- one hint bar of them would cost more than the entire
+// frame budget.  Instead each edge is inset by the corner radius so the four
+// strokes stop short of meeting, which reads as a rounded box at TV distance
+// and costs nothing but writes.  bpx stays 0.
+#define HINT_BADGE_W    26
+#define HINT_BADGE_H    22
+#define HINT_BADGE_R     3   // corner inset, px at 720p (visual radius ~6)
+
+// The whole bar scales with UIS_T rather than UIS_W/UIS_H: it is a text-led
+// cluster, and at 1080p the pass-through forms left the badges and their labels
+// at two-thirds the handoff's intended size.  Scaling only the type would leave
+// 19px labels inside a 26px box, so icons, badges, gaps and text all move
+// together and the bar keeps the proportions section 3.1 draws.
+static int hint_badge_w(void) { return UIS_H(HINT_BADGE_W); }
+
+static void draw_hint_badge(int x, int cy, const char *label) {
+    const int w = UIS_H(HINT_BADGE_W);
+    const int h = UIS_H(HINT_BADGE_H);
+    const int t = UIS_H(2) < 1 ? 1 : UIS_H(2);   // 1.5px spec, on the pixel grid
+    const int r = UIS_H(HINT_BADGE_R);
+    const int y = cy - h / 2;
+
+    if (x < 0 || y < 0 || (u32)(x + w) > display_width ||
+        (u32)(y + h) > display_height) return;
+
+    const u32 c = XMB_TEXT_DIM;
+    drawRect((u32)(x + r),         (u32)y,               (u32)(w - 2 * r), (u32)t, c);
+    drawRect((u32)(x + r),         (u32)(y + h - t),     (u32)(w - 2 * r), (u32)t, c);
+    drawRect((u32)x,               (u32)(y + r),         (u32)t, (u32)(h - 2 * r), c);
+    drawRect((u32)(x + w - t),     (u32)(y + r),         (u32)t, (u32)(h - 2 * r), c);
+
+    // Centred label.  The design asks for a mono face; this build has none
+    // (UI_FACE_REGULAR/BOLD/NOTO/ROBOCOND), so regular stands in at the spec
+    // size -- "L1"/"R1" are two glyphs and do not need the alignment a mono
+    // face buys for the date and the tech strip.
+    const float px = UIS_TF(10.5f);      // section 3.1: mono 10.5 badge label
+    const int   tw = ttf_text_width(label, px);
+    drawTTF((u32)(x + (w - tw) / 2), (u32)(cy - (int)(px * 0.55f)), label, px, c);
+}
+
+// A hint is a shoulder badge when its glyph is lowercase 'l'/'r' (L1/R1).
+// Uppercase 'L'/'R' stay the L2/R2 sprites the sheet already carries.
+static bool hint_is_shoulder(char g) { return g == 'l' || g == 'r'; }
 
 void draw_hints_bar(const Hint *hints, int n) {
     if (n <= 0) return;
@@ -364,30 +877,54 @@ void draw_hints_bar(const Hint *hints, int n) {
     if (s_ps_state != 1) return;
 
     const int   icon_h  = UIS_H(24);
-    const float text_px = (float)UIS_H(15);
-    const int   gap_it  = UIS_W(8);    // icon to its label
-    const int   gap_sep = UIS_W(26);   // between hint pairs
+    const float text_px = UIS_TF(12.5f);      // section 3.1: 12.5px label
+    const int   gap_it  = UIS_H(8);           // icon to its label
+    const int   gap_sep = UIS_H(22);          // section 3.1: items gap 22
+
+    // An EMPTY label pairs a hint with the one after it, so "L1/R1 Tab" is a
+    // single cluster ({'l',""},{'r',"Tab"}) rather than two hints with a full
+    // separator between them.
+    const int gap_pair = UIS_H(4);
 
     int total_w = 0;
     for (int i = 0; i < n; i++) {
-        total_w += ps_btn_width(hints[i].glyph, icon_h);
-        total_w += gap_it;
-        total_w += ttf_text_width(hints[i].label, text_px);
-        if (i < n - 1) total_w += gap_sep;
+        total_w += hint_is_shoulder(hints[i].glyph)
+                     ? hint_badge_w()
+                     : ps_btn_width(hints[i].glyph, icon_h);
+        if (hints[i].label && hints[i].label[0]) {
+            total_w += gap_it + ttf_text_width(hints[i].label, text_px);
+            if (i < n - 1) total_w += gap_sep;
+        } else {
+            total_w += gap_pair;
+        }
     }
 
     int x = (int)display_width - XMB_ITEM_PAD - total_w;
     if (x < (int)XMB_ITEM_PAD) x = (int)XMB_ITEM_PAD;
-    int cy = (int)display_height - XMB_BOTTOM_PAD + UIS_H(34);
+
+    // Section 3.1 puts the hint baseline at y=698 of the 720-tall canvas.  The
+    // overscan inset stays folded in on top of that, so a calibrated CRT still
+    // lifts the whole bar clear of the bezel.
+    int cy = (int)display_height - XMB_OY - UIS_H(22);
     if (cy < 0 || (u32)cy >= display_height) return;
 
     for (int i = 0; i < n; i++) {
-        draw_ps_button_vcentered((u32)x, cy, hints[i].glyph, icon_h, 255);
-        x += ps_btn_width(hints[i].glyph, icon_h) + gap_it;
-        drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), hints[i].label,
-                text_px, XMB_TEXT_DIM);
-        x += ttf_text_width(hints[i].label, text_px);
-        if (i < n - 1) x += gap_sep;
+        if (hint_is_shoulder(hints[i].glyph)) {
+            draw_hint_badge(x, cy, hints[i].glyph == 'l' ? "L1" : "R1");
+            x += hint_badge_w();
+        } else {
+            draw_ps_button_vcentered((u32)x, cy, hints[i].glyph, icon_h, 255);
+            x += ps_btn_width(hints[i].glyph, icon_h);
+        }
+        if (hints[i].label && hints[i].label[0]) {
+            x += gap_it;
+            drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), hints[i].label,
+                    text_px, XMB_TEXT_DIM);
+            x += ttf_text_width(hints[i].label, text_px);
+            if (i < n - 1) x += gap_sep;
+        } else {
+            x += gap_pair;
+        }
     }
 }
 
@@ -397,12 +934,12 @@ void draw_hints_bar(const Hint *hints, int n) {
 
 void xmb_draw_empty_state(int tab, const char *msg) {
     int cx = (int)display_width / 2;
-    int cy = (XMB_CONTENT_Y + (int)display_height - XMB_BOTTOM_PAD) / 2 - 30;
-    const float icon_px = 48.0f;
+    int cy = (XMB_CONTENT_Y + (int)display_height - XMB_BOTTOM_PAD) / 2 - UIS_H(30);
+    const float icon_px = UIS_TF(48.0f);
     drawIcon((u32)(cx - (int)icon_px / 2), (u32)(cy - (int)icon_px),
-             tab_icon(tab), icon_px, 0x002E3458UL);
-    int tw = ttf_text_width(msg, 17);
-    drawTTF((u32)(cx - tw / 2), (u32)(cy + 8), msg, 17, XMB_TEXT_FAINT);
+             tab_icon(tab), icon_px, XMB_HAIRLINE);
+    int tw = ttf_text_width(msg, UIS_TF(17));
+    drawTTF((u32)(cx - tw / 2), (u32)(cy + UIS_H(8)), msg, UIS_TF(17), XMB_TEXT_FAINT);
 }
 
 // -------------------------------------------------------
@@ -411,20 +948,20 @@ void xmb_draw_empty_state(int tab, const char *msg) {
 
 void xmb_draw_breadcrumb(int x, int y, const char *a, const char *b,
                          const char *leaf) {
-    const float px = 15.0f;
+    const float px = UIS_TF(15.0f);
     const char *parts[3] = { a, b, leaf };
     for (int i = 0; i < 3; i++) {
         if (!parts[i]) continue;
         bool is_leaf = (i == 2) || (i == 1 && !parts[2]) || (i == 0 && !parts[1] && !parts[2]);
         drawTTF((u32)x, (u32)y, parts[i], px,
-                is_leaf ? 0x00C5CBE3UL : XMB_TEXT_FAINT);
+                is_leaf ? XMB_TEXT : XMB_TEXT_FAINT);
         x += ttf_text_width(parts[i], px);
         // Chevron between segments.
         bool more = (i < 2) && parts[i + 1];
         if (more) {
-            drawIcon((u32)(x + 4), (u32)(y - 1), ICON_CHEVRON_RIGHT, 16.0f,
+            drawIcon((u32)(x + UIS_W(4)), (u32)(y - 1), ICON_CHEVRON_RIGHT, UIS_TF(16.0f),
                      XMB_TEXT_FAINT);
-            x += 24;
+            x += UIS_W(24);
         }
     }
 }

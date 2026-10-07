@@ -1,0 +1,11 @@
+!!VP2.0
+TEMP R0;
+TEMP R1;
+TEMP R2;
+MOV R1, vertex.position;
+ADD R0, vertex.attrib[8], -R1;
+MAD result.position, R0, c[4].x, R1;
+MOV R2, vertex.color;
+ADD R0, vertex.attrib[4], -R2;
+MAD result.color, R0, c[4].x, R2;
+END

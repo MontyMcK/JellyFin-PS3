@@ -34,8 +34,6 @@ static volatile u64  s_last_shown_vsync = 0;
 static s64           s_vsync_err        = 0;   // Bresenham accumulator, units of fps_num
 static volatile u32  s_vsyncs_next      = 2;   // precomputed vsync hold for the next frame
 static volatile bool s_vsync_shown_once = false;
-// Elapsed-vblank cursor for the duration-consumption gate (timing_vsyncs_elapsed).
-static u64           s_gate_last_vc     = 0;
 
 // Phase 2 — vblank-edge flip trigger.
 // The vblank handler sets s_flip_trigger at the exact vsync edge where the
@@ -63,6 +61,22 @@ static void s_vblank_handler(const u32 head) {
     }
 }
 
+// Display-rate override, set by display_24p.cpp after it has switched the
+// output AND measured the new vblank period.  The refresh bitmask cannot say
+// 23.976 (its 24Hz-family bits are undocumented and would fall to the 59.94
+// default below), so the measured rate is authoritative while it is set.
+static u32 s_override_num = 0;
+static u32 s_override_den = 0;
+
+void timing_set_display_override(u32 num, u32 den) {
+    s_override_num = num;
+    s_override_den = den;
+}
+
+u64 timing_vsync_count(void) {
+    return s_vsync_count;
+}
+
 void timing_register_vblank(void) {
     gcmSetVBlankHandler(s_vblank_handler);
     plog("timing: vsync handler registered");
@@ -76,17 +90,24 @@ void timing_init(u32 fps_num, u32 fps_den) {
     s_display_num = 60000;
     s_display_den = 1001;
     {
+        u16 rr_raw = 0;
         videoState vs;
         if (videoGetState(0, 0, &vs) == 0) {
             u16 rr = vs.displayMode.refreshRates;
+            rr_raw = rr;
             if      (rr & VIDEO_REFRESH_59_94HZ) { s_display_num = 60000; s_display_den = 1001; }
             else if (rr & VIDEO_REFRESH_50HZ)    { s_display_num = 50;    s_display_den = 1;    }
             else if (rr & VIDEO_REFRESH_60HZ)    { s_display_num = 60;    s_display_den = 1;    }
             else if (rr & VIDEO_REFRESH_30HZ)    { s_display_num = 30;    s_display_den = 1;    }
         }
-        char buf[80];
-        snprintf(buf, sizeof(buf), "timing: display=%u/%u fps=%u/%u",
-                 s_display_num, s_display_den, fps_num, fps_den);
+        if (s_override_num && s_override_den) {
+            s_display_num = s_override_num;
+            s_display_den = s_override_den;
+        }
+        char buf[112];
+        snprintf(buf, sizeof(buf), "timing: display=%u/%u%s (rr=0x%02x) fps=%u/%u",
+                 s_display_num, s_display_den, s_override_num ? " MEASURED" : "",
+                 (unsigned)rr_raw, fps_num, fps_den);
         plog(buf);
     }
 
@@ -96,7 +117,6 @@ void timing_init(u32 fps_num, u32 fps_den) {
     s_fps_den          = fps_den;
     s_vsync_count      = 0;
     s_last_shown_vsync = 0;
-    s_gate_last_vc     = 0;
     s_vsync_err        = 0;
     s_vsyncs_next      = 2;
     s_vsync_shown_once = false;
@@ -164,25 +184,17 @@ void timing_frame_shown(void) {
 // real vblank, so it stays correct at ANY refresh: 16683 at 59.94Hz NTSC,
 // 20000 at 50Hz PAL, 33333 at 30Hz.  Replaces a hardcoded 16683 that silently
 // assumed a 60Hz display and undershot ~17% on a 50Hz CRT (judder).
+// True when one content frame lasts exactly one vblank (24p output of 24p
+// film, 2026-09-27): player_display.cpp then presents frame-locked.
+bool timing_is_1to1(void) {
+    return s_fps_num && s_display_num &&
+           (u64)s_display_num * s_fps_den == (u64)s_fps_num * s_display_den;
+}
+
 s64 timing_vblank_period_us(void) {
     if (s_display_num == 0) return 16683;   // defensive; never happens post-init
     return (s64)1000000 * (s64)s_display_den / (s64)s_display_num;
 }
-
-// ---- Elapsed-vblank cursor for the duration-consumption gate ----
-// See timing.h for why the gate must count REAL vblanks, not display steps.
-#define GATE_MAX_CATCHUP_VSYNCS 4
-
-u32 timing_vsyncs_elapsed(void) {
-    u64 vc   = s_vsync_count;
-    u64 prev = s_gate_last_vc;
-    s_gate_last_vc = vc;
-    if (prev == 0 || vc <= prev) return 1;      // first call after a reset
-    u64 d = vc - prev;
-    return (d > GATE_MAX_CATCHUP_VSYNCS) ? GATE_MAX_CATCHUP_VSYNCS : (u32)d;
-}
-
-void timing_gate_reset(void) { s_gate_last_vc = 0; }
 
 // ---- AV sync EMA ----
 

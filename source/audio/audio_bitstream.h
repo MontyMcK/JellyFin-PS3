@@ -48,6 +48,17 @@ void audio_bitstream_begin(int port_channels);
 // app never changed it.  Safe to call unconditionally, including when begin()
 // failed part-way.
 void audio_bitstream_end(void);
+// Apply the playback's output configuration AGAIN, if begin() applied one.
+// A display mode change (the 24p switch, and its revert) re-establishes the
+// HDMI link and the system puts ITS audio setting back -- 8ch when the PS3's
+// own Audio Output Settings are on auto -- which undid the 6ch configure the
+// soundbar's centre channel depends on (dialogue gone, 2026-09-27).
+void audio_bitstream_reassert(const char *why);
+
+// Once at startup, before anything opens an audio port: if the last session
+// died with the output changed, put back what it journalled; if the output is
+// on a compressed coding with no journal, reset it to LPCM.  See the .cpp.
+void audio_bitstream_recover(void);
 
 bool audio_bitstream_engaged(void);
 

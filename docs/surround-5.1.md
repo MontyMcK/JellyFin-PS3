@@ -1,5 +1,13 @@
 # 5.1 Surround Output — Design (Alpha)
 
+> **Naming note.** This document describes the work as it was built, when the
+> setting was a Settings row called "Surround 5.1 (Alpha)" with states
+> Off / AC-3 / HD. It now reads **Audio Output** with **Stereo / 5.1 / 7.1**:
+> the separate AC-3 state was retired (the surround states already fall back to
+> that same request when a source has no HD track), and 7.1 is offered only
+> where the connected chain reports it takes eight channels of LPCM. The
+> mechanics below are unchanged.
+
 Status: **implemented on branch `surround-5.1`** (design approved 2026-08-12;
 see §11 for implementation/verification results). Feature default **OFF**;
 with it off, every code path is the shipped stereo path.

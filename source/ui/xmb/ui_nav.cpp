@@ -1,11 +1,17 @@
 // XMB navigation — tab switching and the browse-mode input handlers
 // (settings, TV sub-screens, collections sub-screens, jump bar, item lists).
 
+#include "menusnow.h"
+#include "autoskip.h"
+#include "display_24p.h"
+#include "month_bg.h"
+#include "ui_wave_audio.h"
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
 
 #include "ui_internal.h"
+#include "ui_spine.h"        // each category remembers its focus
 #include "thumbnail_cache.h"
 #include "jellyfin_api.h"
 #include "player.h"
@@ -15,7 +21,10 @@
 #include "hd1080.h"
 #include "surround.h"
 #include "centermix.h"
+#include "subfont.h"
+#include "subcolor.h"
 #include "statsovl.h"
+#include "update_check.h"
 
 // -------------------------------------------------------
 // Tab switching
@@ -25,6 +34,11 @@ void xmb_switch_tab(int new_tab) {
     if (new_tab < 0 || new_tab >= XMB_TAB_COUNT) return;
     if (!g_tabs[new_tab].enabled) return;
     int old = g_active_tab;
+    // Under the spine each category remembers where it was (render/depth.h).
+    // A tab whose paged window or name filter is dropped just below starts
+    // from its top again, so its old position is forgotten, not restored.
+    spine_focus_leave(old, old != XMB_TAB_SEARCH && old != XMB_TAB_SETTINGS &&
+                           (g_tab_start[old] > 0 || g_tab_name_filter[old][0]));
     if (old != XMB_TAB_SEARCH && old != XMB_TAB_SETTINGS
         && (g_tab_start[old] > 0 || g_tab_name_filter[old][0])) {
         g_items_loaded[old]       = false;
@@ -47,11 +61,11 @@ void xmb_switch_tab(int new_tab) {
     g_music_sub_count = 0; g_music_sub_total = 0;
     if (new_tab == XMB_TAB_SEARCH) {
         g_osk_row = 0; g_osk_col = 0; g_osk_sym = false;
-        plog("xmb: search tab");
     }
     if (new_tab == XMB_TAB_SETTINGS) {
         g_settings_sel = 0; g_settings_confirm = false;
     }
+    spine_focus_enter(new_tab);     // no-op with the gate off, or first visit
     // Home: reset focus and refetch the dynamic rows (Continue Watching /
     // Next Up change after every playback).
     if (new_tab == XMB_TAB_HOME)
@@ -81,8 +95,13 @@ int xmb_next_enabled(int start, int dir) {
 
 // Launch the player for one list item, mapping XMBItem -> JFItem.
 // resume_secs > 0 starts playback at that position (Continue Watching).
+// Bumped by every playback start and every mark-as-watched, so screens
+// holding Continue Watching / Next Up know those rows have gone stale.
+unsigned g_play_gen = 0;
+
 void xmb_play_item(const XMBItem *it, u32 resume_secs,
                    const char *media_source_id) {
+    g_play_gen++;
     JFItem jf; memset(&jf, 0, sizeof(jf));
     strncpy(jf.id,   it->id,   sizeof(jf.id)-1);
     strncpy(jf.name, it->name, sizeof(jf.name)-1);
@@ -108,23 +127,79 @@ static void xmb_play_list_with_next(const XMBItem *items, int count, int idx,
 // (or the end-of-episode countdown fires).  The follower is resolved from
 // the server before each playback, so this works no matter where the episode
 // was launched from and keeps going across season boundaries.
+// Words of a version label, lower-cased, for matching one episode's version
+// to the next's ("[PM] MediaFusion 1080p / WEB-DL / HEVC ..." etc.).
+static int label_words(const char *s, char w[][24], int max) {
+    int n = 0;
+    while (*s && n < max) {
+        while (*s && !isalnum((unsigned char)*s)) s++;
+        int k = 0;
+        while (*s && isalnum((unsigned char)*s)) {
+            if (k < 23) w[n][k++] = (char)tolower((unsigned char)*s);
+            s++;
+        }
+        w[n][k] = '\0';
+        if (k >= 2) n++;
+    }
+    return n;
+}
+
+// The next episode's version most like the one just watched: most shared
+// words (resolution, source, codec, provider, release group), at least two,
+// ties to the earlier (server-preferred) one.  NULL: let the server choose.
+static const char *match_version(const char *item_id, const char *want_label) {
+    static JFMediaSources vs;
+    if (!want_label || !want_label[0]) return NULL;
+    memset(&vs, 0, sizeof vs);
+    if (!jellyfin_fetch_media_sources(item_id, &vs) || vs.n_sources < 2) return NULL;
+    static char want[24][24], have[24][24];
+    const int nw = label_words(want_label, want, 24);
+    int best = -1, best_score = 1;
+    for (int i = 0; i < vs.n_sources; i++) {
+        const int nh = label_words(vs.source[i].label, have, 24);
+        int score = 0;
+        for (int a = 0; a < nw; a++)
+            for (int b = 0; b < nh; b++)
+                if (strcmp(want[a], have[b]) == 0) { score++; break; }
+        if (score > best_score) { best_score = score; best = i; }
+    }
+    if (best < 0) return NULL;
+    static char id[96];
+    snprintf(id, sizeof id, "%s", vs.source[best].id);
+    char b[200];
+    snprintf(b, sizeof b, "next episode: version %d/%d matched (%d shared words): %.80s",
+             best + 1, vs.n_sources, best_score, vs.source[best].label);
+    plog(b);
+    return id;
+}
+
 void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs,
                                 const char *media_source_id) {
+    g_play_gen++;
     XMBItem cur = *first;
     u32 resume = resume_secs;
+    // One chain: each episode after the first keeps the last one's audio
+    // language, quality (vquality is not reset between them) and, as near as
+    // the server's versions allow, the same version (2026-09-26).
+    player_chain_begin();
     for (;;) {
         XMBItem next;
         bool have = xmb_fetch_next_episode(cur.id, &next);
         if (have)
             player_arm_next("NEXT EPISODE", "Press SELECT for next episode");
-        // A source chosen from the info screen applies to this title only.
-        // Auto-advanced followers negotiate their own default source.
         xmb_play_item(&cur, resume, media_source_id);
         if (!have || !player_take_next_request()) break;
         cur    = next;
         resume = 0;
-        media_source_id = NULL;
+        // The follower: the version most like what was just watched, else
+        // the server's default.  (Copied: match_version returns a static
+        // buffer that later calls reuse.)
+        static char msid[100];
+        const char *pick = match_version(cur.id, player_chain_source_label());
+        if (pick) { snprintf(msid, sizeof msid, "%s", pick); media_source_id = msid; }
+        else        media_source_id = NULL;
     }
+    player_chain_end();
 }
 
 // -------------------------------------------------------
@@ -152,8 +227,19 @@ static bool xmb_input_settings(void) {
         if (BTN_PRESSED(circle)) g_settings_confirm = false;
         return false;
     }
-    if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
-    if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
+    // Triangle: what the highlighted setting does.  The panel follows the
+    // selection while it is up; Triangle again or O closes it (O does nothing
+    // else while it is open).
+    if (BTN_PRESSED(triangle)) {
+        // Spine: the row turns over like a poster's quick-peek.  Without the
+        // spine (no peek layer) the old in-place panel.
+        if (g_spine_on) { g_settings_help = false; settings_open_help_peek(); }
+        else            g_settings_help = !g_settings_help;
+        return false;
+    }
+    if (g_settings_help && BTN_PRESSED(circle)) { g_settings_help = false; return false; }
+    if (BTN_PRESSED(l1)) { g_settings_help = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
+    if (BTN_PRESSED(r1)) { g_settings_help = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
     if (BTN_REPEAT(up)   && g_settings_sel > 0)                      g_settings_sel--;
     if (BTN_REPEAT(down) && g_settings_sel < XMB_SETTINGS_COUNT - 1) g_settings_sel++;
     if (BTN_PRESSED(cross)) {
@@ -169,8 +255,28 @@ static bool xmb_input_settings(void) {
             surround_cycle();    // Stereo -> 5.1 -> [7.1 where offered]
         if (g_settings_sel == 5)                                        // Dialogue Boost
             centermix_cycle();   // Off -> +3 -> +6 -> +10
+        if (g_settings_sel == 6)                                        // Subtitle Font
+            subfont_cycle();     // Open Sans -> Noto Sans -> Roboto Cond.
+        if (g_settings_sel == 7)                                        // Subtitle Colour
+            subcolor_cycle();    // White -> Soft Yellow -> Soft Grey
+        if (g_settings_sel == 8)                                        // Theme
+            theme_cycle();       // XMB wave -> Golden Age -> any USRDIR/tmp .ini
+        if (g_settings_sel == 9)                                        // Menu Particles
+            menusnow_set_enabled(!menusnow_enabled());
+        if (g_settings_sel == 10)                                       // Day / Night Palette
+            daynight_set_enabled(!daynight_enabled());
+        if (g_settings_sel == 11)                                       // Wave Intensity
+            wave_audio_set_level((wave_audio_level() + 1) % 4);         // Off -> Normal -> Strong -> Max
+        if (g_settings_sel == 12)                                       // Auto Skip
+            autoskip_set_enabled(!autoskip_enabled());
+        if (g_settings_sel == 13)                                       // 24Hz Output
+            d24_set_enabled(!d24_enabled());
+        if (g_settings_sel == 14) {                                     // Software Update
+            if (update_check_state() == UPD_AVAILABLE) xmb_update_popup_reopen();
+            else                                       update_check_again();
+        }
 #if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 6)                                        // Player Stats Overlay
+        if (g_settings_sel == 15)                                       // Player Stats Overlay
             statsovl_set_enabled(!statsovl_enabled());
 #endif
     }
@@ -203,6 +309,22 @@ static void xmb_input_tv_sub(void) {
     if (BTN_PRESSED(circle)) {
         g_tv_depth--;
         g_tv_sub_sel = 0; g_tv_sub_scroll = 0; g_tv_sub_start = 0; g_tv_sub_total = 0;
+        if (g_tv_depth == 1) {
+            // Episodes -> seasons: the grid's items ARE the episodes until
+            // the seasons are fetched back, which drew every season as an
+            // episode (2026-09-27).  Reload them, the season we came from
+            // selected.
+            g_tv_sub_count = xmb_fetch_seasons(g_tv_series_id, g_tv_sub_items,
+                                               XMB_ITEMS_MAX, 0, &g_tv_sub_total);
+            for (int i = 0; i < g_tv_sub_count; i++)
+                if (strcmp(g_tv_sub_items[i].id, g_tv_season_id) == 0) {
+                    g_tv_sub_sel = i;
+                    g_tv_sub_scroll = (i / C) * C;
+                    if (g_tv_sub_scroll > 0 && g_tv_sub_scroll + VIS > g_tv_sub_count + C - 1)
+                        g_tv_sub_scroll = g_tv_sub_scroll;   // (kept on the row)
+                    break;
+                }
+        }
         return;
     }
     if (BTN_REPEAT(up)) {
@@ -252,7 +374,8 @@ static void xmb_input_tv_sub(void) {
     if (BTN_PRESSED(triangle) && g_tv_depth == 2 && g_tv_sub_count > 0 &&
         g_tv_sub_sel < g_tv_sub_count &&
         timing_get_us() >= g_info_cooldown_until) {
-        xmb_show_item_info(&g_tv_sub_items[g_tv_sub_sel]);
+        if (g_spine_on) peek_open_item(&g_tv_sub_items[g_tv_sub_sel], gg.card_w, gg.card_h);
+        else            xmb_show_item_info(&g_tv_sub_items[g_tv_sub_sel]);
         return;
     }
     if (BTN_PRESSED(cross) && g_tv_sub_count > 0 && g_tv_sub_sel < g_tv_sub_count) {
@@ -266,15 +389,12 @@ static void xmb_input_tv_sub(void) {
                                                  0, &g_tv_sub_total);
             g_tv_depth = 2; g_tv_sub_sel = 0; g_tv_sub_scroll = 0;
         } else {
-            // A partly-watched episode asks resume vs. start over first.
-            int resume = xmb_resume_choice(&g_tv_sub_items[g_tv_sub_sel]);
-            if (resume >= 0) {
-                xmb_play_episode_with_next(&g_tv_sub_items[g_tv_sub_sel],
-                                           (u32)resume);
-                g_tv_depth = 0;
-                g_tv_sub_sel = 0;
-                g_tv_sub_scroll = 0;
-            }
+            // X opens the episode's details page (2026-09-26, hardware
+            // feedback): that is where Version and Quality are chosen, and
+            // where Play / Resume / Start over live.  It used to play at once.
+            if (timing_get_us() >= g_info_cooldown_until)
+                xmb_show_item_info(&g_tv_sub_items[g_tv_sub_sel]);
+            init_btns();
         }
     }
 }
@@ -334,7 +454,8 @@ static void xmb_input_col_sub(void) {
     if (BTN_PRESSED(triangle) && g_col_sub_count > 0 &&
         g_col_sub_sel < g_col_sub_count &&
         timing_get_us() >= g_info_cooldown_until) {
-        xmb_show_item_info(&g_col_sub_items[g_col_sub_sel]);
+        if (g_spine_on) peek_open_item(&g_col_sub_items[g_col_sub_sel], gg.card_w, gg.card_h);
+        else            xmb_show_item_info(&g_col_sub_items[g_col_sub_sel]);
         return;
     }
     if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
@@ -465,6 +586,9 @@ bool xmb_handle_input_browse(void) {
     int tab = g_active_tab;
 
     if (tab == XMB_TAB_SETTINGS) return xmb_input_settings();
+
+    // A quick-peek owns the input while it is up (spine gate only).
+    if (peek_input()) return false;
 
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
@@ -622,13 +746,18 @@ bool xmb_handle_input_browse(void) {
                 g_music_depth = 1;
                 g_music_sub_sel = 0; g_music_sub_scroll = 0;
             }
+        } else if (tab != XMB_TAB_RESUME) {
+            // Movies, episodes, videos: X opens the details page (2026-09-26,
+            // hardware feedback) -- Version and Quality are chosen there, and
+            // its Play / Resume / Start over rows replace the old prompt.
+            if (timing_get_us() >= g_info_cooldown_until) xmb_show_item_info(it);
+            s_movie_just_exited = true;
+            init_btns();
+            return false;
         } else {
-            // The Continue Watching row launches straight at the saved
-            // position; from any other tab (Movies, etc.) a partly-watched
-            // item first asks the user resume vs. start over.
-            int resume;
-            if (tab == XMB_TAB_RESUME) resume = (int)it->resume_secs;
-            else                       resume = xmb_resume_choice(it);
+            // The Continue Watching row still launches straight at the saved
+            // position.
+            int resume = (int)it->resume_secs;
             if (resume >= 0) {
                 if (strcmp(it->type, "Episode") == 0)
                     xmb_play_episode_with_next(it, (u32)resume);
@@ -651,6 +780,15 @@ bool xmb_handle_input_browse(void) {
         plog(dbg);
     }
     u64 now_us = timing_get_us();
+    // Under the spine, Triangle on a library grid is the quick-peek: the
+    // poster turns over to show the synopsis and cast (xmb/ui_peek.cpp).  X
+    // from there opens full detail.
+    if (g_spine_on && BTN_PRESSED(triangle) && count > 0 && g_sel < count &&
+        xmb_kind(tab) != TABKIND_MUSIC &&
+        now_us >= g_info_cooldown_until) {
+        peek_open_item(&g_items[tab][g_sel], gg.card_w, gg.card_h);
+        return false;
+    }
     if (BTN_PRESSED(triangle) && count > 0 && g_sel < count
         && now_us >= g_info_cooldown_until) {
         const XMBItem *sel = &g_items[tab][g_sel];

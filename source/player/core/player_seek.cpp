@@ -5,9 +5,12 @@
 // grace-bridged to ride out the bit's frame-to-frame flicker:
 //   * quick TAP  -> +10s skip, batched by a 1s gate so taps stack into one
 //                   reopen further ahead.
-//   * HOLD       -> pause and scrub the seek bar +25s/-25s every 250ms.  While
-//                   held NOTHING is fetched — only the bar moves; the single
-//                   reopen to the scrubbed spot happens when the user releases.
+//   * HOLD       -> pause and scrub the seek bar +25s/-25s every 250ms. The
+//                   STREAM itself is never re-fetched while held — the
+//                   single reopen to the scrubbed spot happens on release —
+//                   but a trickplay preview thumbnail is (see trickplay.h),
+//                   since that is a separate, much cheaper request the
+//                   server already has sitting on disk.
 // The D-pad also gives +10s taps via the HUD.
 
 #include <stdio.h>
@@ -17,6 +20,7 @@
 #include <sys/thread.h>
 #include <net/net.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 
 #include "player_internal.h"
 #include "stream.h"
@@ -25,9 +29,11 @@
 #include "video.h"
 #include "timing.h"
 #include "plog.h"
+#include "subtitles.h"
 #include "ui.h"
 #include "jellyfin_api.h"
 #include "slog.h"
+#include "trickplay.h"
 
 extern void crash_log(const char *msg);
 
@@ -41,12 +47,27 @@ extern void crash_log(const char *msg);
 // respawned.
 static volatile bool s_seeking = false;
 
+// A seek moves the clock backwards as often as forwards, and the cue lookup
+// walks forward from where it last was.  Telling it to start over costs one
+// binary search and keeps the wrong line from lingering after a jump.
+static void subs_after_seek(void) { subs_reset_cursor(); }
+
+// Absolute media time (ms) the currently-accumulated scrub offset points
+// at -- same base+clock+pending_secs arithmetic player_execute_seek() uses
+// to compute its real seek target, just not yet committed to a reopen.
+static u32 scrub_target_ms(const PlayerState *ps) {
+    s64 cur_us    = (s64)ps->play_base_us + (s64)audio_get_clock_us();
+    s64 target_us = cur_us + (s64)ps->seek.pending_secs * 1000000LL;
+    if (target_us < 0) target_us = 0;
+    return (u32)(target_us / 1000);
+}
+
 static const u64 SEEK_HOLD_DELAY_US = 400000ULL;   // held longer than this -> scrub
 static const u64 SEEK_SCRUB_STEP_US = 250000ULL;   // one scrub step per 250ms
 static const s32 SEEK_SCRUB_SECS    = 25;          // +25s per scrub step
 static const s32 SEEK_TAP_SECS      = 10;          // +10s per quick tap
 static const u64 SEEK_GRACE_US      = 250000ULL;   // bridge digital-bit flicker
-static const u64 SEEK_TAP_GATE_US   = 1000000ULL;  // batch window for quick taps
+static const u64 SEEK_TAP_GATE_US   = 450000ULL;   // batch window for quick taps (was 1 s: felt laggy)
 
 // -------------------------------------------------------
 // Input
@@ -98,6 +119,8 @@ HudAction player_seek_input_update(PlayerState *ps, HudAction act) {
             sk->scrub_step_us = now - SEEK_SCRUB_STEP_US;   // first step now
             sk->tap_gate_us   = 0;
             plog("seek: scrub begin");
+            trickplay_scrub_update(ps->item->id, ps->source.id,
+                                   scrub_target_ms(ps));
         } else {
             sk->dir = dir;             // allow F<->B before it commits
         }
@@ -115,11 +138,14 @@ HudAction player_seek_input_update(PlayerState *ps, HudAction act) {
                 ps->paused = !sk->scrub_resume;
             }
             plog("seek: scrub end");
+            trickplay_release_sheet();   // give its memory back -- see trickplay.cpp
         } else {
             sk->dir = dir;
             if (now - sk->scrub_step_us >= SEEK_SCRUB_STEP_US) {
                 sk->scrub_step_us = now;
                 sk->pending_secs += dir * SEEK_SCRUB_SECS;   // move bar +25s
+                trickplay_scrub_update(ps->item->id, ps->source.id,
+                                       scrub_target_ms(ps));
             }
         }
         break;
@@ -202,6 +228,7 @@ bool player_execute_seek(PlayerState *ps) {
     crash_log("sk2a vdec_close done");
     if (!vdec_open()) {
         crash_log("sk2b vdec_open FAILED");
+        plog("playing=0 reason=seek_vdec_open_failed");
         s_seeking   = false;
         ps->playing = false;
         return false;
@@ -227,7 +254,12 @@ bool player_execute_seek(PlayerState *ps) {
     // serving the in-progress job (which started at offset 0) and
     // the seek appears to reset to 0:00 instead of honouring the
     // new StartTimeTicks.
-    jellyfin_stop_transcode(ps->session_id);
+    // The old transcode is stopped AFTER the new session exists, off this
+    // thread (2026-09-27: it cost a whole HTTP round trip per seek).  Only if
+    // no new session can be had is it stopped here, first -- the same id
+    // would make Jellyfin reuse the old job and ignore StartTimeTicks.
+    char old_sid[64];
+    snprintf(old_sid, sizeof old_sid, "%s", ps->session_id);
     // Stopping the transcode is not enough on its own: re-requesting
     // stream.ts with the SAME PlaySessionId makes Jellyfin reuse the
     // existing transcode job (which began at offset 0), so
@@ -270,29 +302,91 @@ bool player_execute_seek(PlayerState *ps) {
             }
         } else {
             plog("seek: PlaybackInfo failed, reusing old session");
+            jellyfin_stop_transcode(old_sid);     // the same id: that job must die first
         }
+    }
+    // The old transcode is stopped FIRST, and its source connection given a
+    // moment to close (2026-09-27).  Stopping it off-thread after the new one
+    // had started left two connections on the same debrid file for a moment,
+    // and TorBox answered the second with a 5 s placeholder clip: the new
+    // transcode encoded nothing and playback ended (an audio-track switch,
+    // and a fast-forward before it).
+    if (strcmp(old_sid, ps->session_id) != 0) {
+        jellyfin_stop_transcode(old_sid);
+        usleep(600000);
     }
     char surl[768];
     build_stream_url(surl, sizeof(surl), ps, start_ticks);
     plog_url("surl", surl);
-    int nsock = stream_open(surl);
-    if (nsock < 0) {
-        plog("seek: stream_open FAILED");
-        crash_log("sk_fail reopen");
-        ps->playing = false;       // give up cleanly; loop will exit
-        return false;
+    // 3b/4) Open and re-prime, retrying with a growing wait.
+    //
+    // A debrid host rate-limits opens of the same file: the server's ffmpeg
+    // got "HTTP 429 Too Many Requests" after four opens in ~90 s (start,
+    // audio switch, seek, retry), answered the reopen with a 200 and no body,
+    // then a 500 -- and one 2 s retry later playback was dumped back at the
+    // menu (2026-09-27).  So: up to four tries, 5 / 10 / 15 s apart, the last
+    // picture and the spinner up the whole time, Circle to give up.
+    static const unsigned RETRY_WAIT_MS[] = { 5000, 10000, 15000 };
+    const int max_tries = 1 + (int)(sizeof RETRY_WAIT_MS / sizeof RETRY_WAIT_MS[0]);
+    int nsock = -1;
+    for (int attempt = 0; ; attempt++) {
+        stream_set_wait_cb(player_seek_wait);      // spinner + Circle while the server thinks
+        nsock = stream_open(surl);
+        stream_set_wait_cb(NULL);
+        const bool cancelled = nsock < 0 &&
+            strstr(stream_last_error(), "Cancelled") != NULL;
+        if (nsock >= 0) {
+            ps->sock = nsock;
+            // The new stream's PTS restarts at ~0, so its clock now maps to
+            // absolute media time target_us.
+            ps->play_base_us = (u64)target_us;
+            { struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 5000;   // the lv2 layout (16 bytes)
+              netSetSockOpt(ps->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
+            crash_log("sk4 reopened");
+            if (attempt > 0) video_reset_demux();
+            // Re-prime: decode a few frames before resuming display so the
+            // jitter buffer is non-empty (mirrors initial pre-fill).
+            player_prefill(ps, false, 20000);
+            if (jbuf_count() > 0 || !ps->playing || !running) break;
+            plog("seek: reopen gave no picture (the server found nothing to send)");
+            netClose(ps->sock);
+            ps->sock = -1;
+        } else {
+            char b[160];
+            snprintf(b, sizeof b, "seek: stream_open FAILED (%.100s)", stream_last_error());
+            plog(b);
+        }
+        if (cancelled || attempt + 1 >= max_tries || !running) {
+            plog("playing=0 reason=seek_stream_open_failed");
+            crash_log("sk_fail reopen");
+            ps->sock = -1;
+            ps->playing = false;       // give up cleanly; loop will exit
+            return false;
+        }
+        // Kill the job that produced nothing (the same PlaySessionId would be
+        // handed it again) and give the source host time to calm down.
+        jellyfin_stop_transcode(ps->session_id);
+        const unsigned wait_ms = RETRY_WAIT_MS[attempt];
+        {
+            char b[96];
+            snprintf(b, sizeof b, "seek: asking again in %u s (try %d of %d)",
+                     wait_ms / 1000, attempt + 2, max_tries);
+            plog(b);
+        }
+        const u64 w0 = timing_get_us();
+        bool gave_up = false;
+        while (timing_get_us() - w0 < (u64)wait_ms * 1000ULL) {
+            if (!player_seek_wait((unsigned)((timing_get_us() - w0) / 1000ULL))) { gave_up = true; break; }
+            usleep(30000);
+        }
+        if (gave_up) {
+            plog("playing=0 reason=seek_cancelled_by_user");
+            ps->sock = -1;
+            ps->playing = false;
+            return false;
+        }
     }
-    ps->sock = nsock;
-    // The new stream's PTS restarts at ~0, so its clock now maps to
-    // absolute media time target_us.
-    ps->play_base_us = (u64)target_us;
-    { struct { u32 sec; u32 usec; } tv = { 0, 5000 };
-      setsockopt(ps->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
-    crash_log("sk4 reopened");
-
-    // 4) Re-prime: decode a few frames before resuming display so
-    //    the jitter buffer is non-empty (mirrors initial pre-fill).
-    player_prefill(ps, false, 20000);
+    subs_after_seek();      // the cue cursor must not walk on from the old spot
     crash_log("sk5 prefilled");
     {
         // What timestamps did Jellyfin actually return for the new

@@ -10,6 +10,11 @@
 // genre the user drilled through.
 void music_screen_open_album(const XMBItem *album, const char *parent);
 
+// Call just before music_screen_open_album() when the album was opened from a
+// card whose rect was noted with depth_note_focus_rect(): the cover then
+// flies out of that card instead of rising out of depth.
+void music_screen_origin_from_focus(void);
+
 // Songs sub-tab: queue the loaded song list, starting at start_idx.
 void music_screen_open_songs(const XMBItem *items, int count, int start_idx);
 

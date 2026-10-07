@@ -6,6 +6,7 @@
 #include <ctype.h>
 
 #include "jellyfin_api.h"
+#include "json_unescape.h"   // \u0027 & co. -> UTF-8
 #include "plog.h"
 #include "hd1080.h"
 #include "surround.h"
@@ -39,9 +40,7 @@ static void json_array_first_string(const char *json, const char *key,
     while (*p == ' ') p++;
     if (*p != '"') return;
     p++;
-    int i = 0;
-    while (*p && *p != '"' && i < out_size - 1) out[i++] = *p++;
-    out[i] = '\0';
+    json_unescape(p, p + strlen(p), out, out_size);
 }
 
 static void json_array_strings_join(const char *json, const char *key,
@@ -63,10 +62,8 @@ static void json_array_strings_join(const char *json, const char *key,
         if (written > 0 && written < out_size - 3) {
             out[written++] = ','; out[written++] = ' '; out[written] = '\0';
         }
-        while (*p && *p != '"' && written < out_size - 1)
-            out[written++] = *p++;
-        out[written] = '\0';
-        if (*p == '"') p++;
+        p = json_unescape(p, p + strlen(p), out + written, out_size - written);
+        written += (int)strlen(out + written);
     }
 }
 
@@ -317,6 +314,10 @@ bool jellyfin_fetch_tracks(const char *item_id, JFTracks *out) {
                      disp[0] ? disp : "Audio");
             if (json_get_bool_in_range(obj_start, olen, "IsDefault"))
                 out->default_audio = out->n_audio;
+            {
+                const int br = json_get_int_in_range(obj_start, olen, "BitRate", 0);
+                s->bitrate = br > 0 && br < 100000000 ? (unsigned)br : 0;
+            }
             out->n_audio++;
         } else if (strcmp(stype, "Subtitle") == 0 && out->n_subs < JF_MAX_STREAMS) {
             JFStream *s = &out->subs[out->n_subs];
@@ -367,6 +368,26 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out) {
     json_array_strings_join(resp,   "Genres",   out->genres,  sizeof(out->genres));
     json_array_obj_names_join(resp, "Studios",  out->studios, sizeof(out->studios));
     parse_people(resp, out->people, JF_MAX_PEOPLE, &out->n_people);
+    json_get_string(resp, "SeriesId",   out->series_id,   sizeof(out->series_id));
+    json_get_string(resp, "SeriesName", out->series_name, sizeof(out->series_name));
+    json_get_string(resp, "SeasonId",   out->season_id,   sizeof(out->season_id));
+    out->season_num = json_get_int_in_range(resp, (int)strlen(resp), "ParentIndexNumber", -1);
+    if (!out->series_id[0] || !out->season_id[0]) {
+        // A debrid episode's reply is ~400 KB -- every version and all their
+        // streams -- and is cut off at the buffer before SeriesId / SeasonId
+        // (log 2026-09-27: "body TRUNCATED 396090 -> 393215").  Ask again
+        // through the items query, which leaves the versions out.
+        static char small[24 * 1024];
+        char u2[512];
+        snprintf(u2, sizeof u2, "%s/Users/%s/Items?Ids=%s&Recursive=true", g_server, g_userid, item_id);
+        if (http_request(0, u2, NULL, g_token, small, sizeof small) == 200) {
+            if (!out->series_id[0])   json_get_string(small, "SeriesId",   out->series_id,   sizeof(out->series_id));
+            if (!out->series_name[0]) json_get_string(small, "SeriesName", out->series_name, sizeof(out->series_name));
+            if (!out->season_id[0])   json_get_string(small, "SeasonId",   out->season_id,   sizeof(out->season_id));
+            if (out->season_num < 0)
+                out->season_num = json_get_int_in_range(small, (int)strlen(small), "ParentIndexNumber", -1);
+        }
+    }
 
     parse_media_streams(resp, out->video_info, sizeof(out->video_info),
                               out->audio_info, sizeof(out->audio_info));
@@ -382,8 +403,15 @@ void jellyfin_stop_transcode(const char *session_id) {
     snprintf(url, sizeof(url),
         "%s/Videos/ActiveEncodings?deviceId=%s&playSessionId=%s",
         g_server, device_id, session_id);
+    // A LOCAL buffer, not the shared responseBuffer.  This runs on the music
+    // stream thread -- at every track end AND every seek -- while the UI
+    // thread browses into that same global.  http_request's mutex serialises
+    // the calls but says nothing about what the callers do with the buffer
+    // afterwards, so the two can shred each other's results.  The response
+    // here is a 204 with no body; 128 bytes is generous.
+    char resp[128];
     int status = http_request(HTTP_DELETE, url, NULL, g_token,
-                              responseBuffer, RESPONSE_SIZE);
+                              resp, sizeof resp);
     char buf[80];
     snprintf(buf, sizeof(buf), "stop_transcode: http %d session=%s", status, session_id);
     plog(buf);
@@ -479,16 +507,22 @@ bool jellyfin_get_playback_info(const char *item_id,
             "]"
           "}],"
           "\"ContainerProfiles\":[],"
-          // No on-device subtitle renderer: ask the server to burn subs into
-          // the video (Method=Encode) for every common format.
+          // TEXT subtitles are delivered as a separate file and drawn on the
+          // console (player/subtitles.cpp).  Method=Encode burns them into
+          // the video, which forces a transcode and throws away the
+          // stream-copy path -- and with it the source's lossless TrueHD /
+          // DTS-HD MA track.  External keeps the video copied untouched, so
+          // subtitles and lossless audio stop being mutually exclusive.
+          // pgssub and dvdsub are BITMAPS, cannot become text, and still
+          // need the burn-in until there is an RLE decoder and an overlay.
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -538,13 +572,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -604,13 +638,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -666,13 +700,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -752,13 +786,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
@@ -821,13 +855,13 @@ bool jellyfin_get_playback_info(const char *item_id,
           "}],"
           "\"ContainerProfiles\":[],"
           "\"SubtitleProfiles\":["
-            "{\"Format\":\"subrip\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"srt\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ass\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"ssa\",\"Method\":\"Encode\"},"
+            "{\"Format\":\"subrip\",\"Method\":\"External\"},"
+            "{\"Format\":\"srt\",\"Method\":\"External\"},"
+            "{\"Format\":\"ass\",\"Method\":\"External\"},"
+            "{\"Format\":\"ssa\",\"Method\":\"External\"},"
+            "{\"Format\":\"vtt\",\"Method\":\"External\"},"
             "{\"Format\":\"pgssub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"},"
-            "{\"Format\":\"vtt\",\"Method\":\"Encode\"}"
+            "{\"Format\":\"dvdsub\",\"Method\":\"Encode\"}"
           "]"
         "}}";
 
