@@ -1011,7 +1011,19 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     }
 
     // Video GPU blit init — allocate RSX buffers once per session
-    vid_gpu_init(jbuf_fw(), jbuf_fh());
+    if (!vid_gpu_init(jbuf_fw(), jbuf_fh())) {
+        lc_logf("show_player: RETURN to UI -- VRAM allocation failed for the video surfaces");
+        live_abort();
+        player_startup_abort();
+        decode_ring_free();
+        jbuf_free();
+        stream_close(ps.sock);
+        adec_stop();
+        audio_close();
+        vdec_close();
+        thumb_cache_init();
+        return;
+    }
 
     // 5 ms socket receive timeout keeps the network thread responsive
     // A local file never waits, so there is nothing to set for one.

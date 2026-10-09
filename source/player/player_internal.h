@@ -272,7 +272,7 @@ extern volatile bool  s_vid_frame_ready;
 extern volatile u32   s_vid_uploaded_seq;
 extern volatile bool  s_vid_b_present;
 
-void vid_gpu_init(u32 fw, u32 fh);
+bool vid_gpu_init(u32 fw, u32 fh);   // false: VRAM allocation failed (already released)
 void vid_gpu_free(void);
 void vid_gpu_draw(bool render_blend, float blend_factor, u32 fw, u32 fh);
 // The loading spinner over the video (player.cpp), GPU phase; and the seek

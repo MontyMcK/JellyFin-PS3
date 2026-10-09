@@ -107,11 +107,22 @@ static void vid_gpu_build_quad(u32 fw, u32 fh) {
     plog(buf);
 }
 
+// A VRAM allocation failed: release what was taken and report failure, so the
+// caller backs out of playback instead of binding a NULL texture.
+void vid_gpu_free(void);
+static bool vid_gpu_fail(const char *what) {
+    char m[96];
+    snprintf(m, sizeof m, "vid_gpu: VRAM allocation FAILED (%s) -- playback aborted", what);
+    plog(m);
+    vid_gpu_free();
+    return false;
+}
+
 // -------------------------------------------------------
 // vid_gpu_init — allocate RSX buffers, build vertex quad, load FP ucode
 // -------------------------------------------------------
 
-void vid_gpu_init(u32 fw, u32 fh) {
+bool vid_gpu_init(u32 fw, u32 fh) {
     // Planar: allocate Y (fw×fh) + Cb/Cr (½×½) as three independent RSX
     // textures, double-buffered, for frame A and B.  Height padded to a
     // macroblock to match the decoder's coded size.
@@ -123,8 +134,9 @@ void vid_gpu_init(u32 fw, u32 fh) {
             u32 sz[3] = { ysz, csz, csz };
             for (int p = 0; p < 3; p++) {
                 s_yuvA_buf[db][p] = (u8*)rsxMemalign(64, sz[p]);
-                rsxAddressToOffset(const_cast<u8*>(s_yuvA_buf[db][p]), &s_yuvA_off[db][p]);
                 s_yuvB_buf[db][p] = (u8*)rsxMemalign(64, sz[p]);
+                if (!s_yuvA_buf[db][p] || !s_yuvB_buf[db][p]) return vid_gpu_fail("YUV plane");
+                rsxAddressToOffset(const_cast<u8*>(s_yuvA_buf[db][p]), &s_yuvA_off[db][p]);
                 rsxAddressToOffset(const_cast<u8*>(s_yuvB_buf[db][p]), &s_yuvB_off[db][p]);
             }
         }
@@ -137,6 +149,7 @@ void vid_gpu_init(u32 fw, u32 fh) {
     void *fp_ucode; u32 fp_size;
     rsxFragmentProgramGetUCode(vid_fpo, &fp_ucode, &fp_size);
     s_vid_fp_buf = (u32*)rsxMemalign(256, fp_size);
+    if (!s_vid_fp_buf) return vid_gpu_fail("passthrough FP");
     memcpy(s_vid_fp_buf, fp_ucode, fp_size);
     rsxAddressToOffset(s_vid_fp_buf, &s_vid_fp_off);
 
@@ -147,18 +160,21 @@ void vid_gpu_init(u32 fw, u32 fh) {
         void *yfp_ucode; u32 yfp_size;
         rsxFragmentProgramGetUCode(yuv_fpo, &yfp_ucode, &yfp_size);
         s_vid_fp_buf_yuv = (u32*)rsxMemalign(256, yfp_size);
+        if (!s_vid_fp_buf_yuv) return vid_gpu_fail("BT.709 FP");
         memcpy(s_vid_fp_buf_yuv, yfp_ucode, yfp_size);
         rsxAddressToOffset(s_vid_fp_buf_yuv, &s_vid_fp_off_yuv);
 
         rsxFragmentProgram *y601_fpo = (rsxFragmentProgram*)video_fp_yuv601_data;
         rsxFragmentProgramGetUCode(y601_fpo, &yfp_ucode, &yfp_size);
         s_vid_fp_buf_yuv601 = (u32*)rsxMemalign(256, yfp_size);
+        if (!s_vid_fp_buf_yuv601) return vid_gpu_fail("BT.601 FP");
         memcpy(s_vid_fp_buf_yuv601, yfp_ucode, yfp_size);
         rsxAddressToOffset(s_vid_fp_buf_yuv601, &s_vid_fp_off_yuv601);
     }
 
     // 4 vertices: float4 pos + float2 uv = 24 bytes each
     s_vid_vbuf = (u8*)rsxMemalign(128, 4 * 24);
+    if (!s_vid_vbuf) return vid_gpu_fail("quad vertices");
     rsxAddressToOffset(s_vid_vbuf, &s_vid_vbuf_off);
 
     // fw/fh here are the *allocated* size; vid_gpu_draw rebuilds the quad
@@ -166,6 +182,7 @@ void vid_gpu_init(u32 fw, u32 fh) {
     vid_gpu_build_quad(fw, fh);
 
     plog("vid_gpu: init done");
+    return true;
 }
 
 // -------------------------------------------------------

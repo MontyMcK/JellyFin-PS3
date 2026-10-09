@@ -175,6 +175,39 @@ int main(void)
         CHECK(s.a == 0);                                   // invisible while morphing in
     }
 
+    // 9. the hourly clock wrap: m->t wraps at 3600 s, but no pose may notice.
+    //    Run past the wrap with a beat-driven ts (!= 1) and compare the pose
+    //    change on the wrap frame with the largest change anywhere else.
+    {
+        jd_in in;
+        jd_pose prev;
+        float worst = 0.0f, at_wrap = 0.0f;
+        int wraps = 0;
+        jd_motion_init(&mo);
+        memset(&in, 0, sizeof in);
+        in.rms = 0.5f; in.mid = 0.4f; in.lowmid = 0.3f; in.width = 0.3f;
+        in.beat_hz = 2.6f; in.beat_conf = 1.0f;
+        memset(&prev, 0, sizeof prev);
+        for (i = 0; i < 60 * 3600; i++) {
+            const float t0 = mo.t;
+            float d = 0.0f;
+            jd_motion_step(&mo, &in, 1.0f / 60.0f);
+            jd_place(&mo, 1.0f, 16.0f / 9.0f, 0.0f, 0.02f, 0.40f, &P);
+            if (i > 0) {
+                for (int k = 0; k < 9; k++) d = fmaxf(d, fabsf(P.R[k] - prev.R[k]));
+                d = fmaxf(d, fabsf(P.P.x - prev.P.x) / P.S0);
+                d = fmaxf(d, fabsf(P.P.y - prev.P.y) / P.S0);
+                d = fmaxf(d, fabsf(P.S - prev.S) / P.S0);
+                if (mo.t < t0) { wraps++; at_wrap = d; }
+                else if (d > worst) worst = d;
+            }
+            prev = P;
+        }
+        printf("clock wrap: %d wrap(s), pose step on the wrap %.5f, worst elsewhere %.5f\n", wraps, at_wrap, worst);
+        CHECK(wraps >= 1);
+        CHECK(at_wrap <= worst * 1.5f + 1e-4f);
+    }
+
     if (fails) { printf("test_wave_drop: %d FAILED\n", fails); return 1; }
     printf("test_wave_drop: all passed\n");
     return 0;

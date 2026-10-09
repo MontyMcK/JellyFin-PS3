@@ -1379,9 +1379,10 @@ static void music_screen_run(const MusicCtx *ctx, int count, int start_idx) {
                 hb_us = now;
                 char b[160];
                 const u32 n = c_n ? c_n : 1;
-                snprintf(b, sizeof b, "music_screen: f=%u %s pos=%us gpu=%llu sync=%llu draw=%llu us/frame",
+                snprintf(b, sizeof b, "music_screen: f=%u %s focus=%.2f pos=%us gpu=%llu sync=%llu draw=%llu us/frame",
                          (unsigned)hb_frame,
                          music_is_paused() ? "PAUSED" : "playing",
+                         (double)s_focus_p,
                          (unsigned)music_elapsed_secs(),
                          (unsigned long long)(c_gpu / n), (unsigned long long)(c_sync / n),
                          (unsigned long long)(c_draw / n));

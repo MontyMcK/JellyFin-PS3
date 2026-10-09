@@ -335,9 +335,12 @@ static void fetch_thread_fn(void *arg) {
         // pixels have been consumed.
         img_arena_begin();
 
-        int w, h, ch;
-        unsigned char *px = stbi_load_from_memory(
-            (const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch, 4);
+        int w = 0, h = 0, ch;
+        unsigned char *px = NULL;
+        if (stbi_info_from_memory((const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch) && img_dims_ok(w, h))
+            px = stbi_load_from_memory((const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch, 4);
+        else
+            glogf("decode REFUSED %s %dx%d (over the %u px cap)", item_id, w, h, (unsigned)IMG_MAX_PIXELS);
         if (!px) {
             char msg[128];
             snprintf(msg, sizeof(msg), "thumb: decode failed %s", item_id);
