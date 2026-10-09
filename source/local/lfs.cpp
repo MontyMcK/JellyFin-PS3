@@ -58,6 +58,9 @@ struct Slot {
     uint64_t  total, free;
     uint64_t  rd_bytes, rd_us;
     bool      bench_logged;
+    bool      write_failed;   // NTFS: a write failed this mount -> read-only, dirty flag left up
+    bool      hibernated;     // NTFS: Windows hibernated with it attached -> read-only
+    bool      small_clusters; // NTFS: clusters smaller than a record or index block -> read-only
 };
 
 static Slot       s_slot[NPORTS];
@@ -140,7 +143,13 @@ int lfs_drives(lfs_drive *out, int max) {
     return n;
 }
 
+static bool port_has_writer(int p);           // the files section
+
 static void drop_volume(int p) {               // io lock held
+    // Pulled with a file open for writing: whatever the last write left is not known to be whole,
+    // so the dirty flag must stay up (writable 0 stops unmountNtfs from clearing it).  The handles
+    // are not touched here: their epoch is stale, so lfs_close only frees them.
+    if (s_slot[p].kind == LFS_USB_NTFS && s_ntfs[p].mounted && port_has_writer(p)) s_ntfs[p].writable = 0;
     if (s_slot[p].kind == LFS_USB_NTFS && s_ntfs[p].mounted)   unmountNtfs(&s_ntfs[p]);
     if (s_slot[p].kind == LFS_USB_EXFAT && s_exfat[p].mounted) unmountExfat(&s_exfat[p]);
 }
@@ -148,6 +157,18 @@ static void drop_volume(int p) {               // io lock held
 static void set_label(Slot *s, int port, const char *vol_label) {
     if (vol_label && vol_label[0]) snprintf(s->label, sizeof s->label, "%s", vol_label);
     else                           snprintf(s->label, sizeof s->label, TR("USB drive %d"), port + 1);
+}
+
+// Windows hibernated (or "fast started") with this volume attached: its hiberfil.sys starts "hibr".
+// Windows resumes with its own cached picture of the volume and would write over ours, so such a
+// volume is never written (ntfs-3g refuses it too).  "wake" means it resumed: fine.  io lock held.
+static bool ntfs_hibernated(NtfsVolume *v) {
+    NtfsFile f;
+    if (openNtfs(&f, v, "/hiberfil.sys") != 0) return false;
+    uint8_t head[512] __attribute__((aligned(32)));
+    const int n = f.size >= 4 ? readNtfs(&f, head, 4) : 0;
+    closeNtfs(&f);
+    return n == 4 && (memcmp(head, "hibr", 4) == 0 || memcmp(head, "HIBR", 4) == 0);
 }
 
 // A device that has been present long enough: say what it is.  Called without locks.
@@ -168,7 +189,7 @@ static void try_mount(int p) {
     }
 
     lfs_kind kind = LFS_USB_UNSUPPORTED;
-    bool not_ready = false;
+    bool not_ready = false, hibernated = false, small_clusters = false;
     char label[64] = "";
     uint64_t f = 0, t = 0;
     const uint64_t t0 = P.now_us ? P.now_us() : 0;
@@ -179,6 +200,15 @@ static void try_mount(int p) {
             kind = LFS_USB_NTFS;
             snprintf(label, sizeof label, "%s", s_ntfs[p].label);
             getNtfsFree(&s_ntfs[p], &f, &t);
+            hibernated = s_ntfs[p].writable && ntfs_hibernated(&s_ntfs[p]);
+            if (hibernated) s_ntfs[p].writable = 0;
+            // Writes only where one cluster holds a whole MFT record and a whole index block (4 KB
+            // clusters and up: Windows' default from 7 MB to 16 TB).  With smaller clusters a record
+            // or index block can straddle two runs and needs two writes, so a pull between them
+            // tears it -- a corrupt record no repair brings back whole.
+            const NtfsVolume &v = s_ntfs[p];
+            small_clusters = v.writable && (v.bytesPerCluster < v.mftRecordSize || v.bytesPerCluster < v.indexRecordSize);
+            if (small_clusters) s_ntfs[p].writable = 0;
         } else if (r == NTFS_MOUNT_NOT_READY) {
             not_ready = true;
         } else {
@@ -198,9 +228,13 @@ static void try_mount(int p) {
         s.state = SLOT_MOUNTED; s.kind = kind; s.epoch = ++s_epoch_counter;
         set_label(&s, p, label);
         s.free = f; s.total = t; s.rd_bytes = s.rd_us = 0; s.bench_logged = false;
+        s.write_failed = false; s.hibernated = hibernated; s.small_clusters = small_clusters;
         s_gen++;
-        log_line("lfs: usb%d %s \"%s\" mounted in %llu ms", p, lfs_kind_name(kind), s.label,
-                 (unsigned long long)(P.now_us ? (P.now_us() - t0) / 1000ULL : 0));
+        log_line("lfs: usb%d %s \"%s\" mounted in %llu ms%s", p, lfs_kind_name(kind), s.label,
+                 (unsigned long long)(P.now_us ? (P.now_us() - t0) / 1000ULL : 0),
+                 kind != LFS_USB_NTFS ? "" : s_ntfs[p].writable ? ", writable"
+                 : hibernated ? ", read-only (Windows hibernated it)"
+                 : small_clusters ? ", read-only (clusters under 4 KB)" : ", read-only (marked for checking)");
     } else if (not_ready && ++s.tries < RAW_TRIES) {
         // stay SETTLING: the next poll asks again
     } else {
@@ -560,9 +594,16 @@ struct Handle {
     ExfatFile  ef;
     uint64_t   size;
     uint64_t   pos;          // where the reader's next byte is (NTFS/exFAT keep their own cursor)
+    bool       writing;      // NTFS: opened by lfs_open_append
 };
 
 static Handle s_h[MAX_HANDLES];
+
+static bool port_has_writer(int p) {           // io lock held
+    for (int i = 0; i < MAX_HANDLES; i++)
+        if (s_h[i].used && s_h[i].writing && s_h[i].port == p) return true;
+    return false;
+}
 
 int lfs_open(const char *path) {
     Target t;
@@ -608,14 +649,31 @@ uint64_t lfs_size(int hnd) {
     return (hnd >= 0 && hnd < MAX_HANDLES && s_h[hnd].used) ? s_h[hnd].size : 0;
 }
 
+static void write_failed(int p, const char *what);
+static void settle(int p);
+
 void lfs_close(int hnd) {
     Guard io(LOCK_IO);
     if (hnd < 0 || hnd >= MAX_HANDLES || !s_h[hnd].used) return;
     Handle &h = s_h[hnd];
     if (h.kind == T_NATIVE && h.fd >= 0 && P.fs_close) P.fs_close(h.fd);
-    if (h.kind == T_NTFS)  closeNtfs(&h.nf);
-    if (h.kind == T_EXFAT) closeExfat(&h.ef);
+    bool alive = true;
+    if (h.port >= 0) {
+        Guard g(LOCK_TABLE);
+        alive = s_slot[h.port].state == SLOT_MOUNTED && s_slot[h.port].epoch == h.epoch;
+    }
+    const bool writing = h.writing;
+    const int port = h.port;
+    // A writer's close writes the final sizes; on a volume that is gone (unplugged, remounted)
+    // there is nothing left to write to, so the handle is only freed.
+    int rc = 0;
+    if (h.kind == T_NTFS && alive)  rc = closeNtfs(&h.nf);
+    if (h.kind == T_EXFAT && alive) closeExfat(&h.ef);
     memset(&h, 0, sizeof h);
+    if (writing && alive) {
+        if (rc != 0) write_failed(port, "close");
+        else settle(port);
+    }
 }
 
 static void bench_note(int port, uint64_t bytes, uint64_t us) {
@@ -684,4 +742,269 @@ int lfs_read(int hnd, uint64_t off, void *buf, uint32_t n) {
         done += (uint32_t)r;
     }
     return (int)done;
+}
+
+// ---- writing (NTFS) -------------------------------------------------------------------
+//
+// What the original's VFS wrappers did around the write path (third_party/mohasi_fs/ntfs.c, end),
+// plus one rule of ours: a call that fails after it may have touched the disk leaves the drive
+// read-only and its dirty flag up for the rest of this mount, instead of clearing the flag over a
+// volume that may be half updated.  "May have touched": the driver arms the dirty flag before its
+// first write of an operation and refusals before that point (a missing parent, a name that is
+// there already) leave it as it was.
+
+// io lock held.  The drive will take no more writes this mount; its dirty flag stays up.
+static void write_failed(int p, const char *what) {
+    s_ntfs[p].writable = 0;
+    bool first;
+    {
+        Guard g(LOCK_TABLE);
+        first = !s_slot[p].write_failed;
+        s_slot[p].write_failed = true;
+        s_gen++;
+    }
+    if (first) log_line("lfs: usb%d: %s failed -- the drive is read-only until it is plugged in again, "
+                        "and marked for checking (chkdsk) on a PC", p, what);
+}
+
+// io lock held.  After a write call: the flag comes down once no writer is open.
+static void settle(int p) {
+    if (!s_ntfs[p].mounted || !s_ntfs[p].writable || port_has_writer(p)) return;
+    if (ntfsClearDirty(&s_ntfs[p]) != 0) write_failed(p, "clearing the dirty flag");
+}
+
+// Resolves a path for writing (io lock NOT held).  0, or a LFS_E_ code.
+static int resolve_write(const char *path, Target *t, uint32_t *epoch) {
+    int rc = resolve(path, t);
+    if (rc < 0) return rc;
+    if (t->kind != T_NTFS) return LFS_E_READONLY;
+    *epoch = port_epoch(t->port);
+    return 0;
+}
+
+// io lock held: the drive is still the one resolved, and takes writes
+static int write_gate(const Target &t, uint32_t epoch) {
+    if (!target_alive(t, epoch)) return LFS_E_REMOVED;
+    if (!s_ntfs[t.port].mounted || !s_ntfs[t.port].writable) return LFS_E_READONLY;
+    return 0;
+}
+
+// The outcome of a driver call that may write: rc < 0 and not one of `benign` -> the drive is
+// gone (LFS_E_REMOVED) or failed (LFS_E_IO, read-only from now on, dirty flag left up).
+static int write_outcome(const Target &t, int rc, const char *what) {
+    if (rc >= 0) { settle(t.port); return 0; }
+    if (P.usb_present && !P.usb_present(t.port)) { s_ntfs[t.port].writable = 0; return LFS_E_REMOVED; }
+    if (s_ntfs[t.port].volumeDirty) { write_failed(t.port, what); return LFS_E_IO; }
+    return LFS_E_IO;                                  // refused before anything was written
+}
+
+bool lfs_drive_writable(const char *path) {
+    Target t;
+    uint32_t epoch;
+    if (resolve_write(path, &t, &epoch) != 0) return false;
+    Guard io(LOCK_IO);
+    return write_gate(t, epoch) == 0;
+}
+
+const char *lfs_drive_why_readonly(const char *path) {
+    Target t;
+    if (resolve(path, &t) < 0) return TR("The drive is not connected");
+    if (t.kind != T_NTFS) return TR("Downloads need an NTFS drive");
+    Guard g(LOCK_TABLE);
+    const Slot &s = s_slot[t.port];
+    if (s.state != SLOT_MOUNTED) return TR("The drive is not connected");
+    if (s.write_failed) return TR("A write failed: check the drive on a PC (chkdsk), then plug it in again");
+    if (s.hibernated) return TR("Windows hibernated this drive: shut Windows down fully, then plug it in again");
+    if (s.small_clusters) return TR("Its clusters are under 4 KB: format it with the default allocation size");
+    if (!s_ntfs[t.port].writable) return TR("The drive needs checking on a PC (chkdsk) first");
+    return "";
+}
+
+int lfs_mkdir(const char *path) {
+    Target t; uint32_t epoch;
+    int rc = resolve_write(path, &t, &epoch);
+    if (rc < 0) return rc;
+    Guard io(LOCK_IO);
+    if ((rc = write_gate(t, epoch)) < 0) return rc;
+    rc = mkdirNtfsPath(&s_ntfs[t.port], t.rest);
+    return write_outcome(t, rc == -2 ? 0 : rc, "making a folder");
+}
+
+int lfs_remove(const char *path) {
+    Target t; uint32_t epoch;
+    int rc = resolve_write(path, &t, &epoch);
+    if (rc < 0) return rc;
+    Guard io(LOCK_IO);
+    if ((rc = write_gate(t, epoch)) < 0) return rc;
+    NtfsInfo i;
+    if (statNtfs(&s_ntfs[t.port], t.rest, &i) == 0 && i.isDir) return LFS_E_BADPATH;
+    rc = unlinkNtfsPath(&s_ntfs[t.port], t.rest);
+    return write_outcome(t, rc == -2 ? 0 : rc, "deleting a file");
+}
+
+int lfs_rmdir(const char *path) {
+    Target t; uint32_t epoch;
+    int rc = resolve_write(path, &t, &epoch);
+    if (rc < 0) return rc;
+    Guard io(LOCK_IO);
+    if ((rc = write_gate(t, epoch)) < 0) return rc;
+    NtfsInfo i;
+    if (statNtfs(&s_ntfs[t.port], t.rest, &i) == 0 && !i.isDir) return LFS_E_BADPATH;
+    rc = rmdirNtfsPath(&s_ntfs[t.port], t.rest);
+    return write_outcome(t, rc == -2 ? 0 : rc, "deleting a folder");
+}
+
+int lfs_rename(const char *from, const char *to) {
+    Target a, b; uint32_t ea, eb;
+    int rc = resolve_write(from, &a, &ea);
+    if (rc < 0) return rc;
+    if ((rc = resolve_write(to, &b, &eb)) < 0) return rc;
+    if (a.port != b.port) return LFS_E_BADPATH;
+    Guard io(LOCK_IO);
+    if ((rc = write_gate(a, ea)) < 0) return rc;
+    NtfsInfo i;
+    if (statNtfs(&s_ntfs[a.port], b.rest, &i) == 0) return LFS_E_EXISTS;
+    rc = renameNtfsPath(&s_ntfs[a.port], a.rest, b.rest);
+    if (rc == -2) { settle(a.port); return LFS_E_EXISTS; }
+    return write_outcome(a, rc, "renaming");
+}
+
+int lfs_open_append(const char *path) {
+    Target t; uint32_t epoch;
+    int rc = resolve_write(path, &t, &epoch);
+    if (rc < 0) return rc;
+    Guard io(LOCK_IO);
+    if ((rc = write_gate(t, epoch)) < 0) return rc;
+    int slot = -1;
+    for (int i = 0; i < MAX_HANDLES; i++) if (!s_h[i].used) { slot = i; break; }
+    if (slot < 0) return LFS_E_TOOMANY;
+    Handle &h = s_h[slot];
+    memset(&h, 0, sizeof h);
+    h.kind = T_NTFS; h.port = t.port; h.epoch = epoch; h.fd = -1;
+    NtfsVolume *v = &s_ntfs[t.port];
+    rc = openNtfs(&h.nf, v, t.rest);
+    if (rc == -2) return LFS_E_BADPATH;                  // compressed / encrypted: not ours to append to
+    if (rc != 0) {
+        const int c = createNtfsPath(v, t.rest);
+        if (c != 0 && c != -2) return write_outcome(t, -1, "creating a file");
+        if (openNtfs(&h.nf, v, t.rest) != 0) return write_outcome(t, -1, "opening a new file");
+    }
+    h.nf.writable = 1;
+    seekNtfs(&h.nf, h.nf.size);
+    h.size = h.nf.size;
+    h.pos = ~0ULL;
+    h.writing = true;
+    h.used = true;
+    return slot;
+}
+
+int lfs_write(int hnd, const void *buf, uint32_t n) {
+    Guard io(LOCK_IO);
+    if (hnd < 0 || hnd >= MAX_HANDLES || !s_h[hnd].used || !s_h[hnd].writing) return LFS_E_IO;
+    Handle &h = s_h[hnd];
+    {
+        Guard g(LOCK_TABLE);
+        const Slot &s = s_slot[h.port];
+        if (s.state != SLOT_MOUNTED || s.epoch != h.epoch) return LFS_E_REMOVED;
+    }
+    if (!s_ntfs[h.port].writable) return LFS_E_READONLY;
+    seekNtfs(&h.nf, h.nf.size);                          // appends only (a read may have moved it)
+    h.pos = ~0ULL;
+    const uint8_t *p = (const uint8_t *)buf;
+    uint32_t done = 0;
+    while (done < n) {
+        const int w = writeNtfs(&h.nf, p + done, (int)(n - done));
+        if (w <= 0) {
+            h.size = h.nf.size;
+            if (P.usb_present && !P.usb_present(h.port)) { s_ntfs[h.port].writable = 0; return LFS_E_REMOVED; }
+            write_failed(h.port, "writing a file");
+            return LFS_E_IO;
+        }
+        done += (uint32_t)w;
+    }
+    h.size = h.nf.size;
+    return (int)n;
+}
+
+struct NamesCtx { void (*cb)(const char *, bool, void *); void *ctx; int n; };
+static void names_native_cb(const char *name, bool is_dir, void *ctx) {
+    NamesCtx *c = (NamesCtx *)ctx;
+    c->cb(name, is_dir, c->ctx);
+    c->n++;
+}
+
+int lfs_list_names(const char *path, void (*cb)(const char *name, bool is_dir, void *ctx), void *ctx) {
+    Target t;
+    int rc = resolve(path, &t);
+    if (rc < 0) return rc;
+    const uint32_t epoch = t.port >= 0 ? port_epoch(t.port) : 0;
+    Guard io(LOCK_IO);
+    NamesCtx c = { cb, ctx, 0 };
+    char name[768];
+    switch (t.kind) {
+    case T_NATIVE:
+        if (!P.fs_list || P.fs_list(t.native, names_native_cb, &c) != 0) return target_alive(t, epoch) ? LFS_E_NOTFOUND : LFS_E_REMOVED;
+        return c.n;
+    case T_NTFS: {
+        if (!target_alive(t, epoch)) return LFS_E_REMOVED;
+        NtfsVolume *v = &s_ntfs[t.port];
+        NtfsInfo di, ei;
+        if (statNtfs(v, t.rest, &di) != 0) return why_failed(t, epoch);
+        if (!di.isDir) return LFS_E_BADPATH;
+        NtfsDir dir;
+        openNtfsDir(&dir, v, di.mftReference);
+        while ((rc = readNtfsDir(&dir, name, sizeof name, &ei)) == 1) { cb(name, ei.isDir != 0, ctx); c.n++; }
+        closeNtfsDir(&dir);
+        return rc < 0 ? (why_failed(t, epoch) == LFS_E_REMOVED ? LFS_E_REMOVED : LFS_E_IO) : c.n;
+    }
+    case T_EXFAT: {
+        if (!target_alive(t, epoch)) return LFS_E_REMOVED;
+        ExfatVolume *v = &s_exfat[t.port];
+        ExfatInfo di, ei;
+        if (statExfat(v, t.rest, &di) != 0) return why_failed(t, epoch);
+        if (!di.isDir) return LFS_E_BADPATH;
+        ExfatDir dir;
+        openExfatDir(&dir, v, di.firstCluster, di.noFatChain, di.size);
+        while ((rc = readExfatDir(&dir, name, sizeof name, &ei)) == 1) { cb(name, ei.isDir != 0, ctx); c.n++; }
+        closeExfatDir(&dir);
+        return rc < 0 ? (why_failed(t, epoch) == LFS_E_REMOVED ? LFS_E_REMOVED : LFS_E_IO) : c.n;
+    }
+    default: return LFS_E_BADPATH;
+    }
+}
+
+bool lfs_space(const char *path, uint64_t *free_bytes, uint64_t *total_bytes) {
+    Target t;
+    if (resolve(path, &t) < 0) return false;
+    if (t.kind == T_NTFS || t.kind == T_EXFAT) {
+        const uint32_t epoch = port_epoch(t.port);
+        Guard io(LOCK_IO);
+        if (!target_alive(t, epoch)) return false;
+        if (t.kind == T_NTFS) return getNtfsFree(&s_ntfs[t.port], free_bytes, total_bytes) == 0;
+        return getExfatFree(&s_exfat[t.port], free_bytes, total_bytes) == 0;
+    }
+    if (t.kind == T_NATIVE && P.fs_space) return P.fs_space(t.native, free_bytes, total_bytes);
+    return false;
+}
+
+void lfs_unmount_all(void) {
+    Guard io(LOCK_IO);
+    for (int i = 0; i < MAX_HANDLES; i++) {              // writers first: their close writes the sizes
+        Handle &h = s_h[i];
+        if (!h.used || !h.writing) continue;
+        bool alive;
+        { Guard g(LOCK_TABLE); alive = s_slot[h.port].state == SLOT_MOUNTED && s_slot[h.port].epoch == h.epoch; }
+        if (alive && closeNtfs(&h.nf) != 0) write_failed(h.port, "closing a file at exit");
+        memset(&h, 0, sizeof h);
+    }
+    for (int p = 0; p < NPORTS; p++) {
+        if (s_slot[p].kind != LFS_USB_NTFS || !s_ntfs[p].mounted) continue;
+        for (int i = 0; i < MAX_HANDLES; i++)            // readers on it are done with
+            if (s_h[i].used && s_h[i].port == p) memset(&s_h[i], 0, sizeof s_h[i]);
+        unmountNtfs(&s_ntfs[p]);                          // clears the dirty flag unless a write failed
+        Guard g(LOCK_TABLE);
+        memset(&s_slot[p], 0, sizeof s_slot[p]);
+        s_slot[p].epoch = ++s_epoch_counter;
+        s_gen++;
+    }
 }

@@ -40,10 +40,11 @@ int  dl_plat_send(int h, const void *buf, int len);
 int  dl_plat_recv(int h, void *buf, int cap);
 void dl_plat_close(int h);
 
-// ---- filesystem (absolute paths) ---------------------------------------
-// Small text records go through stdio, which already works on both targets
-// (every settings file in this app is written that way).  The MEDIA file
-// does not: it can pass 4 GB, so it gets explicit 64-bit calls.
+// ---- filesystem ---------------------------------------------------------
+// Paths are absolute lv2 paths ("/dev_hdd0/...") or, for a store on a USB
+// drive, lfs paths ("usb0:/...", source/local/lfs.h) -- the console side
+// routes each call by the path.  Small text records are whole-file reads and
+// writes; the MEDIA file can pass 4 GB, so it gets explicit 64-bit calls.
 bool     dl_plat_mkdir(const char *path);          // true if it exists after
 bool     dl_plat_rmdir(const char *path);          // empty directory only
 bool     dl_plat_remove(const char *path);         // true if gone after
@@ -51,6 +52,10 @@ bool     dl_plat_rename(const char *from, const char *to);
 int64_t  dl_plat_file_size(const char *path);      // -1 if missing
 bool     dl_plat_exists(const char *path);         // file or directory
 bool     dl_plat_truncate(const char *path);       // to 0 bytes, creating it
+// A small file whole (records, artwork): read up to cap bytes, returning the
+// count or -1 when it cannot be opened; written by creating/replacing it.
+int      dl_plat_read_file(const char *path, void *buf, int cap);
+bool     dl_plat_write_file(const char *path, const void *data, int len);
 // Calls cb once per sub-directory name of path ("." and ".." skipped).
 // Returns the number of entries reported, or -1 if path cannot be read.
 int      dl_plat_list_dirs(const char *path,

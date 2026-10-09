@@ -112,6 +112,9 @@ static const LfsPort PS3_PORT = {
 // ---- the hotplug thread -----------------------------------------------------------
 
 static volatile bool s_run = false;
+static void (*volatile s_hook)(void) = NULL;
+
+void lfs_set_poll_hook(void (*hook)(void)) { s_hook = hook; }
 static sys_ppu_thread_t s_tid;
 static bool s_have_tid = false;
 
@@ -119,6 +122,8 @@ static void poll_main(void *arg) {
     (void)arg;
     while (s_run) {
         lfs_poll_once();
+        void (*hook)(void) = s_hook;
+        if (hook && s_run) hook();
         for (int i = 0; i < 20 && s_run; i++) usleep(100000);     // two seconds, but quick to stop
     }
     sysThreadExit(0);
@@ -150,4 +155,5 @@ void lfs_stop(void) {
     u64 ret;
     sysThreadJoin(s_tid, &ret);
     s_have_tid = false;
+    lfs_unmount_all();      // anything still open for writing closed, NTFS dirty flags down
 }

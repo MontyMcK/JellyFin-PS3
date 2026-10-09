@@ -40,6 +40,9 @@ static const setting_row k_rows[] = {
       TRN("The colour subtitles are drawn in.\n"
       "White is the broadcast default; the others are softer.")},
     // ---- Downloads
+    { SET_DL_LOCATION, SEC_DOWNLOADS, TRN("Download Location"),
+      TRN("Where new downloads are saved: this PS3's HDD, or an NTFS USB drive.\n"
+      "The lists show the downloads on the drive while it is plugged in.")},
     { SET_DOWNLOADS, SEC_DOWNLOADS, TRN("Downloads"),
       TRN("Downloads in progress, with pause and cancel.\n"
       "They wait while you stream and carry on by themselves.")},

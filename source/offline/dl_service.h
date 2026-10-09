@@ -65,6 +65,15 @@ const char *dl_service_root(void);
 // the library can be queried now.  Needs no server and no login.
 bool dl_service_wait_restored(unsigned timeout_ms);
 
+// Download location.  dl_location_usb(): the setting is "USB drive" (jellyfin_dlloc.txt).
+// dl_location_note(): why a new download cannot go to the USB drive right now ("" when it can,
+// or when the location is the HDD).  dl_location_drive(): the label of the drive the store is on
+// ("" while it is on the internal disk).
+bool dl_location_usb(void);
+void dl_location_set_usb(bool usb);
+void dl_location_note(char *out, int cap);
+void dl_location_drive(char *out, int cap);
+
 // DOWNLOAD FOR OFFLINE: the item page's action.  source is the version the
 // page has selected (its versions list), detail may be NULL.  Only disk
 // writes, no network: returns at once, the worker does the rest.

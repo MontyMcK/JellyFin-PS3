@@ -354,6 +354,23 @@ bool dl_plat_truncate(const char *path) {
     return true;
 }
 
+int dl_plat_read_file(const char *path, void *buf, int cap) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    const int n = (int)fread(buf, 1, (size_t)cap, f);
+    fclose(f);
+    return n;
+}
+
+bool dl_plat_write_file(const char *path, const void *data, int len) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return false;
+    bool ok = fwrite(data, 1, (size_t)len, f) == (size_t)len;
+    ok = (fflush(f) == 0) && ok;
+    ok = (fclose(f) == 0) && ok;
+    return ok;
+}
+
 int dl_plat_list_dirs(const char *path, void (*cb)(const char *, void *), void *ctx) {
     DIR *d = opendir(path);
     if (!d) return -1;

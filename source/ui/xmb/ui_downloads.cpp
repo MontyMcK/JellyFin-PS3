@@ -330,8 +330,11 @@ void xmb_show_downloads(void) {
             static u64 s_space_at = 0;
             const u64 t = timing_get_us();
             if (t >= s_space_at) { s_space = dl_space_report(0); s_space_at = t + 1000000ULL; }
-            dl_ui_hdd_header(&s_space, hdd, sizeof(hdd));
+            char drive[48];
+            dl_location_drive(drive, sizeof(drive));
+            dl_ui_store_header(&s_space, drive, hdd, sizeof(hdd));
             dl_ui_banner(&cx, &s_space, dl_space_held(), banner, sizeof(banner));
+            if (!banner[0]) dl_location_note(banner, sizeof(banner));   // the USB drive is not ready
         }
         frame_begin();
         draw_title(TR("Downloads"), hdd, banner, DL_WARN_CLR);

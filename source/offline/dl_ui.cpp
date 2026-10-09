@@ -87,6 +87,7 @@ const char *dl_ui_result_text(int r) {
     case DL_E_IO:        return TR("Could not write to the HDD");
     case DL_E_NOT_FOUND: return TR("No longer in the download list");
     case DL_E_STATE:     return TR("Not possible right now");
+    case DL_E_NO_DRIVE:  return TR("The USB drive for downloads isn't ready (Settings > Download Location)");
     default:             return TR("Something went wrong");
     }
 }
@@ -141,6 +142,18 @@ void dl_ui_hdd_header(const DlSpaceReport *space, char *out, int cap) {
     gb(space->free_bytes, fr, sizeof(fr));
     gb(space->reserve_bytes, keep, sizeof(keep));
     snprintf(out, (size_t)cap, TR("HDD: %s free \xC2\xB7 downloads keep %s free"), fr, keep);
+}
+
+void dl_ui_store_header(const DlSpaceReport *space, const char *drive, char *out, int cap) {
+    if (!drive || !drive[0]) { dl_ui_hdd_header(space, out, cap); return; }
+    if (!space || space->state == DL_SPACE_UNKNOWN) {
+        snprintf(out, (size_t)cap, TR("%s: free space unknown \xC2\xB7 downloads are paused"), drive);
+        return;
+    }
+    char fr[24], keep[24];
+    gb(space->free_bytes, fr, sizeof(fr));
+    gb(space->reserve_bytes, keep, sizeof(keep));
+    snprintf(out, (size_t)cap, TR("%s: %s free \xC2\xB7 downloads keep %s free"), drive, fr, keep);
 }
 
 void dl_ui_row(const DlStatus *st, const DlUiContext *cx, DlUiRow *o) {

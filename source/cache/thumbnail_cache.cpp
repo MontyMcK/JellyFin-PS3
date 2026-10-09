@@ -30,6 +30,7 @@
 #include <sys/thread.h>
 
 #include "thumbnail_cache.h"
+#include "lfs.h"            // artwork of a download on a USB drive
 #include "bitmap.h"
 #include "http.h"
 #include "jellyfin_api.h"
@@ -130,6 +131,14 @@ void thumb_set_local_bytes(ThumbLocalBytes provide) { s_local_bytes = provide; }
 // A whole local file into buf.  Returns its length, or -1 when it is missing
 // or does not fit.
 static int read_local_file(const char *path, uint8_t *buf, int cap) {
+    if (path[0] && path[0] != '/') {           // a download on a USB drive: an lfs path
+        const int h = lfs_open(path);
+        if (h < 0) return -1;
+        const uint64_t size = lfs_size(h);
+        const int n = (size == 0 || size > (uint64_t)cap) ? -1 : lfs_read(h, 0, buf, (uint32_t)size);
+        lfs_close(h);
+        return (n <= 0 || (uint64_t)n != size) ? -1 : n;
+    }
     FILE *f = fopen(path, "rb");
     if (!f) return -1;
     const size_t n = fread(buf, 1, (size_t)cap, f);

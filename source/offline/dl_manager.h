@@ -43,6 +43,7 @@ typedef enum {
     DL_E_STATE,       // not possible in the item's current state
     DL_E_SPACE_UNKNOWN, // free HDD space cannot be read: nothing may start
     DL_E_SIZE_UNKNOWN,  // neither a size nor a runtime: space cannot be checked
+    DL_E_NO_DRIVE,      // the download location is a USB drive that is not there / not writable
 } DlResult;
 
 typedef struct {

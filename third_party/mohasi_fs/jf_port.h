@@ -1,5 +1,5 @@
 #pragma once
-// jf-port: the platform layer for the vendored mohasi NTFS/exFAT readers.
+// jf-port: the platform layer for the vendored mohasi NTFS (read/write) and exFAT (read) drivers.
 //
 // Replaces mohasi's storage-device.h, syscall.h, thread.h, string-utilities.h,
 // <sys/timer.h> and <cell/rtc.h> with the little they used.  The storage calls
@@ -11,6 +11,9 @@
 #include <stdint.h>
 
 #define USB_STORAGE_MAX_PORTS  8     // lv2 exposes USB mass-storage on ports 0..7
+#ifndef MAX_PATH_LEN
+#define MAX_PATH_LEN 512                // in-volume path buffers in the write path (upstream path.h)
+#endif
 
 // USB mass-storage device id for a port (0-5 and 6+ use different bases).
 static inline uint64_t getUsbDeviceId(int port)
@@ -37,8 +40,14 @@ int getStorageInfo(uint64_t deviceId, StorageDeviceInfo *info);
 int openStorage(uint64_t deviceId, int *outStorageHandle);
 int closeStorage(int storageHandle);
 // One raw read of `count` sectors into a 32-byte-aligned buffer; outRead receives
-// the sectors transferred.  0 on success, an lv2 error otherwise.  There is no write.
+// the sectors transferred.  0 on success, an lv2 error otherwise.
 int readStorageRaw(int storageHandle, uint64_t sector, uint32_t count, void *buffer, uint32_t *outRead);
+// One raw write (lv2 syscall 603), the same shape.  Only ntfs.c's write path calls it; exfat.c
+// stays read-only (tests/Makefile.host check-mohasi-readonly).
+int writeStorageRaw(int storageHandle, uint64_t sector, uint32_t count, const void *buffer, uint32_t *outWritten);
+
+// The wall clock, UTC, in unix seconds (0 when unknown): timestamps of files the writer creates.
+uint64_t jf_port_utc_seconds(void);
 
 // Sleep, in microseconds (sys_timer_usleep in the original).
 void jf_port_usleep(unsigned usec);

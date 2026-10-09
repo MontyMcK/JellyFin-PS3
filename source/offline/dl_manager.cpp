@@ -302,14 +302,18 @@ static void restore_one(const char *id) {
 
 bool dl_manager_init(const char *root, const DlConfig *cfg) {
     s_ready = false;
-    if (cfg) s_cfg = *cfg; else dl_config_defaults(&s_cfg);
-    // The reserve may be raised, never lowered: below DL_RESERVE_MIN it is
-    // DL_RESERVE_MIN, and the optional setting (whole GB) can only add to it.
+    // The internal disk's floor is DL_RESERVE_MIN; a USB drive's (an lfs path,
+    // not "/...") is DL_RESERVE_MIN_USB.
+    const uint64_t floor = (root && root[0] == '/') ? DL_RESERVE_MIN : DL_RESERVE_MIN_USB;
+    if (cfg) s_cfg = *cfg;
+    else { dl_config_defaults(&s_cfg); s_cfg.reserve_bytes = floor; }
+    // The reserve may be raised, never lowered: below the floor it is the
+    // floor, and the optional setting (whole GB) can only add to it.
     {
         const int gb = dl_plat_reserve_gb();
         const uint64_t want = gb > 0 ? (uint64_t)gb * 1024ull * 1024 * 1024 : 0;
         if (want > s_cfg.reserve_bytes) s_cfg.reserve_bytes = want;
-        if (s_cfg.reserve_bytes < DL_RESERVE_MIN) s_cfg.reserve_bytes = DL_RESERVE_MIN;
+        if (s_cfg.reserve_bytes < floor) s_cfg.reserve_bytes = floor;
     }
     s_space_hold = false;
     if (!dl_store_init(root)) return false;

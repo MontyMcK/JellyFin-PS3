@@ -21,6 +21,11 @@
 // install updates and keep its system caches.  A floor, not a default: the
 // configured reserve can raise it and nothing can lower it.
 #define DL_RESERVE_MIN   (10ull * 1024 * 1024 * 1024)
+// The floor on a USB drive (a store whose root is an lfs path, "usb0:/..."):
+// nothing of the console's lives there, so it only keeps the NTFS writer clear
+// of a full volume, where a failed write would leave the drive marked for
+// checking.  The same raise-only rules apply.
+#define DL_RESERVE_MIN_USB (1ull * 1024 * 1024 * 1024)
 #define DL_ID_MAX        64      // Jellyfin ids are 32 hex chars
 #define DL_URL_MAX       1024
 #define DL_TITLE_MAX     128

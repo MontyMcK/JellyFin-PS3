@@ -344,15 +344,16 @@ MOHASI_DEP = $(MOHASI_SRC) $(MOHASI)/ntfs.h $(MOHASI)/exfat.h $(MOHASI)/jf_port.
 test_mohasi_fs: $(MOHASI_DEP)
 	$(CC) -O2 -Wall -Wextra -Wno-misleading-indentation -I$(MOHASI) -o $@ $(MOHASI_SRC)
 
-# The readers must never grow a write path back: no write syscall, no raw syscall trampolines.
+# exFAT stays read-only: exfat.c must not grow a write path back (no write syscall, no raw syscall
+# trampolines, no allocator).  NTFS writes, through jf_port.h's writeStorageRaw only.
 # (Comments are stripped first; the wording of a comment is not code.)
 check-mohasi-readonly:
-	@bad=$$(for f in $(MOHASI)/ntfs.c $(MOHASI)/exfat.c $(MOHASI)/jf_port.h $(MOHASI)/jf_port_ps3.c; do \
-	    sed -e 's@//.*@@' $$f | grep -n -E '\b603\b|STORAGE_WRITE|writeSectors|writeStorageRaw|allocateClusters|scCall|sys_storage_write' \
-	        | sed "s@^@$$f: @"; \
-	done); \
-	if [ -n "$$bad" ]; then echo "write path found in the vendored readers:"; echo "$$bad"; exit 1; fi; \
-	echo "mohasi readers: no write path"
+	@bad=$$(sed -e 's@//.*@@' $(MOHASI)/exfat.c | grep -n -E '\b603\b|STORAGE_WRITE|writeSectors|writeStorageRaw|allocateClusters|scCall|sys_storage_write' \
+	        | sed "s@^@$(MOHASI)/exfat.c: @"; \
+	    sed -e 's@//.*@@' $(MOHASI)/ntfs.c | grep -n -E '\b603\b|scCall|sys_storage_write|lv2syscall' \
+	        | sed "s@^@$(MOHASI)/ntfs.c: @"); \
+	if [ -n "$$bad" ]; then echo "write path or raw syscall found where it must not be:"; echo "$$bad"; exit 1; fi; \
+	echo "mohasi: exFAT read-only, NTFS writes only through jf_port"
 
 # The same, built big-endian and run under qemu-ppc64 (skipped when the cross compiler is missing).
 test_mohasi_fs_be: $(MOHASI_DEP)
@@ -922,3 +923,10 @@ test_line_break: test_line_break.c ../source/ui/render/line_break.h
 # The corner clock and date, as the XMB writes them.
 test_clock_fmt: test_clock_fmt.c ../source/ui/render/clock_fmt.h
 	$(CC) $(CFLAGS) -Wextra -I../source/ui/render -o $@ test_clock_fmt.c
+
+# The NTFS write path end to end (third_party/mohasi_fs/README.md, Tests): not part of check -- it needs
+# mkntfs, ntfscat and the ntfs-3g headers (apt: ntfs-3g ntfs-3g-dev).  NTFS_MODE=quick|full|cut512.
+.PHONY: ntfs-write-check
+ntfs-write-check:
+	bash fixtures/fs/ntfs_write_check.sh $(or $(NTFS_MODE),quick)
+	bash fixtures/fs/ntfs_write_check.sh quick be

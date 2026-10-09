@@ -28,6 +28,7 @@
 #include "subfont.h"
 #include "subcolor.h"
 #include "dl_manager.h"     // Downloads / Offline Library rows
+#include "dl_service.h"     // Download Location
 #include "i18n_store.h"     // Language
 
 // xmb/ui_peek.cpp (declared in ui_internal.h, not included here).
@@ -67,6 +68,15 @@ static void v_autoskip(char *b, int c, bool *l) { val_onoff(b, c, l, autoskip_en
 #if ENABLE_PLAYER_STATS
 static void v_stats(char *b, int c, bool *l)    { val_onoff(b, c, l, statsovl_enabled()); }
 #endif
+static void v_dlloc(char *b, int c, bool *l) {
+    if (!dl_location_usb()) { val_text(b, c, l, TR("Internal HDD"), false); return; }
+    char drive[48], note[8];
+    dl_location_drive(drive, sizeof(drive));
+    dl_location_note(note, sizeof(note));
+    if (drive[0])     { snprintf(b, (size_t)c, "USB: %s", drive); *l = true; }
+    else if (note[0]) val_text(b, c, l, TR("USB (not ready)"), false);
+    else              val_text(b, c, l, TR("USB drive"), true);
+}
 static void v_direct(char *b, int c, bool *l)   { val_text(b, c, l, directstream_enabled() ? TR("Auto") : TR("Off"), directstream_enabled()); }
 static void v_24hz(char *b, int c, bool *l)     { val_text(b, c, l, d24_enabled() ? TR("Auto") : TR("Off"), d24_enabled()); }
 static void v_audio(char *b, int c, bool *l)    { val_text(b, c, l, tr(surround_mode_label()), surround_enabled()); }
@@ -150,6 +160,7 @@ static void t_autoskip(int)    { autoskip_set_enabled(!autoskip_enabled()); }
 static void t_stats(int)       { statsovl_set_enabled(!statsovl_enabled()); }
 #endif
 static void t_direct(int)      { directstream_set_enabled(!directstream_enabled()); }
+static void t_dlloc(int)       { dl_location_set_usb(!dl_location_usb()); }
 static void t_24hz(int)        { d24_set_enabled(!d24_enabled()); }
 static void s_audio(int d)     { surround_step(d); }
 static void s_dialogue(int d)  { if (!audio_passthrough_wanted()) centermix_step(d); }
@@ -191,6 +202,7 @@ static const UiRow k_ui[] = {
     TOGGLE(SET_STATS,       ICON_BUG,         v_stats,     t_stats),
 #endif
     // Downloads: the stacked-cards glyph (a queue); Offline: play.
+    TOGGLE(SET_DL_LOCATION, ICON_COLLECTIONS, v_dlloc,     t_dlloc),
     ACTION(SET_DOWNLOADS,   ICON_COLLECTIONS, v_downloads, a_downloads),
     ACTION(SET_OFFLINE_LIB, ICON_PLAY,        v_offline,   a_offline),
     ACTION(SET_LOGOUT,      ICON_LOGOUT,      NULL,        a_logout),

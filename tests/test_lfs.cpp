@@ -472,6 +472,170 @@ static void benchmark_log() {
     poll();
 }
 
+// ---- writing to an NTFS drive -------------------------------------------------------
+
+static void fresh_ntfs(int port, const char *path) {
+    char cmd[300];
+    snprintf(cmd, sizeof cmd, "rm -f %s && truncate -s 128M %s && mkntfs -F -f -q -L JFWRITE %s >/dev/null 2>&1", path, path, path);
+    if (system(cmd) != 0) { printf("FAIL mkntfs %s\n", path); s_failed++; return; }
+    if (g_port_fd[port] >= 0) close(g_port_fd[port]);
+    g_port_fd[port] = open(path, O_RDWR);
+    g_port_fail[port] = 0;
+    g_present[port] = true;
+}
+
+static void replug(int port, const char *path) {         // pulled, then plugged in again
+    g_present[port] = false;
+    poll();
+    if (g_port_fd[port] >= 0) close(g_port_fd[port]);
+    g_port_fd[port] = open(path, O_RDWR);
+    g_port_fail[port] = 0;
+    g_present[port] = true;
+    settle_and_poll();
+}
+
+static std::vector<std::string> g_names;
+static void collect_name(const char *name, bool is_dir, void *) { g_names.push_back(std::string(is_dir ? "/" : "") + name); }
+
+static void ntfs_writes() {
+    printf("- writing to an NTFS drive\n");
+    const char *img = "/tmp/jf_lfs_w.img";
+    fresh_ntfs(3, img);
+    settle_and_poll();
+    lfs_drive d;
+    CHECK(has_drive("usb3", &d) && d.kind == LFS_USB_NTFS);
+    CHECK(lfs_drive_writable("usb3:/"));
+    CHECK(strcmp(lfs_drive_why_readonly("usb3:/"), "") == 0);
+    CHECK(!lfs_drive_writable("hdd:/video"));                               // not an lfs write target
+    CHECK(lfs_mkdir("hdd:/video/x") == LFS_E_READONLY);
+    CHECK(lfs_drive_why_readonly("usb6:/")[0] != '\0');                     // nothing there
+
+    uint64_t free0 = 0, total = 0;
+    CHECK(lfs_space("usb3:/", &free0, &total) && total > 100ull * MB && free0 > 0);
+    CHECK(lfs_mkdir("usb3:/jellyfin_offline") == 0);
+    CHECK(lfs_mkdir("usb3:/jellyfin_offline") == 0);                        // already there: fine
+    CHECK(lfs_mkdir("usb3:/jellyfin_offline/items") == 0);
+    CHECK(lfs_mkdir("usb3:/no/such/parent") < 0);
+
+    // a download: appended, read back while it grows, closed, resumed
+    std::vector<uint8_t> chunk(512 * 1024), want(3 * MB + 777);
+    gen(31, 0, want.data(), want.size());
+    int h = lfs_open_append("usb3:/jellyfin_offline/items/media.ts.part");
+    CHECK(h >= 0);
+    uint64_t at = 0;
+    while (at < 2 * MB) {
+        const uint32_t n = (uint32_t)std::min<uint64_t>(chunk.size(), 2 * MB - at);
+        CHECK(lfs_write(h, want.data() + at, n) == (int)n);
+        at += n;
+    }
+    CHECK(lfs_size(h) == 2 * MB);
+    uint8_t back[4096];
+    CHECK(lfs_read(h, MB, back, sizeof back) == (int)sizeof back && memcmp(back, want.data() + MB, sizeof back) == 0);
+    CHECK(lfs_write(h, want.data() + at, 100) == 100);                     // a read in between does not move the append point
+    at += 100;
+    lfs_close(h);
+    lfs_entry e;
+    CHECK(lfs_stat("usb3:/jellyfin_offline/items/media.ts.part", &e) && e.size == at);
+    h = lfs_open_append("usb3:/jellyfin_offline/items/media.ts.part");      // the app restarts: resume
+    CHECK(h >= 0 && lfs_size(h) == at);
+    CHECK(lfs_write(h, want.data() + at, (uint32_t)(want.size() - at)) == (int)(want.size() - at));
+    lfs_close(h);
+    CHECK(lfs_rename("usb3:/jellyfin_offline/items/media.ts.part", "usb3:/jellyfin_offline/items/media.ts") == 0);
+    h = lfs_open("usb3:/jellyfin_offline/items/media.ts");
+    CHECK(h >= 0 && lfs_size(h) == want.size());
+    if (h >= 0) { CHECK(read_whole(h, want.size(), 65536) == want); lfs_close(h); }
+
+    // records: written whole, swapped in
+    h = lfs_open_append("usb3:/jellyfin_offline/items/state.txt");
+    CHECK(h >= 0 && lfs_write(h, "state 1\n", 8) == 8);
+    lfs_close(h);
+    h = lfs_open_append("usb3:/jellyfin_offline/items/state.txt.tmp");
+    CHECK(h >= 0 && lfs_write(h, "state 2\n", 8) == 8);
+    lfs_close(h);
+    CHECK(lfs_rename("usb3:/jellyfin_offline/items/state.txt.tmp", "usb3:/jellyfin_offline/items/state.txt") == LFS_E_EXISTS);
+    CHECK(lfs_remove("usb3:/jellyfin_offline/items/state.txt") == 0);
+    CHECK(lfs_rename("usb3:/jellyfin_offline/items/state.txt.tmp", "usb3:/jellyfin_offline/items/state.txt") == 0);
+    CHECK(lfs_remove("usb3:/jellyfin_offline/items/nothing.txt") == 0);     // absent: fine
+    CHECK(lfs_remove("usb3:/jellyfin_offline/items") == LFS_E_BADPATH);     // a folder is not a file
+    CHECK(lfs_rmdir("usb3:/jellyfin_offline/items") < 0);                   // not empty
+
+    g_names.clear();
+    CHECK(lfs_list_names("usb3:/jellyfin_offline/items", collect_name, nullptr) == 2);
+    std::sort(g_names.begin(), g_names.end());
+    CHECK(g_names == (std::vector<std::string>{ "media.ts", "state.txt" }));
+    uint64_t free1 = 0;
+    CHECK(lfs_space("usb3:/", &free1, &total) && free1 + want.size() <= free0);
+
+    // pulled with a file open for writing: it comes back read-only (dirty flag up), and says why
+    h = lfs_open_append("usb3:/jellyfin_offline/items/second.ts.part");
+    CHECK(h >= 0 && lfs_write(h, want.data(), 65536) == 65536);
+    g_port_fail[3] = 1; g_present[3] = false;
+    CHECK(lfs_write(h, want.data(), 65536) == LFS_E_REMOVED);
+    replug(3, img);
+    lfs_close(h);                                                           // stale: only freed
+    CHECK(has_drive("usb3"));
+    CHECK(!lfs_drive_writable("usb3:/"));
+    CHECK(strstr(lfs_drive_why_readonly("usb3:/"), "chkdsk") != nullptr);
+    CHECK(lfs_mkdir("usb3:/after") == LFS_E_READONLY);
+    h = lfs_open("usb3:/jellyfin_offline/items/media.ts");                 // still reads
+    CHECK(h >= 0 && lfs_read(h, 0, back, 16) == 16 && memcmp(back, want.data(), 16) == 0);
+    lfs_close(h);
+
+    // chkdsk, on a PC (ntfsfix -d here clears the flag): writable again
+    lfs_unmount_all();
+    CHECK(system("ntfsfix -d /tmp/jf_lfs_w.img >/dev/null 2>&1") == 0);
+    replug(3, img);
+    CHECK(lfs_drive_writable("usb3:/"));
+    CHECK(lfs_remove("usb3:/jellyfin_offline/items/second.ts.part") == 0);
+
+    // a write that fails with the drive still there: read-only from then on, with the reason
+    h = lfs_open_append("usb3:/jellyfin_offline/items/third.ts.part");
+    CHECK(h >= 0 && lfs_write(h, want.data(), 65536) == 65536);
+    g_port_fail[3] = 1;
+    CHECK(lfs_write(h, want.data(), 65536) == LFS_E_IO);
+    g_port_fail[3] = 0;
+    CHECK(!lfs_drive_writable("usb3:/"));
+    CHECK(strstr(lfs_drive_why_readonly("usb3:/"), "failed") != nullptr);
+    CHECK(lfs_write(h, want.data(), 16) == LFS_E_READONLY);
+    lfs_close(h);
+    CHECK(lfs_mkdir("usb3:/later") == LFS_E_READONLY);
+    // ...and its dirty flag stayed up: after a replug it is still read-only
+    replug(3, img);
+    CHECK(!lfs_drive_writable("usb3:/"));
+    lfs_unmount_all();
+    CHECK(system("ntfsfix -d /tmp/jf_lfs_w.img >/dev/null 2>&1") == 0);
+    replug(3, img);
+    CHECK(lfs_drive_writable("usb3:/"));
+
+    // the app exits with a download open: the clean unmount closes it and puts the flag down
+    h = lfs_open_append("usb3:/jellyfin_offline/items/third.ts.part");
+    CHECK(h >= 0 && lfs_write(h, want.data(), 65536) == 65536);
+    lfs_unmount_all();
+    CHECK(!has_drive("usb3"));
+    settle_and_poll();
+    CHECK(lfs_drive_writable("usb3:/"));
+    CHECK(lfs_stat("usb3:/jellyfin_offline/items/third.ts.part", &e) && e.size >= 65536);
+
+    // Windows hibernated with the drive attached: never written
+    h = lfs_open_append("usb3:/hiberfil.sys");
+    CHECK(h >= 0 && lfs_write(h, "hibr", 4) == 4);
+    lfs_close(h);
+    replug(3, img);
+    CHECK(has_drive("usb3") && !lfs_drive_writable("usb3:/"));
+    CHECK(strstr(lfs_drive_why_readonly("usb3:/"), "hibernated") != nullptr);
+    lfs_unmount_all();
+
+    // clusters smaller than an MFT record: read, never written
+    CHECK(system("rm -f /tmp/jf_lfs_w.img && truncate -s 128M /tmp/jf_lfs_w.img && "
+                 "mkntfs -F -f -q -c 512 -L SMALL /tmp/jf_lfs_w.img >/dev/null 2>&1") == 0);
+    replug(3, img);
+    CHECK(has_drive("usb3") && !lfs_drive_writable("usb3:/"));
+    CHECK(strstr(lfs_drive_why_readonly("usb3:/"), "4 KB") != nullptr);
+    CHECK(lfs_mkdir("usb3:/x") == LFS_E_READONLY);
+    lfs_unmount_all();
+    detach(3);
+}
+
 int main() {
     char tmpl[] = "/tmp/jf_lfs_hdd_XXXXXX";
     g_hdd_root = mkdtemp(tmpl);
@@ -494,6 +658,7 @@ int main() {
     unplug_mid_read();
     unsupported_and_probing();
     benchmark_log();
+    ntfs_writes();
     printf("lfs: %d checks, %d failed\n", s_checks, s_failed);
     return s_failed ? 1 : 0;
 }

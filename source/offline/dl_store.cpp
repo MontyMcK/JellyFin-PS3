@@ -23,12 +23,8 @@ static bool path_join(char *out, int cap, const char *a, const char *b) {
 // Whole small file into buf (NUL-terminated).  False if missing, empty or
 // too big to be one of ours.
 static bool read_text(const char *path, char *buf, int cap) {
-    FILE *f = fopen(path, "rb");
-    if (!f) return false;
-    int n = (int)fread(buf, 1, (size_t)(cap - 1), f);
-    bool too_big = (n == cap - 1) && fgetc(f) != EOF;
-    fclose(f);
-    if (n <= 0 || too_big) return false;
+    const int n = dl_plat_read_file(path, buf, cap);   // cap bytes back = more than cap-1 there
+    if (n <= 0 || n >= cap) return false;
     buf[n] = '\0';
     // An embedded NUL means binary junk, not a text record.
     return (int)strlen(buf) == n;
@@ -38,12 +34,7 @@ static bool write_text_atomic(const char *path, const char *text, int len) {
     char tmp[DL_PATH_MAX + 8];
     int tn = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
     if (tn < 0 || tn >= (int)sizeof(tmp)) return false;
-    FILE *f = fopen(tmp, "wb");
-    if (!f) return false;
-    bool ok = fwrite(text, 1, (size_t)len, f) == (size_t)len;
-    ok = (fflush(f) == 0) && ok;
-    ok = (fclose(f) == 0) && ok;
-    if (!ok) { dl_plat_remove(tmp); return false; }
+    if (!dl_plat_write_file(tmp, text, len)) { dl_plat_remove(tmp); return false; }
     // lv2's rename does not promise to replace an existing file, so remove
     // first.  The window between the two leaves only the .tmp, which load
     // falls back to.

@@ -1345,6 +1345,10 @@ static void test_space_estimates_and_text(void) {
     rep.free_bytes = 42ull * GIB;
     dl_ui_hdd_header(&rep, buf, sizeof(buf));
     CHECK(!strcmp(buf, "HDD: 42 GB free \xC2\xB7 downloads keep 10 GB free"));
+    dl_ui_store_header(&rep, "", buf, sizeof(buf));                 // no drive: the HDD's header
+    CHECK(!strcmp(buf, "HDD: 42 GB free \xC2\xB7 downloads keep 10 GB free"));
+    dl_ui_store_header(&rep, "MOVIES", buf, sizeof(buf));
+    CHECK(!strcmp(buf, "MOVIES: 42 GB free \xC2\xB7 downloads keep 10 GB free"));
     rep.state = DL_SPACE_UNKNOWN;
     dl_ui_hdd_header(&rep, buf, sizeof(buf));
     CHECK(strstr(buf, "unknown") != NULL);

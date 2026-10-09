@@ -83,6 +83,8 @@ void dl_ui_banner(const DlUiContext *cx, const DlSpaceReport *space, bool held,
 // keep 10 GB free" with a middle dot between the two; it says the free space
 // is unknown when it cannot be read.
 void dl_ui_hdd_header(const DlSpaceReport *space, char *out, int cap);
+// The same for the store wherever it is: `drive` is the USB drive's label, or "" / NULL for the HDD.
+void dl_ui_store_header(const DlSpaceReport *space, const char *drive, char *out, int cap);
 
 // ---- the Offline library --------------------------------------------------
 
