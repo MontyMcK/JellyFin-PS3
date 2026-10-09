@@ -293,6 +293,12 @@ int stream_open(const char *url) {
     s_hdr_deadline_secs = 0;
     file_close_stream();
     const char *p = url;
+    if (strncmp(p, "https://", 8) == 0) {
+        // The API works over TLS; the video socket path does not (see
+        // net/https_client.h).  Say so instead of connecting in plaintext.
+        plog("stream: https:// servers cannot be streamed -- use http:// for playback");
+        return -1;
+    }
     if (strncmp(p, "http://", 7) == 0) p += 7;
 
     char host[256]; int port = 8096; char path[512];

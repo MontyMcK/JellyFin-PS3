@@ -45,6 +45,9 @@
 static u32 d_req = 0, d_claim_ok = 0, d_claim_fail = 0, d_size_drop = 0,
            d_fail_drop = 0, d_fetch_ok = 0, d_fetch_fail = 0, d_decode_fail = 0,
            d_steal_drop = 0, d_get_hit = 0, d_get_miss = 0;
+// Timing, to decide whether hardware JPEG decode (cellJpgDec) would pay: wall
+// time of the HTTP fetch and of the stb decode, per second (us, count, max).
+static u32 d_net_us = 0, d_net_n = 0, d_net_max = 0, d_dec_us = 0, d_dec_n = 0, d_dec_max = 0;
 static bool d_fetch_gated = false;   // fetch thread's last-known gate state
 
 // Sized for the Home shelf, which shows several rows of cards at once (more
@@ -309,10 +312,15 @@ static void fetch_thread_fn(void *arg) {
 
         glogf("fetch START %s %dx%d%s", item_id, tw, th, local ? " (local)" : "");
         // A provider's own key is answered by the provider alone; any other goes to a local file or the server.
+        const u64 t_net0 = timing_get_us();
         int bytes = s_local_bytes ? s_local_bytes(item_id, s_fetch_buf, FETCH_BUF_SIZE) : 0;
         if (bytes == 0)
             bytes = local ? read_local_file(lpath, s_fetch_buf, FETCH_BUF_SIZE)
                           : http_fetch_binary(url, g_token, s_fetch_buf, FETCH_BUF_SIZE);
+        {
+            const u32 us = (u32)(timing_get_us() - t_net0);
+            d_net_us += us; d_net_n++; if (us > d_net_max) d_net_max = us;
+        }
         if (bytes <= 0) {
             char msg[128];
             snprintf(msg, sizeof(msg), "thumb: fetch failed %s (%d)", item_id, bytes);
@@ -335,12 +343,17 @@ static void fetch_thread_fn(void *arg) {
         // pixels have been consumed.
         img_arena_begin();
 
+        const u64 t_dec0 = timing_get_us();
         int w = 0, h = 0, ch;
         unsigned char *px = NULL;
         if (stbi_info_from_memory((const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch) && img_dims_ok(w, h))
             px = stbi_load_from_memory((const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch, 4);
         else
             glogf("decode REFUSED %s %dx%d (over the %u px cap)", item_id, w, h, (unsigned)IMG_MAX_PIXELS);
+        {
+            const u32 us = (u32)(timing_get_us() - t_dec0);
+            d_dec_us += us; d_dec_n++; if (us > d_dec_max) d_dec_max = us;
+        }
         if (!px) {
             char msg[128];
             snprintf(msg, sizeof(msg), "thumb: decode failed %s", item_id);
@@ -877,7 +890,7 @@ void thumb_cache_tick(void) {
         glogf("HB f=%u thr=%d gate=%d(hold=%u) slots E/Q/R=%d/%d/%d | "
               "req=%u qOK=%u qFULL=%u szDrop=%u failList=%u | "
               "fOK=%u fFail=%u dFail=%u drop=%u | get H/M=%u/%u | "
-              "freeKB=%u arenaPeak=%uKB/%uKB",
+              "freeKB=%u arenaPeak=%uKB/%uKB | net n=%u avg=%uus max=%uus dec n=%u avg=%uus max=%uus",
               frame, run ? 1 : 0, gated ? 1 : 0, hold,
               n_empty, n_queued, n_ready,
               d_req, d_claim_ok, d_claim_fail, d_size_drop, d_fail_drop,
@@ -885,7 +898,10 @@ void thumb_cache_tick(void) {
               d_get_hit, d_get_miss,
               meminfo_avail_kb(),
               (unsigned)(img_arena_peak() / 1024),
-              (unsigned)(img_arena_size() / 1024));
+              (unsigned)(img_arena_size() / 1024),
+              d_net_n, d_net_n ? d_net_us / d_net_n : 0, d_net_max,
+              d_dec_n, d_dec_n ? d_dec_us / d_dec_n : 0, d_dec_max);
+        d_net_us = d_net_n = d_net_max = d_dec_us = d_dec_n = d_dec_max = 0;
         d_req = d_claim_ok = d_claim_fail = d_size_drop = d_fail_drop = 0;
         d_fetch_ok = d_fetch_fail = d_decode_fail = d_steal_drop = 0;
         d_get_hit = d_get_miss = 0;

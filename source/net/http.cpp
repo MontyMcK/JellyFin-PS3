@@ -16,6 +16,7 @@
 #include <sys/mutex.h>
 
 #include "http.h"
+#include "https_client.h"
 #include "jf_paths.h"
 
 // Jellyfin-layer hooks (api_auth.cpp): the per-install device id sent in the
@@ -313,6 +314,18 @@ static int read_response(int sock, char *buf, int cap,
     return status;
 }
 
+static void build_auth(char *auth, int cap, const char *token) {
+    if (token && token[0])
+        snprintf(auth, cap,
+            "MediaBrowser Client=\"PS3\", Device=\"PS3\","
+            " DeviceId=\"%s\", Version=\"0.1\", Token=\"%s\"",
+            jf_device_id(), token);
+    else
+        snprintf(auth, cap,
+            "MediaBrowser Client=\"PS3\", Device=\"PS3\","
+            " DeviceId=\"%s\", Version=\"0.1\"", jf_device_id());
+}
+
 static int build_headers(char *req, int cap, const char *method,
                          const char *path, const char *host, int port,
                          const char *token, const char *accept, int blen,
@@ -324,15 +337,7 @@ static int build_headers(char *req, int cap, const char *method,
     // used for seeking isn't tied to a tracked session, so StartTimeTicks is
     // ignored and seeks fall back to offset 0.  stream.cpp already does this.
     char auth[400];
-    if (token && token[0])
-        snprintf(auth, sizeof(auth),
-            "MediaBrowser Client=\"PS3\", Device=\"PS3\","
-            " DeviceId=\"%s\", Version=\"0.1\", Token=\"%s\"",
-            jf_device_id(), token);
-    else
-        snprintf(auth, sizeof(auth),
-            "MediaBrowser Client=\"PS3\", Device=\"PS3\","
-            " DeviceId=\"%s\", Version=\"0.1\"", jf_device_id());
+    build_auth(auth, sizeof auth, token);
 
     int rlen = 0;
     rlen += snprintf(req+rlen, cap-rlen,
@@ -454,6 +459,7 @@ int http_init(void) {
     attr.attr_protocol  = SYS_MUTEX_PROTOCOL_FIFO;
     attr.attr_recursive = SYS_MUTEX_ATTR_NOT_RECURSIVE;
     s_http_mtx_ok = (sysMutexCreate(&s_http_mtx, &attr) == 0);
+    https_rt_init();
     return HTTP_SUCCESS;
 }
 
@@ -466,6 +472,21 @@ static int http_request_once(int method, const char *url, const char *body,
                              const char *token, char *out, int out_size,
                              const char *ctype = NULL) {
     if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
+    if (https_url(url)) {
+        // API over TLS (firmware cellHttp); streaming stays on plain sockets.
+        char auth[400];
+        build_auth(auth, sizeof auth, token);
+        const char *verb = (method == HTTP_POST)   ? "POST"   :
+                           (method == HTTP_DELETE) ? "DELETE" : "GET";
+        int blen = 0;
+        int status = https_request(verb, url, method == HTTP_POST ? body : NULL, ctype, auth,
+                                   "application/json", out, out_size, &blen,
+                                   s_first_byte_tries * HTTP_IO_TIMEOUT_SEC);
+        if (blen > out_size - 1) plog("http: body TRUNCATED (https; raise RESPONSE_SIZE)");
+        if (status == 401 && token && token[0]) g_auth_expired = true;
+        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        return status;
+    }
     char host[256]; int port; char path[512];
     url_parse(url, host, sizeof(host), &port, path, sizeof(path));
 
@@ -610,6 +631,18 @@ int http_fetch_binary(const char *url, const char *token,
     // Bounded by the connect/IO timeouts in http_connect,
     // so the UI can never wait more than one in-flight fetch.
     if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
+
+    if (https_url(url)) {
+        char auth[400];
+        build_auth(auth, sizeof auth, token);
+        int blen = 0;
+        const int status = https_request("GET", url, NULL, NULL, auth, "image/jpeg,image/*",
+                                         (char *)out, out_size, &blen, HTTP_IO_TIMEOUT_SEC * 3);
+        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        // A short buffer would hand stb a truncated image; fail instead.
+        if (status != 200 || blen <= 0 || blen > out_size - 1) return -1;
+        return blen;
+    }
 
     char host[256]; int port; char path[512];
     url_parse(url, host, sizeof(host), &port, path, sizeof(path));
