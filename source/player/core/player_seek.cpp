@@ -256,6 +256,7 @@ bool player_execute_seek(PlayerState *ps) {
 
     // 3) Re-request the stream at the new offset.
     stream_close(ps->sock);
+    ps->sock = -1;     // a failed reopen must not leave a closed fd to be closed again
     if (ps->local) {
         // Offline: no server to ask.  Find the entry point nearest the target
         // in the file itself; player_local_open sets play_base_us to where it
