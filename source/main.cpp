@@ -47,6 +47,7 @@
 #include "video.h"
 #include "player_hud.h"
 #include "slog.h"
+#include "server_discovery.h"
 #include "lclog.h"
 #include "jf_spu.h"
 #include "ui_card_gpu.h"
@@ -317,6 +318,16 @@ int main(int argc, const char *argv[]) {
             crash_log("11 get_server");
             slog_state("SERVER_URL_SCREEN");
             char new_server[256] = "http://";
+            {   // A server on this network fills the box in.
+                SdServer found[SD_MAX];
+                const int n = sd_discover(found, SD_MAX, 1200);
+                for (int i = 0; i < n; i++)
+                    if (strncmp(found[i].address, "http://127.", 11) != 0) {
+                        snprintf(new_server, sizeof new_server, "%s",
+                                 found[i].alt[0] ? found[i].alt : found[i].address);
+                        break;
+                    }
+            }
             if (get_input(new_server, sizeof(new_server),
                           TR("Server URL (e.g. http://192.168.1.2:8096)"), false) != 1)
                 break;

@@ -118,11 +118,13 @@ bool jbuf_alloc(u32 fw, u32 fh) {
     s_jb_wr = s_jb_rd = s_jb_n = 0;
     memset(s_jbuf_pts, 0, sizeof(s_jbuf_pts));
     memset(s_jbuf_dur, 0, sizeof(s_jbuf_dur));
+    // A zeroed attr is rejected by lv2: until 10-11 this mutex never existed,
+    // and the decode thread's s_jb_n++ raced the display thread's s_jb_n--.
     sys_mutex_attr_t attr;
-    memset(&attr, 0, sizeof(attr));
+    sysMutexAttrInitialize(attr);
     attr.attr_protocol  = SYS_LWMUTEX_ATTR_PROTOCOL;
     attr.attr_recursive = SYS_MUTEX_ATTR_RECURSIVE;
-    sysMutexCreate(&s_jbuf_mtx, &attr);
+    if (sysMutexCreate(&s_jbuf_mtx, &attr) != 0) plog("jbuf: mutex create FAILED");
     return true;
 }
 
@@ -139,7 +141,12 @@ void jbuf_clear(void) {
 }
 
 const u8 *jbuf_peek(void)     { return (s_jb_n > 0) ? s_jbuf_data[s_jb_rd] : NULL; }
-void      jbuf_pop(void)      { s_jb_rd = (s_jb_rd + 1) % s_jb_cap; s_jb_n--; }
+void      jbuf_pop(void) {
+    sysMutexLock(s_jbuf_mtx, 0);
+    s_jb_rd = (s_jb_rd + 1) % s_jb_cap;
+    s_jb_n--;
+    sysMutexUnlock(s_jbuf_mtx);
+}
 u32       jbuf_fw(void)       { return s_jbuf_fw; }
 u32       jbuf_fh(void)       { return s_jbuf_fh; }
 int       jbuf_count(void)    { return s_jb_n; }

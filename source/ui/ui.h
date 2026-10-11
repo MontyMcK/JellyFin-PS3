@@ -218,6 +218,9 @@ void xmb_show_media(void);
 // If there are downloads to play, ask whether to open them.  True when the
 // Offline library was opened (the caller then retries sign-in as before).
 bool xmb_offer_offline_after_login_failure(void);
+// The saved server is not answering: offer to enter its address.  True when
+// the address changed (the caller retries at once).
+bool xmb_server_unreachable_prompt(void);
 
 // One-time setup: upload font bitmap, configure RSX blend.
 void ui_init(void);

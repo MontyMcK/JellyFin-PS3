@@ -27,10 +27,29 @@ extern volatile bool g_auth_expired;
 
 static char s_raw_buf[RESPONSE_SIZE + 4096];
 
-// Serializes http_request() — it shares s_raw_buf, and the playback progress
-// reporter calls it from its own thread while the UI/seek paths use it too.
+// Serializes resolve + connect, the part of the net stack that is not
+// reentrant (see http_fetch_binary).  Only that part: holding it for a whole
+// request would make the UI wait behind a 24 s search or a 60 s Live TV open.
+// Until 10-11 this lock never existed -- the attr was memset to 0, which lv2
+// rejects -- so every thread shared s_raw_buf with nothing in between.
 static sys_mutex_t s_http_mtx;
 static bool        s_http_mtx_ok = false;
+
+// Response staging.  The static buffer serves the usual single request; a
+// request that finds it in use gets a heap copy rather than writing into
+// another thread's reply.
+static volatile int s_raw_busy = 0;
+#define RAW_CAP ((int)sizeof(s_raw_buf))
+
+static char *raw_claim(void) {
+    if (__sync_lock_test_and_set(&s_raw_busy, 1) == 0) return s_raw_buf;
+    return (char *)malloc(RAW_CAP);
+}
+
+static void raw_release(char *b) {
+    if (b == s_raw_buf) __sync_lock_release(&s_raw_busy);
+    else free(b);
+}
 
 // Bounds so a slow/unreachable/keep-alive server can never hang us forever.
 #define HTTP_CONNECT_TIMEOUT_MS 5000
@@ -155,6 +174,13 @@ static int http_connect(const char *host, int port, int rcvbuf = 0) {
     struct timeval tv; tv.tv_sec = HTTP_IO_TIMEOUT_SEC; tv.tv_usec = 0;
     netSetSockOpt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     netSetSockOpt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    return sock;
+}
+
+static int http_connect_locked(const char *host, int port, int rcvbuf = 0) {
+    if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
+    const int sock = http_connect(host, port, rcvbuf);
+    if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
     return sock;
 }
 
@@ -455,10 +481,11 @@ int http_init(void) {
         }
     }
     sys_mutex_attr_t attr;
-    memset(&attr, 0, sizeof(attr));
+    sysMutexAttrInitialize(attr);   // a zeroed attr is rejected by lv2
     attr.attr_protocol  = SYS_MUTEX_PROTOCOL_FIFO;
     attr.attr_recursive = SYS_MUTEX_ATTR_NOT_RECURSIVE;
     s_http_mtx_ok = (sysMutexCreate(&s_http_mtx, &attr) == 0);
+    if (!s_http_mtx_ok) plog("net: http mutex create FAILED");
     https_rt_init();
     return HTTP_SUCCESS;
 }
@@ -470,8 +497,7 @@ void http_end(void) {
 
 static int http_request_once(int method, const char *url, const char *body,
                              const char *token, char *out, int out_size,
-                             const char *ctype = NULL) {
-    if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
+                             const char *ctype = NULL, bool note_401 = true) {
     if (https_url(url)) {
         // API over TLS (firmware cellHttp); streaming stays on plain sockets.
         char auth[400];
@@ -483,16 +509,18 @@ static int http_request_once(int method, const char *url, const char *body,
                                    "application/json", out, out_size, &blen,
                                    s_first_byte_tries * HTTP_IO_TIMEOUT_SEC);
         if (blen > out_size - 1) plog("http: body TRUNCATED (https; raise RESPONSE_SIZE)");
-        if (status == 401 && token && token[0]) g_auth_expired = true;
-        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        if (status == 401 && token && token[0] && note_401) g_auth_expired = true;
         return status;
     }
     char host[256]; int port; char path[512];
     url_parse(url, host, sizeof(host), &port, path, sizeof(path));
 
-    int sock = http_connect(host, port);
-    if (sock < 0) {
-        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+    int sock = http_connect_locked(host, port);
+    if (sock < 0) return -1;
+    char *raw = raw_claim();
+    if (!raw) {
+        plog("http: no memory for a second response buffer");
+        netClose(sock);
         return -1;
     }
 
@@ -528,13 +556,13 @@ static int http_request_once(int method, const char *url, const char *body,
                  rlen, blen, path);
         plog(b);
         netClose(sock);
-        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+        raw_release(raw);
         return -2;
     }
 
     int body_off, body_len;
     RespDiag dg; memset(&dg, 0, sizeof(dg));
-    int status = read_response(sock, s_raw_buf, sizeof(s_raw_buf),
+    int status = read_response(sock, raw, RAW_CAP,
                                &body_off, &body_len, &dg);
     netClose(sock);
 
@@ -552,7 +580,7 @@ static int http_request_once(int method, const char *url, const char *body,
                  "last_n=%d chunked=%d clen=%ld cap_hit=%d raw=%.28s | %.60s",
                  dg.total, dg.header_end, dg.reads, dg.last_n,
                  dg.chunked ? 1 : 0, dg.content_len, dg.cap_hit ? 1 : 0,
-                 dg.header_end > 0 ? s_raw_buf + dg.header_end : "(no body)",
+                 dg.header_end > 0 ? raw + dg.header_end : "(no body)",
                  path);
         plog(b);
     }
@@ -560,7 +588,7 @@ static int http_request_once(int method, const char *url, const char *body,
     // 401 on a request that carried a token: the saved session is dead
     // (revoked server-side).  Login itself sends no token, so a wrong
     // password can't trip this.
-    if (status == 401 && token && token[0]) g_auth_expired = true;
+    if (status == 401 && token && token[0] && note_401) g_auth_expired = true;
 
     memset(out, 0, out_size);
     if (body_len > out_size - 1) {
@@ -574,10 +602,10 @@ static int http_request_once(int method, const char *url, const char *body,
         plog(b);
         body_len = out_size - 1;
     }
-    if (body_len > 0) memcpy(out, s_raw_buf + body_off, body_len);
+    if (body_len > 0) memcpy(out, raw + body_off, body_len);
     out[body_len > 0 ? body_len : 0] = '\0';
 
-    if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
+    raw_release(raw);
     return status;
 }
 
@@ -601,6 +629,12 @@ int http_request(int method, const char *url, const char *body,
     return status;
 }
 
+// A GET to a server that may not be ours (server_discovery.cpp): a 401 there
+// says nothing about our session, so it must not log the user out.
+int http_probe_get(const char *url, const char *token, char *out, int out_size) {
+    return http_request_once(HTTP_GET, url, NULL, token, out, out_size, NULL, false);
+}
+
 // POST a text/plain body (a log file); the body must be NUL-terminated.
 int http_post_text(const char *url, const char *body, const char *token,
                    char *out, int out_size) {
@@ -613,24 +647,18 @@ int http_open_socket(const char *host, int port, int rcvbuf_bytes) {
     // net stack that is not reentrant (see http_fetch_binary below).  The
     // caller's own reads run unlocked, so a long download never holds up the
     // UI's requests.
-    if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
-    int sock = http_connect(host, port, rcvbuf_bytes);
-    if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
-    return sock;
+    return http_connect_locked(host, port, rcvbuf_bytes);
 }
 
 int http_fetch_binary(const char *url, const char *token,
                       uint8_t *out, int out_size) {
-    // MUST hold the same lock as http_request().  This runs on the thumbnail
-    // fetch thread; the UI/seek/progress paths run http_request() on other
-    // threads.  The PS3 sys/net resolver + connection setup are not reentrant,
-    // so two concurrent HTTP calls corrupt shared net-stack state — observed
-    // as a thumbnail fetch that hangs PAST the socket timeouts (the socket
-    // timeouts can't bound a wedged netGetHostByName / connect), which with a
-    // single fetch thread kills all poster loading after a tab switch.  Also
-    // Bounded by the connect/IO timeouts in http_connect,
-    // so the UI can never wait more than one in-flight fetch.
-    if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);
+    // Connects under the same lock as http_request().  This runs on the
+    // thumbnail fetch thread; the UI/seek/progress paths run http_request()
+    // on other threads.  The PS3 sys/net resolver + connection setup are not
+    // reentrant, so two concurrent connects corrupt shared net-stack state —
+    // observed as a thumbnail fetch that hangs PAST the socket timeouts (the
+    // socket timeouts can't bound a wedged netGetHostByName / connect).  The
+    // read goes into the caller's buffer, so it needs no lock.
 
     if (https_url(url)) {
         char auth[400];
@@ -638,7 +666,6 @@ int http_fetch_binary(const char *url, const char *token,
         int blen = 0;
         const int status = https_request("GET", url, NULL, NULL, auth, "image/jpeg,image/*",
                                          (char *)out, out_size, &blen, HTTP_IO_TIMEOUT_SEC * 3);
-        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
         // A short buffer would hand stb a truncated image; fail instead.
         if (status != 200 || blen <= 0 || blen > out_size - 1) return -1;
         return blen;
@@ -647,11 +674,8 @@ int http_fetch_binary(const char *url, const char *token,
     char host[256]; int port; char path[512];
     url_parse(url, host, sizeof(host), &port, path, sizeof(path));
 
-    int sock = http_connect(host, port);
-    if (sock < 0) {
-        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
-        return -1;
-    }
+    int sock = http_connect_locked(host, port);
+    if (sock < 0) return -1;
 
     char req[2048];
     int  rlen = build_headers(req, sizeof(req), "GET", path, host, port,
@@ -669,12 +693,7 @@ int http_fetch_binary(const char *url, const char *token,
                                &body_off, &body_len, NULL);
     netClose(sock);
 
-    if (status != 200 || body_len <= 0) {
-        if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
-        return -1;
-    }
+    if (status != 200 || body_len <= 0) return -1;
     memmove(out, out + body_off, body_len);
-
-    if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx);
     return body_len;
 }

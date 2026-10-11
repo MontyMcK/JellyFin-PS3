@@ -519,6 +519,29 @@ void xmb_show_offline(void) {
     init_btns();
 }
 
+// Nothing answered at the saved address and nothing on the network claimed
+// the saved login.  Offer to type the address; otherwise the menu keeps
+// retrying (and looking) in the background, and Media still plays.
+// True when the address was changed.
+bool xmb_server_unreachable_prompt(void) {
+    char line[320];
+    snprintf(line, sizeof line, TR("No server answered at %s."), g_server);
+    if (!xmb_dl_confirm(TR("Can't reach the server"), line,
+                        TR("Keep trying"), TR("Enter the server address")))
+        return false;
+    char addr[256];
+    snprintf(addr, sizeof addr, "%s", g_server);
+    if (get_input(addr, sizeof addr, TR("Server URL (e.g. http://192.168.1.2:8096)"), false) != 1)
+        return false;
+    int sl = (int)strlen(addr);
+    while (sl > 0 && addr[sl - 1] == '/') addr[--sl] = '\0';
+    if (sl == 0 || strcmp(addr, g_server) == 0) return false;
+    { char b[400]; snprintf(b, sizeof b, "server: address changed by hand %.150s -> %.150s", g_server, addr); plog(b); }
+    snprintf(g_server, sizeof g_server, "%s", addr);
+    save_config();
+    return true;
+}
+
 bool xmb_offer_offline_after_login_failure(void) {
     // Only worth asking when there is something to play: a download, or a USB drive
     // (the Media screen plays both, and needs no server).

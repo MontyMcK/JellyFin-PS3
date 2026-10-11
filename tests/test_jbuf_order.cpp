@@ -9,6 +9,7 @@
 struct sys_mutex_attr_t { int attr_protocol, attr_recursive; };
 #define SYS_LWMUTEX_ATTR_PROTOCOL 0
 #define SYS_MUTEX_ATTR_RECURSIVE  0
+#define sysMutexAttrInitialize(a) ((a).attr_protocol = 0, (a).attr_recursive = 0)
 static int sysMutexCreate(sys_mutex_t *, sys_mutex_attr_t *) { return 0; }
 static int sysMutexDestroy(sys_mutex_t)     { return 0; }
 static int sysMutexLock(sys_mutex_t, unsigned long long) { return 0; }

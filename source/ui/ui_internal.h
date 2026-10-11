@@ -34,9 +34,15 @@ int  xmb_next_enabled(int start, int dir);
 
 void xmb_detect_tabs(void);
 bool xmb_take_prepared(void);     // see xmb_prepare() in ui.h
-// One attempt only — for the XMB's background retry, which must not block
-// the render loop inside the full retry set.
-bool xmb_detect_tabs_once(void);
+// The XMB's background retry: start() sends one request from a worker;
+// poll() returns -1 while it is in flight (or none was started), else applies
+// the reply to g_tabs on the calling (render) thread: 1 libraries, 0 failed.
+bool xmb_detect_tabs_start(void);
+int  xmb_detect_tabs_poll(void);
+// A library from the server, not the always-present Media tab.
+bool xmb_have_server_tabs(void);
+// The last library request got no answer at all (as opposed to an error).
+bool xmb_server_unreachable(void);
 void xmb_fetch_tab_items(int tab);
 int  xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
                        int start_index, int *out_total);

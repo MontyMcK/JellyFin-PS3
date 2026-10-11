@@ -25,6 +25,8 @@ void http_end(void);
 // Returns HTTP status code, or -1 on connection failure.
 // Response body written to out[0..out_size-1].  `method` is one of the
 // HTTP_* codes above (legacy callers pass 0/1 for GET/POST).
+// A GET whose 401 does not mark the session expired (a server being probed).
+int  http_probe_get(const char *url, const char *token, char *out, int out_size);
 int  http_request(int method, const char *url, const char *body,
                   const char *token, char *out, int out_size);
 

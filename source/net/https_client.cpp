@@ -21,17 +21,24 @@
 // --- runtime -----------------------------------------------------------------
 static sys_mutex_t s_rt_mtx;
 static bool        s_rt_mtx_ok = false;
+// One cellHttp client is shared by every thread; a request holds it throughout.
+static sys_mutex_t s_cli_mtx;
+static bool        s_cli_mtx_ok = false;
 static int         s_rt_refs   = 0;
 static void       *s_http_pool = NULL, *s_ssl_pool = NULL, *s_cert_buf = NULL;
 static bool        s_mod_http, s_mod_util, s_mod_https, s_mod_ssl;
 static bool        s_init_http, s_init_ssl, s_init_https;
 
 void https_rt_init(void) {
+    // A zeroed attr is rejected by lv2; with no mutex https_rt_acquire()
+    // refused every request, so HTTPS could never have worked.
     sys_mutex_attr_t attr;
-    memset(&attr, 0, sizeof attr);
+    sysMutexAttrInitialize(attr);
     attr.attr_protocol  = SYS_MUTEX_PROTOCOL_FIFO;
     attr.attr_recursive = SYS_MUTEX_ATTR_NOT_RECURSIVE;
-    s_rt_mtx_ok = (sysMutexCreate(&s_rt_mtx, &attr) == 0);
+    s_rt_mtx_ok  = (sysMutexCreate(&s_rt_mtx, &attr) == 0);
+    s_cli_mtx_ok = (sysMutexCreate(&s_cli_mtx, &attr) == 0);
+    if (!s_rt_mtx_ok || !s_cli_mtx_ok) plog("https: mutex create FAILED");
 }
 
 static void rt_teardown(void) {
@@ -180,11 +187,9 @@ static bool client_ready(int timeout_secs) {
 
 bool https_url(const char *url) { return url && strncmp(url, "https://", 8) == 0; }
 
-int https_request(const char *method, const char *url, const char *body,
-                  const char *ctype, const char *auth, const char *accept,
-                  char *out, int out_size, int *body_len, int timeout_secs) {
-    if (body_len) *body_len = 0;
-    if (out && out_size > 0) out[0] = '\0';
+static int https_request_locked(const char *method, const char *url, const char *body,
+                                const char *ctype, const char *auth, const char *accept,
+                                char *out, int out_size, int *body_len, int timeout_secs) {
     if (!client_ready(timeout_secs)) return -1;
 
     void       *uri_pool = NULL;
@@ -237,5 +242,18 @@ int https_request(const char *method, const char *url, const char *body,
 done:
     if (trans)    httpDestroyTransaction(trans);
     if (uri_pool) free(uri_pool);
+    return status;
+}
+
+int https_request(const char *method, const char *url, const char *body,
+                  const char *ctype, const char *auth, const char *accept,
+                  char *out, int out_size, int *body_len, int timeout_secs) {
+    if (body_len) *body_len = 0;
+    if (out && out_size > 0) out[0] = '\0';
+    if (!s_cli_mtx_ok) return -1;
+    sysMutexLock(s_cli_mtx, 0);
+    const int status = https_request_locked(method, url, body, ctype, auth, accept,
+                                            out, out_size, body_len, timeout_secs);
+    sysMutexUnlock(s_cli_mtx);
     return status;
 }

@@ -127,5 +127,10 @@
   "Volume is set on your soundbar or receiver": {"ja": "音量はサウンドバーまたはレシーバーで調整します", "pt-BR": "O volume é ajustado na soundbar ou no receptor", "de": "Die Lautstärke wird an Soundbar oder Receiver geregelt", "fr": "Le volume se règle sur votre barre de son ou votre récepteur", "es": "El volumen se ajusta en tu barra de sonido o receptor"},
   "‹ back %ds": {"ja": "‹ %d秒戻る", "pt-BR": "‹ voltar %ds", "de": "‹ %ds zurück", "fr": "‹ reculer de %ds", "es": "‹ retroceder %ds"},
   "ahead %ds ›": {"ja": "%d秒進む ›", "pt-BR": "avançar %ds ›", "de": "%ds vor ›", "fr": "avancer de %ds ›", "es": "avanzar %ds ›"},
-  "LIVE": {"ja": "ライブ", "pt-BR": "AO VIVO", "de": "LIVE", "fr": "DIRECT", "es": "EN VIVO"}
+  "LIVE": {"ja": "ライブ", "pt-BR": "AO VIVO", "de": "LIVE", "fr": "DIRECT", "es": "EN VIVO"},
+
+  "Can't reach the server": {"ja": "サーバーに接続できません", "pt-BR": "Não foi possível acessar o servidor", "de": "Server nicht erreichbar", "fr": "Serveur injoignable", "es": "No se puede acceder al servidor"},
+  "No server answered at %s.": {"ja": "%s のサーバーから応答がありません。", "pt-BR": "Nenhum servidor respondeu em %s.", "de": "Unter %s hat kein Server geantwortet.", "fr": "Aucun serveur n'a répondu à %s.", "es": "Ningún servidor respondió en %s."},
+  "Keep trying": {"ja": "再試行を続ける", "pt-BR": "Continuar tentando", "de": "Weiter versuchen", "fr": "Continuer d'essayer", "es": "Seguir intentando"},
+  "Enter the server address": {"ja": "サーバーのアドレスを入力", "pt-BR": "Digitar o endereço do servidor", "de": "Serveradresse eingeben", "fr": "Saisir l'adresse du serveur", "es": "Introducir la dirección del servidor"}
 }
