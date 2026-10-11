@@ -16,14 +16,33 @@
 - Downloads always leave at least **10 GB free** on the PS3's hard drive, and
   pause rather than fill it. If the app can't tell how much room there is, it
   doesn't download.
+- **Download to a USB drive.** Settings › Downloads › Download Location can put
+  new downloads on an **NTFS** USB drive instead of the PS3's hard drive. The
+  drive must have been shut down cleanly by Windows (not hibernated) and use
+  the default 4 KB or larger allocation size. Plug it in and the downloads
+  move there; pull it out and the hard drive's downloads show again. While the
+  location is USB and no usable drive is in, new downloads are refused with the
+  reason, never quietly sent to the hard drive. The USB drive keeps 1 GB free.
+- **The app finds your server again.** If the server's address changes (a PC
+  moving from Wi-Fi to Ethernet, a new DHCP lease), the console looks for it
+  on the network, and only switches to a server that accepts your saved
+  sign-in. If it can't find it, it asks whether to keep trying or to enter the
+  address. The first-run address box is filled in when a server is found.
+- **HTTPS servers (experimental).** A server address starting `https://` now
+  works for sign-in, browsing and posters. It has not been tried against a
+  real TLS server yet. If the console's certificate store can't verify the
+  server's certificate (it predates Let's Encrypt), the certificate is pinned
+  the first time and a later change is refused. Video streams and downloads
+  still need plain `http://`.
+- The app now appears under **TV/Video Services** in the XMB.
 - **Play from USB drives, no server needed.** The new Media tab plays your own
   MKV, .m2ts and .ts films from USB drives formatted **NTFS, exFAT or FAT32**,
   or from the PS3's hard drive. Blu-ray remuxes play at full bitrate with
   their lossless TrueHD / DTS-HD MA audio (Dolby Digital, DTS, MP3, AAC,
   FLAC and PCM work too), you can switch audio tracks and subtitles while
   watching, and the drive's files show their length and where you stopped.
-  Drives are only ever read, never written to. Limits, which the file's page
-  tells you about: H.264 video only (HEVC, 4K, 10-bit and VC-1 files can't
+  Playing never writes to a drive (the one exception is Download Location,
+  above). Limits, which the file's page tells you about: H.264 video only (HEVC, 4K, 10-bit and VC-1 files can't
   play on a PS3), files whose only audio is Dolby Digital Plus or Vorbis can't
   play yet, and subtitles come from MKV files only (text and PGS).
 - **Music from your drives.** FLAC, MP3 and WAV files in the Media tab play in
@@ -76,6 +95,19 @@
   server's reply was framed unusually.
 - A downloaded film entered part way through (after a seek) showed a time that
   counted the position twice.
+- **Software Update and HTTPS did not work** in the build before this one: the
+  lock around the console's shared HTTPS client was never created.
+- Network requests from different parts of the app (posters, search, progress
+  reports) could receive each other's replies, because the lock around the
+  shared receive buffer was never created either. The video jitter buffer had
+  the same fault between the decode and display threads.
+- With the server unreachable the menu froze for about five seconds on every
+  background retry, and startup spent 15 more seconds loading Home rows from a
+  server that wasn't there.
+- A failed seek reopen could close the stream's socket twice.
+- A cover image over 8 megapixels is refused instead of exhausting memory, and
+  a failed video-memory allocation ends playback cleanly instead of crashing.
+- JellyDrop jumped once an hour when its clock wrapped.
 
 ## 3.1
 

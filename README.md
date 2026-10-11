@@ -149,12 +149,13 @@ All taken on a real PS3 at 1920×1080. More in the
   playlist: a channel list with what's on now, a guide grid, channel up/down
   while watching.
 - **Downloads**: a film, an episode or a whole season saved to the PS3's hard
-  drive, played offline. They pause while you stream, resume after a restart,
-  and always leave 10 GB free.
+  drive (or an NTFS USB drive, from Settings), played offline. They pause while
+  you stream, resume after a restart, and always leave 10 GB free on the hard
+  drive.
 - **Favourites** on their own Home row.
 - **A Media tab that plays from USB drives and the hard drive, with no server**:
-  MKV, .m2ts and .ts files from **NTFS, exFAT or FAT32** drives (read only; the
-  drive is never written to), with audio-track switching and a resume point
+  MKV, .m2ts and .ts files from **NTFS, exFAT or FAT32** drives (playback
+  only reads; downloads are the one thing written, to NTFS), with audio-track switching and a resume point
   kept on the console. H.264 only, with Dolby Digital, DTS, TrueHD, MP3, AAC,
   FLAC or PCM audio; the file's page says what a file lacks. MKV files show their
   text and PGS subtitles; subtitles in .ts / .m2ts files are not supported yet.
@@ -566,9 +567,10 @@ source/
 |-- cache/    Thumbnail caching
 |-- gfx/      RSX helpers, shaders, embedded fonts, stb_image/truetype
 |-- music/    Audio-only engine, FFT visualizer, Now Playing screen
-|-- local/    Drives and files with no server: one read-only file layer over the
-|             hard drive and USB (FAT32, NTFS, exFAT), file probing, names, resume points
-|-- net/      HTTP client, GitHub update check
+|-- local/    Drives and files with no server: one file layer over the hard drive
+|             and USB (FAT32, NTFS, exFAT; writes only on NTFS, for downloads),
+|             file probing, names, resume points
+|-- net/      HTTP and HTTPS clients, server discovery, GitHub update check
 |-- offline/  Downloads: queue, store, library, free-space rules
 |-- player/   Core loop, HUD, GPU draw, decode/upload/audio threads, TS stream
 |-- ui/       XMB UI: input, OSK, home shelf, browse, search, settings, rendering
@@ -604,9 +606,10 @@ its own trace in `/dev_hdd0/tmp/update_detection.txt`.
   libraries that make open PS3 homebrew possible in the first place. PSL1GHT is
   MIT-licensed, Copyright (c) 2011 PSL1GHT Development Team.
 - **[mohasi/ps3-dev](https://github.com/mohasi/ps3-dev)**, whose hand-written NTFS and
-  exFAT readers (Apache-2.0) are vendored, read-only, in
+  exFAT drivers (Apache-2.0) are vendored in
   [`third_party/mohasi_fs`](third_party/mohasi_fs) so the app can play files from
-  USB drives. What was changed is listed in that directory's README.
+  USB drives and save downloads to NTFS ones. What was changed is listed in that
+  directory's README.
 - The authors of the embedded libraries (minimp3, stb_image, stb_truetype), and the
   Jellyfin project itself.
 
