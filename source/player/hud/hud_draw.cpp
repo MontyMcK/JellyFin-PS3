@@ -29,6 +29,7 @@
 #include "timing.h"   // timing_get_us(): the channel banner expires
 #include "audio.h"   // audio_get_volume() for the volume slider
 #include "audio_bitstream.h"   // audio_passthrough_active(): the receiver owns the volume
+#include "../core/player_picture.h"   // picture_get(): the picture-shape chip
 
 // -------------------------------------------------------
 // Overlay buffers + compose-on-change state
@@ -51,6 +52,7 @@ struct OvlKey {
     s32  focus, incr_idx;
     s32  menu_sel, menu_cur, menu_n;
     s32  vol_pct;
+    s32  aspect;                       // Fit / Fill / Stretch (picture_size.h)
     s32  live_permille;
     u32  live_epoch;
     u8   paused, cc, menu_vis, title_on, vol_active, scrubbing, live, banner_on, solo;
@@ -546,6 +548,7 @@ void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
     key.title_on     = (paused && g_hud.title[0]) ? 1 : 0;
     key.vol_active   = g_hud.vol_active ? 1 : 0;
     key.vol_pct      = audio_get_volume();
+    key.aspect       = picture_get().aspect;
     key.scrubbing    = scrubbing ? 1 : 0;
     key.live         = g_hud.live ? 1 : 0;
     key.live_permille = g_hud.live_permille;

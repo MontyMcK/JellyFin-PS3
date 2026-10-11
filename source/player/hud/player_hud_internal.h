@@ -66,7 +66,8 @@
 #define FOCUS_AUDIO  3
 #define FOCUS_VOLUME 4
 #define FOCUS_CC     5
-#define FOCUS_COUNT  6
+#define FOCUS_ASPECT 6          // the picture-shape chip, bottom right
+#define FOCUS_COUNT  7
 
 // -------------------------------------------------------
 // State (defined in hud_core.cpp)

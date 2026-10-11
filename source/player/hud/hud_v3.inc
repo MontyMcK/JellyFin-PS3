@@ -94,6 +94,34 @@ static void v3_rrect(int x, int y, int w, int h, int r, int t,
     ovl_span(y, y + h);
 }
 
+// The picture-shape glyph, bottom right: the screen as a frame, and what the
+// film does inside it.  FIT shows the whole film with bars above and below;
+// FILL covers the frame (the notches outside are the cropped sides); STRETCH
+// pulls it to the frame's edges (arrows).  22 x 16 at (x, y).
+static int v3_aspect_icon_w(void) { return UIS_W(22) > 18 ? UIS_W(22) : 18; }   // never a speck on SD
+
+static void v3_aspect_icon(int x, int y, int mode, bool foc) {
+    const int fw = v3_aspect_icon_w(), fh = fw * 16 / 22;
+    const u32 col = foc ? 0x00FFFFFFu : 0x00E4E6F0u;
+    v3_rrect(x, y, fw, fh, UIS_H(2), 1, 0x00000000, 0, col, 210);          // the screen
+    if (mode == PIC_FILL) {
+        v3_fill(x + 2, y + 2, fw - 4, fh - 4, col, 235);                    // covers it
+        const int nh = UIS_H(6);
+        v3_fill(x - UIS_W(3), y + (fh - nh) / 2, UIS_W(2), nh, col, 200);   // the cropped sides
+        v3_fill(x + fw + UIS_W(1), y + (fh - nh) / 2, UIS_W(2), nh, col, 200);
+    } else if (mode == PIC_STRETCH) {
+        const int my = y + fh / 2, a = UIS_W(2);                            // arrow shaft + heads
+        v3_fill(x + 4, my, fw - 8, 1, col, 235);
+        for (int k = 0; k < 3; k++) {
+            v3_fill(x + 3 + k * a / 2, my - k, 1, 2 * k + 1, col, 235);
+            v3_fill(x + fw - 4 - k * a / 2, my - k, 1, 2 * k + 1, col, 235);
+        }
+    } else {
+        const int ih = (fw - 4) * 9 / 16;                                   // the whole film, 16:9
+        v3_fill(x + 2, y + (fh - ih) / 2, fw - 4, ih, col, 235);
+    }
+}
+
 // The banner: what a channel change lands on, or the picture-size readout,
 // top left.
 static void v3_draw_banner(void) {
@@ -198,8 +226,15 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
     // All of it is composed into the staging buffer on change, like the rest
     // of the HUD -- no per-frame cost.
     {
-        const float kpx = UIS_TF(8.5f), vpx = UIS_TF(12.0f);
-        const int  ch = UIS_H(38), cy = v3y(574), gap = UIS_W(10), pad = UIS_W(14);
+        // On a low-resolution display the type has a floor (uis_tf), so the chip
+        // grows to hold it, and the small type is drawn heavy: thin strokes
+        // vanish on a CRT.
+        const bool  sd  = (int)display_height < 720;
+        const float kpx = (sd && UIS_TF(8.5f) < 9.5f) ? 9.5f : UIS_TF(8.5f), vpx = UIS_TF(12.0f);
+        const int  ky = UIS_H(7);
+        const int  vy = UIS_H(18) > ky + (int)kpx + UIS_H(3) ? UIS_H(18) : ky + (int)kpx + UIS_H(3);
+        const int  ch = UIS_H(38) > vy + (int)vpx + UIS_H(7) ? UIS_H(38) : vy + (int)vpx + UIS_H(7);
+        const int  cy = v3y(574), gap = UIS_W(10), pad = UIS_W(14);
         const int  r  = UIS_H(9);
         char a_val[72], v_val[16];
         const char *al = g_hud.audio_label;
@@ -207,22 +242,27 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
         snprintf(a_val, sizeof a_val, "%s", named ? al : TR("Default"));
         if (audio_passthrough_active()) snprintf(v_val, sizeof v_val, TR("Receiver"));
         else                            snprintf(v_val, sizeof v_val, "%d%%", audio_get_volume());
-        const char *keys[3] = { TR("AUDIO"), TR("VOLUME"), TR("SUBTITLES") };
-        const char *vals[3] = { a_val, v_val, g_hud.cc_active ? TR("On") : TR("Off") };
-        const int   slot[3] = { FOCUS_AUDIO, FOCUS_VOLUME, FOCUS_CC };
+        const int aspect = picture_get().aspect;
+        const char *keys[4] = { TR("AUDIO"), TR("VOLUME"), TR("SUBTITLES"), TR("PICTURE") };
+        const char *vals[4] = { a_val, v_val, g_hud.cc_active ? TR("On") : TR("Off"),
+                                aspect == PIC_FILL ? TR("Fill") : aspect == PIC_STRETCH ? TR("Stretch") : TR("Fit") };
+        const int   slot[4] = { FOCUS_AUDIO, FOCUS_VOLUME, FOCUS_CC, FOCUS_ASPECT };
         // The audio value is the long one: clip it so the row never runs
         // into the title.
         {
             const int maxw = UIS_W(300);
             int len = (int)strlen(a_val);
-            while (len > 1 && ttf_text_width(a_val, vpx) > maxw) a_val[--len] = 0;
+            while (len > 1 && ttf_text_width(a_val, vpx, sd) > maxw) a_val[--len] = 0;
         }
-        int w[3], x = chips_right;
-        for (int i = 2; i >= 0; i--) {
+        int w[4], x = chips_right;
+        for (int i = 3; i >= 0; i--) {
             const int kw = ttf_text_width_face(keys[i], kpx, UI_FACE_EYEBROW);
-            const int vw = ttf_text_width(vals[i], vpx);
-            const int dot = (slot[i] == FOCUS_CC) ? UIS_W(12) : 0;
-            w[i] = (kw > vw ? kw : vw) + dot + 2 * pad;
+            const int vw = ttf_text_width(vals[i], vpx, sd);
+            // CC: a dot left of both lines.  PICTURE: an icon left of the value only.
+            const int dot = (slot[i] == FOCUS_CC) ? UIS_W(12)
+                          : (slot[i] == FOCUS_ASPECT) ? v3_aspect_icon_w() + UIS_W(10) : 0;
+            w[i] = (slot[i] == FOCUS_ASPECT ? (kw > vw + dot ? kw : vw + dot)
+                                            : (kw > vw ? kw : vw) + dot) + 2 * pad;
             if (slot[i] == FOCUS_VOLUME && w[i] < UIS_W(76)) w[i] = UIS_W(76);
             x -= w[i];
             const bool foc = g_hud.focus == slot[i];
@@ -236,10 +276,12 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
             v3_fill(x + r, cy + 1, w[i] - 2 * r, 1, WHITE, foc ? 70 : 34);
             // type
             const int tx = x + pad + dot;
-            drawTTF_face((u32)tx, (u32)(cy + UIS_H(7)), keys[i], kpx,
+            const int kx = (slot[i] == FOCUS_ASPECT) ? x + pad : tx;
+            if (slot[i] == FOCUS_ASPECT) v3_aspect_icon(x + pad, cy + vy, aspect, foc);
+            drawTTF_face((u32)kx, (u32)(cy + ky), keys[i], kpx,
                          foc ? 0x00C9C3F2 : 0x008A90B4, UI_FACE_EYEBROW);
-            drawTTF((u32)tx, (u32)(cy + UIS_H(18)), vals[i], vpx,
-                    foc ? WHITE : 0x00E4E6F0);
+            drawTTF((u32)tx, (u32)(cy + vy), vals[i], vpx,
+                    foc ? WHITE : 0x00E4E6F0, sd);
             if (slot[i] == FOCUS_CC) {
                 const int d = UIS_H(6);
                 v3_rrect(x + pad, cy + ch / 2 - d / 2, d, d, d / 2, 0,
@@ -344,10 +386,11 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
             while (len > 1 && ttf_text_width(pt, tpx) > tw_max) pt[--len] = 0;
             drawTTF((u32)(bx + bw2 + UIS_W(12)), (u32)v3y(644), pt, tpx, 0x00C2C2C2);
         } else {
-            drawTTF((u32)bx, (u32)v3y(644), el_s, tpx, 0x00C2C2C2);
+            const bool hv = (int)display_height < 720;      // heavy on SD: see the chips
+            drawTTF((u32)bx, (u32)v3y(644), el_s, tpx, 0x00E0E0E0, hv);
             if (rem_s[0]) {
-                const int rw = ttf_text_width(rem_s, tpx);
-                drawTTF((u32)(bx + bw - rw), (u32)v3y(644), rem_s, tpx, 0x00C2C2C2);
+                const int rw = ttf_text_width(rem_s, tpx, hv);
+                drawTTF((u32)(bx + bw - rw), (u32)v3y(644), rem_s, tpx, 0x00E0E0E0, hv);
             }
         }
     }
@@ -364,6 +407,7 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
                    : g_hud.focus == FOCUS_AUDIO  ? TRN("Audio")
                    : g_hud.focus == FOCUS_VOLUME ? TRN("Volume")
                    : g_hud.focus == FOCUS_CC     ? TRN("Subtitles")
+                   : g_hud.focus == FOCUS_ASPECT ? TRN("Picture shape")
                    : paused                      ? TRN("Play") : TRN("Pause");
         n++;
         if (g_hud.live) {

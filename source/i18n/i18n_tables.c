@@ -9,9 +9,9 @@ extern const int i18n_n;
 extern const char *const i18n_keys[];
 extern const char *const *const i18n_text[LANG__COUNT];
 
-const int i18n_n = 507;
+const int i18n_n = 509;
 
-const char *const i18n_keys[507] = {
+const char *const i18n_keys[509] = {
     "  %s  %s free",
     "  (can't be decoded yet)",
     "%.40s video (can't play on PS3)",
@@ -284,6 +284,7 @@ const char *const i18n_keys[507] = {
     "Original  (direct play, no re-encode)",
     "Original \302\267 direct play",
     "Other",
+    "PICTURE",
     "PREPARING",
     "Page",
     "Password",
@@ -294,6 +295,7 @@ const char *const i18n_keys[507] = {
     "Paused: the HDD is down to %s free",
     "Paused: the HDD is down to its free-space reserve",
     "Picture",
+    "Picture shape",
     "Picture size",
     "Play",
     "Play from start",
@@ -521,7 +523,7 @@ const char *const i18n_keys[507] = {
     "\342\200\271 back %ds",
 };
 
-static const char *const i18n_text_ja[507] = {
+static const char *const i18n_text_ja[509] = {
     "  %s  %s \347\251\272\343\201\215",
     "  \357\274\210\343\201\276\343\201\240\343\203\207\343\202\263\343\203\274\343\203\211\343\201\247\343\201\215\343\201\276\343\201\233\343\202\223\357\274\211",
     "%.40s \343\201\256\346\230\240\345\203\217\357\274\210PS3\343\201\247\343\201\257\345\206\215\347\224\237\343\201\247\343\201\215\343\201\276\343\201\233\343\202\223\357\274\211",
@@ -794,6 +796,7 @@ static const char *const i18n_text_ja[507] = {
     "\343\202\252\343\203\252\343\202\270\343\203\212\343\203\253\357\274\210\343\203\200\343\202\244\343\203\254\343\202\257\343\203\210\345\206\215\347\224\237\343\200\201\345\206\215\343\202\250\343\203\263\343\202\263\343\203\274\343\203\211\343\201\252\343\201\227\357\274\211",
     "\343\202\252\343\203\252\343\202\270\343\203\212\343\203\253 \302\267 \343\203\200\343\202\244\343\203\254\343\202\257\343\203\210\345\206\215\347\224\237",
     "\343\201\235\343\201\256\344\273\226",
+    "\347\224\273\351\235\242",
     "\346\272\226\345\202\231\344\270\255",
     "\343\203\232\343\203\274\343\202\270",
     "\343\203\221\343\202\271\343\203\257\343\203\274\343\203\211",
@@ -804,6 +807,7 @@ static const char *const i18n_text_ja[507] = {
     "\344\270\200\346\231\202\345\201\234\346\255\242\357\274\232HDD\343\201\256\347\251\272\343\201\215\343\201\214 %s \343\201\253\343\201\252\343\202\212\343\201\276\343\201\227\343\201\237",
     "\344\270\200\346\231\202\345\201\234\346\255\242\357\274\232HDD\343\201\256\347\251\272\343\201\215\343\201\214\347\242\272\344\277\235\345\210\206\343\201\276\343\201\247\346\270\233\343\202\212\343\201\276\343\201\227\343\201\237",
     "\347\224\273\351\235\242",
+    "\347\224\273\351\235\242\343\201\256\345\275\242",
     "\347\224\273\351\235\242\343\202\265\343\202\244\343\202\272",
     "\345\206\215\347\224\237",
     "\346\234\200\345\210\235\343\201\213\343\202\211\345\206\215\347\224\237",
@@ -1031,7 +1035,7 @@ static const char *const i18n_text_ja[507] = {
     "\342\200\271 %d\347\247\222\346\210\273\343\202\213",
 };
 
-static const char *const i18n_text_pt_BR[507] = {
+static const char *const i18n_text_pt_BR[509] = {
     "  %s  %s livres",
     "  (ainda n\303\243o pode ser decodificado)",
     "V\303\255deo %.40s (n\303\243o reproduz no PS3)",
@@ -1304,6 +1308,7 @@ static const char *const i18n_text_pt_BR[507] = {
     "Original  (reprodu\303\247\303\243o direta, sem recodificar)",
     "Original \302\267 reprodu\303\247\303\243o direta",
     "Outros",
+    "IMAGEM",
     "PREPARANDO",
     "P\303\241gina",
     "Senha",
@@ -1314,6 +1319,7 @@ static const char *const i18n_text_pt_BR[507] = {
     "Pausado: restam %s livres no HD",
     "Pausado: o HD chegou \303\240 reserva de espa\303\247o livre",
     "Imagem",
+    "Formato da imagem",
     "Tamanho da imagem",
     "Reproduzir",
     "Reproduzir do in\303\255cio",
@@ -1541,7 +1547,7 @@ static const char *const i18n_text_pt_BR[507] = {
     "\342\200\271 voltar %ds",
 };
 
-static const char *const i18n_text_de[507] = {
+static const char *const i18n_text_de[509] = {
     "  %s  %s frei",
     "  (kann noch nicht decodiert werden)",
     "%.40s-Video (auf der PS3 nicht abspielbar)",
@@ -1814,6 +1820,7 @@ static const char *const i18n_text_de[507] = {
     "Original  (Direktwiedergabe, keine Neukodierung)",
     "Original \302\267 Direktwiedergabe",
     "Sonstige",
+    "BILD",
     "VORBEREITUNG",
     "Seite",
     "Passwort",
@@ -1824,6 +1831,7 @@ static const char *const i18n_text_de[507] = {
     "Pausiert: auf der HDD sind nur noch %s frei",
     "Pausiert: Die HDD ist bei ihrer Speicherreserve angekommen",
     "Bild",
+    "Bildformat",
     "Bildgr\303\266\303\237e",
     "Abspielen",
     "Von vorn abspielen",
@@ -2051,7 +2059,7 @@ static const char *const i18n_text_de[507] = {
     "\342\200\271 %ds zur\303\274ck",
 };
 
-static const char *const i18n_text_fr[507] = {
+static const char *const i18n_text_fr[509] = {
     "  %s  %s libres",
     "  (ne peut pas encore \303\252tre d\303\251cod\303\251)",
     "Vid\303\251o %.40s (non lisible sur PS3)",
@@ -2324,6 +2332,7 @@ static const char *const i18n_text_fr[507] = {
     "Original  (lecture directe, sans r\303\251encodage)",
     "Original \302\267 lecture directe",
     "Autres",
+    "IMAGE",
     "PR\303\211PARATION",
     "Page",
     "Mot de passe",
@@ -2334,6 +2343,7 @@ static const char *const i18n_text_fr[507] = {
     "En pause : il ne reste que %s sur le disque",
     "En pause : le disque est \303\240 sa r\303\251serve d'espace libre",
     "Image",
+    "Format de l'image",
     "Taille de l'image",
     "Lire",
     "Lire depuis le d\303\251but",
@@ -2561,7 +2571,7 @@ static const char *const i18n_text_fr[507] = {
     "\342\200\271 reculer de %ds",
 };
 
-static const char *const i18n_text_es[507] = {
+static const char *const i18n_text_es[509] = {
     "  %s  %s libres",
     "  (a\303\272n no se puede decodificar)",
     "V\303\255deo %.40s (no se puede reproducir en la PS3)",
@@ -2834,6 +2844,7 @@ static const char *const i18n_text_es[507] = {
     "Original  (reproducci\303\263n directa, sin recodificar)",
     "Original \302\267 reproducci\303\263n directa",
     "Otros",
+    "IMAGEN",
     "PREPARANDO",
     "P\303\241gina",
     "Contrase\303\261a",
@@ -2844,6 +2855,7 @@ static const char *const i18n_text_es[507] = {
     "En pausa: al disco le quedan %s libres",
     "En pausa: el disco ha llegado a su reserva de espacio libre",
     "Imagen",
+    "Formato de imagen",
     "Tama\303\261o de imagen",
     "Reproducir",
     "Reproducir desde el inicio",

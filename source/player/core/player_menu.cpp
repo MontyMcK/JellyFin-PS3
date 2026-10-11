@@ -14,6 +14,7 @@
 #include "experience.h"
 #include "ui_visuals.h"      // g_spine_on   // vpick_audio_words
 #include "chapters.h"
+#include "player_picture.h"   // picture_cycle_aspect
 #include "timing.h"
 #include "audio.h"           // audio_get_clock_us
 
@@ -84,6 +85,10 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
         if (st == JF_CHAPTERS_READY)     { s_chap_pending = false; chapters_open(ps); }
         else if (st == JF_CHAPTERS_NONE) { s_chap_pending = false; chapters_banner(TR("No chapters")); }
         else if (st == JF_CHAPTERS_IDLE) { s_chap_pending = false; }     // another film started
+    }
+    if (act == HUD_ACTION_ASPECT) {
+        picture_cycle_aspect();          // the chip redraws itself from picture_get()
+        return HUD_ACTION_NONE;
     }
     if (act == HUD_ACTION_CHAPTERS) {
         act = HUD_ACTION_NONE;

@@ -96,5 +96,7 @@
   "Chapter %d": {"ja": "チャプター %d", "pt-BR": "Capítulo %d", "de": "Kapitel %d", "fr": "Chapitre %d", "es": "Capítulo %d"},
   "Chapters": {"ja": "チャプター", "pt-BR": "Capítulos", "de": "Kapitel", "fr": "Chapitres", "es": "Capítulos"},
   "No chapters": {"ja": "チャプターなし", "pt-BR": "Sem capítulos", "de": "Keine Kapitel", "fr": "Aucun chapitre", "es": "Sin capítulos"},
-  "Loading chapters...": {"ja": "チャプターを読み込み中...", "pt-BR": "Carregando capítulos...", "de": "Kapitel werden geladen...", "fr": "Chargement des chapitres...", "es": "Cargando capítulos..."}
+  "Loading chapters...": {"ja": "チャプターを読み込み中...", "pt-BR": "Carregando capítulos...", "de": "Kapitel werden geladen...", "fr": "Chargement des chapitres...", "es": "Cargando capítulos..."},
+  "PICTURE": {"ja": "画面", "pt-BR": "IMAGEM", "de": "BILD", "fr": "IMAGE", "es": "IMAGEN"},
+  "Picture shape": {"ja": "画面の形", "pt-BR": "Formato da imagem", "de": "Bildformat", "fr": "Format de l'image", "es": "Formato de imagen"}
 }

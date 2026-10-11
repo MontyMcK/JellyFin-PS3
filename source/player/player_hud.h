@@ -13,6 +13,7 @@ typedef enum {
     HUD_ACTION_CHANNEL_NEXT,  // Live TV: Up / NEXT -- never seen outside live mode
     HUD_ACTION_CHANNEL_PREV,  //         Down / PREV
     HUD_ACTION_CHAPTERS,      // R1: the chapter list (never in live mode)
+    HUD_ACTION_ASPECT,        // X on the picture-shape chip: Fit -> Fill -> Stretch
 } HudAction;
 
 // A skippable segment is on screen.  While it is and the bar is hidden, X

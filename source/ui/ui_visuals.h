@@ -190,9 +190,19 @@ static inline int uis_h(int px) {
                      : px * uis_safe_h() / 720;
 }
 static inline float uis_tf(float px) {
-    return g_uis_pct ? px * (float)g_uis_pct / 100.0f
-                          * (float)uis_safe_h() / (float)display_height
-                     : px * (float)uis_safe_h() / 720.0f;
+    const float s = g_uis_pct ? px * (float)g_uis_pct / 100.0f
+                                    * (float)uis_safe_h() / (float)display_height
+                              : px * (float)uis_safe_h() / 720.0f;
+    // A floor under the proportional scale on a low-resolution display (a 480 or
+    // 576 line CRT).  The scale takes a 12.5 px label to 8 px there, thin strokes
+    // a CRT cannot draw, and a tester could not read the player bar.  Type that
+    // was authored at 11 px or more is never drawn smaller than 11; type authored
+    // below that keeps its authored size.  720p and 1080p are untouched.
+    if ((int)display_height < 720) {
+        const float floor_px = px < 11.0f ? px : 11.0f;
+        if (s < floor_px) return floor_px;
+    }
+    return s;
 }
 
 #define UIS_W(px)  uis_w((int)(px))

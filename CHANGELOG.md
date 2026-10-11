@@ -63,12 +63,15 @@
   as titles and descriptions, are shown as the server sends them.
 - **Favourites.** Star films and shows on their page; they get their own row
   on Home.
-- **Fit, Fill or Stretch.** `Select` in the player cycles the picture's shape:
+- **Fit, Fill or Stretch.** The player bar has a **Picture** chip at its right
+  end (move to it with the D-pad and press `X`); its icon shows the mode you
+  are in. `Select` cycles it without opening the bar. The shape is:
   *Fit* shows the whole frame; *Fill* zooms in until the screen is full and
   crops the edges, so a 16:9 film fills a 4:3 TV; *Stretch* squeezes the frame
-  to the screen's shape. The choice is kept for every video, and still works
-  with the picture size on `L1` (where `Square` cycles it too). While the next
-  episode's prompt is up, `Select` still goes to the next episode.
+  to the screen's shape. The choice is kept for every video and every episode,
+  and still works with the picture size on `L1` (where `Square` cycles it too).
+  While the next episode's prompt is up, `Select` still goes to the next
+  episode.
 - **Chapters.** `R1` in the player lists the film's chapters with their times;
   pick one to jump there. Only films whose server has chapter data have a list
   (films streamed through a debrid plugin usually don't, and a file played from
@@ -128,6 +131,13 @@
 - A failed seek reopen could close the stream's socket twice.
 - A cover image over 8 megapixels is refused instead of exhausting memory, and
   a failed video-memory allocation ends playback cleanly instead of crashing.
+- **Small text was too thin to read on a standard-definition TV.** On a 480 or
+  576 line display the whole interface is scaled down, which took the player
+  bar's labels and the button hints to about 6-8 pixels. Type is now never drawn
+  smaller than 11 pixels there, the player bar's chips grow to hold it, and the
+  small always-on text (the bar's chips and times, and the button hints) is
+  drawn in the heavier weight. HD screens are unchanged. (`jellyfin_uiscale.txt`
+  still scales everything if you want it larger or smaller.)
 - JellyDrop jumped once an hour when its clock wrapped.
 
 ## 3.1

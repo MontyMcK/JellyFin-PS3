@@ -895,6 +895,7 @@ void draw_hints_bar(const Hint *hints, int n) {
 
     const int   icon_h  = UIS_H(24);
     const float text_px = UIS_TF(12.5f);      // section 3.1: 12.5px label
+    const bool  heavy   = (int)display_height < 720;   // a CRT loses thin strokes
     const int   gap_it  = UIS_H(8);           // icon to its label
     const int   gap_sep = UIS_H(22);          // section 3.1: items gap 22
 
@@ -909,7 +910,7 @@ void draw_hints_bar(const Hint *hints, int n) {
                      ? hint_badge_w()
                      : ps_btn_width(hints[i].glyph, icon_h);
         if (hints[i].label && hints[i].label[0]) {
-            total_w += gap_it + ttf_text_width(tr(hints[i].label), text_px);
+            total_w += gap_it + ttf_text_width(tr(hints[i].label), text_px, heavy);
             if (i < n - 1) total_w += gap_sep;
         } else {
             total_w += gap_pair;
@@ -936,8 +937,8 @@ void draw_hints_bar(const Hint *hints, int n) {
         if (hints[i].label && hints[i].label[0]) {
             x += gap_it;
             drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), tr(hints[i].label),
-                    text_px, XMB_TEXT_DIM);
-            x += ttf_text_width(tr(hints[i].label), text_px);
+                    text_px, heavy ? XMB_TEXT : XMB_TEXT_DIM, heavy);
+            x += ttf_text_width(tr(hints[i].label), text_px, heavy);
             if (i < n - 1) x += gap_sep;
         } else {
             x += gap_pair;

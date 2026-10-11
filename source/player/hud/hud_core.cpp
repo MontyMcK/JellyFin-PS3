@@ -304,6 +304,8 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
             if (g_hud.focus < 0)                   g_hud.focus = FOCUS_PP;
             else if (g_hud.focus < FOCUS_COUNT - 1) g_hud.focus++;
             if (g_spine_on && g_hud.focus == FOCUS_FF)  g_hud.focus = FOCUS_AUDIO;
+            // The old bar has no picture-shape chip to land on.
+            if (!g_spine_on && g_hud.focus == FOCUS_ASPECT) g_hud.focus = FOCUS_CC;
             return HUD_ACTION_NONE;
         }
     }
@@ -326,6 +328,7 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
         case FOCUS_AUDIO:  return HUD_ACTION_AUDIO_TRACK;
         case FOCUS_VOLUME: g_hud.vol_active = true; return HUD_ACTION_NONE;
         case FOCUS_CC:     return HUD_ACTION_SUBTITLE;
+        case FOCUS_ASPECT: return HUD_ACTION_ASPECT;
         case FOCUS_PP:
         default:          return HUD_ACTION_TOGGLE_PAUSE;
         }
