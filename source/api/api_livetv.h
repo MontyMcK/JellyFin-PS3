@@ -23,8 +23,12 @@ int jf_fetch_channels(JFChannel *out, int max);
 // every category, in number order.  The server's /LiveTv/Channels ignores a
 // search term, so this asks /Users/<id>/Items for channels; those replies carry
 // no current programme (the guide request fills the rows in).
+//
+// `items_extra` (optional) is more query for that same /Users/<id>/Items route,
+// such as "&isFavorite=true" (every starred channel, from all categories) or
+// "&Ids=<id>,<id>" (those channels).
 int jf_fetch_channels_range(JFChannel *out, int max, int start, int count, int *total,
-                            const char *search = NULL);
+                            const char *search = NULL, const char *items_extra = NULL);
 
 // Every channel's number, in the server's order and nothing else (small
 // replies), for working out where the categories start.  Up to `max` numbers

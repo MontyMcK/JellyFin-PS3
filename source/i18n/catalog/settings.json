@@ -5,185 +5,58 @@
   "Downloads": {"ja": "ダウンロード", "pt-BR": "Downloads", "de": "Downloads", "fr": "Téléchargements", "es": "Descargas"},
   "Display": {"ja": "表示", "pt-BR": "Tela", "de": "Anzeige", "fr": "Affichage", "es": "Pantalla"},
   "System": {"ja": "システム", "pt-BR": "Sistema", "de": "System", "fr": "Système", "es": "Sistema"},
-
   "Language": {"ja": "言語", "pt-BR": "Idioma", "de": "Sprache", "fr": "Langue", "es": "Idioma"},
-  "The language the menus are shown in.\nAuto follows the PS3's own language setting.": {
-    "ja": "メニューの表示言語です。\n「自動」はPS3本体の言語設定に従います。",
-    "pt-BR": "O idioma em que os menus são exibidos.\nAutomático segue a configuração de idioma do PS3.",
-    "de": "Die Sprache der Menüs.\nAutomatisch folgt der Spracheinstellung der PS3.",
-    "fr": "La langue d'affichage des menus.\nAuto suit le réglage de langue de la PS3.",
-    "es": "El idioma en que se muestran los menús.\nAutomático sigue el idioma configurado en la PS3."},
+  "The language the menus are shown in.\nAuto follows the PS3's own language setting.": {"ja": "メニューの表示言語です。\n「自動」はPS3本体の言語設定に従います。", "pt-BR": "O idioma em que os menus são exibidos.\nAutomático segue a configuração de idioma do PS3.", "de": "Die Sprache der Menüs.\nAutomatisch folgt der Spracheinstellung der PS3.", "fr": "La langue d'affichage des menus.\nAuto suit le réglage de langue de la PS3.", "es": "El idioma en que se muestran los menús.\nAutomático sigue el idioma configurado en la PS3."},
   "Auto": {"ja": "自動", "pt-BR": "Automático", "de": "Automatisch", "fr": "Auto", "es": "Automático"},
   "On": {"ja": "オン", "pt-BR": "Ligado", "de": "An", "fr": "Activé", "es": "Activado"},
   "Off": {"ja": "オフ", "pt-BR": "Desligado", "de": "Aus", "fr": "Désactivé", "es": "Desactivado"},
   "n/a": {"ja": "利用不可", "pt-BR": "n/d", "de": "n. v.", "fr": "n/d", "es": "n/d"},
-
   "1080p Playback (Alpha)": {"ja": "1080p再生（アルファ）", "pt-BR": "Reprodução 1080p (Alfa)", "de": "1080p-Wiedergabe (Alpha)", "fr": "Lecture 1080p (alpha)", "es": "Reproducción 1080p (alfa)"},
-  "Ask the server for full 1920x1080 video instead of 720p.\nSharper, but needs more bandwidth. Still experimental.": {
-    "ja": "720pの代わりにサーバーへ1920x1080の映像を要求します。\nより鮮明ですが、帯域を多く使います。まだ実験的な機能です。",
-    "pt-BR": "Pede ao servidor vídeo em 1920x1080 completo em vez de 720p.\nMais nítido, mas usa mais banda. Ainda experimental.",
-    "de": "Fordert vom Server volles 1920x1080 statt 720p an.\nSchärfer, braucht aber mehr Bandbreite. Noch experimentell.",
-    "fr": "Demande au serveur la vidéo complète en 1920x1080 au lieu de 720p.\nPlus net, mais demande plus de débit. Encore expérimental.",
-    "es": "Pide al servidor vídeo en 1920x1080 completo en lugar de 720p.\nMás nítido, pero necesita más ancho de banda. Aún experimental."},
-
+  "Ask the server for full 1920x1080 video instead of 720p.\nSharper, but needs more bandwidth. Still experimental.": {"ja": "720pの代わりにサーバーへ1920x1080の映像を要求します。\nより鮮明ですが、帯域を多く使います。まだ実験的な機能です。", "pt-BR": "Pede ao servidor vídeo em 1920x1080 completo em vez de 720p.\nMais nítido, mas usa mais banda. Ainda experimental.", "de": "Fordert vom Server volles 1920x1080 statt 720p an.\nSchärfer, braucht aber mehr Bandbreite. Noch experimentell.", "fr": "Demande au serveur la vidéo complète en 1920x1080 au lieu de 720p.\nPlus net, mais demande plus de débit. Encore expérimental.", "es": "Pide al servidor vídeo en 1920x1080 completo en lugar de 720p.\nMás nítido, pero necesita más ancho de banda. Aún experimental."},
   "24Hz Output": {"ja": "24Hz出力", "pt-BR": "Saída 24Hz", "de": "24-Hz-Ausgabe", "fr": "Sortie 24 Hz", "es": "Salida a 24 Hz"},
-  "Auto: 24fps films switch the TV to 24Hz for smooth motion.\nEach TV is checked once first. Off keeps everything at 60Hz.": {
-    "ja": "自動：24fpsの映画ではテレビを24Hzに切り替え、滑らかに表示します。\n各テレビは最初に一度確認されます。オフでは常に60Hzです。",
-    "pt-BR": "Auto: filmes de 24 fps mudam a TV para 24 Hz e ficam mais fluidos.\nCada TV é verificada uma vez antes. Desligado mantém tudo em 60 Hz.",
-    "de": "Auto: 24-fps-Filme schalten den Fernseher für ruhige Bewegung auf 24 Hz.\nJeder Fernseher wird zuerst einmal geprüft. Aus bleibt bei 60 Hz.",
-    "fr": "Auto : les films en 24 i/s passent la TV en 24 Hz pour un mouvement fluide.\nChaque TV est d'abord testée une fois. Désactivé reste en 60 Hz.",
-    "es": "Auto: las películas de 24 fps cambian la TV a 24 Hz para un movimiento fluido.\nCada TV se comprueba una vez antes. Desactivado mantiene 60 Hz."},
-
+  "Auto: 24fps films switch the TV to 24Hz for smooth motion.\nEach TV is checked once first. Off keeps everything at 60Hz.": {"ja": "自動：24fpsの映画ではテレビを24Hzに切り替え、滑らかに表示します。\n各テレビは最初に一度確認されます。オフでは常に60Hzです。", "pt-BR": "Auto: filmes de 24 fps mudam a TV para 24 Hz e ficam mais fluidos.\nCada TV é verificada uma vez antes. Desligado mantém tudo em 60 Hz.", "de": "Auto: 24-fps-Filme schalten den Fernseher für ruhige Bewegung auf 24 Hz.\nJeder Fernseher wird zuerst einmal geprüft. Aus bleibt bei 60 Hz.", "fr": "Auto : les films en 24 i/s passent la TV en 24 Hz pour un mouvement fluide.\nChaque TV est d'abord testée une fois. Désactivé reste en 60 Hz.", "es": "Auto: las películas de 24 fps cambian la TV a 24 Hz para un movimiento fluido.\nCada TV se comprueba una vez antes. Desactivado mantiene 60 Hz."},
   "Direct Stream": {"ja": "ダイレクトストリーム", "pt-BR": "Transmissão direta", "de": "Direktes Streaming", "fr": "Streaming direct", "es": "Transmisión directa"},
-  "Auto: the server may pass a compatible video through untouched.\nOff: always re-encode. Try Off if playback stutters at every quality.": {
-    "ja": "自動：互換性のある映像は、サーバーがそのまま送ります。\nオフ：常に再エンコードします。どの画質でもカクつくときはオフに。",
-    "pt-BR": "Automático: o servidor pode enviar um vídeo compatível sem alterações.\nDesligado: sempre recodifica. Tente Desligado se travar em qualquer qualidade.",
-    "de": "Automatisch: Der Server darf ein passendes Video unverändert durchreichen.\nAus: immer neu kodieren. Aus probieren, wenn es bei jeder Qualität ruckelt.",
-    "fr": "Auto : le serveur peut transmettre tel quel une vidéo compatible.\nDésactivé : toujours réencoder. Essayez si la lecture saccade à toute qualité.",
-    "es": "Automático: el servidor puede enviar sin cambios un vídeo compatible.\nDesactivado: siempre recodifica. Pruébalo si se entrecorta en cualquier calidad."},
-
+  "Auto: the server may pass a compatible video through untouched.\nOff: always re-encode. Try Off if playback stutters at every quality.": {"ja": "自動：互換性のある映像は、サーバーがそのまま送ります。\nオフ：常に再エンコードします。どの画質でもカクつくときはオフに。", "pt-BR": "Automático: o servidor pode enviar um vídeo compatível sem alterações.\nDesligado: sempre recodifica. Tente Desligado se travar em qualquer qualidade.", "de": "Automatisch: Der Server darf ein passendes Video unverändert durchreichen.\nAus: immer neu kodieren. Aus probieren, wenn es bei jeder Qualität ruckelt.", "fr": "Auto : le serveur peut transmettre tel quel une vidéo compatible.\nDésactivé : toujours réencoder. Essayez si la lecture saccade à toute qualité.", "es": "Automático: el servidor puede enviar sin cambios un vídeo compatible.\nDesactivado: siempre recodifica. Pruébalo si se entrecorta en cualquier calidad."},
   "Auto Skip": {"ja": "自動スキップ", "pt-BR": "Pular automaticamente", "de": "Automatisch überspringen", "fr": "Passage auto", "es": "Salto automático"},
-  "Skip intros and recaps automatically, without pressing X.\nCredits start the next episode's 25 second countdown instead.": {
-    "ja": "Xを押さなくても、オープニングやあらすじを自動でスキップします。\nエンドロールでは、代わりに次のエピソードの25秒カウントダウンが始まります。",
-    "pt-BR": "Pula aberturas e resumos automaticamente, sem apertar X.\nNos créditos, começa a contagem de 25 segundos do próximo episódio.",
-    "de": "Überspringt Vorspann und Rückblicke automatisch, ohne X zu drücken.\nBeim Abspann startet stattdessen der 25-Sekunden-Countdown zur nächsten Folge.",
-    "fr": "Passe automatiquement les génériques et résumés, sans appuyer sur X.\nAu générique de fin, le compte à rebours de 25 s de l'épisode suivant démarre.",
-    "es": "Salta las intros y los resúmenes automáticamente, sin pulsar X.\nEn los créditos empieza la cuenta atrás de 25 segundos del siguiente episodio."},
-
+  "Skip intros and recaps automatically, without pressing X.\nCredits start the next episode's 25 second countdown instead.": {"ja": "Xを押さなくても、オープニングやあらすじを自動でスキップします。\nエンドロールでは、代わりに次のエピソードの25秒カウントダウンが始まります。", "pt-BR": "Pula aberturas e resumos automaticamente, sem apertar X.\nNos créditos, começa a contagem de 25 segundos do próximo episódio.", "de": "Überspringt Vorspann und Rückblicke automatisch, ohne X zu drücken.\nBeim Abspann startet stattdessen der 25-Sekunden-Countdown zur nächsten Folge.", "fr": "Passe automatiquement les génériques et résumés, sans appuyer sur X.\nAu générique de fin, le compte à rebours de 25 s de l'épisode suivant démarre.", "es": "Salta las intros y los resúmenes automáticamente, sin pulsar X.\nEn los créditos empieza la cuenta atrás de 25 segundos del siguiente episodio."},
   "Audio Output": {"ja": "音声出力", "pt-BR": "Saída de áudio", "de": "Audioausgabe", "fr": "Sortie audio", "es": "Salida de audio"},
-  "Stereo, 5.1 or 7.1 over HDMI. Dolby Digital sends the film's Dolby\ntrack untouched: use it if your soundbar drops the centre channel.": {
-    "ja": "HDMIでステレオ、5.1、7.1を出力します。Dolby Digitalは映画のDolby音声を\nそのまま送ります。サウンドバーでセンターが鳴らないときにお使いください。",
-    "pt-BR": "Estéreo, 5.1 ou 7.1 por HDMI. Dolby Digital envia a faixa Dolby do filme\nsem alterações: use se a soundbar perder o canal central.",
-    "de": "Stereo, 5.1 oder 7.1 über HDMI. Dolby Digital sendet die Dolby-Tonspur des\nFilms unverändert: nützlich, wenn der Center-Kanal der Soundbar fehlt.",
-    "fr": "Stéréo, 5.1 ou 7.1 via HDMI. Dolby Digital envoie la piste Dolby du film\ntelle quelle : utile si votre barre de son perd la voie centrale.",
-    "es": "Estéreo, 5.1 o 7.1 por HDMI. Dolby Digital envía la pista Dolby de la\npelícula sin tocar: úsalo si tu barra de sonido pierde el canal central."},
+  "Stereo, 5.1 or 7.1 over HDMI. Dolby Digital sends the film's Dolby\ntrack untouched: use it if your soundbar drops the centre channel.": {"ja": "HDMIでステレオ、5.1、7.1を出力します。Dolby Digitalは映画のDolby音声を\nそのまま送ります。サウンドバーでセンターが鳴らないときにお使いください。", "pt-BR": "Estéreo, 5.1 ou 7.1 por HDMI. Dolby Digital envia a faixa Dolby do filme\nsem alterações: use se a soundbar perder o canal central.", "de": "Stereo, 5.1 oder 7.1 über HDMI. Dolby Digital sendet die Dolby-Tonspur des\nFilms unverändert: nützlich, wenn der Center-Kanal der Soundbar fehlt.", "fr": "Stéréo, 5.1 ou 7.1 via HDMI. Dolby Digital envoie la piste Dolby du film\ntelle quelle : utile si votre barre de son perd la voie centrale.", "es": "Estéreo, 5.1 o 7.1 por HDMI. Dolby Digital envía la pista Dolby de la\npelícula sin tocar: úsalo si tu barra de sonido pierde el canal central."},
   "Stereo": {"ja": "ステレオ", "pt-BR": "Estéreo", "de": "Stereo", "fr": "Stéréo", "es": "Estéreo"},
-
   "Dialogue Boost": {"ja": "セリフ強調", "pt-BR": "Realce de diálogo", "de": "Dialogverstärkung", "fr": "Renfort des dialogues", "es": "Realce de diálogos"},
-  "Raise the centre channel, where the dialogue is. Not available\nwith Dolby Digital passthrough. Helps when voices are quiet.": {
-    "ja": "セリフが入るセンターチャンネルを持ち上げます。Dolby Digital\nパススルーでは使えません。声が小さいときに役立ちます。",
-    "pt-BR": "Aumenta o canal central, onde fica o diálogo. Indisponível com\npassthrough Dolby Digital. Ajuda quando as vozes estão baixas.",
-    "de": "Hebt den Center-Kanal an, auf dem die Dialoge liegen. Nicht verfügbar\nbei Dolby-Digital-Durchleitung. Hilft, wenn Stimmen zu leise sind.",
-    "fr": "Renforce la voie centrale, où se trouvent les dialogues. Indisponible\navec le passthrough Dolby Digital. Utile quand les voix sont faibles.",
-    "es": "Sube el canal central, donde van los diálogos. No disponible con\nel passthrough de Dolby Digital. Ayuda cuando las voces se oyen bajas."},
-
+  "Raise the centre channel, where the dialogue is. Not available\nwith Dolby Digital passthrough. Helps when voices are quiet.": {"ja": "セリフが入るセンターチャンネルを持ち上げます。Dolby Digital\nパススルーでは使えません。声が小さいときに役立ちます。", "pt-BR": "Aumenta o canal central, onde fica o diálogo. Indisponível com\npassthrough Dolby Digital. Ajuda quando as vozes estão baixas.", "de": "Hebt den Center-Kanal an, auf dem die Dialoge liegen. Nicht verfügbar\nbei Dolby-Digital-Durchleitung. Hilft, wenn Stimmen zu leise sind.", "fr": "Renforce la voie centrale, où se trouvent les dialogues. Indisponible\navec le passthrough Dolby Digital. Utile quand les voix sont faibles.", "es": "Sube el canal central, donde van los diálogos. No disponible con\nel passthrough de Dolby Digital. Ayuda cuando las voces se oyen bajas."},
   "Subtitle Font": {"ja": "字幕フォント", "pt-BR": "Fonte das legendas", "de": "Untertitel-Schrift", "fr": "Police des sous-titres", "es": "Fuente de subtítulos"},
-  "The typeface subtitles are drawn in.\nLeft and Right step through the choices.": {
-    "ja": "字幕に使う書体です。\n左右キーで選択肢を切り替えます。",
-    "pt-BR": "A fonte usada nas legendas.\nEsquerda e Direita percorrem as opções.",
-    "de": "Die Schrift, in der Untertitel dargestellt werden.\nLinks und Rechts wechseln die Auswahl.",
-    "fr": "La police utilisée pour les sous-titres.\nGauche et Droite font défiler les choix.",
-    "es": "La tipografía con la que se dibujan los subtítulos.\nIzquierda y Derecha recorren las opciones."},
-
+  "The typeface subtitles are drawn in.\nLeft and Right step through the choices.": {"ja": "字幕に使う書体です。\n左右キーで選択肢を切り替えます。", "pt-BR": "A fonte usada nas legendas.\nEsquerda e Direita percorrem as opções.", "de": "Die Schrift, in der Untertitel dargestellt werden.\nLinks und Rechts wechseln die Auswahl.", "fr": "La police utilisée pour les sous-titres.\nGauche et Droite font défiler les choix.", "es": "La tipografía con la que se dibujan los subtítulos.\nIzquierda y Derecha recorren las opciones."},
   "Subtitle Colour": {"ja": "字幕の色", "pt-BR": "Cor das legendas", "de": "Untertitel-Farbe", "fr": "Couleur des sous-titres", "es": "Color de subtítulos"},
-  "The colour subtitles are drawn in.\nWhite is the broadcast default; the others are softer.": {
-    "ja": "字幕の表示色です。\n白が放送の標準で、ほかはやわらかい色です。",
-    "pt-BR": "A cor das legendas.\nBranco é o padrão de transmissão; as outras são mais suaves.",
-    "de": "Die Farbe der Untertitel.\nWeiß ist der Sendestandard, die anderen sind weicher.",
-    "fr": "La couleur des sous-titres.\nLe blanc est la norme de diffusion ; les autres sont plus douces.",
-    "es": "El color de los subtítulos.\nBlanco es el estándar de emisión; los demás son más suaves."},
+  "The colour subtitles are drawn in.\nWhite is the broadcast default; the others are softer.": {"ja": "字幕の表示色です。\n白が放送の標準で、ほかはやわらかい色です。", "pt-BR": "A cor das legendas.\nBranco é o padrão de transmissão; as outras são mais suaves.", "de": "Die Farbe der Untertitel.\nWeiß ist der Sendestandard, die anderen sind weicher.", "fr": "La couleur des sous-titres.\nLe blanc est la norme de diffusion ; les autres sont plus douces.", "es": "El color de los subtítulos.\nBlanco es el estándar de emisión; los demás son más suaves."},
   "White": {"ja": "白", "pt-BR": "Branco", "de": "Weiß", "fr": "Blanc", "es": "Blanco"},
   "Soft Yellow": {"ja": "やわらかい黄", "pt-BR": "Amarelo suave", "de": "Sanftes Gelb", "fr": "Jaune doux", "es": "Amarillo suave"},
   "Soft Grey": {"ja": "やわらかい灰", "pt-BR": "Cinza suave", "de": "Sanftes Grau", "fr": "Gris doux", "es": "Gris suave"},
-
-  "Downloads in progress, with pause and cancel.\nThey wait while you stream and carry on by themselves.": {
-    "ja": "進行中のダウンロードを、一時停止やキャンセルとともに表示します。\nストリーミング中は待機し、終われば自動で再開します。",
-    "pt-BR": "Downloads em andamento, com pausar e cancelar.\nEles esperam enquanto você assiste e continuam sozinhos.",
-    "de": "Laufende Downloads mit Pause und Abbrechen.\nSie warten während des Streamens und laufen danach selbst weiter.",
-    "fr": "Téléchargements en cours, avec pause et annulation.\nIls attendent pendant la lecture et reprennent tout seuls.",
-    "es": "Descargas en curso, con pausa y cancelación.\nEsperan mientras ves contenido y continúan solas."},
-
+  "Downloads in progress, with pause and cancel.\nThey wait while you stream and carry on by themselves.": {"ja": "進行中のダウンロードを、一時停止やキャンセルとともに表示します。\nストリーミング中は待機し、終われば自動で再開します。", "pt-BR": "Downloads em andamento, com pausar e cancelar.\nEles esperam enquanto você assiste e continuam sozinhos.", "de": "Laufende Downloads mit Pause und Abbrechen.\nSie warten während des Streamens und laufen danach selbst weiter.", "fr": "Téléchargements en cours, avec pause et annulation.\nIls attendent pendant la lecture et reprennent tout seuls.", "es": "Descargas en curso, con pausa y cancelación.\nEsperan mientras ves contenido y continúan solas."},
   "Offline Library": {"ja": "オフラインライブラリ", "pt-BR": "Biblioteca offline", "de": "Offline-Mediathek", "fr": "Bibliothèque hors ligne", "es": "Biblioteca sin conexión"},
-  "Films and episodes saved on this PS3, ready to play.\nThey play without a connection to your server.": {
-    "ja": "このPS3に保存された映画やエピソードを再生できます。\nサーバーに接続しなくても再生できます。",
-    "pt-BR": "Filmes e episódios salvos neste PS3, prontos para assistir.\nTocam sem conexão com o seu servidor.",
-    "de": "Auf dieser PS3 gespeicherte Filme und Folgen, sofort abspielbar.\nSie laufen ohne Verbindung zu Ihrem Server.",
-    "fr": "Films et épisodes enregistrés sur cette PS3, prêts à lire.\nIls se lisent sans connexion à votre serveur.",
-    "es": "Películas y episodios guardados en esta PS3, listos para ver.\nSe reproducen sin conexión con tu servidor."},
-
+  "Films and episodes saved on this PS3, ready to play.\nThey play without a connection to your server.": {"ja": "このPS3に保存された映画やエピソードを再生できます。\nサーバーに接続しなくても再生できます。", "pt-BR": "Filmes e episódios salvos neste PS3, prontos para assistir.\nTocam sem conexão com o seu servidor.", "de": "Auf dieser PS3 gespeicherte Filme und Folgen, sofort abspielbar.\nSie laufen ohne Verbindung zu Ihrem Server.", "fr": "Films et épisodes enregistrés sur cette PS3, prêts à lire.\nIls se lisent sans connexion à votre serveur.", "es": "Películas y episodios guardados en esta PS3, listos para ver.\nSe reproducen sin conexión con tu servidor."},
   "Screen Size": {"ja": "画面サイズ", "pt-BR": "Tamanho da tela", "de": "Bildgröße", "fr": "Taille de l'écran", "es": "Tamaño de pantalla"},
-  "Shrink the picture to fit TVs that crop the edges (overscan).\nLine the corners up with your screen's edges.": {
-    "ja": "画面の端が切れるテレビ（オーバースキャン）に合わせて映像を縮小します。\n四隅を画面の端に合わせてください。",
-    "pt-BR": "Reduz a imagem para TVs que cortam as bordas (overscan).\nAlinhe os cantos com as bordas da sua tela.",
-    "de": "Verkleinert das Bild für Fernseher, die den Rand abschneiden (Overscan).\nRichten Sie die Ecken an den Bildschirmrändern aus.",
-    "fr": "Réduit l'image pour les TV qui rognent les bords (overscan).\nAlignez les coins sur les bords de votre écran.",
-    "es": "Reduce la imagen para TVs que recortan los bordes (overscan).\nAlinea las esquinas con los bordes de tu pantalla."},
-
+  "Shrink the picture to fit TVs that crop the edges (overscan).\nLine the corners up with your screen's edges.": {"ja": "画面の端が切れるテレビ（オーバースキャン）に合わせて映像を縮小します。\n四隅を画面の端に合わせてください。", "pt-BR": "Reduz a imagem para TVs que cortam as bordas (overscan).\nAlinhe os cantos com as bordas da sua tela.", "de": "Verkleinert das Bild für Fernseher, die den Rand abschneiden (Overscan).\nRichten Sie die Ecken an den Bildschirmrändern aus.", "fr": "Réduit l'image pour les TV qui rognent les bords (overscan).\nAlignez les coins sur les bords de votre écran.", "es": "Reduce la imagen para TVs que recortan los bordes (overscan).\nAlinea las esquinas con los bordes de tu pantalla."},
   "Theme": {"ja": "テーマ", "pt-BR": "Tema", "de": "Design", "fr": "Thème", "es": "Tema"},
-  "The interface colour theme.\nJellywave is the default; extra .ini themes appear here too.": {
-    "ja": "画面の配色テーマです。\n標準はJellywaveで、追加の.iniテーマもここに表示されます。",
-    "pt-BR": "O tema de cores da interface.\nJellywave é o padrão; temas .ini extras também aparecem aqui.",
-    "de": "Das Farbdesign der Oberfläche.\nJellywave ist der Standard; zusätzliche .ini-Designs erscheinen hier ebenfalls.",
-    "fr": "Le thème de couleurs de l'interface.\nJellywave est le thème par défaut ; les thèmes .ini ajoutés apparaissent ici.",
-    "es": "El tema de color de la interfaz.\nJellywave es el predeterminado; los temas .ini extra también aparecen aquí."},
-
+  "The interface colour theme.\nJellywave is the default; extra .ini themes appear here too.": {"ja": "画面の配色テーマです。\n標準はJellywaveで、追加の.iniテーマもここに表示されます。", "pt-BR": "O tema de cores da interface.\nJellywave é o padrão; temas .ini extras também aparecem aqui.", "de": "Das Farbdesign der Oberfläche.\nJellywave ist der Standard; zusätzliche .ini-Designs erscheinen hier ebenfalls.", "fr": "Le thème de couleurs de l'interface.\nJellywave est le thème par défaut ; les thèmes .ini ajoutés apparaissent ici.", "es": "El tema de color de la interfaz.\nJellywave es el predeterminado; los temas .ini extra también aparecen aquí."},
   "Day / Night Palette": {"ja": "昼夜パレット", "pt-BR": "Paleta dia/noite", "de": "Tag-/Nacht-Palette", "fr": "Palette jour / nuit", "es": "Paleta día / noche"},
-  "Brighten the background by day, back to the night look after\ndark, with a glow at dawn and dusk. Follows the console clock.": {
-    "ja": "昼は背景を明るくし、日が暮れると夜の見た目に戻します。\n夜明けと夕暮れには光がにじみます。本体の時計に従います。",
-    "pt-BR": "Clareia o fundo de dia e volta ao visual noturno ao escurecer,\ncom um brilho ao amanhecer e ao entardecer. Segue o relógio do console.",
-    "de": "Hellt den Hintergrund tagsüber auf und kehrt nach Einbruch der Dunkelheit\nzum Nachtlook zurück, mit Glühen in der Dämmerung. Folgt der Konsolenuhr.",
-    "fr": "Éclaircit l'arrière-plan le jour et revient à l'aspect nocturne la nuit,\navec une lueur à l'aube et au crépuscule. Suit l'horloge de la console.",
-    "es": "Aclara el fondo de día y vuelve al aspecto nocturno al anochecer,\ncon un brillo al amanecer y al atardecer. Sigue el reloj de la consola."},
-
+  "Brighten the background by day, back to the night look after\ndark, with a glow at dawn and dusk. Follows the console clock.": {"ja": "昼は背景を明るくし、日が暮れると夜の見た目に戻します。\n夜明けと夕暮れには光がにじみます。本体の時計に従います。", "pt-BR": "Clareia o fundo de dia e volta ao visual noturno ao escurecer,\ncom um brilho ao amanhecer e ao entardecer. Segue o relógio do console.", "de": "Hellt den Hintergrund tagsüber auf und kehrt nach Einbruch der Dunkelheit\nzum Nachtlook zurück, mit Glühen in der Dämmerung. Folgt der Konsolenuhr.", "fr": "Éclaircit l'arrière-plan le jour et revient à l'aspect nocturne la nuit,\navec une lueur à l'aube et au crépuscule. Suit l'horloge de la console.", "es": "Aclara el fondo de día y vuelve al aspecto nocturno al anochecer,\ncon un brillo al amanecer y al atardecer. Sigue el reloj de la consola."},
   "Wave Intensity": {"ja": "ウェーブの強さ", "pt-BR": "Intensidade da onda", "de": "Wellenstärke", "fr": "Intensité de la vague", "es": "Intensidad de la onda"},
-  "How strongly the wave reacts to music.\nOff keeps it calm; Max makes every beat hit hard.": {
-    "ja": "ウェーブが音楽にどれだけ反応するかを決めます。\nオフなら穏やかに、最大ではビートごとに強く動きます。",
-    "pt-BR": "O quanto a onda reage à música.\nDesligado a mantém calma; Máx. faz cada batida pesar.",
-    "de": "Wie stark die Welle auf Musik reagiert.\nAus hält sie ruhig; Max lässt jeden Beat kräftig einschlagen.",
-    "fr": "À quel point la vague réagit à la musique.\nDésactivé la garde calme ; Max fait claquer chaque temps.",
-    "es": "Cuánto reacciona la onda a la música.\nDesactivado la mantiene tranquila; Máx. hace que cada golpe se note."},
+  "How strongly the wave reacts to music.\nOff keeps it calm; Max makes every beat hit hard.": {"ja": "ウェーブが音楽にどれだけ反応するかを決めます。\nオフなら穏やかに、最大ではビートごとに強く動きます。", "pt-BR": "O quanto a onda reage à música.\nDesligado a mantém calma; Máx. faz cada batida pesar.", "de": "Wie stark die Welle auf Musik reagiert.\nAus hält sie ruhig; Max lässt jeden Beat kräftig einschlagen.", "fr": "À quel point la vague réagit à la musique.\nDésactivé la garde calme ; Max fait claquer chaque temps.", "es": "Cuánto reacciona la onda a la música.\nDesactivado la mantiene tranquila; Máx. hace que cada golpe se note."},
   "Normal": {"ja": "標準", "pt-BR": "Normal", "de": "Normal", "fr": "Normal", "es": "Normal"},
   "Strong": {"ja": "強", "pt-BR": "Forte", "de": "Stark", "fr": "Fort", "es": "Fuerte"},
   "Max": {"ja": "最大", "pt-BR": "Máx.", "de": "Max", "fr": "Max", "es": "Máx."},
-
   "Menu Particles": {"ja": "メニューのパーティクル", "pt-BR": "Partículas nos menus", "de": "Menü-Partikel", "fr": "Particules des menus", "es": "Partículas en menús"},
-  "Let the floating particles drift behind the menus too,\nnot only while music is playing.": {
-    "ja": "漂う粒子を、音楽の再生中だけでなく\nメニューの背後にも表示します。",
-    "pt-BR": "Deixa as partículas flutuantes aparecerem atrás dos menus também,\nnão só durante a música.",
-    "de": "Lässt die schwebenden Partikel auch hinter den Menüs treiben,\nnicht nur bei laufender Musik.",
-    "fr": "Laisse aussi flotter les particules derrière les menus,\npas seulement pendant la lecture de musique.",
-    "es": "Deja que las partículas floten también detrás de los menús,\nno solo mientras suena música."},
-
+  "Let the floating particles drift behind the menus too,\nnot only while music is playing.": {"ja": "漂う粒子を、音楽の再生中だけでなく\nメニューの背後にも表示します。", "pt-BR": "Deixa as partículas flutuantes aparecerem atrás dos menus também,\nnão só durante a música.", "de": "Lässt die schwebenden Partikel auch hinter den Menüs treiben,\nnicht nur bei laufender Musik.", "fr": "Laisse aussi flotter les particules derrière les menus,\npas seulement pendant la lecture de musique.", "es": "Deja que las partículas floten también detrás de los menús,\nno solo mientras suena música."},
   "Software Update": {"ja": "ソフトウェア更新", "pt-BR": "Atualização de software", "de": "Software-Update", "fr": "Mise à jour", "es": "Actualización de software"},
-  "Checked at every launch. X checks again. New versions:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases": {
-    "ja": "起動のたびに確認します。Xでもう一度確認します。新バージョン：\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases",
-    "pt-BR": "Verificado a cada inicialização. X verifica de novo. Novas versões:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases",
-    "de": "Wird bei jedem Start geprüft. X prüft erneut. Neue Versionen:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases",
-    "fr": "Vérifié à chaque lancement. X relance la vérification. Nouvelles versions :\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases",
-    "es": "Se comprueba en cada inicio. X vuelve a comprobar. Nuevas versiones:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases"},
-
+  "Checked at every launch. X checks again. New versions:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases": {"ja": "起動のたびに確認します。Xでもう一度確認します。新バージョン：\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases", "pt-BR": "Verificado a cada inicialização. X verifica de novo. Novas versões:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases", "de": "Wird bei jedem Start geprüft. X prüft erneut. Neue Versionen:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases", "fr": "Vérifié à chaque lancement. X relance la vérification. Nouvelles versions :\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases", "es": "Se comprueba en cada inicio. X vuelve a comprobar. Nuevas versiones:\ngithub.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases"},
   "Send Log to Server": {"ja": "ログをサーバーへ送信", "pt-BR": "Enviar log ao servidor", "de": "Protokoll an Server senden", "fr": "Envoyer le journal au serveur", "es": "Enviar registro al servidor"},
-  "Send the diagnostic log to your Jellyfin server (X). It is saved\nunder Dashboard > Logs as upload_PS3_...log: share that file.": {
-    "ja": "診断ログをJellyfinサーバーへ送信します（X）。ダッシュボード > ログに\nupload_PS3_...log として保存されます。このファイルを共有してください。",
-    "pt-BR": "Envia o log de diagnóstico ao seu servidor Jellyfin (X). Ele fica salvo\nem Painel > Logs como upload_PS3_...log: compartilhe esse arquivo.",
-    "de": "Sendet das Diagnoseprotokoll an Ihren Jellyfin-Server (X). Es liegt unter\nDashboard > Protokolle als upload_PS3_...log: Teilen Sie diese Datei.",
-    "fr": "Envoie le journal de diagnostic à votre serveur Jellyfin (X). Il est enregistré\ndans Tableau de bord > Journaux sous upload_PS3_...log : partagez ce fichier.",
-    "es": "Envía el registro de diagnóstico a tu servidor Jellyfin (X). Se guarda en\nPanel > Registros como upload_PS3_...log: comparte ese archivo."},
-
+  "Send the diagnostic log to your Jellyfin server (X). It is saved\nunder Dashboard > Logs as upload_PS3_...log: share that file.": {"ja": "診断ログをJellyfinサーバーへ送信します（X）。ダッシュボード > ログに\nupload_PS3_...log として保存されます。このファイルを共有してください。", "pt-BR": "Envia o log de diagnóstico ao seu servidor Jellyfin (X). Ele fica salvo\nem Painel > Logs como upload_PS3_...log: compartilhe esse arquivo.", "de": "Sendet das Diagnoseprotokoll an Ihren Jellyfin-Server (X). Es liegt unter\nDashboard > Protokolle als upload_PS3_...log: Teilen Sie diese Datei.", "fr": "Envoie le journal de diagnostic à votre serveur Jellyfin (X). Il est enregistré\ndans Tableau de bord > Journaux sous upload_PS3_...log : partagez ce fichier.", "es": "Envía el registro de diagnóstico a tu servidor Jellyfin (X). Se guarda en\nPanel > Registros como upload_PS3_...log: comparte ese archivo."},
   "Debug Logging": {"ja": "デバッグログ", "pt-BR": "Log de depuração", "de": "Debug-Protokoll", "fr": "Journal de débogage", "es": "Registro de depuración"},
-  "Write a diagnostic log to /dev_hdd0/tmp/player_log.txt (on by default).\nUse Send Log to Server when reporting a problem.": {
-    "ja": "診断ログを /dev_hdd0/tmp/player_log.txt に書き込みます（初期設定はオン）。\n問題を報告するときは「ログをサーバーへ送信」を使ってください。",
-    "pt-BR": "Grava um log de diagnóstico em /dev_hdd0/tmp/player_log.txt (ligado por padrão).\nUse Enviar log ao servidor ao relatar um problema.",
-    "de": "Schreibt ein Diagnoseprotokoll nach /dev_hdd0/tmp/player_log.txt (standardmäßig an).\nNutzen Sie „Protokoll an Server senden“, wenn Sie ein Problem melden.",
-    "fr": "Écrit un journal de diagnostic dans /dev_hdd0/tmp/player_log.txt (activé par défaut).\nUtilisez Envoyer le journal au serveur pour signaler un problème.",
-    "es": "Escribe un registro de diagnóstico en /dev_hdd0/tmp/player_log.txt (activado por defecto).\nUsa Enviar registro al servidor al informar de un problema."},
-
+  "Write a diagnostic log to /dev_hdd0/tmp/player_log.txt (on by default).\nUse Send Log to Server when reporting a problem.": {"ja": "診断ログを /dev_hdd0/tmp/player_log.txt に書き込みます（初期設定はオン）。\n問題を報告するときは「ログをサーバーへ送信」を使ってください。", "pt-BR": "Grava um log de diagnóstico em /dev_hdd0/tmp/player_log.txt (ligado por padrão).\nUse Enviar log ao servidor ao relatar um problema.", "de": "Schreibt ein Diagnoseprotokoll nach /dev_hdd0/tmp/player_log.txt (standardmäßig an).\nNutzen Sie „Protokoll an Server senden“, wenn Sie ein Problem melden.", "fr": "Écrit un journal de diagnostic dans /dev_hdd0/tmp/player_log.txt (activé par défaut).\nUtilisez Envoyer le journal au serveur pour signaler un problème.", "es": "Escribe un registro de diagnóstico en /dev_hdd0/tmp/player_log.txt (activado por defecto).\nUsa Enviar registro al servidor al informar de un problema."},
   "Player Stats Overlay": {"ja": "再生統計オーバーレイ", "pt-BR": "Estatísticas do player", "de": "Wiedergabe-Statistik", "fr": "Statistiques de lecture", "es": "Estadísticas de reproducción"},
-  "Show playback statistics over the video:\nframe rate, bitrate, buffer and decoder figures.": {
-    "ja": "映像の上に再生統計を表示します：\nフレームレート、ビットレート、バッファ、デコーダーの数値。",
-    "pt-BR": "Mostra estatísticas de reprodução sobre o vídeo:\ntaxa de quadros, bitrate, buffer e dados do decodificador.",
-    "de": "Zeigt Wiedergabestatistiken über dem Video an:\nBildrate, Bitrate, Puffer und Decoder-Werte.",
-    "fr": "Affiche les statistiques de lecture sur la vidéo :\nfréquence d'images, débit, tampon et chiffres du décodeur.",
-    "es": "Muestra estadísticas de reproducción sobre el vídeo:\nfotogramas, bitrate, búfer y cifras del decodificador."},
-
+  "Show playback statistics over the video:\nframe rate, bitrate, buffer and decoder figures.": {"ja": "映像の上に再生統計を表示します：\nフレームレート、ビットレート、バッファ、デコーダーの数値。", "pt-BR": "Mostra estatísticas de reprodução sobre o vídeo:\ntaxa de quadros, bitrate, buffer e dados do decodificador.", "de": "Zeigt Wiedergabestatistiken über dem Video an:\nBildrate, Bitrate, Puffer und Decoder-Werte.", "fr": "Affiche les statistiques de lecture sur la vidéo :\nfréquence d'images, débit, tampon et chiffres du décodeur.", "es": "Muestra estadísticas de reproducción sobre el vídeo:\nfotogramas, bitrate, búfer y cifras del decodificador."},
   "Log Out": {"ja": "ログアウト", "pt-BR": "Sair", "de": "Abmelden", "fr": "Se déconnecter", "es": "Cerrar sesión"},
-  "Sign out of this Jellyfin account.\nYou will need to log in again to browse your library.": {
-    "ja": "このJellyfinアカウントからサインアウトします。\nライブラリを見るには再度ログインが必要です。",
-    "pt-BR": "Sai desta conta do Jellyfin.\nVocê precisará entrar de novo para navegar pela biblioteca.",
-    "de": "Meldet dieses Jellyfin-Konto ab.\nZum Durchsuchen der Mediathek müssen Sie sich erneut anmelden.",
-    "fr": "Déconnecte ce compte Jellyfin.\nVous devrez vous reconnecter pour parcourir votre bibliothèque.",
-    "es": "Cierra la sesión de esta cuenta de Jellyfin.\nTendrás que iniciar sesión de nuevo para ver tu biblioteca."},
-
+  "Sign out of this Jellyfin account.\nYou will need to log in again to browse your library.": {"ja": "このJellyfinアカウントからサインアウトします。\nライブラリを見るには再度ログインが必要です。", "pt-BR": "Sai desta conta do Jellyfin.\nVocê precisará entrar de novo para navegar pela biblioteca.", "de": "Meldet dieses Jellyfin-Konto ab.\nZum Durchsuchen der Mediathek müssen Sie sich erneut anmelden.", "fr": "Déconnecte ce compte Jellyfin.\nVous devrez vous reconnecter pour parcourir votre bibliothèque.", "es": "Cierra la sesión de esta cuenta de Jellyfin.\nTendrás que iniciar sesión de nuevo para ver tu biblioteca."},
   "%s available": {"ja": "%s が利用可能", "pt-BR": "%s disponível", "de": "%s verfügbar", "fr": "%s disponible", "es": "%s disponible"},
   "Up to date (%s)": {"ja": "最新です（%s）", "pt-BR": "Atualizado (%s)", "de": "Aktuell (%s)", "fr": "À jour (%s)", "es": "Actualizado (%s)"},
   "Checking...": {"ja": "確認中...", "pt-BR": "Verificando...", "de": "Wird geprüft...", "fr": "Vérification...", "es": "Comprobando..."},
@@ -198,7 +71,6 @@
   "%d failed": {"ja": "%d件失敗", "pt-BR": "%d com falha", "de": "%d fehlgeschlagen", "fr": "%d en échec", "es": "%d con error"},
   "None": {"ja": "なし", "pt-BR": "Nenhum", "de": "Keine", "fr": "Aucun", "es": "Ninguno"},
   "Empty": {"ja": "空", "pt-BR": "Vazia", "de": "Leer", "fr": "Vide", "es": "Vacía"},
-
   "Log out of this account?": {"ja": "このアカウントからログアウトしますか？", "pt-BR": "Sair desta conta?", "de": "Von diesem Konto abmelden?", "fr": "Se déconnecter de ce compte ?", "es": "¿Cerrar sesión en esta cuenta?"},
   "You'll need to sign in again to browse your library.": {"ja": "ライブラリを見るには、もう一度サインインが必要です。", "pt-BR": "Você precisará entrar de novo para navegar pela biblioteca.", "de": "Zum Durchsuchen Ihrer Mediathek müssen Sie sich erneut anmelden.", "fr": "Vous devrez vous reconnecter pour parcourir votre bibliothèque.", "es": "Tendrás que iniciar sesión de nuevo para ver tu biblioteca."},
   "Account": {"ja": "アカウント", "pt-BR": "Conta", "de": "Konto", "fr": "Compte", "es": "Cuenta"},
@@ -207,5 +79,15 @@
   "Jellyfin for PS3 %s · built %s": {"ja": "PS3版Jellyfin %s · ビルド %s", "pt-BR": "Jellyfin para PS3 %s · compilado em %s", "de": "Jellyfin für PS3 %s · erstellt am %s", "fr": "Jellyfin pour PS3 %s · compilé le %s", "es": "Jellyfin para PS3 %s · compilado el %s"},
   "Match the corners to the edges of your screen": {"ja": "四隅を画面の端に合わせてください", "pt-BR": "Alinhe os cantos com as bordas da tela", "de": "Ecken an den Bildschirmrändern ausrichten", "fr": "Alignez les coins sur les bords de l'écran", "es": "Alinea las esquinas con los bordes de la pantalla"},
   "D-pad Left / Right to adjust": {"ja": "方向キー左右で調整", "pt-BR": "Esquerda / Direita no direcional para ajustar", "de": "Steuerkreuz Links / Rechts zum Anpassen", "fr": "Croix directionnelle gauche / droite pour régler", "es": "Cruceta izquierda / derecha para ajustar"},
-  "Cross  Save        Circle  Cancel": {"ja": "× 保存        ○ キャンセル", "pt-BR": "X  Salvar        Círculo  Cancelar", "de": "Kreuz  Speichern        Kreis  Abbrechen", "fr": "Croix  Enregistrer        Rond  Annuler", "es": "Cruz  Guardar        Círculo  Cancelar"}
+  "Cross  Save        Circle  Cancel": {"ja": "× 保存        ○ キャンセル", "pt-BR": "X  Salvar        Círculo  Cancelar", "de": "Kreuz  Speichern        Kreis  Abbrechen", "fr": "Croix  Enregistrer        Rond  Annuler", "es": "Cruz  Guardar        Círculo  Cancelar"},
+  "Server MAC Address": {"ja": "サーバーのMACアドレス", "pt-BR": "MAC do servidor", "de": "MAC des Servers", "fr": "MAC du serveur", "es": "MAC del servidor"},
+  "Wake Server": {"ja": "サーバーを起動", "pt-BR": "Ligar servidor", "de": "Server wecken", "fr": "Réveiller le serveur", "es": "Despertar servidor"},
+  "Not set": {"ja": "未設定", "pt-BR": "Não definido", "de": "Nicht festgelegt", "fr": "Non défini", "es": "Sin definir"},
+  "Set the MAC first": {"ja": "先にMACを設定", "pt-BR": "Defina o MAC antes", "de": "Erst MAC eintragen", "fr": "Saisir d'abord la MAC", "es": "Define antes la MAC"},
+  "Wake-on-LAN": {"ja": "Wake-on-LAN", "pt-BR": "Wake-on-LAN", "de": "Wake-on-LAN", "fr": "Wake-on-LAN", "es": "Wake-on-LAN"},
+  "Server MAC address (like 1C:69:7A:12:34:56)": {"ja": "サーバーのMACアドレス（例 1C:69:7A:12:34:56）", "pt-BR": "Endereço MAC do servidor (como 1C:69:7A:12:34:56)", "de": "MAC-Adresse des Servers (z. B. 1C:69:7A:12:34:56)", "fr": "Adresse MAC du serveur (comme 1C:69:7A:12:34:56)", "es": "Dirección MAC del servidor (como 1C:69:7A:12:34:56)"},
+  "That is not a MAC address: six pairs of digits, like 1C:69:7A:12:34:56.": {"ja": "MACアドレスではありません。1C:69:7A:12:34:56 のように6組の16進数で入力してください。", "pt-BR": "Isso não é um endereço MAC: seis pares de dígitos, como 1C:69:7A:12:34:56.", "de": "Das ist keine MAC-Adresse: sechs Zifferpaare, z. B. 1C:69:7A:12:34:56.", "fr": "Ce n'est pas une adresse MAC : six paires de chiffres, comme 1C:69:7A:12:34:56.", "es": "Eso no es una dirección MAC: seis pares de dígitos, como 1C:69:7A:12:34:56."},
+  "Enter the server's MAC address first (Server MAC Address).": {"ja": "先にサーバーのMACアドレスを入力してください（サーバーのMACアドレス）。", "pt-BR": "Digite primeiro o endereço MAC do servidor (MAC do servidor).", "de": "Trage zuerst die MAC-Adresse des Servers ein (MAC des Servers).", "fr": "Saisissez d'abord l'adresse MAC du serveur (MAC du serveur).", "es": "Introduce primero la dirección MAC del servidor (MAC del servidor)."},
+  "The server PC's MAC address, so this PS3 can wake it (X to enter).\nOn the PC: ipconfig /all, then Physical Address. Jellyfin can't say.": {"ja": "サーバーPCのMACアドレス。PS3から起動するために使います（Xで入力）。\nPCで ipconfig /all の「物理アドレス」を確認。Jellyfinでは分かりません。", "pt-BR": "O endereço MAC do PC servidor, para o PS3 poder ligá-lo (X para digitar).\nNo PC: ipconfig /all, Endereço Físico. O Jellyfin não informa.", "de": "MAC-Adresse des Server-PCs, damit die PS3 ihn wecken kann (X: eingeben).\nAm PC: ipconfig /all, Physische Adresse. Jellyfin nennt sie nicht.", "fr": "L'adresse MAC du PC serveur, pour que la PS3 le réveille (X : saisir).\nSur le PC : ipconfig /all, Adresse physique. Jellyfin ne la fournit pas.", "es": "La MAC del PC servidor, para que la PS3 lo despierte (X: introducir).\nEn el PC: ipconfig /all, Dirección física. Jellyfin no la indica."},
+  "Send a Wake-on-LAN signal to the server PC (X). It is also sent when\nthe server can't be reached. The PC must allow wake-up in its BIOS.": {"ja": "サーバーPCにWake-on-LAN信号を送ります（X）。サーバーに繋がらない時も\n自動で送ります。PCのBIOSで起動を許可しておいてください。", "pt-BR": "Envia um sinal Wake-on-LAN ao PC servidor (X). Também é enviado quando\no servidor não responde. O PC precisa permitir isso na BIOS.", "de": "Sendet ein Wake-on-LAN-Signal an den Server-PC (X). Auch automatisch,\nwenn der Server nicht erreichbar ist. Das BIOS des PCs muss es erlauben.", "fr": "Envoie un signal Wake-on-LAN au PC serveur (X). Envoyé aussi quand le\nserveur est injoignable. Le BIOS du PC doit l'autoriser.", "es": "Envía una señal Wake-on-LAN al PC servidor (X). También se envía si el\nservidor no responde. El PC debe permitirlo en su BIOS."}
 }

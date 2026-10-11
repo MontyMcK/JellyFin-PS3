@@ -63,6 +63,27 @@
   as titles and descriptions, are shown as the server sends them.
 - **Favourites.** Star films and shows on their page; they get their own row
   on Home.
+- **Fit, Fill or Stretch.** `Select` in the player cycles the picture's shape:
+  *Fit* shows the whole frame; *Fill* zooms in until the screen is full and
+  crops the edges, so a 16:9 film fills a 4:3 TV; *Stretch* squeezes the frame
+  to the screen's shape. The choice is kept for every video, and still works
+  with the picture size on `L1` (where `Square` cycles it too). While the next
+  episode's prompt is up, `Select` still goes to the next episode.
+- **Chapters.** `R1` in the player lists the film's chapters with their times;
+  pick one to jump there. Only films whose server has chapter data have a list
+  (films streamed through a debrid plugin usually don't, and a file played from
+  a drive doesn't show chapters yet).
+- **Wake the server.** Settings › System › *Server MAC Address* (the PC's
+  physical address, from `ipconfig /all`) and *Wake Server* send a Wake-on-LAN
+  signal to a sleeping server PC. The console also sends one by itself when it
+  can't reach the server, and keeps looking until the PC is up. The PC must
+  allow wake-up in its BIOS and network card settings. Jellyfin 10.11 can no
+  longer tell clients its MAC address, which is why it is entered once.
+- **Live TV your way.** With many channels, two pages of your own come before
+  the categories: *My Channels* (every channel you starred, from all
+  categories) and *Recently watched*. `Start` opens *Customise*, where `X`
+  hides or shows each page, so `L2`/`R2` only visit the ones you care about
+  (one category always stays). The tab reopens on the page you left it on.
 - **Dolby Digital output.** Settings → Audio → Audio Output has a new
   *Dolby Digital* choice. It sends the film's Dolby Digital track to your
   soundbar or receiver untouched (other tracks are converted to Dolby Digital

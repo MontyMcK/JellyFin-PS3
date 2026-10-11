@@ -50,7 +50,7 @@ volatile bool s_vid_b_present   = false;
 // vid_gpu_draw compares against this and rebuilds, otherwise the frame is
 // stretched onto the stale full-screen quad.
 static u32 s_vid_quad_fw = 0, s_vid_quad_fh = 0;
-static PicSize s_vid_quad_pic = { PIC_DEFAULT, PIC_DEFAULT };   // and the picture size it carries
+static PicSize s_vid_quad_pic = { PIC_DEFAULT, PIC_DEFAULT, PIC_FIT };   // and the picture size it carries
 
 // -------------------------------------------------------
 // vid_gpu_build_quad — aspect-correct letterbox fit of a fw×fh frame
@@ -83,6 +83,16 @@ static void vid_gpu_build_quad(u32 fw, u32 fh) {
     float cx1 = (float)(ox0v + sw) / display_width  * 2.0f - 1.0f;
     float cy0 = 1.0f - (float)oy0v / display_height * 2.0f;
     float cy1 = 1.0f - (float)(oy0v + sh) / display_height * 2.0f;
+
+    // Fill / Stretch (Select): the picture grows about the centre; Fill's excess
+    // is what the screen edge crops.  Fit keeps the numbers above untouched.
+    const PicSize pic0 = picture_get();
+    if (pic0.aspect != PIC_FIT) {
+        unsigned ow, oh;
+        pic_aspect_apply(pic0.aspect, sw, sh, display_width, display_height, &ow, &oh);
+        cx1 = (float)ow / display_width;   cx0 = -cx1;
+        cy0 = (float)oh / display_height;  cy1 = -cy0;
+    }
 
     // The user's picture size (L1 in the player): the fitted picture scaled about
     // the screen centre, each axis on its own.
@@ -212,7 +222,8 @@ void vid_gpu_draw(bool render_blend, float blend_factor, u32 fw, u32 fh) {
     // quad) — refit the letterbox instead of stretching into the old one.
     const PicSize pic = picture_get();
     if (fw != s_vid_quad_fw || fh != s_vid_quad_fh ||
-        pic.w != s_vid_quad_pic.w || pic.h != s_vid_quad_pic.h)
+        pic.w != s_vid_quad_pic.w || pic.h != s_vid_quad_pic.h ||
+        pic.aspect != s_vid_quad_pic.aspect)
         vid_gpu_build_quad(fw, fh);
     rsx_draw_frame(render_blend, blend_factor, fw, fh);
 }

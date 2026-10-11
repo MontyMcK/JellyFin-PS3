@@ -16,5 +16,9 @@ PicSize picture_get(void);               // what the video quad should use
 // which case the HUD must not see this frame's buttons.
 bool    picture_mode_input(void);
 
+// Select: Fit -> Fill -> Stretch (picture_size.h), saved for every video.  A
+// banner names the new mode.  Called once per frame the button is pressed.
+void    picture_cycle_aspect(void);
+
 // Playback is over: leave the mode if it was open and save what changed.
 void    picture_session_end(void);

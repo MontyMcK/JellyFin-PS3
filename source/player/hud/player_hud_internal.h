@@ -50,7 +50,7 @@
 #define TITLE_TOP_PAD        34
 
 // Popup menu (track selection)
-#define MENU_MAX              9            // JF_MAX_STREAMS subs + "Off"
+#define MENU_MAX              49           // the chapter list (JF_MAX_CHAPTERS + 1); tracks need 9 (JF_MAX_STREAMS subs + "Off")
 #define MENU_TITLE_PX      22.0f
 #define MENU_TITLE_H         38            // title row height incl. padding
 #define MENU_ROW_H           30

@@ -13,6 +13,9 @@
 #include "slog.h"
 #include "experience.h"
 #include "ui_visuals.h"      // g_spine_on   // vpick_audio_words
+#include "chapters.h"
+#include "timing.h"
+#include "audio.h"           // audio_get_clock_us
 
 // ---- Remembered track preference (see player_internal.h) ------------------
 static char s_pref_audio_label[64] = "";
@@ -49,7 +52,55 @@ int track_pref_find_sub(const JFTracks *tracks) {
     return -1;
 }
 
+// ---- Chapters (R1) ----------------------------------------------------------
+// The list is fetched the first time it is asked for, on a worker (chapters.h),
+// so a slow server shows "Loading chapters..." and the film plays on.
+static bool        s_chap_pending = false;
+static char        s_chap_lab[JF_MAX_CHAPTERS][64];
+static const char *s_chap_items[JF_MAX_CHAPTERS];
+
+static double chapters_pos_secs(const PlayerState *ps) {
+    return (double)(ps->play_base_us + audio_get_clock_us()) / 1e6;
+}
+
+static void chapters_banner(const char *line) {
+    hud_set_banner(line, "", timing_get_us() + 2500000ULL);
+}
+
+static void chapters_open(PlayerState *ps) {
+    const JFChapters *c = jf_chapters();
+    for (int i = 0; i < c->n; i++) {
+        jf_chapter_label(&c->ch[i], i, TR("Chapter %d"), s_chap_lab[i], sizeof s_chap_lab[i]);
+        s_chap_items[i] = s_chap_lab[i];
+    }
+    ps->menu_kind = PLAYER_MENU_CHAPTERS;
+    hud_open_menu(TR("Chapters"), s_chap_items, c->n,
+                  jf_chapter_index_at(c, chapters_pos_secs(ps)));
+}
+
 HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
+    if (s_chap_pending) {
+        const int st = jf_chapters_state();
+        if (st == JF_CHAPTERS_READY)     { s_chap_pending = false; chapters_open(ps); }
+        else if (st == JF_CHAPTERS_NONE) { s_chap_pending = false; chapters_banner(TR("No chapters")); }
+        else if (st == JF_CHAPTERS_IDLE) { s_chap_pending = false; }     // another film started
+    }
+    if (act == HUD_ACTION_CHAPTERS) {
+        act = HUD_ACTION_NONE;
+        const int st = jf_chapters_state();
+        if (ps->local || !ps->item) {
+            chapters_banner(TR("No chapters"));          // a file on a drive: not read from the file yet
+        } else if (st == JF_CHAPTERS_READY) {
+            chapters_open(ps);
+        } else if (st == JF_CHAPTERS_NONE) {
+            chapters_banner(TR("No chapters"));
+        } else {
+            if (st == JF_CHAPTERS_IDLE) jf_chapters_request(ps->item->id);
+            s_chap_pending = true;
+            chapters_banner(TR("Loading chapters..."));
+        }
+        return act;
+    }
     if (act == HUD_ACTION_AUDIO_TRACK) {
         act = HUD_ACTION_NONE;
         if (ps->have_tracks && ps->tracks.n_audio > 0) {
@@ -77,6 +128,19 @@ HudAction player_handle_menu_action(PlayerState *ps, HudAction act) {
     } else if (act == HUD_ACTION_MENU_SELECT) {
         act = HUD_ACTION_NONE;
         int sel = hud_menu_choice();
+        if (ps->menu_kind == PLAYER_MENU_CHAPTERS) {
+            const JFChapters *c = jf_chapters();
+            if (jf_chapters_state() == JF_CHAPTERS_READY && sel >= 0 && sel < c->n) {
+                const double to = c->ch[sel].start_secs, from = chapters_pos_secs(ps);
+                const int delta = (int)(to >= from ? to - from + 0.5 : to - from - 0.5);
+                char b[80];
+                snprintf(b, sizeof b, "hud: chapter %d -> %.0f s (%+d)", sel + 1, to, delta);
+                plog(b);
+                if (delta != 0) player_seek_queue_tap(ps, delta);
+            }
+            ps->menu_kind = PLAYER_MENU_NONE;
+            return HUD_ACTION_NONE;
+        }
         if (ps->menu_kind == PLAYER_MENU_AUDIO &&
             sel >= 0 && sel < ps->tracks.n_audio && sel != ps->cur_audio) {
             ps->cur_audio = sel;

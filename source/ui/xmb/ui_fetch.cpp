@@ -10,6 +10,7 @@
 #include "ui_internal.h"
 #include "jellyfin_api.h"
 #include "server_discovery.h"
+#include "wol_net.h"
 #include "plog.h"
 #include "../../build_config.h"   // SHOW_PLAYLISTS_TAB
 
@@ -213,6 +214,7 @@ sys_ppu_thread_t s_bg_tid;
 
 void bg_main(void *) {
     s_bg_status = http_request(0, s_bg_url, NULL, s_bg_token, s_bg_buf, BG_BUF);
+    if (s_bg_status < 0) wol_send_saved();       // a sleeping server PC (Settings > Server MAC Address)
     if (s_bg_status < 0 &&
         sd_find_moved(s_bg_server, s_bg_userid, s_bg_token, s_bg_moved, sizeof s_bg_moved)) {
         snprintf(s_bg_url, sizeof s_bg_url, "%s/Users/%s/Views", s_bg_moved, s_bg_userid);
@@ -286,6 +288,7 @@ void xmb_detect_tabs(void) {
         // look for it now, and once more later in case the console's own
         // network was the one still coming up.
         if (s_detect_status < 0 && (try_n == 1 || (try_n == 4 && !looked))) {
+            if (try_n == 1) wol_send_saved();    // a sleeping server PC: wake it while we look
             char moved[160];
             if (sd_find_moved(g_server, g_userid, g_token, moved, sizeof moved)) {
                 adopt_server(moved);

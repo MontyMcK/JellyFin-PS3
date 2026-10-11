@@ -159,6 +159,11 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     if (BTN_PRESSED(stop))     return HUD_ACTION_STOP;
     if (BTN_PRESSED(audio))    return HUD_ACTION_AUDIO_TRACK;
     if (BTN_PRESSED(subtitle)) return HUD_ACTION_SUBTITLE;
+    // R1 asks for the chapter list (the player decides whether there is one).
+    if (!g_hud.live && !g_hud.vol_active && !g_hud.menu_visible && BTN_PRESSED(r1)) {
+        hud_show();
+        return HUD_ACTION_CHAPTERS;
+    }
     // A live channel has nothing to seek in.  Up/Down change channel with
     // the bar hidden or shown (nothing else uses them unless the volume
     // slider or a menu is open); the remote's NEXT/PREV change it too.

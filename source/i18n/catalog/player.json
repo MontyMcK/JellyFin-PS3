@@ -27,7 +27,6 @@
   "Returning": {"ja": "戻っています", "pt-BR": "Voltando", "de": "Rückkehr", "fr": "Retour", "es": "Volviendo"},
   "This channel could not be opened.": {"ja": "このチャンネルを開けませんでした。", "pt-BR": "Não foi possível abrir este canal.", "de": "Dieser Kanal konnte nicht geöffnet werden.", "fr": "Cette chaîne n'a pas pu être ouverte.", "es": "No se pudo abrir este canal."},
   "The server has no stream for it right now.": {"ja": "サーバーには現在このチャンネルのストリームがありません。", "pt-BR": "O servidor não tem transmissão para ele agora.", "de": "Der Server hat dafür gerade keinen Stream.", "fr": "Le serveur n'a pas de flux pour elle en ce moment.", "es": "El servidor no tiene transmisión para él ahora mismo."},
-
   "Could not connect to %s:%d": {"ja": "%s:%d に接続できませんでした", "pt-BR": "Não foi possível conectar a %s:%d", "de": "Verbindung zu %s:%d fehlgeschlagen", "fr": "Connexion à %s:%d impossible", "es": "No se pudo conectar con %s:%d"},
   "Server closed the connection": {"ja": "サーバーが接続を閉じました", "pt-BR": "O servidor fechou a conexão", "de": "Der Server hat die Verbindung geschlossen", "fr": "Le serveur a fermé la connexion", "es": "El servidor cerró la conexión"},
   "Cancelled while waiting for the server": {"ja": "サーバーの応答待ち中にキャンセルしました", "pt-BR": "Cancelado enquanto aguardava o servidor", "de": "Beim Warten auf den Server abgebrochen", "fr": "Annulé pendant l'attente du serveur", "es": "Cancelado mientras se esperaba al servidor"},
@@ -39,7 +38,6 @@
   "Could not start the Matroska file": {"ja": "Matroskaファイルを開始できませんでした", "pt-BR": "Não foi possível iniciar o arquivo Matroska", "de": "Die Matroska-Datei konnte nicht gestartet werden", "fr": "Impossible de démarrer le fichier Matroska", "es": "No se pudo iniciar el archivo Matroska"},
   "Could not reach the server": {"ja": "サーバーに接続できませんでした", "pt-BR": "Não foi possível alcançar o servidor", "de": "Server nicht erreichbar", "fr": "Impossible de joindre le serveur", "es": "No se pudo contactar con el servidor"},
   "Could not reach the server.": {"ja": "サーバーに接続できませんでした。", "pt-BR": "Não foi possível alcançar o servidor.", "de": "Server nicht erreichbar.", "fr": "Impossible de joindre le serveur.", "es": "No se pudo contactar con el servidor."},
-
   "Testing 1080p 24Hz output on this TV (one time only).": {"ja": "このテレビで1080p 24Hz出力をテストしています（1回のみ）。", "pt-BR": "Testando a saída 1080p 24Hz nesta TV (uma única vez).", "de": "Test der 1080p-24-Hz-Ausgabe an diesem Fernseher (einmalig).", "fr": "Test de la sortie 1080p 24 Hz sur cette TV (une seule fois).", "es": "Probando la salida 1080p a 24 Hz en esta TV (solo una vez)."},
   "When the picture returns, press X if you can read this. O or 15 s = no.": {"ja": "映像が戻ったら、これが読めればXを押してください。○または15秒で「いいえ」。", "pt-BR": "Quando a imagem voltar, pressione X se conseguir ler isto. O ou 15 s = não.", "de": "Wenn das Bild zurückkehrt, drücken Sie X, falls Sie dies lesen können. O oder 15 s = nein.", "fr": "Quand l'image revient, appuyez sur X si vous pouvez lire ceci. O ou 15 s = non.", "es": "Cuando vuelva la imagen, pulsa X si puedes leer esto. O o 15 s = no."},
   "Switching the TV to 1080p 24Hz for this film...": {"ja": "この映画のためにテレビを1080p 24Hzに切り替えています...", "pt-BR": "Mudando a TV para 1080p 24Hz para este filme...", "de": "Fernseher wird für diesen Film auf 1080p 24 Hz umgeschaltet...", "fr": "Passage de la TV en 1080p 24 Hz pour ce film...", "es": "Cambiando la TV a 1080p 24 Hz para esta película..."},
@@ -47,7 +45,6 @@
   "O or 15 s = no, go back.": {"ja": "○または15秒で「いいえ」（元に戻します）。", "pt-BR": "O ou 15 s = não, voltar.", "de": "O oder 15 s = nein, zurück.", "fr": "O ou 15 s = non, revenir.", "es": "O o 15 s = no, volver."},
   "The TV is now at 1080p 24Hz.": {"ja": "テレビは現在1080p 24Hzです。", "pt-BR": "A TV agora está em 1080p 24Hz.", "de": "Der Fernseher läuft jetzt mit 1080p 24 Hz.", "fr": "La TV est maintenant en 1080p 24 Hz.", "es": "La TV está ahora a 1080p 24 Hz."},
   "Press X if you can read this.  O = no.  Going back in %llu s": {"ja": "これが読めればXを押してください。○＝いいえ。%llu秒後に元に戻します", "pt-BR": "Pressione X se conseguir ler isto.  O = não.  Voltando em %llu s", "de": "Drücken Sie X, falls Sie dies lesen können.  O = nein.  Zurück in %llu s", "fr": "Appuyez sur X si vous pouvez lire ceci.  O = non.  Retour dans %llu s", "es": "Pulsa X si puedes leer esto.  O = no.  Se vuelve atrás en %llu s"},
-
   "Session expired": {"ja": "セッションの有効期限が切れました", "pt-BR": "Sessão expirada", "de": "Sitzung abgelaufen", "fr": "Session expirée", "es": "Sesión caducada"},
   "The server rejected this device's saved login, so the library could not be read.": {"ja": "サーバーがこの端末に保存されたログインを拒否したため、ライブラリを読み込めませんでした。", "pt-BR": "O servidor recusou o login salvo neste dispositivo, então a biblioteca não pôde ser lida.", "de": "Der Server hat die gespeicherte Anmeldung dieses Geräts abgelehnt, daher konnte die Mediathek nicht gelesen werden.", "fr": "Le serveur a rejeté la connexion enregistrée de cet appareil, la bibliothèque n'a donc pas pu être lue.", "es": "El servidor rechazó el inicio de sesión guardado en este dispositivo, así que no se pudo leer la biblioteca."},
   "This usually means another client signed in and took over the session.": {"ja": "通常は、別のクライアントがサインインしてセッションを引き継いだことを意味します。", "pt-BR": "Isso geralmente significa que outro cliente entrou e assumiu a sessão.", "de": "Das bedeutet meist, dass sich ein anderer Client angemeldet und die Sitzung übernommen hat.", "fr": "Cela signifie généralement qu'un autre client s'est connecté et a repris la session.", "es": "Normalmente significa que otro cliente inició sesión y se hizo con la sesión."},
@@ -67,7 +64,6 @@
   "Server URL (e.g. http://192.168.1.2:8096)": {"ja": "サーバーURL（例：http://192.168.1.2:8096）", "pt-BR": "URL do servidor (ex.: http://192.168.1.2:8096)", "de": "Server-URL (z. B. http://192.168.1.2:8096)", "fr": "URL du serveur (p. ex. http://192.168.1.2:8096)", "es": "URL del servidor (p. ej. http://192.168.1.2:8096)"},
   "New version detected": {"ja": "新しいバージョンが見つかりました", "pt-BR": "Nova versão detectada", "de": "Neue Version gefunden", "fr": "Nouvelle version détectée", "es": "Nueva versión detectada"},
   "Get the new .pkg from": {"ja": "新しい.pkgはこちらから", "pt-BR": "Baixe o novo .pkg em", "de": "Das neue .pkg gibt es unter", "fr": "Récupérez le nouveau .pkg sur", "es": "Consigue el nuevo .pkg en"},
-
   "Search your library": {"ja": "ライブラリを検索", "pt-BR": "Pesquisar na biblioteca", "de": "Mediathek durchsuchen", "fr": "Rechercher dans la bibliothèque", "es": "Buscar en tu biblioteca"},
   "Searching for \"%s\"...": {"ja": "「%s」を検索中...", "pt-BR": "Pesquisando \"%s\"...", "de": "Suche nach „%s“...", "fr": "Recherche de « %s »...", "es": "Buscando «%s»..."},
   "No results for \"%s\"": {"ja": "「%s」に一致する結果はありません", "pt-BR": "Nenhum resultado para \"%s\"", "de": "Keine Ergebnisse für „%s“", "fr": "Aucun résultat pour « %s »", "es": "Sin resultados para «%s»"},
@@ -84,7 +80,6 @@
   "Live TV is unavailable": {"ja": "ライブTVは利用できません", "pt-BR": "A TV ao vivo está indisponível", "de": "Live-TV ist nicht verfügbar", "fr": "La TV en direct est indisponible", "es": "La TV en vivo no está disponible"},
   "Couldn't load the channel list": {"ja": "チャンネル一覧を読み込めませんでした", "pt-BR": "Não foi possível carregar a lista de canais", "de": "Die Kanalliste konnte nicht geladen werden", "fr": "Impossible de charger la liste des chaînes", "es": "No se pudo cargar la lista de canales"},
   "Loading channels...": {"ja": "チャンネルを読み込み中...", "pt-BR": "Carregando canais...", "de": "Kanäle werden geladen...", "fr": "Chargement des chaînes...", "es": "Cargando canales..."},
-
   "QUEUE": {"ja": "キュー", "pt-BR": "FILA", "de": "WARTESCHLANGE", "fr": "FILE", "es": "COLA"},
   "UP NEXT": {"ja": "次に再生", "pt-BR": "A SEGUIR", "de": "ALS NÄCHSTES", "fr": "À SUIVRE", "es": "A CONTINUACIÓN"},
   "Track %d of %d": {"ja": "%d / %d曲目", "pt-BR": "Faixa %d de %d", "de": "Titel %d von %d", "fr": "Piste %d sur %d", "es": "Pista %d de %d"},
@@ -93,5 +88,13 @@
   "Picture size": {"ja": "画面サイズ", "pt-BR": "Tamanho da imagem", "de": "Bildgröße", "fr": "Taille de l'image", "es": "Tamaño de imagen"},
   "Width": {"ja": "幅", "pt-BR": "Largura", "de": "Breite", "fr": "Largeur", "es": "Ancho"},
   "Height": {"ja": "高さ", "pt-BR": "Altura", "de": "Höhe", "fr": "Hauteur", "es": "Alto"},
-  "D-pad adjust  Triangle reset  O done": {"ja": "十字キー：調整　△：リセット　○：完了", "pt-BR": "Direcional: ajustar  Triângulo: redefinir  O: concluir", "de": "Steuerkreuz: anpassen  Dreieck: zurücksetzen  O: fertig", "fr": "Croix : ajuster  Triangle : réinitialiser  O : terminé", "es": "Cruceta: ajustar  Triángulo: restablecer  O: listo"}
+  "D-pad adjust  Square fit / fill / stretch  Triangle reset  O done": {"ja": "十字キー：調整　□：フィット/フィル/ストレッチ　△：リセット　○：完了", "pt-BR": "Direcional: ajustar  Quadrado: ajustar/preencher/esticar  Triângulo: redefinir  O: concluir", "de": "Steuerkreuz: anpassen  Quadrat: Einpassen/Füllen/Strecken  Dreieck: zurücksetzen  O: fertig", "fr": "Croix : ajuster  Carré : ajuster/remplir/étirer  Triangle : réinitialiser  O : terminé", "es": "Cruceta: ajustar  Cuadrado: ajustar/rellenar/estirar  Triángulo: restablecer  O: listo"},
+  "Fit": {"ja": "フィット", "pt-BR": "Ajustar", "de": "Einpassen", "fr": "Ajuster", "es": "Ajustar"},
+  "Fill": {"ja": "フィル（切り取り）", "pt-BR": "Preencher", "de": "Füllen", "fr": "Remplir", "es": "Rellenar"},
+  "Stretch": {"ja": "ストレッチ", "pt-BR": "Esticar", "de": "Strecken", "fr": "Étirer", "es": "Estirar"},
+  "Picture": {"ja": "画面", "pt-BR": "Imagem", "de": "Bild", "fr": "Image", "es": "Imagen"},
+  "Chapter %d": {"ja": "チャプター %d", "pt-BR": "Capítulo %d", "de": "Kapitel %d", "fr": "Chapitre %d", "es": "Capítulo %d"},
+  "Chapters": {"ja": "チャプター", "pt-BR": "Capítulos", "de": "Kapitel", "fr": "Chapitres", "es": "Capítulos"},
+  "No chapters": {"ja": "チャプターなし", "pt-BR": "Sem capítulos", "de": "Keine Kapitel", "fr": "Aucun chapitre", "es": "Sin capítulos"},
+  "Loading chapters...": {"ja": "チャプターを読み込み中...", "pt-BR": "Carregando capítulos...", "de": "Kapitel werden geladen...", "fr": "Chargement des chapitres...", "es": "Cargando capítulos..."}
 }

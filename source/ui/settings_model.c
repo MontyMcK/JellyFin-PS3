@@ -75,6 +75,12 @@ static const setting_row k_rows[] = {
     { SET_SEND_LOG,  SEC_SYSTEM, TRN("Send Log to Server"),
       TRN("Send the diagnostic log to your Jellyfin server (X). It is saved\n"
       "under Dashboard > Logs as upload_PS3_...log: share that file.")},
+    { SET_WOL_MAC,   SEC_SYSTEM, TRN("Server MAC Address"),
+      TRN("The server PC's MAC address, so this PS3 can wake it (X to enter).\n"
+      "On the PC: ipconfig /all, then Physical Address. Jellyfin can't say.")},
+    { SET_WAKE,      SEC_SYSTEM, TRN("Wake Server"),
+      TRN("Send a Wake-on-LAN signal to the server PC (X). It is also sent when\n"
+      "the server can't be reached. The PC must allow wake-up in its BIOS.")},
     { SET_DEBUG_LOG, SEC_SYSTEM, TRN("Debug Logging"),
       TRN("Write a diagnostic log to /dev_hdd0/tmp/player_log.txt (on by default).\n"
       "Use Send Log to Server when reporting a problem.")},

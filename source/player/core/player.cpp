@@ -3,6 +3,7 @@
 // lives in player_session / player_menu / player_seek / player_display.
 
 #include "segments.h"
+#include "chapters.h"
 #include "autoskip.h"
 #include "audio_bitstream.h"
 #include <stdio.h>
@@ -635,6 +636,7 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     subs_clear();                    // a previous title's cues are not this one's
     trickplay_reset();                // ditto for a previous title's scrub sheet
     ps.menu_kind = PLAYER_MENU_NONE;
+    jf_chapters_reset();                // the last film's chapters are not this one's
     ps.local     = local;
     ps.live      = live;
 
@@ -1329,6 +1331,8 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             plog("playing=0 reason=next_item");
             s_next_requested = true;
             ps.playing = false;
+        } else if (BTN_PRESSED(select)) {
+            picture_cycle_aspect();       // Fit / Fill / Stretch
         }
         if (auto_secs == 0 && ps.playing) {
             plog("playing=0 reason=next_auto");

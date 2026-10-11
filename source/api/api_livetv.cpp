@@ -39,7 +39,7 @@ int jf_fetch_channels(JFChannel *out, int max) {
 }
 
 int jf_fetch_channels_range(JFChannel *out, int max, int start, int count, int *total_out,
-                            const char *search) {
+                            const char *search, const char *items_extra) {
     if (max > LIVETV_MAX_CHANNELS) max = LIVETV_MAX_CHANNELS;
     if (count > max) count = max;
     if (start < 0) start = 0;
@@ -49,16 +49,21 @@ int jf_fetch_channels_range(JFChannel *out, int max, int start, int count, int *
     int n = 0, total = 0;
     bool ok = true;
     do {
-        char url[512];
+        char url[1024];
         const int want = count - n < CHANNEL_PAGE ? count - n : CHANNEL_PAGE;
-        if (search && search[0]) {
-            char enc[160];
-            url_encode_query(search, enc, sizeof enc);
+        const bool filtered = items_extra && items_extra[0];
+        if ((search && search[0]) || filtered) {
+            char term[200] = "";
+            if (search && search[0]) {
+                char enc[160];
+                url_encode_query(search, enc, sizeof enc);
+                snprintf(term, sizeof term, "&searchTerm=%s", enc);
+            }
             snprintf(url, sizeof url,
                      "%s/Users/%s/Items?Recursive=true&IncludeItemTypes=LiveTvChannel"
-                     "&searchTerm=%s&EnableImages=true&ImageTypeLimit=1&EnableUserData=true"
+                     "%s%s&EnableImages=true&ImageTypeLimit=1&EnableUserData=true"
                      "&SortBy=SortName&StartIndex=%d&Limit=%d",
-                     g_server, g_userid, enc, start + n, want);
+                     g_server, g_userid, term, filtered ? items_extra : "", start + n, want);
         } else {
             snprintf(url, sizeof url,
                      "%s/LiveTv/Channels?UserId=%s&EnableImages=true&ImageTypeLimit=1"
@@ -88,7 +93,7 @@ int jf_fetch_channels_range(JFChannel *out, int max, int start, int count, int *
     livetv_sort_channels(out, n);
     char b[80];
     snprintf(b, sizeof b, "livetv: %d channel(s) from %d of %d%s", n, start, total,
-             (search && search[0]) ? " (search)" : "");
+             (search && search[0]) ? " (search)" : (items_extra && items_extra[0]) ? " (filtered)" : "");
     plog(b);
     return n;
 }

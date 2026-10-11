@@ -41,6 +41,47 @@ static void picture(void) {
     CHECK(!pic_parse(NULL, &keep));
 }
 
+static void aspect(void) {
+    printf("- aspect\n");
+    unsigned ow, oh;
+    // A 16:9 film fitted to a 1440x1080 visual screen (4:3): full width, 810 high.
+    pic_aspect_apply(PIC_FIT, 1440, 810, 1440, 1080, &ow, &oh);
+    CHECK(ow == 1440 && oh == 810);
+    // Fill: the height is the screen's, the width runs 1920 wide (240 cropped off each side).
+    pic_aspect_apply(PIC_FILL, 1440, 810, 1440, 1080, &ow, &oh);
+    CHECK(oh == 1080 && ow == 1920);
+    // ... and the shape is the film's: 1920/1080 is 16:9.
+    CHECK((unsigned long long)ow * 9 == (unsigned long long)oh * 16);
+    // Stretch is the screen, whatever the film.
+    pic_aspect_apply(PIC_STRETCH, 1440, 810, 1440, 1080, &ow, &oh);
+    CHECK(ow == 1440 && oh == 1080);
+    // A 4:3 film on a 4:3 screen: Fill changes nothing.
+    pic_aspect_apply(PIC_FILL, 1440, 1080, 1440, 1080, &ow, &oh);
+    CHECK(ow == 1440 && oh == 1080);
+    // 2.40:1 on a 16:9 screen: Fill grows it past the sides, height is the screen's.
+    pic_aspect_apply(PIC_FILL, 1920, 800, 1920, 1080, &ow, &oh);
+    CHECK(oh == 1080 && ow >= 2592 && ow <= 2593);
+    // A 4:3 film on a 16:9 screen (pillarbox): Fill fills the width, crops top and bottom.
+    pic_aspect_apply(PIC_FILL, 1440, 1080, 1920, 1080, &ow, &oh);
+    CHECK(ow == 1920 && oh == 1440);
+    // Never smaller than the screen on both axes, and never below the fit.
+    for (unsigned sh = 300; sh <= 1080; sh += 37) {
+        pic_aspect_apply(PIC_FILL, 1920, sh, 1920, 1080, &ow, &oh);
+        CHECK(ow >= 1920 && oh >= 1080 && ow >= 1920 && oh >= sh);
+    }
+    // Degenerate sizes do not divide by zero.
+    pic_aspect_apply(PIC_FILL, 0, 0, 1920, 1080, &ow, &oh);
+    CHECK(ow == 0 && oh == 0);
+    // The saved name round trips; junk is Fit.
+    for (int a = 0; a < PIC_ASPECTS; a++) CHECK(pic_aspect_parse(pic_aspect_name(a)) == a);
+    CHECK(pic_aspect_parse("") == PIC_FIT && pic_aspect_parse("zoom") == PIC_FIT && pic_aspect_parse(NULL) == PIC_FIT);
+    CHECK(pic_aspect_next(PIC_FIT) == PIC_FILL && pic_aspect_next(PIC_FILL) == PIC_STRETCH &&
+          pic_aspect_next(PIC_STRETCH) == PIC_FIT);
+    // A non-default aspect is not the default picture.
+    PicSize p = { PIC_DEFAULT, PIC_DEFAULT, PIC_FILL };
+    CHECK(!pic_is_default(&p));
+}
+
 static void rule(void) {
     printf("- resume rule\n");
     // Total 10 000 s: under 5 % (500 s) or 90 % (9 000 s) and over is a restart.
@@ -89,6 +130,7 @@ static void table(void) {
 
 int main() {
     picture();
+    aspect();
     rule();
     table();
     printf("%d checks, %d failed\n", s_checks, s_failed);

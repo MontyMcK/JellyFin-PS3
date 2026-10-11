@@ -10,22 +10,43 @@
 #include "plog.h"
 #include "jf_paths.h"
 
-#define PIC_FILE "jellyfin_picsize.txt"
+#define PIC_FILE    "jellyfin_picsize.txt"
+#define ASPECT_FILE "jellyfin_aspect.txt"
 
 #define PIC_REPEAT_DELAY_US  350000ULL    // first repeat after a hold
 #define PIC_REPEAT_US         45000ULL    // then ~22 steps a second
 
-static PicSize s_pic = { PIC_DEFAULT, PIC_DEFAULT };
+static PicSize s_pic = { PIC_DEFAULT, PIC_DEFAULT, PIC_FIT };
 static bool    s_active = false;
 static u64     s_next_us = 0;             // 0 = no direction held
 static bool    s_dirty = false;           // changed since the last save
 
 PicSize picture_get(void) { return s_pic; }
 
+static const char *aspect_label(int a) {
+    return a == PIC_FILL ? TR("Fill") : a == PIC_STRETCH ? TR("Stretch") : TR("Fit");
+}
+
+static void aspect_load(void) {
+    FILE *f = fopen(jf_data_path(ASPECT_FILE), "r");
+    if (!f) return;
+    char line[32] = "";
+    if (fgets(line, sizeof line, f)) s_pic.aspect = pic_aspect_parse(line);
+    fclose(f);
+}
+
+static void aspect_save(void) {
+    FILE *f = fopen(jf_data_path(ASPECT_FILE), "w");
+    if (!f) return;
+    fprintf(f, "%s\n", pic_aspect_name(s_pic.aspect));
+    fclose(f);
+}
+
 void picture_load(void) {
     static bool s_loaded = false;
     if (s_loaded) return;
     s_loaded = true;
+    aspect_load();
     FILE *f = fopen(jf_data_path(PIC_FILE), "r");
     if (!f) return;
     char line[64] = "";
@@ -46,9 +67,9 @@ static void picture_save(void) {
 
 static void show_readout(void) {
     char l1[96], l2[96];
-    snprintf(l1, sizeof l1, "%s  %s %d%%   %s %d%%", TR("Picture size"),
-             TR("Width"), s_pic.w, TR("Height"), s_pic.h);
-    snprintf(l2, sizeof l2, "%s", TR("D-pad adjust  Triangle reset  O done"));
+    snprintf(l1, sizeof l1, "%s  %s %d%%   %s %d%%   %s", TR("Picture size"),
+             TR("Width"), s_pic.w, TR("Height"), s_pic.h, aspect_label(s_pic.aspect));
+    snprintf(l2, sizeof l2, "%s", TR("D-pad adjust  Square fit / fill / stretch  Triangle reset  O done"));
     hud_set_picture_banner(l1, l2);
 }
 
@@ -57,6 +78,17 @@ static void leave(void) {
     s_next_us = 0;
     hud_clear_picture_banner();
     picture_save();
+}
+
+void picture_cycle_aspect(void) {
+    s_pic.aspect = pic_aspect_next(s_pic.aspect);
+    aspect_save();
+    char l1[64];
+    snprintf(l1, sizeof l1, "%s: %s", TR("Picture"), aspect_label(s_pic.aspect));
+    hud_set_banner(l1, "", timing_get_us() + 2000000ULL);
+    char b[48];
+    snprintf(b, sizeof b, "picture: aspect %s", pic_aspect_name(s_pic.aspect));
+    plog(b);
 }
 
 void picture_session_end(void) {
@@ -77,6 +109,11 @@ bool picture_mode_input(void) {
 
     if (BTN_PRESSED(l1) || BTN_PRESSED(cross) || BTN_PRESSED(circle)) {
         leave();
+        return true;
+    }
+    if (BTN_PRESSED(square)) {
+        picture_cycle_aspect();
+        show_readout();
         return true;
     }
     if (BTN_PRESSED(triangle)) {

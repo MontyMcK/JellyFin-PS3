@@ -12,6 +12,7 @@ typedef enum {
     HUD_ACTION_SKIP_SEGMENT,  // X on the "Skip Intro" badge (segments.h)
     HUD_ACTION_CHANNEL_NEXT,  // Live TV: Up / NEXT -- never seen outside live mode
     HUD_ACTION_CHANNEL_PREV,  //         Down / PREV
+    HUD_ACTION_CHAPTERS,      // R1: the chapter list (never in live mode)
 } HudAction;
 
 // A skippable segment is on screen.  While it is and the bar is hidden, X

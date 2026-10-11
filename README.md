@@ -353,7 +353,10 @@ right one). Titles and descriptions come from your server as it has them.
 
 **Live TV.** `X` watches the channel, `△` makes it a favourite, `Right` opens the
 guide (`O` or `Left` at its first column comes back). While watching, `Up`/`Down`
-change channel.
+change channel. A big channel list is shown a category at a time (`L2`/`R2`), with
+two pages of your own in front: **My Channels** (everything you starred, from all
+categories) and **Recently watched**. `Start` (**Customise**) hides the categories
+you never watch, and the tab reopens on the page you left it on.
 
 **Media.** `X` opens a drive or folder and then a file's page, where `X` plays or
 resumes it; `O` goes up a folder, `L2`/`R2` page through a long one.
@@ -384,11 +387,12 @@ resumes it; `O` goes up a folder, `L2`/`R2` page through a long one.
 | Left / Right    | Bar hidden: skip -10 s / +10 s. Bar showing: move focus across it (Play/Pause · Audio · Volume · Subtitles) |
 | X               | Activate the focused control; skip an intro or recap when offered |
 | Triangle        | Audio and subtitle tracks                                         |
-| L1              | Picture size: Left/Right = width, Up/Down = height, Triangle resets, L1/X/O done |
+| L1              | Picture size: Left/Right = width, Up/Down = height, Square = Fit / Fill / Stretch, Triangle resets, L1/X/O done |
+| R1              | Chapters: pick one to jump to it (for films whose server has chapters) |
 | L3 / R3 (stick click) | Show / hide the player stats                                |
 | R2 / L2 (tap)   | Skip +10 s / -10 s (taps within 1 s batch into one seek)          |
 | R2 / L2 (hold)  | Pause and scrub the seek bar; seek fires once on release          |
-| Select          | Jump to the next episode/movie (during the NEXT prompt, last 90 s)|
+| Select          | Picture shape: Fit, Fill (crops the edges, for 16:9 films on a 4:3 TV), Stretch. During the NEXT prompt (last 90 s): jump to the next episode/movie |
 
 ### Music player
 

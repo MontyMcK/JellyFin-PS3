@@ -64,7 +64,7 @@ void progress_thread_fn(void *arg);
 
 // Which popup menu the HUD is showing — decides what a
 // HUD_ACTION_MENU_SELECT applies to.
-enum { PLAYER_MENU_NONE, PLAYER_MENU_AUDIO, PLAYER_MENU_SUBS };
+enum { PLAYER_MENU_NONE, PLAYER_MENU_AUDIO, PLAYER_MENU_SUBS, PLAYER_MENU_CHAPTERS };
 
 // R2/L2 tap/hold seek input state (core/player_seek.cpp).
 enum { SEEK_IDLE, SEEK_PRESS, SEEK_SCRUB };

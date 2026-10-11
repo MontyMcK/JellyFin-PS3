@@ -47,7 +47,6 @@
   "Stop": {"ja": "停止", "pt-BR": "Parar", "de": "Stopp", "fr": "Arrêter", "es": "Detener"},
   "Hide": {"ja": "隠す", "pt-BR": "Ocultar", "de": "Ausblenden", "fr": "Masquer", "es": "Ocultar"},
   "Pause": {"ja": "一時停止", "pt-BR": "Pausar", "de": "Pause", "fr": "Pause", "es": "Pausa"},
-
   "Search": {"ja": "検索", "pt-BR": "Buscar", "de": "Suche", "fr": "Recherche", "es": "Buscar"},
   "Home": {"ja": "ホーム", "pt-BR": "Início", "de": "Start", "fr": "Accueil", "es": "Inicio"},
   "Settings": {"ja": "設定", "pt-BR": "Configurações", "de": "Einstellungen", "fr": "Paramètres", "es": "Ajustes"},
@@ -69,7 +68,6 @@
   "Studios": {"ja": "制作会社", "pt-BR": "Estúdios", "de": "Studios", "fr": "Studios", "es": "Estudios"},
   "Nothing in progress": {"ja": "再生中のものはありません", "pt-BR": "Nada em andamento", "de": "Nichts in Wiedergabe", "fr": "Rien en cours", "es": "Nada en curso"},
   "No items in this library": {"ja": "このライブラリには項目がありません", "pt-BR": "Nenhum item nesta biblioteca", "de": "Keine Einträge in dieser Mediathek", "fr": "Aucun élément dans cette bibliothèque", "es": "No hay elementos en esta biblioteca"},
-
   "Continue Watching": {"ja": "続きを見る", "pt-BR": "Continuar assistindo", "de": "Weiterschauen", "fr": "Reprendre la lecture", "es": "Seguir viendo"},
   "Next Up": {"ja": "次に見る", "pt-BR": "A seguir", "de": "Als Nächstes", "fr": "À suivre", "es": "A continuación"},
   "Favourites": {"ja": "お気に入り", "pt-BR": "Favoritos", "de": "Favoriten", "fr": "Favoris", "es": "Favoritos"},
@@ -98,7 +96,6 @@
   "%u h": {"ja": "%u時間", "pt-BR": "%u h", "de": "%u Std.", "fr": "%u h", "es": "%u h"},
   "%u h %u min": {"ja": "%u時間%u分", "pt-BR": "%u h %u min", "de": "%u Std. %u Min.", "fr": "%u h %u min", "es": "%u h %u min"},
   "under a minute": {"ja": "1分未満", "pt-BR": "menos de um minuto", "de": "unter einer Minute", "fr": "moins d'une minute", "es": "menos de un minuto"},
-
   "Added to Downloads (Settings › Downloads)": {"ja": "ダウンロードに追加しました（設定 › ダウンロード）", "pt-BR": "Adicionado aos Downloads (Configurações › Downloads)", "de": "Zu den Downloads hinzugefügt (Einstellungen › Downloads)", "fr": "Ajouté aux téléchargements (Paramètres › Téléchargements)", "es": "Añadido a Descargas (Ajustes › Descargas)"},
   "Couldn't update favourites": {"ja": "お気に入りを更新できませんでした", "pt-BR": "Não foi possível atualizar os favoritos", "de": "Favoriten konnten nicht aktualisiert werden", "fr": "Impossible de mettre à jour les favoris", "es": "No se pudieron actualizar los favoritos"},
   "Resume %u:%02u:%02u": {"ja": "再開 %u:%02u:%02u", "pt-BR": "Continuar %u:%02u:%02u", "de": "Fortsetzen %u:%02u:%02u", "fr": "Reprendre %u:%02u:%02u", "es": "Reanudar %u:%02u:%02u"},
@@ -128,9 +125,16 @@
   "‹ back %ds": {"ja": "‹ %d秒戻る", "pt-BR": "‹ voltar %ds", "de": "‹ %ds zurück", "fr": "‹ reculer de %ds", "es": "‹ retroceder %ds"},
   "ahead %ds ›": {"ja": "%d秒進む ›", "pt-BR": "avançar %ds ›", "de": "%ds vor ›", "fr": "avancer de %ds ›", "es": "avanzar %ds ›"},
   "LIVE": {"ja": "ライブ", "pt-BR": "AO VIVO", "de": "LIVE", "fr": "DIRECT", "es": "EN VIVO"},
-
   "Can't reach the server": {"ja": "サーバーに接続できません", "pt-BR": "Não foi possível acessar o servidor", "de": "Server nicht erreichbar", "fr": "Serveur injoignable", "es": "No se puede acceder al servidor"},
   "No server answered at %s.": {"ja": "%s のサーバーから応答がありません。", "pt-BR": "Nenhum servidor respondeu em %s.", "de": "Unter %s hat kein Server geantwortet.", "fr": "Aucun serveur n'a répondu à %s.", "es": "Ningún servidor respondió en %s."},
   "Keep trying": {"ja": "再試行を続ける", "pt-BR": "Continuar tentando", "de": "Weiter versuchen", "fr": "Continuer d'essayer", "es": "Seguir intentando"},
-  "Enter the server address": {"ja": "サーバーのアドレスを入力", "pt-BR": "Digitar o endereço do servidor", "de": "Serveradresse eingeben", "fr": "Saisir l'adresse du serveur", "es": "Introducir la dirección del servidor"}
+  "Enter the server address": {"ja": "サーバーのアドレスを入力", "pt-BR": "Digitar o endereço do servidor", "de": "Serveradresse eingeben", "fr": "Saisir l'adresse du serveur", "es": "Introducir la dirección del servidor"},
+  "My Channels": {"ja": "マイチャンネル", "pt-BR": "Meus canais", "de": "Meine Sender", "fr": "Mes chaînes", "es": "Mis canales"},
+  "Recently watched": {"ja": "最近視聴", "pt-BR": "Assistidos recentemente", "de": "Zuletzt gesehen", "fr": "Vues récemment", "es": "Vistos recientemente"},
+  "Nothing watched yet": {"ja": "まだ視聴したチャンネルはありません", "pt-BR": "Nada assistido ainda", "de": "Noch nichts gesehen", "fr": "Rien de regardé pour l'instant", "es": "Aún no has visto nada"},
+  "No favourites yet. Press the Favourite button on a channel.": {"ja": "お気に入りはまだありません。チャンネルで「お気に入り」ボタンを押してください。", "pt-BR": "Nenhum favorito ainda. Pressione o botão Favorito em um canal.", "de": "Noch keine Favoriten. Drücke bei einem Sender die Favoriten-Taste.", "fr": "Pas encore de favoris. Appuyez sur le bouton Favori sur une chaîne.", "es": "Aún no hay favoritos. Pulsa el botón Favorito en un canal."},
+  "Customise": {"ja": "カスタマイズ", "pt-BR": "Personalizar", "de": "Anpassen", "fr": "Personnaliser", "es": "Personalizar"},
+  "Customise Live TV": {"ja": "ライブTVをカスタマイズ", "pt-BR": "Personalizar TV ao vivo", "de": "Live-TV anpassen", "fr": "Personnaliser la TV en direct", "es": "Personalizar TV en vivo"},
+  "Ticked pages are shown. L2 / R2 skip the others.": {"ja": "チェックしたページを表示します。L2 / R2 で他は飛ばします。", "pt-BR": "As páginas marcadas aparecem. L2 / R2 pulam as outras.", "de": "Markierte Seiten werden angezeigt. L2 / R2 überspringen die anderen.", "fr": "Les pages cochées sont affichées. L2 / R2 sautent les autres.", "es": "Se muestran las páginas marcadas. L2 / R2 saltan las demás."},
+  "Show / hide": {"ja": "表示 / 非表示", "pt-BR": "Mostrar / ocultar", "de": "Anzeigen / ausblenden", "fr": "Afficher / masquer", "es": "Mostrar / ocultar"}
 }
