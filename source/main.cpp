@@ -329,7 +329,7 @@ int main(int argc, const char *argv[]) {
                     }
             }
             if (get_input(new_server, sizeof(new_server),
-                          TR("Server URL (e.g. http://192.168.1.2:8096)"), false) != 1)
+                          TR("Server URL (e.g. http://192.168.1.2:8096)"), false, true) != 1)
                 break;
             strncpy(g_server, new_server, sizeof(g_server)-1);
             g_server[sizeof(g_server)-1] = '\0';

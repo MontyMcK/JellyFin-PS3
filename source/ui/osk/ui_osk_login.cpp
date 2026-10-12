@@ -196,8 +196,9 @@ void osk_draw(const char *prompt, const char *input, bool is_password,
 
 } // namespace
 
-int get_input(char *out, int max_len, const char *prompt, bool is_password) {
-    out[0] = '\0';
+int get_input(char *out, int max_len, const char *prompt, bool is_password, bool keep_text) {
+    if (!keep_text) out[0] = '\0';
+    else if ((int)strlen(out) >= max_len) out[max_len - 1] = '\0';
 
     int  sr = 1, sc = 0;            // start on the top letter row
     bool caps = false, sym = false;

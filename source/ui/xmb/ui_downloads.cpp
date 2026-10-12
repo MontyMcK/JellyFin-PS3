@@ -531,7 +531,7 @@ bool xmb_server_unreachable_prompt(void) {
         return false;
     char addr[256];
     snprintf(addr, sizeof addr, "%s", g_server);
-    if (get_input(addr, sizeof addr, TR("Server URL (e.g. http://192.168.1.2:8096)"), false) != 1)
+    if (get_input(addr, sizeof addr, TR("Server URL (e.g. http://192.168.1.2:8096)"), false, true) != 1)
         return false;
     int sl = (int)strlen(addr);
     while (sl > 0 && addr[sl - 1] == '/') addr[--sl] = '\0';

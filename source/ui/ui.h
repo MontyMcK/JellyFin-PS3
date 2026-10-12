@@ -190,7 +190,9 @@ void xmb_prepare(void);
 // Legacy on-screen keyboard (used by login flow).
 // Returns 1 = confirmed, -1 = cancelled.
 // -------------------------------------------------------
-int  get_input(char *out, int max_len, const char *prompt, bool is_password);
+// keep_text: start with what `out` already holds (it must be a valid string)
+// instead of an empty field.
+int  get_input(char *out, int max_len, const char *prompt, bool is_password, bool keep_text = false);
 
 // -------------------------------------------------------
 // Offline downloads (xmb/ui_downloads.cpp, Stage 5)
