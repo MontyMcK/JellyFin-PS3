@@ -113,6 +113,12 @@
   replaces the one long list.
 
 ### Fixes
+- Video from a server wired to the network by Ethernet could arrive in short
+  bursts with long silences in between, so it buffered for a minute and then
+  stalled anyway. The console now notices when that happens, picks up where it
+  was over a connection that asks for less at a time, and keeps doing so until
+  the app is closed; switching the server between Ethernet and Wi-Fi needs
+  nothing from you.
 - Leaving a film part way and opening it again from its page started it over
   instead of where you stopped; it now resumes.
 - Square put the player bar away only if you pressed it very quickly: held for

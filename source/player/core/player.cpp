@@ -1143,6 +1143,12 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             sysUtilCheckCallback();
             poll_buttons();
             if (BTN_PRESSED(circle)) { plog("preroll: skipped by user"); break; }
+            // The sender is stuck in backoff on this connection: stop waiting
+            // on it, the loop below reopens with the smaller window.
+            if (!live && !local && stream_window_reopen_pending()) {
+                plog("preroll: sender backing off, reopening");
+                break;
+            }
             // The audio queue can fill before the ring does (HD audio is
             // several Mbps), and the decode thread stops reading when it
             // does.  Waiting past that point achieves nothing.
@@ -1413,6 +1419,14 @@ void show_player_run(const JFItem *item, u32 resume_secs,
                        dts ? "dts" : "truehd");
             surround_hd_session_disable();
             act = HUD_ACTION_SEEK;      // 0-delta reopen applies the fallback
+        }
+
+        // The connection showed sender backoff (stream.cpp): reopen here, the
+        // same 0-delta reopen, and the new connection asks for the smaller
+        // receive window.  A live channel picks it up on its next open.
+        if (act == HUD_ACTION_NONE && !local && !live && stream_window_reopen_take()) {
+            plog("net: reopening with the smaller receive window");
+            act = HUD_ACTION_SEEK;
         }
 
         // R2/L2 tap/hold machine + commit gate (a channel has nothing to seek in).

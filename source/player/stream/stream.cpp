@@ -6,6 +6,7 @@
 #include "timing.h"
 #include "jf_paths.h"
 #include "lclog.h"
+#include "rx_gap.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -179,6 +180,43 @@ static void file_close_stream(void) {
     if (s_file_h >= 0) { lfs_close(s_file_h); s_file_h = -1; }
 }
 
+// Receive window (see stream_open): the run starts at WIN_KB_FAST and falls
+// back to WIN_KB_SAFE for good once a connection shows sender backoff.
+#define WIN_KB_FAST 512
+#define WIN_KB_SAFE 128
+static int          s_win_kb          = 0;      // what the open socket asked for
+static bool         s_win_fixed       = false;  // jellyfin_rcvbuf.txt set it
+static int          s_win_fallback_kb = 0;      // 0 until a backoff is seen
+static volatile int s_win_reopen      = 0;      // the player should reopen
+static RxGap        s_gap;
+static bool         s_gap_fired       = false;
+
+static void gap_note(u64 t0, u64 t1, int n) {
+    if (s_gap_fired || file_active()) return;
+    if (!rx_gap_note(&s_gap, t0, t1, n)) return;
+    s_gap_fired = true;
+    if (s_win_fixed || s_win_kb <= WIN_KB_SAFE) {
+        lc_logf("stream: %llu KB then %llu ms of silence (window %d KB, %s)",
+                (unsigned long long)(s_gap.bytes / 1024),
+                (unsigned long long)((t1 - s_gap.run_start) / 1000), s_win_kb,
+                s_win_fixed ? "fixed by jellyfin_rcvbuf.txt" : "already the small one");
+        return;
+    }
+    lc_logf("stream: %llu KB then %llu ms of silence at a %d KB window: the sender "
+            "is backing off -- %d KB for the rest of this run, reopening",
+            (unsigned long long)(s_gap.bytes / 1024),
+            (unsigned long long)((t1 - s_gap.run_start) / 1000), s_win_kb, WIN_KB_SAFE);
+    s_win_fallback_kb = WIN_KB_SAFE;
+    s_win_reopen = 1;
+}
+
+bool stream_window_reopen_pending(void) { return s_win_reopen != 0; }
+bool stream_window_reopen_take(void) {
+    if (!s_win_reopen) return false;
+    s_win_reopen = 0;
+    return true;
+}
+
 static int sb_fill(int sock) {
     if (s_sb_p < s_sb_n) return s_sb_n - s_sb_p;
     s_sb_p = s_sb_n = 0;
@@ -232,6 +270,7 @@ static int sb_fill(int sock) {
             }
         }
     }
+    gap_note(t0, t0 + dt, n > 0 ? n : 0);
     if (n <= 0) return n;
     s_rx_bytes += (u64)n;
     if (dt > 50000) {
@@ -327,25 +366,32 @@ int stream_open(const char *url) {
     // negotiated in the SYN, so raising the buffer afterwards cannot widen the
     // window beyond 64 KB.
     {
-        // 512 KB.  It was briefly cut to 128 to match libnet's pool, on the
-        // reasoning that asking for four times the whole shared pool was
-        // incoherent and that Movian asks for exactly 128 here on this same
-        // console (net_psl1ght.c) while its POSIX backend asks for 192.
-        // Sound reasoning. Wrong answer -- measured back to back at 1080p 25,
-        // same film:
-        //
-        //             net median   frames on time   heartbeats with ring empty
-        //   128 KB      24.7 Mbps        81%                  15%
-        //   512 KB      31.1 Mbps        97%                   0%
-        //
-        // So the request is not clamped to the pool in any way that helps,
-        // and a larger one measurably wins. Borrowing a constant from another
-        // project is reasoning, not measurement; this is the measurement.
+        // Which window depends on how the SERVER reaches the network, which
+        // the console cannot see (docs/network-notes.md):
+        //  - 512 KB is measurably faster when the sender is paced, e.g. a
+        //    server on Wi-Fi (31 vs 25 Mbps against 128 KB).
+        //  - From a gigabit wired sender, 512 KB lets it put more in flight
+        //    than libnet's 128 KB pool can hold.  One drop and the segments
+        //    queued behind the hole use up the pool, the retransmission that
+        //    would fill it is dropped too, and the stream sits through the
+        //    sender's doubling backoff: ~1.7 MB bursts every 6-9 s.
+        // So every run starts at 512 and, the first time a connection shows
+        // that backoff (rx_gap.h), drops to 128 -- Movian's value on this
+        // console -- for the rest of the run, and the player reopens at the
+        // same position.  A new run tries 512 again, so a server that moves
+        // between Wi-Fi and Ethernet gets the right one either way.
         //
         // getsockopt reports the request rather than what is funded, so this
-        // cannot be settled by reading it back -- hence the knob
-        // (jellyfin_rcvbuf.txt, in KB) rather than another guess.
-        int rb = netcfg_kb("jellyfin_rcvbuf.txt", 512, 2048) * 1024;
+        // cannot be settled by reading it back.  jellyfin_rcvbuf.txt (KB)
+        // fixes the window and turns the fallback off.
+        const int knob_kb = netcfg_kb("jellyfin_rcvbuf.txt", 0, 2048);
+        s_win_fixed = knob_kb > 0;
+        s_win_kb    = s_win_fixed ? knob_kb
+                    : (s_win_fallback_kb ? s_win_fallback_kb : WIN_KB_FAST);
+        int rb = s_win_kb * 1024;
+        rx_gap_reset(&s_gap);           // a new connection: nothing seen yet
+        s_gap_fired  = false;
+        s_win_reopen = 0;
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
         s_sb_req = netcfg_kb("jellyfin_netbuf.txt", SB_SIZE / 1024,
                              SB_SIZE / 1024) * 1024;
@@ -648,7 +694,10 @@ static int stream_save_carry(const u8 *buf, int got) {
 bool stream_readable(int sock, int timeout_ms) {
     if (s_carry_n > 0 || s_sb_p < s_sb_n) return true;
     struct pollfd pfd; pfd.fd = sock; pfd.events = POLLIN; pfd.revents = 0;
-    return netPoll(&pfd, 1, timeout_ms) != 0;     // < 0: let the read report it
+    const u64 t0 = timing_get_us();
+    const int r = netPoll(&pfd, 1, timeout_ms);   // < 0: let the read report it
+    if (r == 0) gap_note(t0, timing_get_us(), 0); // waited, nothing came
+    return r != 0;
 }
 
 int stream_read(int sock, u8 *buf, int size) {

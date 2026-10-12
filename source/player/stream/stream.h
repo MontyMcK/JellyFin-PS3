@@ -46,6 +46,11 @@ const char *stream_last_error_ui(void);
 int stream_read(int sock, u8 *buf, int size);
 // True when stream_read() has something to return without blocking (see stream.cpp).
 bool stream_readable(int sock, int timeout_ms);
+// The open connection showed sender backoff and later connections in this run
+// use a smaller receive window (stream.cpp): the player should reopen at the
+// current position.  _take clears it; stream_open() clears it too.
+bool stream_window_reopen_pending(void);
+bool stream_window_reopen_take(void);
 
 // Cumulative receive stats since process start: bytes delivered by netRecv,
 // microseconds spent blocked inside it, and how many times it was called.
