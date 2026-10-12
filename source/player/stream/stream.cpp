@@ -233,7 +233,7 @@ bool stream_window_reopen_take(void) {
 // window small and the sender ACK-clocked.  The sleep happens OUTSIDE netRecv,
 // so rx_gap (which only counts time blocked in netRecv) does not mistake it
 // for a silent sender.  jellyfin_rxpace.txt (Mbps, 0 = off) overrides it.
-#define PACE_MBPS_DEF 40
+#define PACE_MBPS_DEF 0     // off unless jellyfin_rxpace.txt asks; it did not cure the stalls
 #define PACE_CHUNK    (64 * 1024)
 #define PACE_BURST    (128 * 1024)
 static u64 s_pace_bps   = 0;   // bytes per second, 0 = unpaced
@@ -706,6 +706,19 @@ void stream_close(int h) {
 
 void stream_set_timeout(int h, u32 usec) {
     if (stream_is_file(h)) return;    // a file never waits on anyone
+    // jellyfin_rcvtimeo.txt (microseconds) overrides the caller's value.
+    // A capture on 2026-10-12 showed the console's network going quiet for
+    // ~10 s at a time only while the reader sat in netRecv timing out every
+    // 5 ms; this lets that be A/B'd over FTP without a rebuild.
+    {
+        FILE *f = fopen(jf_data_path("jellyfin_rcvtimeo.txt"), "r");
+        if (f) {
+            int v = 0;
+            if (fscanf(f, "%d", &v) == 1 && v >= 1000 && v <= 2000000) usec = (u32)v;
+            fclose(f);
+        }
+        lc_logf("stream: receive timeout %u us", (unsigned)usec);
+    }
     // The lv2 call takes a 16-byte struct timeval; any smaller layout is
     // silently ignored and reads then block for seconds.
     struct timeval tv;

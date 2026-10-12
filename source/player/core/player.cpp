@@ -1122,7 +1122,12 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     // bounded: it gives up at the deadline, on Circle, or the moment the
     // stream ends.  Nothing is lost by the timeout — playback simply starts
     // with whatever was buffered.
-    if (ps.playing && decode_ring_cap() > 0) {
+    // Films and episodes start the moment the decoder is ready, the way a
+    // seek restarts them.  On 2026-10-12 every connection that sat behind
+    // this wait stalled (bursts, then ~10 s of nothing from the console) and
+    // the one opened by a seek, which never waits here, ran 25-30 Mbps clean.
+    // Only Live TV still pre-rolls: a live stream has nothing to catch up from.
+    if (ps.playing && live && decode_ring_cap() > 0) {
         // 90%, was 75%.  The ring is the only thing standing between a slow
         // patch and a stall, so fill it as far as it will go before starting.
         // The wait stays bounded by the deadline below and by Circle-to-skip.
