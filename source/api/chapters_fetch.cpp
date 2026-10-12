@@ -21,7 +21,10 @@ JFChapters   s_list;
 
 struct Req { int gen; char url[512]; char token[256]; };
 
-const int BUF = 96 * 1024;      // an item's description with its chapters, nothing else asked for
+// An item's reply carries every version's streams as well as the chapters (the
+// server includes them whatever is asked for), and a multi-version item runs to
+// 100 KB and more: a short buffer would cut the chapters off the end.
+const int BUF = 256 * 1024;
 
 void worker(void *arg) {
     Req *rq = (Req *)arg;

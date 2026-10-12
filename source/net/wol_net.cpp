@@ -9,6 +9,7 @@
 
 #include "wol.h"
 #include "wol_net.h"
+#include "http.h"          // http_net_lock: socket setup shares the net stack's lock
 #include "plog.h"
 #include "jf_paths.h"
 
@@ -37,8 +38,9 @@ bool wol_send(const uint8_t mac[6]) {
     uint8_t pkt[WOL_PACKET_LEN];
     wol_build_packet(mac, pkt);
 
+    http_net_lock();
     const int s = netSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (s < 0) { plog("wol: no UDP socket"); return false; }
+    if (s < 0) { http_net_unlock(); plog("wol: no UDP socket"); return false; }
     int on = 1;
     netSetSockOpt(s, SOL_SOCKET, SO_BROADCAST, &on, sizeof on);
 
@@ -56,6 +58,7 @@ bool wol_send(const uint8_t mac[6]) {
         }
     }
     netClose(s);
+    http_net_unlock();
     char txt[24], b[80];
     wol_format_mac(mac, txt, sizeof txt);
     snprintf(b, sizeof b, "wol: %d packet(s) sent for %s", sent, txt);
