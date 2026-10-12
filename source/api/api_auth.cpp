@@ -131,7 +131,96 @@ static void trim(char *s) {
     if (p != s) memmove(s, p, strlen(p)+1);
 }
 
+// Quick Connect: the console shows a six-digit code, the user approves it from
+// a signed-in Jellyfin app (Settings > Quick Connect), and the server hands
+// back a token — no password typed with a gamepad.  Returns 1 signed in,
+// 0 cancelled or failed, -1 when the server has Quick Connect switched off
+// (the caller falls back to the password prompt).
+static int quick_connect_login(void) {
+    char url[512], body[160], secret[96] = "", code[16] = "";
+
+    snprintf(url, sizeof url, "%s/QuickConnect/Enabled", g_server);
+    int st = http_probe_get(url, NULL, responseBuffer, RESPONSE_SIZE);
+    if (st != 200 || !strstr(responseBuffer, "true")) return -1;
+
+    snprintf(url, sizeof url, "%s/QuickConnect/Initiate", g_server);
+    st = http_request(HTTP_POST, url, "{}", NULL, responseBuffer, RESPONSE_SIZE);
+    if (st != 200) return -1;
+    json_get_string(responseBuffer, "Secret", secret, sizeof secret);
+    json_get_string(responseBuffer, "Code",   code,   sizeof code);
+    if (!secret[0] || !code[0]) return -1;
+
+    u64 last_poll = 0;
+    bool approved = false;
+    init_btns();
+    while (running && !approved) {
+        sysUtilCheckCallback();
+        poll_buttons();
+        if (BTN_PRESSED(circle)) return 0;
+
+        drawHeader();
+        drawTTF(40, 96, TR("Sign in with Quick Connect"), 22, XMB_TEXT, true);
+        drawTTF(40, 136, TR("On your phone, open the Jellyfin app, then:"), 15, XMB_TEXT_DIM);
+        drawTTF(40, 160, TR("Settings > Quick Connect, and enter this code."), 15, XMB_TEXT_DIM);
+        drawTTF(40, 212, code, 64, XMB_ACCENT, true);
+        drawTTF(40, 280, g_server, 13, XMB_TEXT_FAINT);
+        static const Hint h[] = {{'C', TRN("Cancel")}};
+        draw_hints_bar(h, 1);
+        flip();
+
+        u64 now = timing_get_us();
+        if (now - last_poll < 3000000ull) continue;
+        last_poll = now;
+        snprintf(url, sizeof url, "%s/QuickConnect/Connect?secret=%s", g_server, secret);
+        st = http_probe_get(url, NULL, responseBuffer, RESPONSE_SIZE);
+        if (st == 404 || st == 401) return 0;     // code expired or revoked
+        if (st == 200 && strstr(responseBuffer, "\"Authenticated\":true")) approved = true;
+    }
+    if (!approved) return 0;
+
+    snprintf(url,  sizeof url,  "%s/Users/AuthenticateWithQuickConnect", g_server);
+    snprintf(body, sizeof body, "{\"Secret\":\"%s\"}", secret);
+    st = http_request(HTTP_POST, url, body, NULL, responseBuffer, RESPONSE_SIZE);
+    if (st == 200) {
+        json_get_string(responseBuffer, "AccessToken", g_token,  sizeof(g_token));
+        json_get_string(responseBuffer, "Id",          g_userid, sizeof(g_userid));
+        json_get_string(responseBuffer, "Name",        g_username, sizeof(g_username));
+        if (g_token[0]) { save_config(); return 1; }
+    }
+    return 0;
+}
+
 int do_login(void) {
+    // Offer Quick Connect first; Square keeps the classic username/password.
+    // A server with Quick Connect off skips the choice entirely.
+    {
+        char url[512];
+        snprintf(url, sizeof url, "%s/QuickConnect/Enabled", g_server);
+        int st = http_probe_get(url, NULL, responseBuffer, RESPONSE_SIZE);
+        if (st == 200 && strstr(responseBuffer, "true")) {
+            drawHeader();
+            drawTTF(40, 96,  TR("Sign in"), 22, XMB_TEXT, true);
+            drawTTF(40, 136, TR("Quick Connect lets you approve this console from your phone."), 15, XMB_TEXT_DIM);
+            static const Hint h[] = {{'X', TRN("Quick Connect")}, {'S', TRN("Username & password")}};
+            draw_hints_bar(h, 2);
+            flip();
+            init_btns();
+            int pick = 0;
+            while (running && !pick) {
+                sysUtilCheckCallback();
+                poll_buttons();
+                if (BTN_PRESSED(cross))  pick = 1;
+                if (BTN_PRESSED(square)) pick = 2;
+                if (BTN_PRESSED(circle)) return 0;
+            }
+            if (pick == 1) {
+                int r = quick_connect_login();
+                if (r == 1) return 1;
+                if (r == 0) return 0;
+                // -1: fell over mid-way; use the password prompt below.
+            }
+        }
+    }
     char password[64] = "";
     if (get_input(g_username, sizeof(g_username), TR("Username"), false) != 1) return 0;
     if (get_input(password,   sizeof(password),   TR("Password"), true)  != 1) return 0;
