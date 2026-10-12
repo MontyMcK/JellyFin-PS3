@@ -33,6 +33,8 @@
 #include "wol.h"            // Server MAC Address, Wake Server
 #include "wol_net.h"
 #include "timing.h"
+#include "rsxutil.h"        // rsxSync, flip: finish the frame before the keyboard
+extern void crash_log(const char *msg);   // synchronous: survives a freeze
 
 // xmb/ui_peek.cpp (declared in ui_internal.h, not included here).
 void peek_open_text(const char *title, const char *body, int x, int y, int w, int h);
@@ -154,33 +156,49 @@ static void a_sendlog(void)    { log_upload_start(); }
 
 // Wake-on-LAN (net/wol.h): the server PC's MAC, entered once, and the send.
 static u64 s_wake_sent_us = 0;
+// The saved MAC, read once: the row values are drawn every frame.
+static bool    s_mac_read = false, s_mac_have = false;
+static uint8_t s_mac[6];
+static bool wol_have(uint8_t mac[6]) {
+    if (!s_mac_read) { s_mac_read = true; s_mac_have = wol_saved(s_mac); }
+    if (s_mac_have) memcpy(mac, s_mac, 6);
+    return s_mac_have;
+}
 static void v_wolmac(char *b, int c, bool *l) {
     uint8_t mac[6];
-    if (wol_saved(mac)) { wol_format_mac(mac, b, c); *l = true; }
-    else                val_text(b, c, l, TR("Not set"), false);
+    if (wol_have(mac)) { wol_format_mac(mac, b, c); *l = true; }
+    else               val_text(b, c, l, TR("Not set"), false);
 }
 static void v_wake(char *b, int c, bool *l) {
     uint8_t mac[6];
-    if (!wol_saved(mac))                                       val_text(b, c, l, TR("Set the MAC first"), false);
+    if (!wol_have(mac))                                        val_text(b, c, l, TR("Set the MAC first"), false);
     else if (s_wake_sent_us && timing_get_us() - s_wake_sent_us < 5000000ULL) val_text(b, c, l, TR("Sent"), true);
     else                                                       val_text(b, c, l, TR("X to send"), false);
 }
 static void a_wolmac(void) {
     char text[40] = "";
     uint8_t mac[6];
-    if (wol_saved(mac)) wol_format_mac(mac, text, sizeof text);
-    if (get_input(text, sizeof text, TR("Server MAC address (like 1C:69:7A:12:34:56)"), false) != 1) return;
+    if (wol_have(mac)) wol_format_mac(mac, text, sizeof text);
+    // Menu input runs after this frame has already queued the wave's drawing, and
+    // the keyboard draws the wave again.  Finish the frame first, as every other
+    // popup over the XMB does (xmb_dl_confirm, show_details): the keyboard opened
+    // from here froze the console otherwise.
+    crash_log("wol: keyboard");
+    rsxSync();
+    flip();
+    const int r = get_input(text, sizeof text, TR("Server MAC address (like 1C:69:7A:12:34:56)"), false, true);
+    crash_log("wol: keyboard done");
     init_btns();
-    if (!text[0]) return;
+    if (r != 1 || !text[0]) return;
     if (!wol_parse_mac(text, mac)) {
         xmb_dl_notice(TR("Wake-on-LAN"), TR("That is not a MAC address: six pairs of digits, like 1C:69:7A:12:34:56."));
         return;
     }
-    wol_save(mac);
+    if (wol_save(mac)) { memcpy(s_mac, mac, 6); s_mac_have = true; s_mac_read = true; }
 }
 static void a_wake(void) {
     uint8_t mac[6];
-    if (!wol_saved(mac)) {
+    if (!wol_have(mac)) {
         xmb_dl_notice(TR("Wake-on-LAN"), TR("Enter the server's MAC address first (Server MAC Address)."));
         return;
     }
