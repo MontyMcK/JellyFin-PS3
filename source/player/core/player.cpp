@@ -934,6 +934,27 @@ void show_player_run(const JFItem *item, u32 resume_secs,
             ps.sock = stream_open(url);
         }
     }
+    // Connect twice.  2026-10-12/13: the FIRST connection of every start
+    // stalled -- bursts, then seconds of nothing from the console -- and
+    // every reopened one (a seek, the stall recovery) ran 25-33 Mbps clean,
+    // whatever the window or the 24 Hz setting.  So start-up does what a
+    // seek does, before the picture is up: drop the connection, stop its
+    // transcode (the same id: that job must die first), give the debrid
+    // source a moment to let go (see player_seek.cpp), and open again at
+    // the same position.  Costs about a second behind "Connecting".
+    if (!live && !local && ps.sock >= 0) {
+        plog("show_player: reconnecting once (first connection stalls; a reopened one does not)");
+        stream_close(ps.sock);
+        ps.sock = -1;
+        if (ps.session_id[0]) jellyfin_stop_transcode(ps.session_id);
+        usleep(600000);
+        ps.sock = stream_open(url);
+        if (ps.sock < 0 && !strstr(stream_last_error(), "Cancelled")) {
+            usleep(1000000);
+            ps.sock = stream_open(url);
+        }
+        plog(ps.sock >= 0 ? "show_player: reconnect OK" : "show_player: reconnect FAILED");
+    }
     stream_set_wait_cb(NULL);
     if (ps.sock < 0) {
         plog("show_player: stream_open FAILED");
