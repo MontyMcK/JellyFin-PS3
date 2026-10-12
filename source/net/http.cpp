@@ -3,6 +3,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <malloc.h>   // memalign -- libnet pool alignment
+#include <unistd.h>   // usleep: waiting for the shared reply buffer
 
 #include "plog.h"   // truncated-body warning
 
@@ -42,7 +43,14 @@ static volatile int s_raw_busy = 0;
 #define RAW_CAP ((int)sizeof(s_raw_buf))
 
 static char *raw_claim(void) {
-    if (__sync_lock_test_and_set(&s_raw_busy, 1) == 0) return s_raw_buf;
+    // Another request is reading into the static buffer.  Wait for it, briefly,
+    // rather than ask a nearly full heap for 388 KB in the middle of playback
+    // (the usual overlap is a poster or a progress report: milliseconds).  Only a
+    // long request (a search, a Live TV open) makes this fall through to the heap.
+    for (int i = 0; i < 400; i++) {
+        if (__sync_lock_test_and_set(&s_raw_busy, 1) == 0) return s_raw_buf;
+        usleep(5000);
+    }
     return (char *)malloc(RAW_CAP);
 }
 
@@ -176,6 +184,11 @@ static int http_connect(const char *host, int port, int rcvbuf = 0) {
     netSetSockOpt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     return sock;
 }
+
+// The net stack's one lock, for code that opens sockets of its own (wake-on-LAN,
+// server discovery): socket setup there is not reentrant either.
+void http_net_lock(void)   { if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0); }
+void http_net_unlock(void) { if (s_http_mtx_ok) sysMutexUnlock(s_http_mtx); }
 
 static int http_connect_locked(const char *host, int port, int rcvbuf = 0) {
     if (s_http_mtx_ok) sysMutexLock(s_http_mtx, 0);

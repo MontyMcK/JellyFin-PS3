@@ -15,7 +15,18 @@
 #include "plog.h"
 #include "timing.h"
 
+static int sd_discover_locked(SdServer *out, int max, int wait_ms);
+
+// The socket work holds the net lock, so it cannot race a poster or a search
+// opening their own connections.
 int sd_discover(SdServer *out, int max, int wait_ms) {
+    http_net_lock();
+    const int n = sd_discover_locked(out, max, wait_ms);
+    http_net_unlock();
+    return n;
+}
+
+static int sd_discover_locked(SdServer *out, int max, int wait_ms) {
     const int s = netSocket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s < 0) { plog("discovery: no UDP socket"); return 0; }
     int on = 1;
