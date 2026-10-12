@@ -5,8 +5,7 @@ $(error "Please set PSL1GHT in your environment. export PSL1GHT=<path>")
 endif
 
 ICON0       := $(CURDIR)/ICON0.PNG
-# CATEGORY AV puts the app under TV/Video Services in the XMB, not Game.
-SFOXML      := $(CURDIR)/sfo.xml
+SFOXML      := $(PS3DEV)/bin/sfo.xml
 
 include $(PSL1GHT)/ppu_rules
 
