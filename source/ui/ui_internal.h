@@ -180,7 +180,6 @@ void depth_lib_prefetch(int tab, int n);
 // The same card turn for a Settings row: (x,y,w,h) is the row on screen.
 void peek_open_text(const char *title, const char *body, int x, int y, int w, int h);
 // Settings: open the highlighted row's description as a peek (ui_settings.cpp).
-void settings_open_help_peek(void);
 // Live TV tab (xmb/ui_livetv.cpp): the channel list and guide.
 void xmb_livetv_on_enter(void);
 bool xmb_input_livetv(void);          // the tab's input (it never exits the XMB)

@@ -437,7 +437,8 @@ extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 // displayed order.
 extern int   g_settings_sel;       // highlighted settings entry
 extern bool  g_settings_confirm;   // true while the logout confirm prompt is up
-extern bool  g_settings_help;      // Triangle: the highlighted row's description is up
+extern int   g_settings_cat;       // -1: the list of categories; else the open category (a setting_section)
+extern int   g_settings_catsel;    // highlighted category in that list
 extern bool  g_overscan_calib;     // true while the overscan calibration screen is up
 extern float g_overscan_calib_prev; // frac to restore if calibration is cancelled
 

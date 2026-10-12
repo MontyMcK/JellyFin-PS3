@@ -36,9 +36,6 @@
 #include "rsxutil.h"        // rsxSync, flip: finish the frame before the keyboard
 extern void crash_log(const char *msg);   // synchronous: survives a freeze
 
-// xmb/ui_peek.cpp (declared in ui_internal.h, not included here).
-void peek_open_text(const char *title, const char *body, int x, int y, int w, int h);
-
 // -------------------------------------------------------------------------
 //  The console half of each row
 // -------------------------------------------------------------------------
@@ -290,68 +287,40 @@ void settings_step(int row, int dir) {
 }
 
 // -------------------------------------------------------------------------
-//  Geometry
+//  The screen
 // -------------------------------------------------------------------------
+//  Two levels, like the PS3's own Settings column.  The first lists the
+//  categories, each an icon tile of its own with its name and what is inside;
+//  X opens one and shows just its settings, with what the highlighted one does
+//  written underneath, and O goes back.  g_settings_cat is -1 on the first
+//  level, else the open category (a setting_section).
 
-static void help_rect(int *x, int *y, int *w, int *h) {
-    *w = XMB_LIST_W;
-    *h = UIS_H(104);
-    *x = ((int)display_width - *w) / 2;
-    *y = (int)display_height - XMB_BOTTOM_PAD - *h - UIS_H(6);
+// One icon per category, none shared (the glyphs are in the icon font subset).
+static int cat_icon(setting_section s) {
+    switch (s) {
+    case SEC_PLAYBACK:  return ICON_PLAY;
+    case SEC_AUDIO:     return ICON_VOLUME;
+    case SEC_SUBTITLES: return ICON_CAPTIONS;
+    case SEC_DOWNLOADS: return ICON_DOWNLOAD;
+    case SEC_DISPLAY:   return ICON_DESKTOP;
+    default:            return ICON_SETTINGS;
+    }
 }
 
-#define SET_PANEL_H UIS_H(96)
-#define SET_ROW_H   UIS_H(56)
-#define SET_HEADER_H UIS_H(34)
+// Sized so that all six categories fit at once below the spine's header, and a
+// category shows five of its settings above the description.
+#define CAT_ROW_H  UIS_H(56)
+#define CAT_TILE   UIS_H(40)
+#define ROW_H      UIS_H(46)
+#define ITEM_GAP   UIS_H(6)
+#define HEAD_H     UIS_H(60)
+#define DESC_H     UIS_H(60)
 
-static int settings_panel_y(void) { return XMB_CONTENT_Y + 16; }
-
-// The band the list scrolls in: below the account card, above the safe area.
-static int band_top(void)    { return settings_panel_y() + SET_PANEL_H + UIS_H(14); }
-static int band_bottom(void) { return (int)display_height - XMB_BOTTOM_PAD; }
-
-// The row rhythm never changes; the list scrolls instead of compressing.
-static int settings_row_pitch(void) { return SET_ROW_H + UIS_H(10); }
-
-static struct {
-    settings_item items[SETTINGS_MAX_ITEMS];
-    int n, total, scroll;
-} s_lay;
-
-// Rebuild the layout for this frame's geometry and move the scroll just far
-// enough to keep the selection, and its section header, on screen.  Called by
-// both draw phases; the second finds nothing left to move.
-static void layout_update(void) {
-    s_lay.n = settings_layout(s_lay.items, SETTINGS_MAX_ITEMS, SET_HEADER_H,
-                              SET_ROW_H, settings_row_pitch(), &s_lay.total);
-    s_lay.scroll = settings_scroll_for(s_lay.items, s_lay.n, g_settings_sel,
-                                       band_bottom() - band_top(), s_lay.scroll,
-                                       s_lay.total);
-}
-
-static int item_y(const settings_item *it) { return band_top() + it->y - s_lay.scroll; }
-
-// Only items that fit the band whole are drawn: text and rects have no clip
-// here, so a half-visible row would spill over the account card or the hints.
-static bool item_on_screen(const settings_item *it) {
-    const int y = item_y(it);
-    return y >= band_top() && y + it->h <= band_bottom();
-}
-
-static int row_y(int row) {
-    const int k = settings_item_of_row(s_lay.items, s_lay.n, row);
-    return k < 0 ? band_top() : item_y(&s_lay.items[k]);
-}
-
-// Triangle (spine gate): the highlighted row turns over like a poster's
-// quick-peek (xmb/ui_peek.cpp), its back the row's description.
-void settings_open_help_peek(void) {
-    const setting_row *r = row_at(g_settings_sel);
-    if (!r) return;
-    layout_update();
-    const int list_x = ((int)display_width - XMB_LIST_W) / 2;
-    peek_open_text(tr(r->label), tr(r->help), list_x, row_y(g_settings_sel), XMB_LIST_W, SET_ROW_H);
-}
+static int list_x(void)      { return ((int)display_width - XMB_LIST_W) / 2; }
+static int top_y(void)       { return XMB_CONTENT_Y + UIS_H(12); }
+static int bottom_y(void)    { return (int)display_height - XMB_BOTTOM_PAD; }
+static int rows_top(void)    { return top_y() + HEAD_H; }
+static int rows_bottom(void) { return bottom_y() - DESC_H - UIS_H(8); }
 
 // Centered confirm dialog rect.
 static void settings_confirm_rect(int *x, int *y, int *w, int *h) {
@@ -368,47 +337,58 @@ static void hairline_frame(int x, int y, int w, int h) {
     drawRect((u32)(x + w - 1), (u32)y, 1, (u32)h, XMB_HAIRLINE);
 }
 
-// Filled circle, scanline by scanline (small radii only).
-static void fill_circle(int cx, int cy, int r, u32 color) {
-    for (int dy = -r; dy <= r; dy++) {
-        int hw = (int)(sqrtf((float)(r * r - dy * dy)) + 0.5f);
-        drawRect((u32)(cx - hw), (u32)(cy + dy), (u32)(2 * hw + 1), 1, color);
+// `src` cut on a character boundary, with "..." when it does not fit `max_w`.
+static void fit_text(const char *src, float px, int max_w, bool bold, char *out, int cap) {
+    snprintf(out, (size_t)cap, "%s", src);
+    if (ttf_text_width(out, px, bold) <= max_w) return;
+    int len = (int)strlen(out);
+    while (len > 1) {
+        do { len--; } while (len > 0 && ((unsigned char)out[len] & 0xC0) == 0x80);
+        char t[200];
+        snprintf(t, sizeof t, "%.*s...", len, out);
+        if (ttf_text_width(t, px, bold) <= max_w) { snprintf(out, (size_t)cap, "%s", t); return; }
     }
 }
 
-// A section header's label, upper case with a little air between letters.
-// Whole UTF-8 characters: a byte at a time would split a kana or an accent.
-static int utf8_len(unsigned char c) { return c < 0x80 ? 1 : c < 0xE0 ? 2 : c < 0xF0 ? 3 : 4; }
-
-static void header_label(const char *src, char *out, int cap) {
-    int n = 0;
-    for (int i = 0; src[i]; ) {
-        const int k = utf8_len((unsigned char)src[i]);
-        if (n + k > cap - 1) break;
-        for (int j = 0; j < k && src[i + j]; j++, i++)
-            out[n++] = (k == 1 && src[i] >= 'a' && src[i] <= 'z') ? (char)(src[i] - 32) : src[i];
+// What is inside a category, as one line: its settings' names.
+static void cat_summary(setting_section s, char *out, int cap) {
+    out[0] = '\0';
+    const int n = settings_category_row_count(s);
+    int used = 0;
+    for (int k = 0; k < n; k++) {
+        const char *l = tr(row_at(settings_category_row(s, k))->label);
+        const int w = snprintf(out + used, (size_t)(cap - used), "%s%s", k ? "  \xC2\xB7  " : "", l);
+        if (w < 0 || w >= cap - used) { out[used] = '\0'; break; }
+        used += w;
     }
-    out[n] = '\0';
 }
 
-#define HEADER_PX      UIS_TF(13)
-#define HEADER_TRACK   UIS_W(2)       // letter spacing
+static int s_scroll_a = 0, s_scroll_b = 0;     // the category list, and the rows inside one
+static int s_last_cat = -2;
 
-static int header_label_width(const char *label) {
-    int w = 0;
-    for (int i = 0; label[i]; ) {
-        const int k = utf8_len((unsigned char)label[i]);
-        char one[5] = { 0 };
-        for (int j = 0; j < k && label[i]; j++) one[j] = label[i++];
-        w += ttf_text_width(one, HEADER_PX) + HEADER_TRACK;
+// Keeps the selection on screen.  Called by both draw phases; the second finds
+// nothing left to move.
+static void scroll_update(void) {
+    if (g_settings_cat != s_last_cat) { s_last_cat = g_settings_cat; s_scroll_b = 0; }
+    if (g_settings_cat < 0) {
+        s_scroll_a = settings_scroll_to(settings_category_count(), g_settings_catsel,
+                                        CAT_ROW_H, ITEM_GAP, bottom_y() - top_y(), s_scroll_a);
+    } else {
+        const setting_section sec = (setting_section)g_settings_cat;
+        s_scroll_b = settings_scroll_to(settings_category_row_count(sec),
+                                        settings_row_in_category(g_settings_sel),
+                                        ROW_H, ITEM_GAP, rows_bottom() - rows_top(), s_scroll_b);
     }
-    return w;
 }
 
-// CPU phase: account card, section rules, row highlight, confirm dialog panel.
+static int cat_y(int i)  { return top_y() + i * (CAT_ROW_H + ITEM_GAP) - s_scroll_a; }
+static int row_y(int k)  { return rows_top() + k * (ROW_H + ITEM_GAP) - s_scroll_b; }
+static bool cat_visible(int i) { const int y = cat_y(i); return y >= top_y() && y + CAT_ROW_H <= bottom_y(); }
+static bool row_visible(int k) { const int y = row_y(k); return y >= rows_top() && y + ROW_H <= rows_bottom(); }
+
+// CPU phase: panels, highlights, icon tiles, the confirm dialog's panel.
 void xmb_cpu_draw_settings(void) {
-    int W      = (int)display_width;
-    int list_x = (W - XMB_LIST_W) / 2;
+    const int lx = list_x();
 
     if (g_settings_confirm) {
         int mx, my, mw, mh;
@@ -417,46 +397,45 @@ void xmb_cpu_draw_settings(void) {
         hairline_frame(mx, my, mw, mh);
         return;
     }
+    scroll_update();
 
-    layout_update();
-
-    // Account card with avatar disc.
-    int py = settings_panel_y();
-    drawRect((u32)list_x, (u32)py, (u32)XMB_LIST_W, SET_PANEL_H, XMB_PANEL);
-    hairline_frame(list_x, py, XMB_LIST_W, SET_PANEL_H);
-    fill_circle(list_x + UIS_W(46), py + SET_PANEL_H / 2, UIS_H(22), XMB_ACCENT_DEEP);
-
-    for (int k = 0; k < s_lay.n; k++) {
-        const settings_item *it = &s_lay.items[k];
-        if (!item_on_screen(it)) continue;
-        const int iy = item_y(it);
-        if (it->is_header) {
-            // A 1px rule from the end of the label to the list's right edge.
-            char lab[48];
-            header_label(tr(settings_section_label((setting_section)it->index)), lab, sizeof lab);
-            const int x0 = list_x + UIS_W(20) + header_label_width(lab) + UIS_W(12);
-            const int x1 = list_x + XMB_LIST_W;
-            if (x1 > x0)
-                drawRect((u32)x0, (u32)(iy + it->h - UIS_H(14)), (u32)(x1 - x0), 1, XMB_HAIRLINE);
-        } else if (it->index == g_settings_sel) {
-            drawRect((u32)list_x, (u32)iy, (u32)XMB_LIST_W, SET_ROW_H, XMB_PANEL_HI);
-            drawRect((u32)(list_x - UIS_W(4)), (u32)iy, UIS_W(3), SET_ROW_H, XMB_ACCENT);
+    if (g_settings_cat < 0) {
+        const int n = settings_category_count();
+        for (int i = 0; i < n; i++) {
+            if (!cat_visible(i)) continue;
+            const int y = cat_y(i);
+            const bool sel = (i == g_settings_catsel);
+            drawRect((u32)lx, (u32)y, (u32)XMB_LIST_W, (u32)CAT_ROW_H, sel ? XMB_PANEL_HI : XMB_PANEL);
+            if (sel) drawRect((u32)(lx - UIS_W(4)), (u32)y, UIS_W(3), (u32)CAT_ROW_H, XMB_ACCENT);
+            drawRect((u32)(lx + UIS_W(14)), (u32)(y + (CAT_ROW_H - CAT_TILE) / 2), (u32)CAT_TILE, (u32)CAT_TILE,
+                     sel ? XMB_ACCENT_DEEP : XMB_THUMB_DIM);
         }
+        return;
     }
 
-    if (g_settings_help) {
-        int hx, hy, hw, hh;
-        help_rect(&hx, &hy, &hw, &hh);
-        drawRect((u32)hx, (u32)hy, (u32)hw, (u32)hh, XMB_PANEL_HI);
-        hairline_frame(hx, hy, hw, hh);
-        drawRect((u32)hx, (u32)hy, UIS_W(3), (u32)hh, XMB_ACCENT);
+    // Inside a category: the header tile, the rows, the description.
+    drawRect((u32)(lx + UIS_W(14)), (u32)(top_y() + (HEAD_H - CAT_TILE) / 2 - UIS_H(4)), (u32)CAT_TILE, (u32)CAT_TILE,
+             XMB_ACCENT_DEEP);
+    drawRect((u32)lx, (u32)(top_y() + HEAD_H - UIS_H(8)), (u32)XMB_LIST_W, 1, XMB_HAIRLINE);
+    const setting_section sec = (setting_section)g_settings_cat;
+    const int n = settings_category_row_count(sec);
+    const int cur = settings_row_in_category(g_settings_sel);
+    for (int k = 0; k < n; k++) {
+        if (!row_visible(k) || k != cur) continue;
+        const int y = row_y(k);
+        drawRect((u32)lx, (u32)y, (u32)XMB_LIST_W, (u32)ROW_H, XMB_PANEL_HI);
+        drawRect((u32)(lx - UIS_W(4)), (u32)y, UIS_W(3), (u32)ROW_H, XMB_ACCENT);
     }
+    const int dy = rows_bottom() + UIS_H(8);
+    drawRect((u32)lx, (u32)dy, (u32)XMB_LIST_W, (u32)DESC_H, XMB_PANEL);
+    hairline_frame(lx, dy, XMB_LIST_W, DESC_H);
+    drawRect((u32)lx, (u32)dy, UIS_W(3), (u32)DESC_H, XMB_ACCENT);
 }
 
-// RSX phase: account text, section labels, rows, confirm prompt.
+// RSX phase: icons and text.
 void xmb_draw_settings(void) {
-    int W      = (int)display_width;
-    int list_x = (W - XMB_LIST_W) / 2;
+    const int W  = (int)display_width;
+    const int lx = list_x();
 
     if (g_settings_confirm) {
         int mx, my, mw, mh;
@@ -469,104 +448,106 @@ void xmb_draw_settings(void) {
         drawTTF((u32)(mx + (mw - sw) / 2), (u32)(my + UIS_H(66)), s, UIS_TF(14), XMB_TEXT_DIM);
         return;
     }
+    scroll_update();
 
-    layout_update();
+    const float icon_px = UIS_TF(24.0f);
+    const int   tile_x  = lx + UIS_W(14);
 
-    int py = settings_panel_y();
-    int tx = list_x + UIS_W(84);
+    if (g_settings_cat < 0) {
+        // Who is signed in, above the list.
+        char who[300], fit[300];
+        snprintf(who, sizeof who, "%s: %s  \xC2\xB7  %s", TR("Account"),
+                 g_username[0] ? g_username : TR("(unknown)"), g_server[0] ? g_server : TR("(no server)"));
+        fit_text(who, UIS_TF(13), XMB_LIST_W, false, fit, sizeof fit);
+        drawTTF((u32)lx, (u32)(top_y() - UIS_H(20)), fit, UIS_TF(13), XMB_TEXT_FAINT);
 
-    // Avatar initial.
-    {
-        char ini[2] = { ' ', '\0' };
-        if (g_username[0]) {
-            ini[0] = g_username[0];
-            if (ini[0] >= 'a' && ini[0] <= 'z') ini[0] -= 32;
+        const int n = settings_category_count();
+        int last_bottom = top_y();
+        for (int i = 0; i < n; i++) {
+            if (!cat_visible(i)) continue;
+            const int y = cat_y(i);
+            last_bottom = y + CAT_ROW_H;
+            const setting_section sec = settings_category_at(i);
+            const bool sel = (i == g_settings_catsel);
+            const int ty = y + (CAT_ROW_H - CAT_TILE) / 2;
+            drawIcon((u32)(tile_x + (CAT_TILE - (int)icon_px) / 2), (u32)(ty + (CAT_TILE - (int)icon_px) / 2),
+                     cat_icon(sec), icon_px, sel ? XMB_WHITE : XMB_TEXT_DIM);
+            const int tx = tile_x + CAT_TILE + UIS_W(18);
+            const int text_w = XMB_LIST_W - (tx - lx) - UIS_W(56);
+            char lab[96];
+            fit_text(tr(settings_section_label(sec)), UIS_TF(20), text_w, sel, lab, sizeof lab);
+            drawTTF((u32)tx, (u32)(y + UIS_H(7)), lab, UIS_TF(20), sel ? XMB_WHITE : XMB_TEXT, sel);
+            char sum[300], sumf[300];
+            cat_summary(sec, sum, sizeof sum);
+            fit_text(sum, UIS_TF(13), text_w, false, sumf, sizeof sumf);
+            drawTTF((u32)tx, (u32)(y + UIS_H(32)), sumf, UIS_TF(13), XMB_TEXT_FAINT);
+            drawIcon((u32)(lx + XMB_LIST_W - UIS_W(34)), (u32)(y + (CAT_ROW_H - UIS_H(20)) / 2),
+                     ICON_CHEVRON_RIGHT, UIS_TF(20.0f), sel ? XMB_ACCENT : XMB_TEXT_FAINT);
         }
-        int iw = ttf_text_width(ini, UIS_TF(22), true);
-        drawTTF((u32)(list_x + UIS_W(46) - iw / 2), (u32)(py + SET_PANEL_H / 2 - UIS_H(12)),
-                ini, UIS_TF(22), XMB_WHITE, true);
-    }
-
-    // Identity.
-    drawTTF((u32)tx, (u32)(py + UIS_H(14)), TR("Account"), UIS_TF(13), XMB_TEXT_FAINT);
-    char line[320];
-    snprintf(line, sizeof(line), "%s", g_username[0] ? g_username : TR("(unknown)"));
-    drawTTF((u32)tx, (u32)(py + UIS_H(34)), line, UIS_TF(21), XMB_TEXT, true);
-    snprintf(line, sizeof(line), "%s", g_server[0] ? g_server : TR("(no server)"));
-    drawTTF((u32)tx, (u32)(py + UIS_H(64)), line, UIS_TF(14), XMB_TEXT_DIM);
-
-    // Headers and rows.  Only what is fully inside the band is drawn; the
-    // input handler owns the whole selection range.
-    int last_bottom = band_top();
-    for (int k = 0; k < s_lay.n; k++) {
-        const settings_item *it = &s_lay.items[k];
-        if (!item_on_screen(it)) continue;
-        const int iy = item_y(it);
-        last_bottom = iy + it->h;
-
-        if (it->is_header) {
-            char lab[48];
-            header_label(tr(settings_section_label((setting_section)it->index)), lab, sizeof lab);
-            int x = list_x + UIS_W(20);
-            const int ty = iy + it->h - UIS_H(14) - (int)HEADER_PX / 2;
-            for (int i = 0; lab[i]; ) {
-                const int k = utf8_len((unsigned char)lab[i]);
-                char one[5] = { 0 };
-                for (int j = 0; j < k && lab[i]; j++) one[j] = lab[i++];
-                drawTTF((u32)x, (u32)ty, one, HEADER_PX, XMB_TEXT_FAINT);
-                x += ttf_text_width(one, HEADER_PX) + HEADER_TRACK;
-            }
-            continue;
-        }
-
-        const setting_row *r = row_at(it->index);
-        const UiRow *u = ui_of(r->id);
-        const bool sel = (it->index == g_settings_sel);
-        const u32  clr = sel ? XMB_WHITE : XMB_TEXT_DIM;
-        drawIcon((u32)(list_x + UIS_W(20)), (u32)(iy + (SET_ROW_H - UIS_H(20)) / 2),
-                 u ? u->icon : ICON_TV, UIS_TF(20.0f), clr);
-        drawTTF((u32)(list_x + UIS_W(52)), (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
-                tr(r->label), UIS_TF(18), clr, sel);
-        if (u && u->value) {
-            char val[48];
-            bool lit = false;
-            u->value(val, sizeof val, &lit);
-            const int vw = ttf_text_width(val, UIS_TF(18), sel);
-            drawTTF((u32)(list_x + XMB_LIST_W - UIS_W(24) - vw),
-                    (u32)(iy + (SET_ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
-                    val, UIS_TF(18), lit ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
-        }
-    }
-
-    // Triangle's description panel, over the list.
-    const setting_row *cur = row_at(g_settings_sel);
-    if (g_settings_help && cur) {
-        int hx, hy, hw, hh;
-        help_rect(&hx, &hy, &hw, &hh);
-        drawTTF((u32)(hx + UIS_W(24)), (u32)(hy + UIS_H(12)),
-                tr(cur->label), UIS_TF(17), XMB_ACCENT, true);
-        char hl[160];
-        const char *t = tr(cur->help);
-        for (int ln = 0; ln < 2 && t && *t; ln++) {
-            const char *nl = strchr(t, '\n');
-            int n = nl ? (int)(nl - t) : (int)strlen(t);
-            if (n > (int)sizeof(hl) - 1) n = (int)sizeof(hl) - 1;
-            memcpy(hl, t, (size_t)n); hl[n] = '\0';
-            drawTTF((u32)(hx + UIS_W(24)), (u32)(hy + UIS_H(42) + ln * UIS_H(24)),
-                    hl, UIS_TF(15), XMB_TEXT, false);
-            t = nl ? nl + 1 : NULL;
-        }
-        return;      // the panel sits where the footer would
-    }
-
-    // Version footer, when the list is scrolled to its end with room to spare.
-    {
-        int footer_y = (int)display_height - XMB_BOTTOM_PAD - UIS_H(26);
+        // Version footer, when the list leaves room for it.
+        const int footer_y = bottom_y() - UIS_H(26);
         if (footer_y > last_bottom + 6) {
             char ver[96];
             snprintf(ver, sizeof ver, TR("Jellyfin for PS3 %s \xC2\xB7 built %s"), APP_VERSION, __DATE__);
-            int vw = ttf_text_width(ver, UIS_TF(13));
+            const int vw = ttf_text_width(ver, UIS_TF(13));
             drawTTF((u32)((W - vw) / 2), (u32)footer_y, ver, UIS_TF(13), XMB_TEXT_FAINT);
+        }
+        return;
+    }
+
+    // Inside a category.
+    const setting_section sec = (setting_section)g_settings_cat;
+    {
+        const int ty = top_y() + (HEAD_H - CAT_TILE) / 2 - UIS_H(4);
+        drawIcon((u32)(tile_x + (CAT_TILE - (int)icon_px) / 2), (u32)(ty + (CAT_TILE - (int)icon_px) / 2),
+                 cat_icon(sec), icon_px, XMB_WHITE);
+        const char *title = tr(settings_section_label(sec));
+        drawTTF((u32)(tile_x + CAT_TILE + UIS_W(18)), (u32)(ty + (CAT_TILE - UIS_H(24)) / 2 - UIS_H(2)),
+                title, UIS_TF(24), XMB_WHITE, true);
+    }
+    const int n = settings_category_row_count(sec);
+    const int cur = settings_row_in_category(g_settings_sel);
+    for (int k = 0; k < n; k++) {
+        if (!row_visible(k)) continue;
+        const int y = row_y(k);
+        const setting_row *r = row_at(settings_category_row(sec, k));
+        const UiRow *u = ui_of(r->id);
+        const bool sel = (k == cur);
+        const u32  clr = sel ? XMB_WHITE : XMB_TEXT_DIM;
+        drawIcon((u32)(lx + UIS_W(20)), (u32)(y + (ROW_H - UIS_H(20)) / 2),
+                 u ? u->icon : ICON_TV, UIS_TF(20.0f), clr);
+        int vw = 0;
+        char val[48];
+        bool lit = false;
+        val[0] = '\0';
+        if (u && u->value) {
+            u->value(val, sizeof val, &lit);
+            vw = ttf_text_width(val, UIS_TF(18), sel);
+        }
+        char lab[96];
+        fit_text(tr(r->label), UIS_TF(18), XMB_LIST_W - UIS_W(52) - vw - UIS_W(56), sel, lab, sizeof lab);
+        drawTTF((u32)(lx + UIS_W(52)), (u32)(y + (ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                lab, UIS_TF(18), clr, sel);
+        if (val[0])
+            drawTTF((u32)(lx + XMB_LIST_W - UIS_W(24) - vw), (u32)(y + (ROW_H - UIS_H(18)) / 2 - UIS_H(2)),
+                    val, UIS_TF(18), lit ? XMB_ACCENT : XMB_TEXT_FAINT, sel);
+    }
+
+    // What the highlighted setting does.
+    const setting_row *cr = row_at(g_settings_sel);
+    if (cr) {
+        const int dy = rows_bottom() + UIS_H(8);
+        const char *t = tr(cr->help);
+        for (int ln = 0; ln < 2 && t && *t; ln++) {
+            const char *nl = strchr(t, '\n');
+            int len = nl ? (int)(nl - t) : (int)strlen(t);
+            char raw[200], hl[200];
+            if (len > (int)sizeof raw - 1) len = (int)sizeof raw - 1;
+            memcpy(raw, t, (size_t)len); raw[len] = '\0';
+            fit_text(raw, UIS_TF(15), XMB_LIST_W - UIS_W(44), false, hl, sizeof hl);
+            drawTTF((u32)(lx + UIS_W(22)), (u32)(dy + UIS_H(8) + ln * UIS_H(24)), hl, UIS_TF(15),
+                    ln == 0 ? XMB_TEXT : XMB_TEXT_DIM, false);
+            t = nl ? nl + 1 : NULL;
         }
     }
 }

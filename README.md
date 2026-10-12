@@ -341,10 +341,11 @@ Canyon preset), and `O` or `Start` stops.
 **Search.** Type on the on-screen keyboard; `□` deletes and `O` clears. Press
 `Down` to reach the results, then `X` to open one or `△` for its details.
 
-**Settings.** The rows are in sections (Playback, Audio, Subtitles, Downloads,
-Display, System). `L2`/`R2` jump between sections, `Left`/`Right` change a value
-in either direction (`X` still steps forward), `△` explains the row, and `Up` from
-the first row returns to the tabs.
+**Settings.** A list of six categories (Playback, Audio, Subtitles, Downloads,
+Display, System), each with its own icon; `X` opens one and shows its settings with
+what the highlighted one does underneath. `O` goes back to the list, `L2`/`R2` move
+to the previous or next category, `Left`/`Right` change a value in either direction
+(`X` still steps forward), and `Up` from the first category returns to the tabs.
 
 **Language.** The app speaks English, 日本語, Português (Brasil), Deutsch, Français
 and Español. It follows the PS3's system language; **Settings → Display → Language**

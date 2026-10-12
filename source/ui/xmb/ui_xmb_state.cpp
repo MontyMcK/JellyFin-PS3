@@ -109,6 +109,7 @@ char g_tab_name_filter[XMB_TAB_COUNT][4];
 // Settings tab state
 int   g_settings_sel      = 0;
 bool  g_settings_confirm  = false;
-bool  g_settings_help     = false;
+int   g_settings_cat      = -1;
+int   g_settings_catsel   = 0;
 bool  g_overscan_calib    = false;
 float g_overscan_calib_prev = 0.0f;

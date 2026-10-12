@@ -44,37 +44,23 @@ const setting_row *settings_row(int i);                  // i in [0, count)
 int                settings_index_of(setting_id id);     // -1 if absent
 const char        *settings_section_label(setting_section s);
 int                settings_section_first(setting_section s);   // row index, -1 if empty
-// The first row of the section before / after the one row `i` is in, or -1
-// at the first / last section.  L2 and R2 use these.
-int                settings_section_jump(int i, int dir);
 
-// ---- layout ---------------------------------------------------------------
-//  One pass builds every section header and row in content coordinates (y = 0
-//  at the top of the first header).  The scroll offset, in pixels, then keeps
-//  the selected row fully inside the visible band.
+// ---- categories ---------------------------------------------------------------
+//  The screen has two levels, like the PS3's own Settings column: the list of
+//  categories (the sections), and inside one of them its rows.  A category
+//  with no visible row is not offered.
 
-typedef struct {
-    int is_header;   // 1: a section header (`index` is the setting_section)
-    int index;       // row index when !is_header
-    int y, h;        // content coordinates
-} settings_item;
+int             settings_category_count(void);
+setting_section settings_category_at(int i);             // the i-th, in order; SEC__COUNT if out of range
+int             settings_category_index(setting_section s);   // its position in that list, -1 if absent
+int             settings_category_row_count(setting_section s);
+int             settings_category_row(setting_section s, int k);   // row index of its k-th row, -1
+int             settings_row_in_category(int row);       // the row's position inside its category, -1
 
-#define SETTINGS_MAX_ITEMS (SET__COUNT + SEC__COUNT)
-
-// Returns the item count.  Sections with no visible row get no header.
-// `*total_h` (optional) is the height of the whole content.
-int settings_layout(settings_item *out, int max, int header_h, int row_h,
-                    int row_pitch, int *total_h);
-
-// The item index of row `row`, or -1.
-int settings_item_of_row(const settings_item *items, int n, int row);
-
-// The scroll offset that shows row `sel` completely inside a band `band_h`
-// tall, moving as little as possible from `cur`.  When `sel` is the first row
-// of its section its header is kept visible too.  Always within
-// [0, total_h - band_h] (0 when everything fits).
-int settings_scroll_for(const settings_item *items, int n, int sel,
-                        int band_h, int cur, int total_h);
+// The scroll offset (pixels) that shows item `sel` completely inside a band
+// `band_h` tall, moving as little as possible from `cur`.  The `n` items are
+// `item_h` tall with `gap` between them.  0 when everything fits.
+int             settings_scroll_to(int n, int sel, int item_h, int gap, int band_h, int cur);
 
 #ifdef __cplusplus
 }

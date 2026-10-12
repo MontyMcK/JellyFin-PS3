@@ -122,62 +122,64 @@ int settings_section_first(setting_section s) {
     return -1;
 }
 
-int settings_section_jump(int i, int dir) {
-    if (i < 0 || i >= N_ROWS || dir == 0) return -1;
-    int s = (int)k_rows[i].section;
-    for (s += dir > 0 ? 1 : -1; s >= 0 && s < SEC__COUNT; s += dir > 0 ? 1 : -1) {
-        const int first = settings_section_first((setting_section)s);
-        if (first >= 0) return first;
-    }
-    return -1;
-}
-
-int settings_layout(settings_item *out, int max, int header_h, int row_h,
-                    int row_pitch, int *total_h) {
-    int n = 0, y = 0;
-    int prev = -1;
-    for (int i = 0; i < N_ROWS; i++) {
-        if ((int)k_rows[i].section != prev) {
-            prev = (int)k_rows[i].section;
-            if (n < max) {
-                out[n].is_header = 1; out[n].index = prev;
-                out[n].y = y; out[n].h = header_h;
-                n++;
-            }
-            y += header_h;
-        }
-        if (n < max) {
-            out[n].is_header = 0; out[n].index = i;
-            out[n].y = y; out[n].h = row_h;
-            n++;
-        }
-        y += row_pitch;
-    }
-    // The last row has no gap below it.
-    if (N_ROWS > 0) y -= (row_pitch - row_h);
-    if (total_h) *total_h = y;
+int settings_category_count(void) {
+    int n = 0;
+    for (int s = 0; s < SEC__COUNT; s++)
+        if (settings_section_first((setting_section)s) >= 0) n++;
     return n;
 }
 
-int settings_item_of_row(const settings_item *items, int n, int row) {
-    for (int k = 0; k < n; k++)
-        if (!items[k].is_header && items[k].index == row) return k;
+setting_section settings_category_at(int i) {
+    int n = 0;
+    for (int s = 0; s < SEC__COUNT; s++)
+        if (settings_section_first((setting_section)s) >= 0) {
+            if (n == i) return (setting_section)s;
+            n++;
+        }
+    return SEC__COUNT;
+}
+
+int settings_category_index(setting_section s) {
+    if (s < 0 || s >= SEC__COUNT || settings_section_first(s) < 0) return -1;
+    int n = 0;
+    for (int t = 0; t < (int)s; t++)
+        if (settings_section_first((setting_section)t) >= 0) n++;
+    return n;
+}
+
+int settings_category_row_count(setting_section s) {
+    int n = 0;
+    for (int i = 0; i < N_ROWS; i++) if (k_rows[i].section == s) n++;
+    return n;
+}
+
+int settings_category_row(setting_section s, int k) {
+    if (k < 0) return -1;
+    int n = 0;
+    for (int i = 0; i < N_ROWS; i++)
+        if (k_rows[i].section == s) {
+            if (n == k) return i;
+            n++;
+        }
     return -1;
 }
 
-int settings_scroll_for(const settings_item *items, int n, int sel,
-                        int band_h, int cur, int total_h) {
-    const int k = settings_item_of_row(items, n, sel);
-    if (k < 0) return cur < 0 ? 0 : cur;
-    int top = items[k].y;
-    const int bot = items[k].y + items[k].h;
-    // The first row of a section brings its header with it.
-    if (k > 0 && items[k - 1].is_header) top = items[k - 1].y;
+int settings_row_in_category(int row) {
+    if (row < 0 || row >= N_ROWS) return -1;
+    int k = 0;
+    for (int i = 0; i < row; i++) if (k_rows[i].section == k_rows[row].section) k++;
+    return k;
+}
 
+int settings_scroll_to(int n, int sel, int item_h, int gap, int band_h, int cur) {
+    if (n <= 0 || sel < 0 || sel >= n) return cur < 0 ? 0 : cur;
+    const int total = n * item_h + (n - 1) * gap;
+    if (total <= band_h) return 0;
+    const int top = sel * (item_h + gap), bot = top + item_h;
     int s = cur;
-    if (top < s)            s = top;
-    if (bot - band_h > s)   s = bot - band_h;
-    const int max_s = total_h > band_h ? total_h - band_h : 0;
+    if (top < s)          s = top;
+    if (bot - band_h > s) s = bot - band_h;
+    const int max_s = total - band_h;
     if (s > max_s) s = max_s;
     if (s < 0) s = 0;
     return s;

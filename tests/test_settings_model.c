@@ -78,115 +78,90 @@ static void sections(void) {
     // First focus is 1080p Playback, the first row of Playback.
     CHECK(settings_row(0)->id == SET_HD1080);
 
-    // L2 / R2: the first row of the previous / next section.
-    CHECK(settings_section_jump(0, -1) == -1);                 // already in the first
-    CHECK(settings_section_jump(n - 1, +1) == -1);             // already in the last
-    int at = 0, hops = 0;
-    while ((at = settings_section_jump(at, +1)) >= 0) {
-        hops++;
-        CHECK(at == 0 || settings_row(at - 1)->section != settings_row(at)->section);
+}
+
+static void categories(void) {
+    printf("- categories\n");
+    const int n = settings_count();
+    CHECK(settings_category_count() == SEC__COUNT);
+    int total = 0;
+    for (int i = 0; i < settings_category_count(); i++) {
+        const setting_section sec = settings_category_at(i);
+        CHECK((int)sec == i);                                  // in section order
+        CHECK(settings_category_index(sec) == i);
+        const int rc = settings_category_row_count(sec);
+        CHECK(rc >= 1);
+        total += rc;
+        // Its rows, in order, all belong to it, and map back to their position.
+        for (int k = 0; k < rc; k++) {
+            const int row = settings_category_row(sec, k);
+            CHECK(row >= 0 && row < n);
+            if (row < 0) continue;
+            CHECK(settings_row(row)->section == sec);
+            CHECK(settings_row_in_category(row) == k);
+        }
+        CHECK(settings_category_row(sec, rc) == -1);
+        CHECK(settings_category_row(sec, -1) == -1);
+        CHECK(settings_category_row(sec, 0) == settings_section_first(sec));
     }
-    CHECK(hops == SEC__COUNT - 1);
-    // From the middle of a section, back goes to the section before (not its own head).
-    const int audio2 = settings_index_of(SET_DIALOGUE);
-    CHECK(settings_section_jump(audio2, -1) == settings_section_first(SEC_PLAYBACK));
-    CHECK(settings_section_jump(audio2, +1) == settings_section_first(SEC_SUBTITLES));
+    CHECK(total == n);                                          // every row is in exactly one category
+    CHECK(settings_category_at(-1) == SEC__COUNT && settings_category_at(SEC__COUNT) == SEC__COUNT);
+    CHECK(settings_category_index(SEC__COUNT) == -1 && settings_category_index((setting_section)-1) == -1);
+    CHECK(settings_row_in_category(-1) == -1 && settings_row_in_category(n) == -1);
+    // The ones the screen's icons are chosen for.
+    CHECK(settings_row(settings_category_row(SEC_DOWNLOADS, 0))->id == SET_DL_LOCATION);
+    CHECK(settings_row(settings_category_row(SEC_SYSTEM, settings_category_row_count(SEC_SYSTEM) - 1))->id == SET_LOGOUT);
 }
 
-// A layout the way the screen builds it, at one of the sizes it runs at.
-struct Geom { const char *name; int header_h, row_h, pitch, band_h; };
-
-static int visible(const settings_item *it, int scroll, int band_h) {
-    return it->y - scroll >= 0 && it->y + it->h - scroll <= band_h;
+static int fully_visible(int n, int sel, int item_h, int gap, int band_h, int scroll) {
+    const int top = sel * (item_h + gap) - scroll;
+    return top >= 0 && top + item_h <= band_h && scroll >= 0 &&
+           scroll <= (n * item_h + (n - 1) * gap > band_h ? n * item_h + (n - 1) * gap - band_h : 0);
 }
 
-static void check_sel(const settings_item *items, int n, int sel, int band_h,
-                      int scroll, int total_h, const char *where) {
-    const int k = settings_item_of_row(items, n, sel);
-    CHECK(k >= 0);
-    if (k < 0) return;
-    CHECK(visible(&items[k], scroll, band_h));
-    if (!visible(&items[k], scroll, band_h))
-        printf("  %s: row %d not visible at scroll %d\n", where, sel, scroll);
-    // The first row of a section shows its header too.
-    if (k > 0 && items[k - 1].is_header) {
-        CHECK(visible(&items[k - 1], scroll, band_h));
-        if (!visible(&items[k - 1], scroll, band_h))
-            printf("  %s: header of row %d not visible at scroll %d\n", where, sel, scroll);
-    }
-    CHECK(scroll >= 0);
-    CHECK(total_h <= band_h ? scroll == 0 : scroll <= total_h - band_h);
-}
-
-static void layout(void) {
-    printf("- layout and scroll\n");
-    // 720p, 1080p (the UI scale 1.5), a band barely taller than a header and a
-    // row, and the smallest the screen could ever offer.
-    static const struct Geom G[] = {
-        { "720p",  34, 56, 66, 330 },
-        { "1080p", 51, 84, 99, 600 },
-        { "tight", 34, 56, 66, 34 + 56 },
-        { "480p",  26, 42, 50, 200 },
+static void scrolling(void) {
+    printf("- scrolling\n");
+    // The sizes the screen runs at: 720p, 1080p, a band barely taller than one
+    // item, and a short 480 line band; with 6 and with 7 items.
+    static const struct { int item_h, gap, band_h; } G[] = {
+        { 64, 8, 330 }, { 96, 12, 560 }, { 64, 8, 64 }, { 43, 5, 150 }, { 52, 8, 400 },
     };
-    for (unsigned g = 0; g < sizeof(G) / sizeof(G[0]); g++) {
-        const struct Geom *q = &G[g];
-        settings_item items[SETTINGS_MAX_ITEMS];
-        int total = 0;
-        const int n_items = settings_layout(items, SETTINGS_MAX_ITEMS, q->header_h,
-                                            q->row_h, q->pitch, &total);
-        const int n = settings_count();
-        int headers = 0;
-        for (int k = 0; k < n_items; k++) headers += items[k].is_header;
-        CHECK(headers == SEC__COUNT && n_items == n + SEC__COUNT);
-        // Content is laid out top to bottom without overlap.
-        for (int k = 1; k < n_items; k++)
-            CHECK(items[k].y >= items[k - 1].y + items[k - 1].h);
-        CHECK(items[0].is_header && items[0].y == 0);
-        CHECK(items[n_items - 1].y + items[n_items - 1].h == total);
-
-        // Walk down, then up, one row at a time, as the d-pad does.
-        int scroll = 0;
-        for (int sel = 0; sel < n; sel++) {
-            scroll = settings_scroll_for(items, n_items, sel, q->band_h, scroll, total);
-            check_sel(items, n_items, sel, q->band_h, scroll, total, q->name);
-        }
-        for (int sel = n - 1; sel >= 0; sel--) {
-            scroll = settings_scroll_for(items, n_items, sel, q->band_h, scroll, total);
-            check_sel(items, n_items, sel, q->band_h, scroll, total, q->name);
-        }
-        // Jump straight to every row from every other scroll position, as L2 and
-        // R2 do and as a long press does.
-        for (int from = 0; from < n; from++) {
-            int s0 = settings_scroll_for(items, n_items, from, q->band_h, 0, total);
-            for (int sel = 0; sel < n; sel++) {
-                const int s1 = settings_scroll_for(items, n_items, sel, q->band_h, s0, total);
-                check_sel(items, n_items, sel, q->band_h, s1, total, q->name);
+    for (unsigned g = 0; g < sizeof G / sizeof G[0]; g++) {
+        for (int n = 1; n <= 8; n++) {
+            int scroll = 0;
+            for (int sel = 0; sel < n; sel++) {                 // down, as the d-pad does
+                scroll = settings_scroll_to(n, sel, G[g].item_h, G[g].gap, G[g].band_h, scroll);
+                CHECK(fully_visible(n, sel, G[g].item_h, G[g].gap, G[g].band_h, scroll));
             }
+            for (int sel = n - 1; sel >= 0; sel--) {            // and back up
+                scroll = settings_scroll_to(n, sel, G[g].item_h, G[g].gap, G[g].band_h, scroll);
+                CHECK(fully_visible(n, sel, G[g].item_h, G[g].gap, G[g].band_h, scroll));
+            }
+            for (int from = 0; from < n; from++) {              // any jump from any position
+                const int s0 = settings_scroll_to(n, from, G[g].item_h, G[g].gap, G[g].band_h, 0);
+                for (int sel = 0; sel < n; sel++)
+                    CHECK(fully_visible(n, sel, G[g].item_h, G[g].gap, G[g].band_h,
+                                        settings_scroll_to(n, sel, G[g].item_h, G[g].gap, G[g].band_h, s0)));
+            }
+            // An item already on screen does not move the list.
+            const int s1 = settings_scroll_to(n, 0, G[g].item_h, G[g].gap, G[g].band_h, 0);
+            CHECK(settings_scroll_to(n, 0, G[g].item_h, G[g].gap, G[g].band_h, s1) == s1);
         }
-        // Minimal movement: a row already on screen does not move the list.
-        scroll = settings_scroll_for(items, n_items, 1, q->band_h, 0, total);
-        CHECK(settings_scroll_for(items, n_items, 1, q->band_h, scroll, total) == scroll);
     }
-    // When everything fits, nothing scrolls.
-    {
-        settings_item items[SETTINGS_MAX_ITEMS];
-        int total = 0;
-        const int n_items = settings_layout(items, SETTINGS_MAX_ITEMS, 34, 56, 66, &total);
-        CHECK(settings_scroll_for(items, n_items, settings_count() - 1, total + 100, 0, total) == 0);
-    }
-    // A row that is not in the list leaves the scroll where it was.
-    {
-        settings_item items[SETTINGS_MAX_ITEMS];
-        int total = 0;
-        const int n_items = settings_layout(items, SETTINGS_MAX_ITEMS, 34, 56, 66, &total);
-        CHECK(settings_scroll_for(items, n_items, 999, 330, 40, total) == 40);
-    }
+    // Everything fits: nothing scrolls, whatever was asked.
+    CHECK(settings_scroll_to(6, 5, 64, 8, 6 * 64 + 5 * 8, 40) == 0);
+    CHECK(settings_scroll_to(3, 2, 64, 8, 1000, 0) == 0);
+    // Nothing to select: the scroll stays.
+    CHECK(settings_scroll_to(0, 0, 64, 8, 300, 17) == 17);
+    CHECK(settings_scroll_to(6, 9, 64, 8, 300, 17) == 17);
+    CHECK(settings_scroll_to(6, -1, 64, 8, 300, 17) == 17);
 }
 
 int main(void) {
     rows();
     sections();
-    layout();
+    categories();
+    scrolling();
     printf("settings model (stats %s): %d checks, %d failed\n",
            ENABLE_PLAYER_STATS ? "in" : "out", s_checks, s_failed);
     return s_failed ? 1 : 0;

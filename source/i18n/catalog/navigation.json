@@ -4,8 +4,6 @@
   "Confirm": {"ja": "決定", "pt-BR": "Confirmar", "de": "Bestätigen", "fr": "Confirmer", "es": "Confirmar"},
   "Cancel": {"ja": "キャンセル", "pt-BR": "Cancelar", "de": "Abbrechen", "fr": "Annuler", "es": "Cancelar"},
   "Select": {"ja": "選択", "pt-BR": "Selecionar", "de": "Auswählen", "fr": "Sélectionner", "es": "Seleccionar"},
-  "About": {"ja": "説明", "pt-BR": "Sobre", "de": "Info", "fr": "À propos", "es": "Acerca de"},
-  "Section": {"ja": "セクション", "pt-BR": "Seção", "de": "Bereich", "fr": "Section", "es": "Sección"},
   "Details": {"ja": "詳細", "pt-BR": "Detalhes", "de": "Details", "fr": "Détails", "es": "Detalles"},
   "Delete": {"ja": "削除", "pt-BR": "Excluir", "de": "Löschen", "fr": "Supprimer", "es": "Eliminar"},
   "Back": {"ja": "戻る", "pt-BR": "Voltar", "de": "Zurück", "fr": "Retour", "es": "Atrás"},

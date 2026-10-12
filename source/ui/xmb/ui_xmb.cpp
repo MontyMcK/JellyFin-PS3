@@ -35,6 +35,8 @@ static void xmb_reset_state(void) {
     g_jumpbar_active = false;
     g_jumpbar_sel    = 1;
     g_settings_sel     = 0;
+    g_settings_cat     = -1;
+    g_settings_catsel  = 0;
     g_settings_confirm = false;
     memset(g_search_buf, 0, sizeof(g_search_buf));
     g_search_results_count = 0;
@@ -463,10 +465,15 @@ static void xmb_draw_hints(int tab) {
             static const Hint h[] = {{'X',TRN("Confirm")},{'C',TRN("Cancel")}};
             draw_hints_vis(h, 2);
         } else {
-            // L2 and R2 pair into one "Section" hint (an empty label pairs a
-            // hint with the next).
-            static const Hint h[] = {{'X',TRN("Select")},{'T',TRN("About")},{'L',""},{'R',TRN("Section")}};
-            draw_hints_vis(h, 4);
+            if (g_settings_cat < 0) {
+                static const Hint h[] = {{'X',TRN("Open")},{'C',TRN("Back")}};
+                draw_hints_vis(h, g_spine_on ? 2 : 1);
+            } else {
+                // L2 and R2 pair into one "Category" hint (an empty label pairs a
+                // hint with the next).
+                static const Hint h[] = {{'X',TRN("Select")},{'C',TRN("Back")},{'L',""},{'R',TRN("Category")}};
+                draw_hints_vis(h, 4);
+            }
         }
     } else if (tab == XMB_TAB_SEARCH) {
         if (g_search_focus_results) {

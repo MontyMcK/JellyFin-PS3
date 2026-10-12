@@ -9,9 +9,9 @@ extern const int i18n_n;
 extern const char *const i18n_keys[];
 extern const char *const *const i18n_text[LANG__COUNT];
 
-const int i18n_n = 509;
+const int i18n_n = 507;
 
-const char *const i18n_keys[509] = {
+const char *const i18n_keys[507] = {
     "  %s  %s free",
     "  (can't be decoded yet)",
     "%.40s video (can't play on PS3)",
@@ -46,7 +46,6 @@ const char *const i18n_keys[509] = {
     "A season is already being added to Downloads.",
     "A write failed: check the drive on a PC (chkdsk), then plug it in again",
     "AUDIO",
-    "About",
     "Account",
     "Added to Downloads (Settings \342\200\272 Downloads)",
     "Ahead",
@@ -350,7 +349,6 @@ const char *const i18n_keys[509] = {
     "Searching for \"%s\"...",
     "Searching: %.60s",
     "Seasons",
-    "Section",
     "Select",
     "Send Log to Server",
     "Send a Wake-on-LAN signal to the server PC (X). It is also sent when\nthe server can't be reached. The PC must allow wake-up in its BIOS.",
@@ -523,7 +521,7 @@ const char *const i18n_keys[509] = {
     "\342\200\271 back %ds",
 };
 
-static const char *const i18n_text_ja[509] = {
+static const char *const i18n_text_ja[507] = {
     "  %s  %s \347\251\272\343\201\215",
     "  \357\274\210\343\201\276\343\201\240\343\203\207\343\202\263\343\203\274\343\203\211\343\201\247\343\201\215\343\201\276\343\201\233\343\202\223\357\274\211",
     "%.40s \343\201\256\346\230\240\345\203\217\357\274\210PS3\343\201\247\343\201\257\345\206\215\347\224\237\343\201\247\343\201\215\343\201\276\343\201\233\343\202\223\357\274\211",
@@ -558,7 +556,6 @@ static const char *const i18n_text_ja[509] = {
     "\343\201\231\343\201\247\343\201\253\343\202\267\343\203\274\343\202\272\343\203\263\343\202\222\343\203\200\343\202\246\343\203\263\343\203\255\343\203\274\343\203\211\343\201\253\350\277\275\345\212\240\344\270\255\343\201\247\343\201\231\343\200\202",
     "\346\233\270\343\201\215\350\276\274\343\201\277\343\201\253\345\244\261\346\225\227\343\201\227\343\201\276\343\201\227\343\201\237: PC\343\201\247\343\203\211\343\203\251\343\202\244\343\203\226\343\202\222\347\242\272\350\252\215\357\274\210chkdsk\357\274\211\343\201\227\343\201\246\343\201\213\343\202\211\343\200\201\343\202\202\343\201\206\344\270\200\345\272\246\346\216\245\347\266\232\343\201\227\343\201\246\343\201\217\343\201\240\343\201\225\343\201\204",
     "\351\237\263\345\243\260",
-    "\350\252\254\346\230\216",
     "\343\202\242\343\202\253\343\202\246\343\203\263\343\203\210",
     "\343\203\200\343\202\246\343\203\263\343\203\255\343\203\274\343\203\211\343\201\253\350\277\275\345\212\240\343\201\227\343\201\276\343\201\227\343\201\237\357\274\210\350\250\255\345\256\232 \342\200\272 \343\203\200\343\202\246\343\203\263\343\203\255\343\203\274\343\203\211\357\274\211",
     "\351\200\262\343\202\200",
@@ -862,7 +859,6 @@ static const char *const i18n_text_ja[509] = {
     "\343\200\214%s\343\200\215\343\202\222\346\244\234\347\264\242\344\270\255...",
     "\346\244\234\347\264\242\344\270\255\357\274\232%.60s",
     "\343\202\267\343\203\274\343\202\272\343\203\263",
-    "\343\202\273\343\202\257\343\202\267\343\203\247\343\203\263",
     "\351\201\270\346\212\236",
     "\343\203\255\343\202\260\343\202\222\343\202\265\343\203\274\343\203\220\343\203\274\343\201\270\351\200\201\344\277\241",
     "\343\202\265\343\203\274\343\203\220\343\203\274PC\343\201\253Wake-on-LAN\344\277\241\345\217\267\343\202\222\351\200\201\343\202\212\343\201\276\343\201\231\357\274\210X\357\274\211\343\200\202\343\202\265\343\203\274\343\203\220\343\203\274\343\201\253\347\271\213\343\201\214\343\202\211\343\201\252\343\201\204\346\231\202\343\202\202\n\350\207\252\345\213\225\343\201\247\351\200\201\343\202\212\343\201\276\343\201\231\343\200\202PC\343\201\256BIOS\343\201\247\350\265\267\345\213\225\343\202\222\350\250\261\345\217\257\343\201\227\343\201\246\343\201\212\343\201\204\343\201\246\343\201\217\343\201\240\343\201\225\343\201\204\343\200\202",
@@ -1035,7 +1031,7 @@ static const char *const i18n_text_ja[509] = {
     "\342\200\271 %d\347\247\222\346\210\273\343\202\213",
 };
 
-static const char *const i18n_text_pt_BR[509] = {
+static const char *const i18n_text_pt_BR[507] = {
     "  %s  %s livres",
     "  (ainda n\303\243o pode ser decodificado)",
     "V\303\255deo %.40s (n\303\243o reproduz no PS3)",
@@ -1070,7 +1066,6 @@ static const char *const i18n_text_pt_BR[509] = {
     "Uma temporada j\303\241 est\303\241 sendo adicionada aos Downloads.",
     "Falha na grava\303\247\303\243o: verifique a unidade em um PC (chkdsk) e conecte-a novamente",
     "\303\201UDIO",
-    "Sobre",
     "Conta",
     "Adicionado aos Downloads (Configura\303\247\303\265es \342\200\272 Downloads)",
     "Avan\303\247ar",
@@ -1374,7 +1369,6 @@ static const char *const i18n_text_pt_BR[509] = {
     "Pesquisando \"%s\"...",
     "Pesquisando: %.60s",
     "Temporadas",
-    "Se\303\247\303\243o",
     "Selecionar",
     "Enviar log ao servidor",
     "Envia um sinal Wake-on-LAN ao PC servidor (X). Tamb\303\251m \303\251 enviado quando\no servidor n\303\243o responde. O PC precisa permitir isso na BIOS.",
@@ -1547,7 +1541,7 @@ static const char *const i18n_text_pt_BR[509] = {
     "\342\200\271 voltar %ds",
 };
 
-static const char *const i18n_text_de[509] = {
+static const char *const i18n_text_de[507] = {
     "  %s  %s frei",
     "  (kann noch nicht decodiert werden)",
     "%.40s-Video (auf der PS3 nicht abspielbar)",
@@ -1582,7 +1576,6 @@ static const char *const i18n_text_de[509] = {
     "Eine Staffel wird bereits zu den Downloads hinzugef\303\274gt.",
     "Schreiben fehlgeschlagen: Laufwerk am PC pr\303\274fen (chkdsk), dann wieder anschlie\303\237en",
     "AUDIO",
-    "Info",
     "Konto",
     "Zu den Downloads hinzugef\303\274gt (Einstellungen \342\200\272 Downloads)",
     "Vor",
@@ -1886,7 +1879,6 @@ static const char *const i18n_text_de[509] = {
     "Suche nach \342\200\236%s\342\200\234...",
     "Suche: %.60s",
     "Staffeln",
-    "Bereich",
     "Ausw\303\244hlen",
     "Protokoll an Server senden",
     "Sendet ein Wake-on-LAN-Signal an den Server-PC (X). Auch automatisch,\nwenn der Server nicht erreichbar ist. Das BIOS des PCs muss es erlauben.",
@@ -2059,7 +2051,7 @@ static const char *const i18n_text_de[509] = {
     "\342\200\271 %ds zur\303\274ck",
 };
 
-static const char *const i18n_text_fr[509] = {
+static const char *const i18n_text_fr[507] = {
     "  %s  %s libres",
     "  (ne peut pas encore \303\252tre d\303\251cod\303\251)",
     "Vid\303\251o %.40s (non lisible sur PS3)",
@@ -2094,7 +2086,6 @@ static const char *const i18n_text_fr[509] = {
     "Une saison est d\303\251j\303\240 en cours d'ajout aux t\303\251l\303\251chargements.",
     "\303\211chec d'\303\251criture : v\303\251rifiez le disque sur un PC (chkdsk), puis rebranchez-le",
     "AUDIO",
-    "\303\200 propos",
     "Compte",
     "Ajout\303\251 aux t\303\251l\303\251chargements (Param\303\250tres \342\200\272 T\303\251l\303\251chargements)",
     "Avancer",
@@ -2398,7 +2389,6 @@ static const char *const i18n_text_fr[509] = {
     "Recherche de \302\253 %s \302\273...",
     "Recherche : %.60s",
     "Saisons",
-    "Section",
     "S\303\251lectionner",
     "Envoyer le journal au serveur",
     "Envoie un signal Wake-on-LAN au PC serveur (X). Envoy\303\251 aussi quand le\nserveur est injoignable. Le BIOS du PC doit l'autoriser.",
@@ -2571,7 +2561,7 @@ static const char *const i18n_text_fr[509] = {
     "\342\200\271 reculer de %ds",
 };
 
-static const char *const i18n_text_es[509] = {
+static const char *const i18n_text_es[507] = {
     "  %s  %s libres",
     "  (a\303\272n no se puede decodificar)",
     "V\303\255deo %.40s (no se puede reproducir en la PS3)",
@@ -2606,7 +2596,6 @@ static const char *const i18n_text_es[509] = {
     "Ya se est\303\241 a\303\261adiendo una temporada a Descargas.",
     "Fall\303\263 una escritura: revisa la unidad en un PC (chkdsk) y vuelve a conectarla",
     "AUDIO",
-    "Acerca de",
     "Cuenta",
     "A\303\261adido a Descargas (Ajustes \342\200\272 Descargas)",
     "Adelante",
@@ -2910,7 +2899,6 @@ static const char *const i18n_text_es[509] = {
     "Buscando \302\253%s\302\273...",
     "Buscando: %.60s",
     "Temporadas",
-    "Secci\303\263n",
     "Seleccionar",
     "Enviar registro al servidor",
     "Env\303\255a una se\303\261al Wake-on-LAN al PC servidor (X). Tambi\303\251n se env\303\255a si el\nservidor no responde. El PC debe permitirlo en su BIOS.",

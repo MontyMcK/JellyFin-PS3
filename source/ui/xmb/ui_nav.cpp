@@ -14,6 +14,7 @@
 #include "settings_model.h"   // the Settings rows
 #include "dl_manager.h"       // dl_manager_ready(): the season sheet
 #include "ui_spine.h"        // each category remembers its focus
+#include "ui_sfx.h"          // the menu sounds
 #include "thumbnail_cache.h"
 #include "jellyfin_api.h"
 #include "player.h"
@@ -66,6 +67,7 @@ void xmb_switch_tab(int new_tab) {
     }
     if (new_tab == XMB_TAB_SETTINGS) {
         g_settings_sel = 0; g_settings_confirm = false;
+        g_settings_cat = -1; g_settings_catsel = 0;     // start on the list of categories
     }
     if (xmb_kind(new_tab) == TABKIND_LIVETV) xmb_livetv_on_enter();
     if (xmb_kind(new_tab) == TABKIND_LOCAL) xmb_media_on_enter();
@@ -232,26 +234,40 @@ static bool xmb_input_settings(void) {
         if (BTN_PRESSED(circle)) g_settings_confirm = false;
         return false;
     }
-    // Triangle: what the highlighted setting does.  The panel follows the
-    // selection while it is up; Triangle again or O closes it (O does nothing
-    // else while it is open).
-    if (BTN_PRESSED(triangle)) {
-        // Spine: the row turns over like a poster's quick-peek.  Without the
-        // spine (no peek layer) the old in-place panel.
-        if (g_spine_on) { g_settings_help = false; settings_open_help_peek(); }
-        else            g_settings_help = !g_settings_help;
+    if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
+    if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
+
+    const int ncat = settings_category_count();
+    if (g_settings_cat < 0) {
+        // The categories.  X (or Right) opens one.
+        if (BTN_REPEAT(up)   && g_settings_catsel > 0)        { g_settings_catsel--; ui_sfx_play(SFX_CURSOR); }
+        if (BTN_REPEAT(down) && g_settings_catsel < ncat - 1) { g_settings_catsel++; ui_sfx_play(SFX_CURSOR); }
+        if (BTN_PRESSED(cross) || BTN_PRESSED(right)) {
+            const setting_section sec = settings_category_at(g_settings_catsel);
+            g_settings_cat = (int)sec;
+            g_settings_sel = settings_category_row(sec, 0);
+            ui_sfx_play(SFX_DECIDE);
+        }
         return false;
     }
-    if (g_settings_help && BTN_PRESSED(circle)) { g_settings_help = false; return false; }
-    if (BTN_PRESSED(l1)) { g_settings_help = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
-    if (BTN_PRESSED(r1)) { g_settings_help = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
-    const int n_rows = settings_count();
-    if (BTN_REPEAT(up)   && g_settings_sel > 0)          g_settings_sel--;
-    if (BTN_REPEAT(down) && g_settings_sel < n_rows - 1) g_settings_sel++;
-    // L2 / R2: the first row of the previous / next section.
+
+    // Inside a category: its settings.  O goes back to the list.
+    const setting_section sec = (setting_section)g_settings_cat;
+    const int nrows = settings_category_row_count(sec);
+    int k = settings_row_in_category(g_settings_sel);
+    if (BTN_PRESSED(circle)) { g_settings_cat = -1; ui_sfx_play(SFX_CANCEL); return false; }
+    if (BTN_REPEAT(up)   && k > 0)         { g_settings_sel = settings_category_row(sec, k - 1); ui_sfx_play(SFX_CURSOR); }
+    if (BTN_REPEAT(down) && k < nrows - 1) { g_settings_sel = settings_category_row(sec, k + 1); ui_sfx_play(SFX_CURSOR); }
+    // L2 / R2: the previous / next category, without going back to the list.
     if (BTN_PRESSED(l2) || BTN_PRESSED(r2)) {
-        const int to = settings_section_jump(g_settings_sel, BTN_PRESSED(r2) ? +1 : -1);
-        if (to >= 0) g_settings_sel = to;
+        const int ci = settings_category_index(sec) + (BTN_PRESSED(r2) ? 1 : -1);
+        if (ci >= 0 && ci < ncat) {
+            const setting_section to = settings_category_at(ci);
+            g_settings_catsel = ci;
+            g_settings_cat    = (int)to;
+            g_settings_sel    = settings_category_row(to, 0);
+            ui_sfx_play(SFX_CURSOR);
+        }
     }
     // X: activate / next value.  Left / Right: previous / next value on value
     // rows (toggles flip either way, action rows ignore them).

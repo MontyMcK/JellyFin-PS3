@@ -297,7 +297,8 @@ bool spine_try_back(int tab) {
         break;
     case TABKIND_SETTINGS:
         if (g_settings_confirm || g_overscan_calib) return false;
-        leave = back || (up && g_settings_sel == 0);
+        if (g_settings_cat >= 0) return false;          // inside a category: O goes back to the list
+        leave = back || (up && g_settings_catsel == 0);
         break;
     case TABKIND_HOME:
         leave = back || (up && xmb_home_at_top());

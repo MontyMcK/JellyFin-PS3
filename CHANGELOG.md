@@ -104,9 +104,13 @@
   or ahead.
 - **Player stats from the pad.** Click either stick in the player to show or
   hide the stats overlay.
-- **Settings has sections** — Playback, Audio, Subtitles, Downloads, Display and
-  System. `L2`/`R2` jump between sections, and `←`/`→` change a value in either
-  direction (`X` still steps forward).
+- **A new Settings screen**, laid out like the PS3's own. It opens on a list of six
+  categories, each with an icon of its own and a line saying what is inside:
+  Playback, Audio, Subtitles, Downloads, Display and System. `X` opens one and
+  shows just its settings, with what the highlighted one does written under the
+  list; `O` goes back, `L2`/`R2` move to the previous or next category, and
+  `←`/`→` change a value in either direction (`X` still steps forward). It
+  replaces the one long list.
 
 ### Fixes
 - Leaving a film part way and opening it again from its page started it over

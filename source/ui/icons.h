@@ -28,3 +28,10 @@
 #define ICON_PAUSE         0xED45   // player-pause
 #define ICON_SEEK_BACK     0xEA64   // chevrons-left
 #define ICON_SEEK_FWD      0xEA65   // chevrons-right
+
+// The Settings categories (ui/render/ui_settings.cpp): one glyph each, so no two
+// categories share an icon.  Playback uses ICON_PLAY, System ICON_SETTINGS.
+#define ICON_VOLUME        0xEB4F   // volume-2: Audio
+#define ICON_CAPTIONS      0xF55A   // badge-cc: Subtitles
+#define ICON_DOWNLOAD      0xEA96   // download: Downloads
+#define ICON_DESKTOP       0xEA89   // device-desktop: Display
