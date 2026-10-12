@@ -18,6 +18,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <net/poll.h>
+#include <unistd.h>
 #include <sysutil/sysutil.h>
 #include "lfs.h"        // local files: the internal disk and USB drives
 #include "local_probe.h" // local_m2ts_compact
@@ -217,6 +218,46 @@ bool stream_window_reopen_take(void) {
     return true;
 }
 
+// Receive pacing.  A capture on 2026-10-12 (pktmon on the server PC, gigabit
+// Ethernet) showed what the burst-and-silence pattern is: while the reader
+// pulls as fast as it can -- the pre-roll, or refilling an empty ring -- the
+// window stays wide open, the sender puts a full window on the wire at line
+// rate, a segment is lost, and the retransmission is lost too, so the sender
+// backs off 0.6, 1.2, 2.4, ~5 s.  It happened at 512, 128 and 48 KB windows.
+// The same connection never lost a segment once playback was the reader's
+// pace (ring full): the window sat near zero and every send was a small
+// step clocked by our reads.
+//
+// So the reader keeps that pace itself.  It never pulls faster than
+// s_pace_bps, in requests of at most PACE_CHUNK, which keeps the advertised
+// window small and the sender ACK-clocked.  The sleep happens OUTSIDE netRecv,
+// so rx_gap (which only counts time blocked in netRecv) does not mistake it
+// for a silent sender.  jellyfin_rxpace.txt (Mbps, 0 = off) overrides it.
+#define PACE_MBPS_DEF 40
+#define PACE_CHUNK    (64 * 1024)
+#define PACE_BURST    (128 * 1024)
+static u64 s_pace_bps   = 0;   // bytes per second, 0 = unpaced
+static u64 s_pace_t0    = 0;   // when this connection's budget started
+static u64 s_pace_bytes = 0;   // bytes received since s_pace_t0
+
+static void pace_reset(int mbps) {
+    s_pace_bps   = mbps > 0 ? (u64)mbps * 1000000ull / 8ull : 0;
+    s_pace_t0    = 0;
+    s_pace_bytes = 0;
+}
+
+// Sleep until the budget allows another read.
+static void pace_wait(void) {
+    if (!s_pace_bps) return;
+    const u64 now = timing_get_us();
+    if (!s_pace_t0) { s_pace_t0 = now; return; }
+    const u64 allowed = (now - s_pace_t0) * s_pace_bps / 1000000ull + PACE_BURST;
+    if (s_pace_bytes <= allowed) return;
+    u64 us = (s_pace_bytes - allowed) * 1000000ull / s_pace_bps;
+    if (us > 200000) us = 200000;
+    usleep((useconds_t)us);
+}
+
 static int sb_fill(int sock) {
     if (s_sb_p < s_sb_n) return s_sb_n - s_sb_p;
     s_sb_p = s_sb_n = 0;
@@ -248,8 +289,11 @@ static int sb_fill(int sock) {
         s_sb_n = got;
         return s_sb_n;
     }
+    pace_wait();
+    int req = s_sb_req ? s_sb_req : SB_SIZE;
+    if (s_pace_bps && req > PACE_CHUNK) req = PACE_CHUNK;
     u64 t0 = timing_get_us();
-    int n = netRecv(sock, s_sb, s_sb_req ? s_sb_req : SB_SIZE, 0);
+    int n = netRecv(sock, s_sb, req, 0);
     u64 dt = timing_get_us() - t0;
     s_rx_wait_us += dt;
     s_rx_calls++;
@@ -273,6 +317,7 @@ static int sb_fill(int sock) {
     gap_note(t0, t0 + dt, n > 0 ? n : 0);
     if (n <= 0) return n;
     s_rx_bytes += (u64)n;
+    s_pace_bytes += (u64)n;
     if (dt > 50000) {
         char lb[64];
         snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
@@ -395,6 +440,18 @@ int stream_open(const char *url) {
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
         s_sb_req = netcfg_kb("jellyfin_netbuf.txt", SB_SIZE / 1024,
                              SB_SIZE / 1024) * 1024;
+        {
+            // 0 in the file turns pacing off; absent = the default.
+            int mbps = PACE_MBPS_DEF;
+            FILE *pf = fopen(jf_data_path("jellyfin_rxpace.txt"), "r");
+            if (pf) {
+                int v = -1;
+                if (fscanf(pf, "%d", &v) == 1 && v >= 0) mbps = v > 1000 ? 1000 : v;
+                fclose(pf);
+            }
+            pace_reset(mbps);
+            lc_logf("stream: rx pacing %d Mbps (window %d KB)", mbps, s_win_kb);
+        }
     }
 
     struct sockaddr_in addr;
