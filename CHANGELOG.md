@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.2.1
+
+### Fixed
+- **4:3 TVs: overlapping text on the details screen.** The Resume, Mark as
+  watched and Favourite buttons and the Quality / Offline selectors now size to
+  their text instead of printing over each other.
+
+### New
+- **Picture size hint in the player.** The hints bar now shows `L1` for
+  picture size on films and episodes.
+
 ## 3.2
 
 The biggest update yet: **Live TV, downloads, playing straight from USB drives,

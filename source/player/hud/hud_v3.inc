@@ -400,7 +400,7 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
 
     // ---- hints: what X does, then Tracks / Stop / Hide ----
     {
-        Hint h[6]; int n = 0;
+        Hint h[7]; int n = 0;
         h[n].glyph = 'X';
         h[n].label = g_hud.focus == FOCUS_REW    ? TRN("Back")
                    : g_hud.focus == FOCUS_FF     ? TRN("Ahead")
@@ -416,6 +416,7 @@ static void hud_body_v3(u64 elapsed_us, bool paused, bool scrubbing) {
             h[n].glyph = 'L'; h[n].label = "";       n++;   // L2 R2: one cluster
             h[n].glyph = 'R'; h[n].label = TRN("Rewind / Fast Forward"); n++;
         }
+        if (!g_hud.live) { h[n].glyph = 'l'; h[n].label = TRN("Picture size"); n++; }
         h[n].glyph = 'T'; h[n].label = TRN("Tracks"); n++;
         h[n].glyph = 'C'; h[n].label = TRN("Stop");   n++;
         h[n].glyph = 'S'; h[n].label = TRN("Hide");   n++;

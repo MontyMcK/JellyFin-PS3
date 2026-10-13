@@ -730,6 +730,18 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         // the cast), and every button is see-through so the wave moves behind
         // it.  The director line and the cast moved up into its old place.
         const int AY = IY(562), AH = UIS_H(44), AR = UIS_H(4), AG = UIS_W(12);
+        // Label text for an action button.  Shared by the layout (which sizes
+        // the box from it) and the draw below, so the two cannot disagree: a
+        // fixed box width overflowed on 4:3, where text scales but the box doesn't.
+        auto action_label = [&](int id, char *lab, size_t n) {
+            if (id == F3_RESUME) {
+                const u32 s = xmb_resume_for(it->id, it->resume_secs);
+                snprintf(lab, n, TR("Resume %u:%02u:%02u"), s / 3600u, (s / 60u) % 60u, s % 60u);
+            } else if (id == F3_PLAY)    snprintf(lab, n, TR("Play"));
+            else if (id == F3_START)     snprintf(lab, n, TR("Play from start"));
+            else if (id == F3_FAVOURITE) snprintf(lab, n, favourite ? TR("Favourited") : TR("Favourite"));
+            else                         snprintf(lab, n, watched ? TR("Watched") : TR("Mark as watched"));
+        };
         int ax[4], aww[4];
         {
             int x = TX;
@@ -737,6 +749,14 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
                 const int id = row0[i];
                 aww[i] = UIS_W(id == F3_RESUME ? 200 : id == F3_PLAY ? 150
                              : id == F3_START ? 150 : 168);
+                {
+                    char lab[40]; action_label(id, lab, sizeof lab);
+                    const bool pr = (id == F3_RESUME || id == F3_PLAY);
+                    // glyph gutter (cross: label at 52; star: 26) + label + right pad
+                    const int need = ttf_text_width(lab, UIS_TF(15.0f), pr)
+                                   + (pr ? UIS_W(52 + 20) : id == F3_FAVOURITE ? UIS_W(26 + 40) : UIS_W(40));
+                    if (need > aww[i]) aww[i] = need;
+                }
                 ax[i] = x;
                 x += aww[i] + AG;
                 const bool primary = (id == F3_RESUME || id == F3_PLAY);
@@ -772,12 +792,45 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         }
 
         // Selectors (y=634, h=34, r=4).
+        auto sel_name = [&](int id) -> const char * {
+            return id == F3_VERSION ? TR("Version") : id == F3_DOWNLOAD ? TR("Offline") : TR("Quality");
+        };
+        auto sel_value = [&](int id, char *val, size_t n) {
+            if (id == F3_DOWNLOAD) {
+                // The live state: "Download", "Downloading 42%", "Play offline"...
+                dl_ui_item_label(dl_have ? &dl_st : NULL, can_download, &dl_cx, val, n);
+            } else if (id == F3_VERSION) {
+                snprintf(val, n, "%s", versions.source[version_sel].summary[0]
+                                          ? versions.source[version_sel].summary
+                                          : versions.source[version_sel].label);
+            } else {
+                u32 qw = 0, qh = 0; unsigned qbr = 0;
+                const vquality_t vq = vquality_get();
+                vquality_params(vq, hd1080_enabled(), display_width, display_height,
+                                &qw, &qh, NULL, NULL, &qbr);
+                if (qbr == 0) snprintf(val, n, TR("Original \xC2\xB7 direct play"));
+                else          snprintf(val, n, "%s \xC2\xB7 %u Mbps",
+                                       tr(vquality_label(vq)), qbr / 1000000u);
+            }
+        };
         const int SY = IY(634), SH = UIS_H(34);
         int sx_[3], sw_[3];
         {
             int x = TX;
             for (int i = 0; i < n1; i++) {
                 sw_[i] = UIS_W(row1[i] == F3_VERSION ? 172 : 216);   // Quality and Download
+                {
+                    // Grow to fit "<name>  <value>" -- the name's width, not a fixed
+                    // 66 px offset, decides where the value starts (see sel_vx below).
+                    char val[64];
+                    sel_value(row1[i], val, sizeof val);
+                    const int nw = ttf_text_width(sel_name(row1[i]), UIS_TF(12.0f), false);
+                    const int vw2 = ttf_text_width(val, UIS_TF(12.5f), true);
+                    const int need = UIS_W(15) + nw + UIS_W(12) + vw2
+                                   + (row1[i] == F3_DOWNLOAD ? UIS_W(14) : UIS_W(28));
+                    if (need > sw_[i]) sw_[i] = need;
+                    if (sw_[i] > UIS_W(330)) sw_[i] = UIS_W(330);
+                }
                 sx_[i] = x;
                 x += sw_[i] + UIS_W(12);
                 wave_draw_rrect_outline_gpu(sx_[i], SY, sw_[i], SH, AR, 1,
@@ -904,14 +957,7 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         for (int i = 0; i < n0; i++) {
             const int id = row0[i];
             char lab[40];
-            if (id == F3_RESUME) {
-                const u32 s = xmb_resume_for(it->id, it->resume_secs);
-                snprintf(lab, sizeof lab, TR("Resume %u:%02u:%02u"),
-                         s / 3600u, (s / 60u) % 60u, s % 60u);
-            } else if (id == F3_PLAY)    snprintf(lab, sizeof lab, TR("Play"));
-            else if (id == F3_START)     snprintf(lab, sizeof lab, TR("Play from start"));
-            else if (id == F3_FAVOURITE) snprintf(lab, sizeof lab, favourite ? TR("Favourited") : TR("Favourite"));
-            else                         snprintf(lab, sizeof lab, watched ? TR("Watched") : TR("Mark as watched"));
+            action_label(id, lab, sizeof lab);
             const bool primary = (id == F3_RESUME || id == F3_PLAY);
             const float bpx = UIS_TF(15.0f);
             const int lw = ttf_text_width(lab, bpx, primary);
@@ -966,32 +1012,16 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         // Selector labels.
         for (int i = 0; i < n1; i++) {
             const int y = SY + (SH - (int)UIS_TF(12.0f)) / 2 - UIS_H(1);
-            const char *name = row1[i] == F3_VERSION ? TR("Version")
-                             : row1[i] == F3_DOWNLOAD ? TR("Offline") : TR("Quality");
+            const char *name = sel_name(row1[i]);
             drawTTF((u32)(sx_[i] + UIS_W(15)), (u32)y, name, UIS_TF(12.0f), XMB_TEXT_DIM);
             char val[64];
+            sel_value(row1[i], val, sizeof val);
+            const int vx = sx_[i] + UIS_W(15) + ttf_text_width(name, UIS_TF(12.0f), false) + UIS_W(12);
             if (row1[i] == F3_DOWNLOAD) {
-                // The live state: "Download", "Downloading 42%", "Play offline"...
-                dl_ui_item_label(dl_have ? &dl_st : NULL, can_download, &dl_cx, val, sizeof val);
-                const int vx = sx_[i] + UIS_W(66);
                 info_clip_text(vx, y, val, UIS_TF(12.5f), XMB_TEXT,
                                sx_[i] + sw_[i] - vx - UIS_W(14), true);
                 continue;                       // not a drop-down: no arrow
             }
-            if (row1[i] == F3_VERSION) {
-                snprintf(val, sizeof val, "%s", versions.source[version_sel].summary[0]
-                                                  ? versions.source[version_sel].summary
-                                                  : versions.source[version_sel].label);
-            } else {
-                u32 qw = 0, qh = 0; unsigned qbr = 0;
-                const vquality_t vq = vquality_get();
-                vquality_params(vq, hd1080_enabled(), display_width, display_height,
-                                &qw, &qh, NULL, NULL, &qbr);
-                if (qbr == 0) snprintf(val, sizeof val, TR("Original \xC2\xB7 direct play"));
-                else          snprintf(val, sizeof val, "%s \xC2\xB7 %u Mbps",
-                                       tr(vquality_label(vq)), qbr / 1000000u);
-            }
-            const int vx = sx_[i] + UIS_W(row1[i] == F3_VERSION ? 70 : 66);
             info_clip_text(vx, y, val, UIS_TF(12.5f), XMB_TEXT,
                            sx_[i] + sw_[i] - vx - UIS_W(24), true);
             drawTTF((u32)(sx_[i] + sw_[i] - UIS_W(18)), (u32)(y + UIS_H(1)),
