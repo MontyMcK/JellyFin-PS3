@@ -901,8 +901,84 @@ void show_player_run(const JFItem *item, u32 resume_secs,
     plog("show_player: audio_open done");
     crash_log("p5 audio_open OK");
 
+    player_startup_step(item->name, TR("Connecting"), TR("Connecting to stream..."));
 
-    ps.sock = -1;          // connected below, once the heavy set-up is done
+    crash_log("p6 stream_open begin");
+    plog("show_player: stream_open");
+    s_wait_title = item->name;
+    stream_set_wait_cb(player_stream_wait);
+    if (live) stream_set_header_deadline(20);
+    // The audio track and the time origin of a local file belong to its session,
+    // whatever the last one left; player_local_open sets them for a file.
+    video_set_audio_pid(0);
+    video_set_pts_origin_us(0);
+    adec_set_pts_origin_us(0);
+    ps.sock = local ? (player_local_open(&ps, (u64)resume_secs * 1000000ULL) ? ps.sock : -1)
+                    : stream_open(url);
+    // The server can lose a channel it opened moments ago and answer the
+    // stream with HTTP 500 (Jellyfin 10.11: "live stream not found").
+    // Open the channel again, once, before giving up.
+    if (live && ps.sock < 0 && strstr(stream_last_error(), "HTTP 5")) {
+        plog("live: stream refused -- reopening the channel once");
+        usleep(1000 * 1000);
+        http_set_first_byte_secs(60);
+        const bool reopened = jellyfin_get_playback_info(item->id, media_source_id, ps.session_id,
+                                                         sizeof(ps.session_id), &ps.total_secs,
+                                                         NULL, &ps.source, true);
+        http_set_first_byte_secs(0);
+        if (reopened && ps.source.id[0]) {
+            ps.total_secs = ps.source.runtime_secs = 0;
+            build_stream_url(url, sizeof(url), &ps, 0);
+            plog_url("url", url);
+            stream_set_header_deadline(20);
+            ps.sock = stream_open(url);
+        }
+    }
+    // Connect twice.  2026-10-12/13: the FIRST connection of every start
+    // stalled -- bursts, then seconds of nothing from the console -- and
+    // every reopened one (a seek, the stall recovery) ran 25-33 Mbps clean,
+    // whatever the window or the 24 Hz setting.  So start-up does what a
+    // seek does, before the picture is up: drop the connection, stop its
+    // transcode (the same id: that job must die first), give the debrid
+    // source a moment to let go (see player_seek.cpp), and open again at
+    // the same position.  Costs about a second behind "Connecting".
+    if (!live && !local && ps.sock >= 0) {
+        plog("show_player: reconnecting once (first connection stalls; a reopened one does not)");
+        stream_close(ps.sock);
+        ps.sock = -1;
+        if (ps.session_id[0]) jellyfin_stop_transcode(ps.session_id);
+        usleep(600000);
+        ps.sock = stream_open(url);
+        if (ps.sock < 0 && !strstr(stream_last_error(), "Cancelled")) {
+            usleep(1000000);
+            ps.sock = stream_open(url);
+        }
+        plog(ps.sock >= 0 ? "show_player: reconnect OK" : "show_player: reconnect FAILED");
+    }
+    stream_set_wait_cb(NULL);
+    if (ps.sock < 0) {
+        plog("show_player: stream_open FAILED");
+        player_startup_abort();
+        adec_stop();
+        audio_close();
+        vdec_close();
+        thumb_cache_init();
+        if (live) {
+            // Circle during the wait is an answer, not a fault.
+            if (!strstr(stream_last_error(), "Cancelled"))
+                show_error(stream_last_error_ui(), TR("Live TV"));
+            live_abort();
+        } else {
+            show_error(stream_last_error_ui(), url);
+        }
+        ui_restore_rsx_state();
+        return;
+    }
+    plog("show_player: stream_open OK");
+    lc_logf("stream CONNECTED sock=%d", ps.sock);
+    crash_log("p7 stream_open OK");
+
+    player_startup_step(item->name, TR("Buffering"), TR("Streaming... START=stop"));
 
     video_reset();
     display_diag_reset();   // this session's frame rate, not the last one's
@@ -971,74 +1047,6 @@ void show_player_run(const JFItem *item, u32 resume_secs,
         thumb_cache_init();
         return;
     }
-
-    // ---- Connect, last ----
-    // The connection opens only after the jitter buffer, the read-ahead ring
-    // and the GPU surfaces exist, the way a seek reopens into a player that is
-    // already set up.  2026-10-12/13: a connection opened BEFORE that ~40 MB of
-    // allocation and decoder/GPU set-up went quiet from the console's side for
-    // seconds at a time for its whole life (pktmon: acks stamped ~2-10 s before
-    // they left), while every connection a seek opened ran 25-33 Mbps clean.
-    player_startup_step(item->name, TR("Connecting"), TR("Connecting to stream..."));
-
-    crash_log("p6 stream_open begin");
-    plog("show_player: stream_open");
-    s_wait_title = item->name;
-    stream_set_wait_cb(player_stream_wait);
-    if (live) stream_set_header_deadline(20);
-    // The audio track and the time origin of a local file belong to its session,
-    // whatever the last one left; player_local_open sets them for a file.
-    video_set_audio_pid(0);
-    video_set_pts_origin_us(0);
-    adec_set_pts_origin_us(0);
-    ps.sock = local ? (player_local_open(&ps, (u64)resume_secs * 1000000ULL) ? ps.sock : -1)
-                    : stream_open(url);
-    // The server can lose a channel it opened moments ago and answer the
-    // stream with HTTP 500 (Jellyfin 10.11: "live stream not found").
-    // Open the channel again, once, before giving up.
-    if (live && ps.sock < 0 && strstr(stream_last_error(), "HTTP 5")) {
-        plog("live: stream refused -- reopening the channel once");
-        usleep(1000 * 1000);
-        http_set_first_byte_secs(60);
-        const bool reopened = jellyfin_get_playback_info(item->id, media_source_id, ps.session_id,
-                                                         sizeof(ps.session_id), &ps.total_secs,
-                                                         NULL, &ps.source, true);
-        http_set_first_byte_secs(0);
-        if (reopened && ps.source.id[0]) {
-            ps.total_secs = ps.source.runtime_secs = 0;
-            build_stream_url(url, sizeof(url), &ps, 0);
-            plog_url("url", url);
-            stream_set_header_deadline(20);
-            ps.sock = stream_open(url);
-        }
-    }
-    stream_set_wait_cb(NULL);
-    if (ps.sock < 0) {
-        plog("show_player: stream_open FAILED");
-        player_startup_abort();
-        vid_gpu_free();
-        decode_ring_free();
-        jbuf_free();
-        adec_stop();
-        audio_close();
-        vdec_close();
-        thumb_cache_init();
-        if (live) {
-            // Circle during the wait is an answer, not a fault.
-            if (!strstr(stream_last_error(), "Cancelled"))
-                show_error(stream_last_error_ui(), TR("Live TV"));
-            live_abort();
-        } else {
-            show_error(stream_last_error_ui(), url);
-        }
-        ui_restore_rsx_state();
-        return;
-    }
-    plog("show_player: stream_open OK");
-    lc_logf("stream CONNECTED sock=%d", ps.sock);
-    crash_log("p7 stream_open OK");
-
-    player_startup_step(item->name, TR("Buffering"), TR("Streaming... START=stop"));
 
     // 5 ms socket receive timeout keeps the network thread responsive
     // A local file never waits, so there is nothing to set for one.
