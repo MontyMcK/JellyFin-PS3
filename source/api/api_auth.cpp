@@ -134,7 +134,7 @@ static void trim(char *s) {
 // Quick Connect: the console shows a six-digit code, the user approves it from
 // a signed-in Jellyfin app (Settings > Quick Connect), and the server hands
 // back a token — no password typed with a gamepad.  Returns 1 signed in,
-// 0 cancelled or failed, -1 when the server has Quick Connect switched off
+// 0 cancelled, -1 when Quick Connect is off, expired or refused
 // (the caller falls back to the password prompt).
 static int quick_connect_login(void) {
     char url[512], body[160], secret[96] = "", code[16] = "";
@@ -173,7 +173,7 @@ static int quick_connect_login(void) {
         last_poll = now;
         snprintf(url, sizeof url, "%s/QuickConnect/Connect?secret=%s", g_server, secret);
         st = http_probe_get(url, NULL, responseBuffer, RESPONSE_SIZE);
-        if (st == 404 || st == 401) return 0;     // code expired or revoked
+        if (st == 404 || st == 401) return -1;    // code expired or revoked: use the password prompt
         if (st == 200 && strstr(responseBuffer, "\"Authenticated\":true")) approved = true;
     }
     if (!approved) return 0;
@@ -187,7 +187,7 @@ static int quick_connect_login(void) {
         json_get_string(responseBuffer, "Name",        g_username, sizeof(g_username));
         if (g_token[0]) { save_config(); return 1; }
     }
-    return 0;
+    return -1;   // rejected: the password prompt is the way in
 }
 
 int do_login(void) {
