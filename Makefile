@@ -5,7 +5,9 @@ $(error "Please set PSL1GHT in your environment. export PSL1GHT=<path>")
 endif
 
 ICON0       := $(CURDIR)/ICON0.PNG
-SFOXML      := $(PS3DEV)/bin/sfo.xml
+# sfo.xml: the stock template plus ITEM_PRIORITY (pins the app to the top of
+# the Game column, as ManaGunZ does) and the APP_VER the XMB shows.
+SFOXML      := $(CURDIR)/sfo.xml
 
 include $(PSL1GHT)/ppu_rules
 

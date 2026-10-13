@@ -50,10 +50,10 @@ Defaults are safe but conservative. For a Blu-ray remux on a wired console:
 
 | Setting | Where | Set it to |
 |---|---|---|
-| **1080p Playback** | Settings → 1080p Playback | **On** |
+| **1080p Playback** | Settings → Playback → 1080p Playback | **On** |
 | **Quality** | `X` on a title → Quality (details page) | **Max** |
-| **Audio Output** | Settings → Audio Output | **5.1** |
-| **24Hz Output** | Settings → 24Hz Output | **Auto** (the default) |
+| **Audio Output** | Settings → Audio → Audio Output | **5.1** |
+| **24Hz Output** | Settings → Playback → 24Hz Output | **Auto** (the default) |
 
 **Audio Output** is Stereo / 5.1 / 7.1 / Dolby Digital, and 7.1 appears only
 where the chain reports that it takes eight channels of LPCM — the app queries
@@ -168,7 +168,7 @@ All taken on a real PS3 at 1920×1080. More in the
 - **Hardware H.264 through the PS3's VDEC**, up to **1080p at 25 Mbps**.
 - **True 24 Hz output.** 23.976 and 24 fps films switch the HDMI output to
   match, one frame per refresh, so there is no 3:2 pulldown judder. Each TV is
-  checked once first. Settings → 24Hz Output.
+  checked once first. Settings → Playback → 24Hz Output.
 - **Lossless HD audio**: TrueHD / Atmos and DTS-HD MA, decoded on the console
   (see [Surround sound](#surround-sound)).
 - **Subtitles rendered by the console** (PGS and text) in 3 fonts and 3 colours,
@@ -195,7 +195,7 @@ All taken on a real PS3 at 1920×1080. More in the
   keyboards, and keyboard media keys.
 - **Jellyfin 10.11 and 12** servers.
 - **An update check at launch** that pops up quietly when a newer release is out,
-  and a **Settings → Software Update** row that shows the result and checks again.
+  and a **Settings → System → Software Update** row that shows the result and checks again.
   See [`CHANGELOG.md`](CHANGELOG.md) for what changed in each release.
 
 ---
@@ -222,7 +222,7 @@ listener to decide, and it is on whenever 5.1 is. **Nothing is compressed to
 achieve it** — the audio on the wire stays uncompressed LPCM, verified by
 reading the output's actual state rather than the value that was requested.
 
-**Dialogue still too quiet?** **Settings → Dialogue Boost** (Off / +3 / +6 /
+**Dialogue still too quiet?** **Settings → Audio → Dialogue Boost** (Off / +3 / +6 /
 +10 dB). None of these decoders applies dynamic range compression, so a film
 mix's full cinema range can leave dialogue well below effects on a compact
 system. It is a level control, not a routing one.
@@ -300,6 +300,17 @@ Then either:
 
 Installing over an existing copy is fine — your login and settings live outside
 the app and are kept.
+
+**Signing in:** if your server has Quick Connect switched on (Dashboard →
+General), press `X` at the sign-in screen and the console shows a code; approve
+it in the Jellyfin app on your phone (Settings → Quick Connect). `□` still
+signs in with a username and password.
+
+**Server PC wired to the router and streaming through a debrid plugin?** If
+films buffer and stall over and over, your router may be choking on the
+server's internet download. See
+[Buffering on a wired server PC](CHANGELOG.md#buffering-on-a-wired-server-pc-check-your-router)
+and [`tools/ffwrap`](tools/ffwrap/README.md).
 
 ## Build from source
 
