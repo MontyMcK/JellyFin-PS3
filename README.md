@@ -626,7 +626,7 @@ JellyFin PS3 is free software licensed under the **GNU General Public License v3
 (or, at your option, any later version). The full text lives in the
 [LICENSE](LICENSE) file.
 
-Copyright (C) 2026 Montague McKeefry
+Copyright (C) 2026 vortigauntlet
 
 This program is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
