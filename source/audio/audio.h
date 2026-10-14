@@ -9,7 +9,25 @@ extern bool s_audio_ok;
 // audio_output_channels() for what was actually opened.
 void audio_open(int channels);
 bool audio_write_pcm(void);  // returns true if a DMA event was consumed
+// Video player pause / resume: silences the ring while paused and puts the
+// writer back at its old distance from the hardware on resume.  Call from
+// the thread that calls audio_write_pcm(), on each change of state.
+void audio_pause_output(bool paused);
+
+// Paced mode (the music player): audio_write_pcm() never waits for the
+// source.  Each wake tops the ring up to
+// a fixed runway ahead of the hardware's READ cursor -- PCM where the source
+// has a block, silence where it does not.  So a stall can never leave the
+// writer behind the hardware and then burn through queued events faster than
+// real time (the old path's "sped-up first second" and lost track openings).
+// Off by default; the video path is unchanged.
+void audio_set_paced(bool on);
 void audio_close(void);
+
+// Shared libaudio init: audioInit() on the first acquire, audioQuit() on the
+// last release.  audio_open/close and ui_sfx.cpp both go through these.
+int  audio_sys_acquire(void);   // 0 or the audioInit() error
+void audio_sys_release(void);
 
 // Widest program the port that is actually open can carry: 2 (stereo) or 8.
 // A 5.1 program uses six of those eight slots and the output stage zeroes the

@@ -30,6 +30,8 @@ bool track_label_is_dts(const char *label);
 // E-AC-3 / Dolby Digital Plus is deliberately NOT included: nothing here
 // decodes it, so those tracks must keep taking the AC-3 transcode path.
 bool track_label_is_truehd(const char *label);
+// Plain Dolby Digital (AC-3) -- NOT Dolby Digital Plus / E-AC-3.
+bool track_label_is_ac3(const char *label);
 
 // Either of the above: the track can be requested as a stream copy and
 // decoded locally.

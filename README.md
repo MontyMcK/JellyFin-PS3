@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="ICON0.PNG" alt="JellyFin PS3">
+  <img src="docs/brand/jellyfin-ps3-lockup.png" alt="Jellyfin PS3" width="560">
 
   # JellyFin PS3
 
@@ -21,7 +21,9 @@
 > ### This is the Lossless Audio fork
 >
 > A fork of [MontyMcK/JellyFin-PS3](https://github.com/MontyMcK/JellyFin-PS3)
-> that adds **lossless HD audio** and fixes 1080p playback.
+> that adds **lossless HD audio**, fixes 1080p playback, and (since 3.0) a whole
+> new **XMB-style interface**: depth navigation, full details pages, the
+> audio-reactive **JellyWave**, and **true 24 Hz output** for films.
 >
 > | | upstream | this fork |
 > |---|---|---|
@@ -48,15 +50,19 @@ Defaults are safe but conservative. For a Blu-ray remux on a wired console:
 
 | Setting | Where | Set it to |
 |---|---|---|
-| **Quality** | Triangle on a title → Quality row | **Max** |
-| **Audio Output** | Settings → Audio Output | **5.1** |
+| **1080p Playback** | Settings → Playback → 1080p Playback | **On** |
+| **Quality** | `X` on a title → Quality (details page) | **Max** |
+| **Audio Output** | Settings → Audio → Audio Output | **5.1** |
+| **24Hz Output** | Settings → Playback → 24Hz Output | **Auto** (the default) |
 
-**Audio Output** is Stereo / 5.1 / 7.1, and 7.1 appears only where the chain
-reports that it takes eight channels of LPCM — the app queries the connected
-display rather than assuming. A surround mode asks the server to stream-copy
-the source's own HD audio track and decodes it here; when a source has no HD
-track it falls back to an AC-3 5.1 transcode automatically, which is why there
-is no separate AC-3 option to pick.
+**Audio Output** is Stereo / 5.1 / 7.1 / Dolby Digital, and 7.1 appears only
+where the chain reports that it takes eight channels of LPCM — the app queries
+the connected display rather than assuming. A surround mode asks the server to
+stream-copy the source's own HD audio track and decodes it here; when a source
+has no HD track it falls back to an AC-3 5.1 transcode automatically.
+**Dolby Digital** is for a soundbar on an ARC link (see
+[Surround sound](#surround-sound)): it sends Dolby Digital to the soundbar
+instead of decoding here.
 
 On 5.1 the app also applies a **routing fix**, because the cellAudio port is 8
 channels wide while the HDMI output is 6, so the console folds 8→6 on the way
@@ -104,62 +110,122 @@ If playback stutters, drop to **Very High** before anything else.
 
 ## Screenshots
 
-<div align="center">
+All taken on a real PS3 at 1920×1080. More in the
+[v3.1 release notes](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/tag/v3.1).
 
-**Home**
-
-<img src="docs/screenshots/home.png" alt="Home screen with Continue Watching, Next Up and Recently Added rows" width="80%">
-
-**Movies**
-
-<img src="docs/screenshots/movies.png" alt="Movies library as a poster grid with an A-Z jump bar" width="80%">
-
-**Now Playing (Music)**
-
-<img src="docs/screenshots/music.png" alt="Now Playing music screen with album art and a real-time spectrum visualizer" width="80%">
-
-</div>
+<table>
+<tr><td width="50%" align="center"><img src="docs/screenshots/3.1/01-home-next-up.png" alt="Home: one category at a time, over JellyWave"><br><sub>Home: one category at a time, over JellyWave</sub></td><td width="50%" align="center"><img src="docs/screenshots/3.1/02-home-recently-added.png" alt="Home: Left/Right slides the poster queue"><br><sub>Home: Left/Right slides the poster queue</sub></td></tr>
+<tr><td width="50%" align="center"><img src="docs/screenshots/3.1/07-details-backrooms.png" alt="Details page: cast, versions, quality"><br><sub>Details page: cast, versions, quality</sub></td><td width="50%" align="center"><img src="docs/screenshots/3.1/06-quick-peek.png" alt="Triangle quick-peek"><br><sub>Triangle quick-peek</sub></td></tr>
+<tr><td width="50%" align="center"><img src="docs/screenshots/3.1/03-movie-library-grid.png" alt="Library grid with the A–Z jump bar"><br><sub>Library grid with the A–Z jump bar</sub></td><td width="50%" align="center"><img src="docs/screenshots/3.1/04-search-results.png" alt="Search results"><br><sub>Search results</sub></td></tr>
+<tr><td width="50%" align="center"><img src="docs/screenshots/3.1/09-music-now-playing.png" alt="Music player with lossless FLAC and Up Next"><br><sub>Music player with lossless FLAC and Up Next</sub></td><td width="50%" align="center"><img src="docs/screenshots/3.1/10-music-focus-jellywave.png" alt="Music focus mode: audio-reactive JellyWave"><br><sub>Music focus mode: audio-reactive JellyWave</sub></td></tr>
+<tr><td width="50%" align="center"><img src="docs/screenshots/3.1/11-music-jellydrop.png" alt="JellyDrop visualiser"><br><sub>JellyDrop visualiser</sub></td><td width="50%" align="center"><img src="docs/screenshots/3.1/12-music-canyon.png" alt="Canyon visualiser, the PS3's spectrogram rebuilt"><br><sub>Canyon visualiser, the PS3's spectrogram rebuilt</sub></td></tr>
+</table>
 
 ---
 
 ## What it does
 
-- **Movies, TV, Collections and Music.** Everything shows up as poster and still
-  card grids, with an A-Z jump bar and scrollbars so you always know where you are
-  in a big library.
-- **A home shelf** that mirrors the Jellyfin web app, with Continue Watching, Next
-  Up, and Recently Added rows.
-- **Hardware H.264 playback** through the PS3's VDEC. The display loop runs at a
-  smooth 60 fps and blends frames so 24 fps content doesn't judder.
-- **AV sync stays locked to within ±5 ms** off the audio clock.
-- **Resume and progress reporting.** Stop watching on the PS3 and it shows up as
-  Continue Watching everywhere else. The next episode auto-advances, too.
-- **An in-player HUD** with a seek bar, transport controls, and audio/subtitle
-  track menus. Subtitles are burned in on the server side.
-- **Pre-play version selection** on the Triangle item-info screen for local
-  multi-version files and MediaSources supplied by Gelato/AIOStreams.
-- **Seek, skip and scrub.** Tap to jump 10 seconds, or hold to scrub the bar.
-- **A full music player.** Albums, Artists, Playlists, Genres and Songs, a play
-  queue with shuffle, and a Now Playing screen whose 28-band spectrum visualizer
-  actually reacts to what you're hearing.
-- **Live search**, an on-screen keyboard, item info overlays, and a thumbnail cache
-  that keeps browsing quick.
-- **An update check at launch** that pops up quietly when a newer release is out.
+**Interface**
+- **An XMB-style interface.** Categories sit along a row like the PS3's own
+  menu; press `Down` to step into one and `O` to step back out. Every category
+  uses the same depth model, with a cold-boot animation, XMB menu sounds and
+  left-stick navigation.
+- **JellyWave**, a translucent take on the XMB wave, drawn on the GPU behind
+  everything, with a day/night palette, particles, and a **Wave Intensity**
+  setting.
+- **Home** mirrors the Jellyfin web app: Continue Watching, Next Up and Recently
+  Added, one category at a time.
+- **Full details pages** (`X` on a title): play or resume, start over, version
+  and quality pickers, cast, backdrop, and "Back to Season" for episodes.
+  `△` anywhere flips a poster to show its synopsis (quick-peek).
+- **Movies, TV, Collections and Music** as poster grids with an A-Z jump bar.
+- **Search** with an on-screen keyboard; results open the details page or
+  start playback directly.
+- **Themes** (including your own `.ini`), menu particles, and overscan that
+  scales the interface to fit your screen.
+
+**More than the library**
+- **Live TV and the guide**, from a Jellyfin server with a tuner or an IPTV
+  playlist: a channel list with what's on now, a guide grid, channel up/down
+  while watching.
+- **Downloads**: a film, an episode or a whole season saved to the PS3's hard
+  drive (or an NTFS USB drive, from Settings), played offline. They pause while
+  you stream, resume after a restart, and always leave 10 GB free on the hard
+  drive.
+- **Favourites** on their own Home row.
+- **A Media tab that plays from USB drives and the hard drive, with no server**:
+  MKV, .m2ts and .ts files from **NTFS, exFAT or FAT32** drives (playback
+  only reads; downloads are the one thing written, to NTFS), with audio-track switching and a resume point
+  kept on the console. H.264 only, with Dolby Digital, DTS, TrueHD, MP3, AAC,
+  FLAC or PCM audio; the file's page says what a file lacks. MKV files show their
+  text and PGS subtitles; subtitles in .ts / .m2ts files are not supported yet.
+- **Music from the same drives**: FLAC (up to 24-bit, 192 kHz), MP3 and WAV files.
+  A folder is an album, played in track order from the tags, with its cover art
+  and no gap between tracks; the music screen and its visualisers work as for
+  server music.
+
+**Playback**
+- **Hardware H.264 through the PS3's VDEC**, up to **1080p at 25 Mbps**.
+- **True 24 Hz output.** 23.976 and 24 fps films switch the HDMI output to
+  match, one frame per refresh, so there is no 3:2 pulldown judder. Each TV is
+  checked once first. Settings → Playback → 24Hz Output.
+- **Lossless HD audio**: TrueHD / Atmos and DTS-HD MA, decoded on the console
+  (see [Surround sound](#surround-sound)).
+- **Subtitles rendered by the console** (PGS and text) in 3 fonts and 3 colours,
+  so turning them on no longer means a server-side burn-in.
+- **Skip intro / recap / credits** from Jellyfin's media segments, with an
+  **Auto Skip** setting. The next-episode countdown starts with the credits,
+  and the next episode keeps your audio language, quality and version.
+- **Resume and progress reporting**, so what you stop on the PS3 shows up as
+  Continue Watching everywhere else.
+- **A player bar** with play/pause, audio and subtitle menus, volume, and
+  `L2`/`R2` seeking (tap to skip, hold to scrub). Slow seeks show a spinner,
+  retry on failure, and `O` cancels them.
+
+**Music**
+- Albums, Artists, Playlists, Genres and Songs, a play queue with shuffle, and a
+  Now Playing screen with lossless FLAC.
+- **Audio-reactive visualisers**, cycled with `□`: **JellyWave** (lows, mids and
+  highs each move their own layer), **JellyDrop** (the ribbons form the Jellyfin
+  logo) and **Canyon** (the PS3's own spectrogram canyon, rebuilt). A focus mode
+  dims everything but the art and the visualiser.
+
+**Everything else**
+- **Controllers:** DualShock 3, the **Blu-ray Disc remote**, USB and Bluetooth
+  keyboards, and keyboard media keys.
+- **Jellyfin 10.11 and 12** servers.
+- **An update check at launch** that pops up quietly when a newer release is out,
+  and a **Settings → System → Software Update** row that shows the result and checks again.
+  See [`CHANGELOG.md`](CHANGELOG.md) for what changed in each release.
 
 ---
 
-## Surround 5.1 (Alpha)
+## Surround sound
 
-Movies can play with **5.1 surround sound**: the app decodes the audio on the
-PS3 and plays it as 6-channel LPCM through an 8-channel audio port. It is
-**off by default** — **Settings → Surround 5.1 (Alpha)** cycles through three
-states:
+Movies can play in **surround**: the app decodes the audio on the PS3 and
+sends it out as multichannel LPCM. It is **off by default** — **Settings →
+Audio Output** cycles through:
 
-| Setting | What it asks the server for |
+| Setting | What it does |
 |---|---|
-| **Off**   | Stereo MP3 — the shipped path, untouched. |
-| **AC-3**  | Transcode the audio to AC-3 (Dolby Digital) 5.1 at 640 kbps. Works with any source. |
-| **HD**    | Send the source's own HD audio track untouched (no audio transcode) and decode it on the PS3. **TrueHD / Dolby Atmos** plays **losslessly** in 5.1 or 7.1. **DTS-HD MA** also plays **losslessly** — its XLL extension is decoded, verified bit-exact against ffmpeg on both x86 and the PPU's own big-endian PowerPC. **DTS, DTS-HD HRA, DTS-ES and DTS:X** play from their 5.1 core at up to 1509 kbps (no free decoder exists for those extensions). Anything else — including Dolby Digital Plus — falls back to the AC-3 request, so HD never plays worse than AC-3. |
+| **Stereo** | Stereo MP3 — the shipped path, untouched. The default. |
+| **5.1** | Sends the source's own HD audio track untouched (no audio transcode) and decodes it here. **TrueHD / Dolby Atmos** plays **losslessly**. **DTS-HD MA** also plays **losslessly** — its XLL extension is decoded, verified bit-exact against ffmpeg on x86 *and* on the PPU's own big-endian PowerPC. **DTS, DTS-HD HRA, DTS-ES and DTS:X** play from their 5.1 core at up to 1509 kbps. Anything else, including Dolby Digital Plus, falls back to an AC-3 5.1 transcode — so this never plays worse than asking for AC-3 directly, which is why there is no separate AC-3 option. |
+| **7.1** | The same, at eight channels. **Only offered when your receiver reports that it accepts 8-channel LPCM** — the app asks the connected display rather than guessing, so most soundbars correctly see only Stereo and 5.1. |
+| **Dolby Digital** | Sends **Dolby Digital (AC-3)** to the soundbar or receiver untouched, and lets *it* decode. A film's own Dolby Digital track goes through as it is; any other track is converted to Dolby Digital by the server first. For a soundbar connected through the TV's **ARC** port, which takes only 2-channel PCM or Dolby Digital: LPCM 5.1 never reaches it there, and the centre channel (the dialogue) goes missing. Volume is then set on the soundbar. |
+
+**No dialogue, or a silent centre speaker?** On 5.1 the app also corrects a
+fault that silences dialogue on some receivers. The PS3's audio port is 8
+channels wide and its HDMI output is 6, so the console folds 8→6 on the way
+out — and that fold can lose the centre channel, which is where nearly all the
+dialogue in a film mix lives. This is not a setting; there is nothing for a
+listener to decide, and it is on whenever 5.1 is. **Nothing is compressed to
+achieve it** — the audio on the wire stays uncompressed LPCM, verified by
+reading the output's actual state rather than the value that was requested.
+
+**Dialogue still too quiet?** **Settings → Audio → Dialogue Boost** (Off / +3 / +6 /
++10 dB). None of these decoders applies dynamic range compression, so a film
+mix's full cinema range can leave dialogue well below effects on a compact
+system. It is a level control, not a routing one.
 
 For actual surround output you must also tell the PS3 your setup can take it:
 
@@ -171,13 +237,17 @@ For actual surround output you must also tell the PS3 your setup can take it:
 
 Notes and limitations:
 
-- In AC-3 mode the audio stream is AC-3 at 640 kbps. If the server refuses AC-3
-  (old ffmpeg, transcode settings), playback falls back to the shipped stereo
-  MP3 path.
+- If the server cannot produce the fallback AC-3 5.1 transcode (old ffmpeg, or
+  transcoding disabled), playback falls back to the shipped stereo MP3 path.
 - Stereo-only sources still play in stereo (front speakers), as they should.
-- There is **no bitstream passthrough** on this platform — nothing in PSL1GHT
-  can hand a receiver an encoded stream — so everything is decoded on the PS3
-  and sent out as LPCM. That sets what each format can be:
+- There is **no bitstream passthrough** for homebrew on this platform, and that
+  is now measured rather than assumed. PSL1GHT never bound `cellAudioOut`, so
+  the request could not even be expressed; this app binds it directly and asks.
+  The console reports **0 channels available** for TrueHD, DTS-HD MA and DD+,
+  and when asked for AC-3 it accepts the request while leaving plain LPCM on
+  the wire. Real passthrough appears to be tied to the Blu-ray player's
+  privileged path. So everything is decoded on the PS3 and sent out as LPCM,
+  and that sets what each format can be:
   - **TrueHD / Dolby Atmos: lossless.** The full 5.1 or 7.1 bed plays, bit for
     bit. Atmos *objects* are not rendered (no free renderer exists, and the
     app cannot know your speaker layout), so an Atmos track plays as its bed.
@@ -193,8 +263,9 @@ Notes and limitations:
 - HD mode streams the original audio track over your network instead of a
   640 kbps transcode — a TrueHD or DTS-HD MA track can be several Mbps on top
   of the video. That is fine on a LAN and a bad idea over the internet.
-- 7.1 output needs **Linear PCM 7.1 Ch.** ticked in the PS3's Sound Settings,
-  the same way 5.1 does.
+- 7.1 needs **Linear PCM 7.1 Ch.** ticked in the PS3's Sound Settings, the same
+  way 5.1 does — and the app only offers 7.1 at all when the connected chain
+  reports it will take eight channels.
 - Music playback is stereo by design and ignores this switch.
 - The **Player Stats Overlay** shows the negotiated result while playing:
   `truehd 8/8` is a lossless 7.1 bed, `truehd 6/8` a lossless 5.1 one,
@@ -218,8 +289,7 @@ Notes and limitations:
 
 **[⬇ JellyFin-PS3.pkg — latest release](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest)**
 
-Direct link to the current build: [`JellyFin-PS3.pkg`](https://github.com/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/download/v1.0/JellyFin-PS3.pkg).  
-The same file is mirrored in [`release/`](release/) in the repo.
+Direct link to the current build: [`JellyFin-PS3.pkg`](release/JellyFin-PS3.pkg?raw=1), the same file as the release, kept in [`release/`](release/).
 
 Then either:
 
@@ -231,6 +301,17 @@ Then either:
 Installing over an existing copy is fine — your login and settings live outside
 the app and are kept.
 
+**Signing in:** if your server has Quick Connect switched on (Dashboard →
+General), press `X` at the sign-in screen and the console shows a code; approve
+it in the Jellyfin app on your phone (Settings → Quick Connect). `□` still
+signs in with a username and password.
+
+**Server PC wired to the router and streaming through a debrid plugin?** If
+films buffer and stall over and over, your router may be choking on the
+server's internet download. See
+[Buffering on a wired server PC](CHANGELOG.md#buffering-on-a-wired-server-pc-check-your-router)
+and [`tools/ffwrap`](tools/ffwrap/README.md).
+
 ## Build from source
 
 ```bash
@@ -241,7 +322,9 @@ make clean && make      # SELF only
 make pkg                # installable PKG
 ```
 
-That gives you `JellyFin---PS3.self` and `JellyFin---PS3.pkg`.
+That gives you `<folder>.self` and `<folder>.pkg`, named after the checkout
+directory. To install over an existing copy by FTP, use the NPDRM-signed
+`obj/pkg/USRDIR/EBOOT.BIN` that `make pkg` leaves behind, not the `.self`.
 
 > Cutting a release? Bump `APP_VERSION` in `source/net/update_check.h` to match the
 > release tag so the update check compares against the right number.
@@ -250,20 +333,45 @@ That gives you `JellyFin---PS3.self` and `JellyFin---PS3.pkg`.
 
 ## Controls
 
-**Menus.** `X` select · `O` back · `D-pad` navigate · `L1`/`R1` switch tabs ·
-`△` item info. In Music, press `Up` from the top row to reach the sub-tab header.
+**Menus.** On the category row, `Left`/`Right` (or `L1`/`R1`) change category and
+`Down` steps into it. Inside, the `D-pad` navigates, `X` opens the details page,
+`△` quick-peeks, and `O` (or `Up` from the top) steps back out. `□` cycles the
+visualiser. On the Blu-ray remote, `|<<` `>>|` and `<<` `>>` also switch tabs.
 
-**Video player.** Press any button to bring up the HUD (it hides itself again after
-4 seconds). `Left`/`Right` move across the control row and `X` activates whatever's
-focused. `R2`/`L2` tap to skip ±10 seconds, or hold to scrub. `Start` stops. During
-the last-90-seconds prompt, `Select` jumps to the next episode.
+**Video player.** Press any button to bring up the player bar. `Left`/`Right`
+move across it and `X` activates the focused control. `R2`/`L2` tap to skip, or
+hold to scrub. `△` opens the audio and subtitle tracks, `□` puts the bar away,
+and `O` or `Start` stops. When an intro or recap is playing, `X` skips it; during
+the next-episode prompt, `Select` starts the next episode.
 
 **Music player.** `Left`/`Right` move across the transport row, and going `Right`
 past Shuffle drops you into the UP NEXT queue. `L1`/`R1` are previous/next track,
-`△` toggles shuffle, `R2`/`L2` seek, and `Select` opens the full-queue overlay.
+`R2`/`L2` seek, `△` toggles shuffle, `□` cycles the visualiser (hold for the next
+Canyon preset), and `O` or `Start` stops.
 
-**Search.** Type on the on-screen keyboard, press `Down` to jump into the results,
-and `△` to toggle caps.
+**Search.** Type on the on-screen keyboard; `□` deletes and `O` clears. Press
+`Down` to reach the results, then `X` to open one or `△` for its details.
+
+**Settings.** A list of six categories (Playback, Audio, Subtitles, Downloads,
+Display, System), each with its own icon; `X` opens one and shows its settings with
+what the highlighted one does underneath. `O` goes back to the list, `L2`/`R2` move
+to the previous or next category, `Left`/`Right` change a value in either direction
+(`X` still steps forward), and `Up` from the first category returns to the tabs.
+
+**Language.** The app speaks English, 日本語, Português (Brasil), Deutsch, Français
+and Español. It follows the PS3's system language; **Settings → Display → Language**
+picks one by hand (the names are in their own language, so you can always find the
+right one). Titles and descriptions come from your server as it has them.
+
+**Live TV.** `X` watches the channel, `△` makes it a favourite, `Right` opens the
+guide (`O` or `Left` at its first column comes back). While watching, `Up`/`Down`
+change channel. A big channel list is shown a category at a time (`L2`/`R2`), with
+two pages of your own in front: **My Channels** (everything you starred, from all
+categories) and **Recently watched**. `Start` (**Customise**) hides the categories
+you never watch, and the tab reopens on the page you left it on.
+
+**Media.** `X` opens a drive or folder and then a file's page, where `X` plays or
+resumes it; `O` goes up a folder, `L2`/`R2` page through a long one.
 
 <details>
 <summary>Full button reference</summary>
@@ -272,22 +380,31 @@ and `△` to toggle caps.
 
 | Button   | Action                                             |
 |----------|----------------------------------------------------|
-| X        | Select / confirm                                   |
-| O        | Back                                               |
+| Left / Right (category row) | Change category                     |
+| Down (category row) | Step into the category                      |
+| X        | Open the details page / confirm                    |
+| O        | Back / step out to the category row                |
 | D-pad    | Navigate                                           |
-| L1 / R1  | Cycle tabs (prev/next page in the season browser)  |
-| Triangle | Item info overlay                                  |
+| L1 / R1  | Change category                                    |
+| Remote `\|<<` `>>\|` / `<<` `>>` | Change category, for remotes without L1 / R1 |
+| Triangle | Quick-peek (synopsis and cast)                     |
+| Square   | Cycle the visualiser (JellyWave / JellyDrop / Off) |
 
 ### Video player
 
 | Button          | Action                                                            |
 |-----------------|-------------------------------------------------------------------|
-| Start           | Stop / exit player                                                |
-| Left / Right    | Move focus across the control row (Rew · Play/Pause · FF · AUDIO · Volume · CC) |
-| X               | Activate the focused control                                      |
+| O / Start       | Stop / exit player (O closes an open track menu first)            |
+| Square          | Hide the player bar before its timeout                            |
+| Left / Right    | Bar hidden: skip -10 s / +10 s. Bar showing: move focus across it (Play/Pause · Audio · Volume · Subtitles) |
+| X               | Activate the focused control; skip an intro or recap when offered |
+| Triangle        | Audio and subtitle tracks                                         |
+| L1              | Picture size: Left/Right = width, Up/Down = height, Square = Fit / Fill / Stretch, Triangle resets, L1/X/O done |
+| R1              | Chapters: pick one to jump to it (for films whose server has chapters) |
+| L3 / R3 (stick click) | Show / hide the player stats                                |
 | R2 / L2 (tap)   | Skip +10 s / -10 s (taps within 1 s batch into one seek)          |
 | R2 / L2 (hold)  | Pause and scrub the seek bar; seek fires once on release          |
-| Select          | Jump to the next episode/movie (during the NEXT prompt, last 90 s)|
+| Select          | Picture shape: Fit, Fill (crops the edges, for 16:9 films on a 4:3 TV), Stretch. During the NEXT prompt (last 90 s): jump to the next episode/movie |
 
 ### Music player
 
@@ -300,7 +417,8 @@ and `△` to toggle caps.
 | Triangle           | Toggle shuffle                                                 |
 | L1 / R1            | Previous / next track (previous restarts when >3 s in)        |
 | R2 / L2            | Seek (tap batches, hold scrubs)                               |
-| Select             | Full-queue overlay                                            |
+| Square (tap)       | Cycle the visualiser: JellyWave / JellyDrop / Canyon / Off    |
+| Square (hold)      | Next Canyon preset                                            |
 | O / Start          | Stop playback and return to the library                       |
 
 ### Search
@@ -308,9 +426,10 @@ and `△` to toggle caps.
 | Button    | Action                                  |
 |-----------|-----------------------------------------|
 | D-pad     | Move cursor on keyboard / in results    |
-| X         | Type character / play result            |
-| Triangle  | Toggle caps lock                        |
-| O / CLEAR | Reset search, return to keyboard        |
+| X         | Type character / open result            |
+| Square    | Delete a character                      |
+| Triangle  | Details of the highlighted result       |
+| O         | Clear the search (empty: next category) |
 | Down      | Jump from keyboard to results           |
 | Up        | Jump from first result back to keyboard |
 
@@ -325,11 +444,14 @@ Its media player was the reference the whole app was built from.
 
 **Video.** An HTTP MPEG-TS transcode stream gets demuxed on a decode thread. H.264
 access units go to the PS3 VDEC (SPU-accelerated), decoded frames land in a 16-slot
-jitter buffer, and a Movian-style 60 fps display loop blits them through the RSX. A
-crossfade shader blends between decoded 24 fps frames using a Bresenham accumulator
-locked to hardware vsync, which is what kills the usual 2:3 pulldown judder.
+jitter buffer, and a Movian-style 60 fps display loop blits them through the RSX. With **24Hz Output** on, a 23.976 or 24 fps film
+switches the display to that rate and shows one frame per refresh. Otherwise a
+crossfade shader blends between decoded 24 fps frames on a Bresenham
+accumulator locked to hardware vsync, to soften the 2:3 pulldown judder.
 
-**Audio.** MP3 gets decoded with minimp3 into a PCM ring and pushed to the PS3 audio
+**Audio.** Stereo MP3 is decoded with minimp3; in a surround mode the source's
+own TrueHD, DTS-HD MA, DTS or AC-3 track is decoded on the PPU instead (see
+[Surround sound](#surround-sound)). Either way the PCM goes into a ring and pushed to the PS3 audio
 DMA at 48 kHz. The audio PTS drives the master clock, and an EMA keeps AV sync inside
 ±5 ms.
 
@@ -422,7 +544,9 @@ changes.
 
 ### Audio & burned-in subtitles
 
-Picking a subtitle track flips the server to `SubtitleMethod=Encode`, which
+Subtitles are normally rendered on the console (PGS and text). Only when a track
+cannot be fetched does the app fall back to asking the server to burn it in, and
+that flips the server to `SubtitleMethod=Encode`, which
 front-loads several seconds of audio while the subtitle-burning encoder warms up. A
 256-slot PES queue holds that burst compressed and the decoder back-pressures on the
 PCM highwater, so nothing gets dropped and playback stays in sync. It used to skip
@@ -430,10 +554,9 @@ about 10 seconds ahead on real hardware before this fix.
 
 ### Version / MediaSource selection
 
-Press Triangle on a playable title before starting it. When Jellyfin exposes
-more than one source, the info page shows a **Version** row beneath Play. Focus
-that row and press X for a scrollable list (up to 32 entries), or cycle it with
-Left/Right. The chosen `MediaSourceId` is negotiated when Play is pressed, along
+Press `X` on a playable title to open its details page. When Jellyfin exposes
+more than one source, the page shows a **Version** picker next to **Quality**;
+focus it and press `X` for a scrollable list (up to 32 entries). The chosen `MediaSourceId` is negotiated when Play is pressed, along
 with that source's own audio/subtitle tracks. The version list is not retained
 by the player and cannot be switched mid-stream. This covers normal Jellyfin
 multi-version movies and plugin-provided alternatives such as Gelato/AIOStreams.
@@ -460,7 +583,11 @@ source/
 |-- cache/    Thumbnail caching
 |-- gfx/      RSX helpers, shaders, embedded fonts, stb_image/truetype
 |-- music/    Audio-only engine, FFT visualizer, Now Playing screen
-|-- net/      HTTP client, GitHub update check
+|-- local/    Drives and files with no server: one file layer over the hard drive
+|             and USB (FAT32, NTFS, exFAT; writes only on NTFS, for downloads),
+|             file probing, names, resume points
+|-- net/      HTTP and HTTPS clients, server discovery, GitHub update check
+|-- offline/  Downloads: queue, store, library, free-space rules
 |-- player/   Core loop, HUD, GPU draw, decode/upload/audio threads, TS stream
 |-- ui/       XMB UI: input, OSK, home shelf, browse, search, settings, rendering
 |-- util/     Frame pacing / AV sync, async logging
@@ -473,9 +600,12 @@ source/
 
 ## Logging
 
-Debug logging is **off by default** and you toggle it from the Settings tab. That
-choice sticks across restarts in `/dev_hdd0/tmp/jellyfin_settings.txt`. When it's on,
-output goes to `/dev_hdd0/tmp/player_log.txt`. A crash log always gets written
+Debug logging is **on by default** and you toggle it from the Settings tab
+(**Debug Logging**). That choice sticks across restarts in
+`/dev_hdd0/tmp/jellyfin_settings.txt`. When it's on, output goes to
+`/dev_hdd0/tmp/player_log.txt`, and **Settings → System → Send Log to Server**
+uploads it to your Jellyfin server (Dashboard → Logs) so you can attach it to a
+bug report without FTP. A crash log always gets written
 synchronously to `/dev_hdd0/tmp/crash_log.txt`, and the launch update check leaves
 its own trace in `/dev_hdd0/tmp/update_detection.txt`.
 
@@ -491,6 +621,11 @@ its own trace in `/dev_hdd0/tmp/update_detection.txt`.
   **[PSL1GHT](https://github.com/ps3dev/PSL1GHT)** alive: the SDK, toolchain, and
   libraries that make open PS3 homebrew possible in the first place. PSL1GHT is
   MIT-licensed, Copyright (c) 2011 PSL1GHT Development Team.
+- **[mohasi/ps3-dev](https://github.com/mohasi/ps3-dev)**, whose hand-written NTFS and
+  exFAT drivers (Apache-2.0) are vendored in
+  [`third_party/mohasi_fs`](third_party/mohasi_fs) so the app can play files from
+  USB drives and save downloads to NTFS ones. What was changed is listed in that
+  directory's README.
 - The authors of the embedded libraries (minimp3, stb_image, stb_truetype), and the
   Jellyfin project itself.
 
@@ -502,7 +637,7 @@ JellyFin PS3 is free software licensed under the **GNU General Public License v3
 (or, at your option, any later version). The full text lives in the
 [LICENSE](LICENSE) file.
 
-Copyright (C) 2026 Montague McKeefry
+Copyright (C) 2026 vortigauntlet
 
 This program is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A

@@ -32,6 +32,10 @@
 #define ICON_LABEL_GAP        6
 #define AUDIO_SEP            16            // horizontal gap between audio btn and CC btn
 
+// Trickplay scrub-preview card (shown above the seek bar while hold-scrubbing)
+#define CARD_PAD              6             // backdrop margin around the tile
+#define CARD_GAP             14             // gap between card bottom and the track
+
 // Volume slider (shown above the speaker control while adjusting)
 #define VOL_STEP              5            // % per d-pad step
 #define VOL_TRACK_W           6            // slider track width
@@ -46,7 +50,7 @@
 #define TITLE_TOP_PAD        34
 
 // Popup menu (track selection)
-#define MENU_MAX              9            // JF_MAX_STREAMS subs + "Off"
+#define MENU_MAX              49           // the chapter list (JF_MAX_CHAPTERS + 1); tracks need 9 (JF_MAX_STREAMS subs + "Off")
 #define MENU_TITLE_PX      22.0f
 #define MENU_TITLE_H         38            // title row height incl. padding
 #define MENU_ROW_H           30
@@ -62,7 +66,8 @@
 #define FOCUS_AUDIO  3
 #define FOCUS_VOLUME 4
 #define FOCUS_CC     5
-#define FOCUS_COUNT  6
+#define FOCUS_ASPECT 6          // the picture-shape chip, bottom right
+#define FOCUS_COUNT  7
 
 // -------------------------------------------------------
 // State (defined in hud_core.cpp)
@@ -79,6 +84,17 @@ struct HudState {
     int  incr_idx;     // 0=10s  1=30s  2=5min
     bool cc_active;    // subtitles on -> underline the CC button
     bool vol_active;   // volume slider open (speaker control clicked)
+
+    // Live TV (hud_set_live*)
+    bool live;
+    char live_title[96];
+    char live_times[24];
+    int  live_permille;     // -1 = unknown
+    u32  live_epoch;        // bumped when any live text changes (the compose key)
+    char banner[96];
+    char banner_sub[96];
+    u64  banner_until_us;
+    bool banner_solo;       // the banner alone, no bar (hud_set_picture_banner)
 
     // Popup menu state.  Items are caller-owned pointers (track labels live
     // in the player's static JFTracks, so they outlive the menu).

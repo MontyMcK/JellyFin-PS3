@@ -172,6 +172,25 @@ void init_screen(void *host_addr,u32 size)
 	crash_log("2.7 init_screen done");
 }
 
+bool waitflip_timeout(u32 timeout_us)
+{
+	u32 waited = 0;
+	while (gcmGetFlipStatus() != 0) {
+		if (waited >= timeout_us) return false;
+		usleep(50);
+		waited += 50;
+	}
+	gcmResetFlipStatus();
+	return true;
+}
+
+void rsx_rebind_display(void)
+{
+	gcmSetFlipMode(GCM_FLIP_VSYNC);
+	gcmSetDisplayBuffer(0,color_offset[0],color_pitch,display_width,display_height);
+	gcmSetDisplayBuffer(1,color_offset[1],color_pitch,display_width,display_height);
+}
+
 void waitflip()
 {
 	// Poll at 50 µs (was 200 µs) — tighter interval reduces post-vblank entry
@@ -208,28 +227,30 @@ void flip()
 	first_fb = 0;
 }
 
-// 24Hz OUTPUT: TESTED ON HARDWARE, DOES NOT WORK.  Do not try this again
-// without reading this first.
+// 24Hz OUTPUT.  Read docs/24P_OUTPUT.md before touching the display mode.
 //
-// videoConfiguration carries no refresh field, so the resolution id is the
-// only lever.  Probing a Panasonic UT30 plasma: id 0x83 refuses to configure
-// (it is 1920x2205, 3D frame packing), while id 130 (0x82) configures CLEANLY,
-// reports exactly 1920x1080 and a refresh bit of 0x40 -- none of
-// 59.94/50/60/30.  Every read-back said success.
+// 2026-09-18: videoConfigure() with resolution id 0x82 configured "cleanly"
+// (1920x1080, refresh bit 0x40), the panel showed no picture, flip() never
+// returned and the console needed a hard power-off.  Two corrections to what
+// was concluded from that at the time:
 //
-// The panel still showed NO PICTURE.  So a clean videoConfigure and a
-// plausible read-back are NOT evidence the display can sync to the mode, and
-// nothing available to a homebrew process can tell you that it cannot.
+//   * 0x82 was never a 24Hz mode.  The panel advertises it with ONLY bit 0x40.
+//     The 24Hz family is bits 0x10|0x20: the only rates of id 0x83 (1080p
+//     frame packing, defined by HDMI 1.4 at 23.98/24 alone), and also present
+//     on id 1 -- plain 1080 -- on this TV.  What 0x82/0x40 is remains unknown.
+//   * flip() hanging means the RSX stopped completing flips, i.e. the scan-out
+//     side, not "the TV could not lock": vblank comes from the console's own
+//     display timing, not from the panel.
 //
-// Worse, the confirm-or-revert safety net did not save it.  The countdown
-// drew to the screen, and flip() waits on a vblank that a mode the panel
-// cannot lock to never delivers -- so it blocked forever and the revert that
-// followed it never ran.  The console needed a hard power-off.  If anyone
-// ever retries this: do NOT draw or flip while the experimental mode is up.
-// Sleep, poll the pad, revert -- nothing that can block on the display.
+// And the finding that stands: videoConfigure() REJECTS id 0x83 with
+// 0x8002b226 (UNSUPPORTED_DISPLAY_MODE) although availability says yes --
+// consistent with the v1 call being unable to select a 24Hz-family rate at
+// all.  The v1 struct has no refresh field; cellVideoOutConfigure2 is the only
+// candidate and its ABI is unknown (avconf_capture.cpp exists to read it).
 //
-// The capability dump below stays because it is pure reporting and costs
-// nothing; the code that CHANGED the mode has been removed.
+// If a switch is ever attempted: never draw or flip while the new mode is up,
+// verify it by timing the vblank handler's counter against the timebase (no
+// flip involved), and write the abort marker BEFORE changing anything.
 
 // Called from main() once plog is open.  This USED to run inside
 // init_screen(), which happens long before logging exists, so every
@@ -280,19 +301,19 @@ void video_log_capabilities(void)
 		}
 		// Resolution ids the SDK defines but PSL1GHT does not name, plus the
 		// 3D frame-packing ones.  Availability is a query, not a change.
-		// 0x82/0x83 were missing from the first pass and they are the whole
-		// point: the panel's own mode list advertises res=130 (0x82) and
-		// res=131 (0x83), and 0x83 offers ONLY rate bits 0x10|0x20 --
-		// 23.98 and 24 Hz.  Availability is a query, not a change, so
-		// asking costs nothing and cannot blank the display.
+		// 0x82/0x83 are the ids the panel's own list advertises beyond the
+		// SDK's: 0x83 (1920x2205, 1080p frame packing) with ONLY rate bits
+		// 0x10|0x20 -- the 24Hz family, which of the two is 23.976 is not
+		// established -- and 0x82 (1920x1080) with only 0x40, meaning
+		// unknown.  Availability is a query, not a change.
 		static const u32 kProbe[] = {
 			1 /*1080*/, 2 /*720*/, 0x81 /*720 3D FP*/,
-			0x82 /*? 24Hz-only per mode list*/, 0x83 /*? 24Hz-only*/,
+			0x82 /*1920x1080, rate 0x40 only*/, 0x83 /*1080p FP, 24Hz family*/,
 			0x88, 0x89, 0x8a, 0x8b,
 			0x91 /*720 dualview*/, 0x98, 0x99,
 		};
 		char b[160]; int n = 0;
-		char list[128]; list[0] = ' ';
+		char list[128]; list[0] = '\0';
 		for (unsigned i = 0; i < sizeof(kProbe)/sizeof(kProbe[0]); i++) {
 			if (videoGetResolutionAvailability(0, kProbe[i],
 			                                   VIDEO_ASPECT_AUTO, 0) == 1) {

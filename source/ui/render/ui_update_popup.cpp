@@ -24,6 +24,11 @@ bool xmb_update_popup_active(void) {
     return true;
 }
 
+void xmb_update_popup_reopen(void) {
+    s_dismissed = false;
+    s_have_ver  = false;
+}
+
 void xmb_update_popup_input(void) {
     if (BTN_PRESSED(cross)) {
         s_dismissed = true;
@@ -44,41 +49,50 @@ void xmb_update_popup_draw(void) {
     // writes below land on top of it.
     wave_dim_screen(110);
 
-    const int mw = 480, mh = 170;
+    const int mw = UIS_W(560), mh = UIS_H(220);
     int mx = ((int)display_width  - mw) / 2;
-    int my = ((int)display_height - mh) / 2 - 20;
+    int my = ((int)display_height - mh) / 2 - UIS_H(20);
 
     drawRect((u32)mx, (u32)my, (u32)mw, (u32)mh, XMB_PANEL);
     hairline_frame(mx, my, mw, mh);
 
-    const char *title = "New version detected";
-    int tw = ttf_text_width(title, 21, true);
-    drawTTF((u32)(mx + (mw - tw) / 2), (u32)(my + 28), title, 21, XMB_TEXT, true);
+    const char *title = TR("New version detected");
+    int tw = ttf_text_width(title, UIS_TF(21), true);
+    drawTTF((u32)(mx + (mw - tw) / 2), (u32)(my + UIS_H(28)), title, UIS_TF(21), XMB_TEXT, true);
 
     // Release tag, shown without a leading v/V.
     {
         const char *v = s_version;
         if (*v == 'v' || *v == 'V') v++;
         char line[80];
-        snprintf(line, sizeof(line), "Version %s", v);
-        int lw = ttf_text_width(line, 14);
-        drawTTF((u32)(mx + (mw - lw) / 2), (u32)(my + 64), line, 14, XMB_TEXT_DIM);
+        snprintf(line, sizeof(line), TR("Version %s"), v);
+        int lw = ttf_text_width(line, UIS_TF(14));
+        drawTTF((u32)(mx + (mw - lw) / 2), (u32)(my + UIS_H(64)), line, UIS_TF(14), XMB_TEXT_DIM);
+    }
+    // Where to get it: the release page's .pkg, installed over this one.
+    {
+        const char *l1 = TR("Get the new .pkg from");
+        const char *l2 = UPDATE_PAGE_TEXT;
+        int w1 = ttf_text_width(l1, UIS_TF(13));
+        int w2 = ttf_text_width(l2, UIS_TF(13));
+        drawTTF((u32)(mx + (mw - w1) / 2), (u32)(my + UIS_H(92)),  l1, UIS_TF(13), XMB_TEXT_FAINT);
+        drawTTF((u32)(mx + (mw - w2) / 2), (u32)(my + UIS_H(112)), l2, UIS_TF(13), XMB_ACCENT);
     }
 
     // OK button — always focused, so it uses the OSK selected-key style
     // (white key, dark label).
     {
-        const int   bw = 140, bh = 36;
-        const float px = 18.0f;
+        const int   bw = UIS_W(140), bh = UIS_H(36);
+        const float px = UIS_TF(18.0f);
         int bx = mx + (mw - bw) / 2;
-        int by = my + mh - bh - 22;
+        int by = my + mh - bh - UIS_H(22);
         drawRect((u32)bx, (u32)by, (u32)bw, (u32)bh, XMB_KEY_SEL);
         int lw = ttf_text_width("OK", px, true);
         drawTTF((u32)(bx + (bw - lw) / 2),
-                (u32)(by + (bh - (int)px) / 2 - 2), "OK", px,
+                (u32)(by + (bh - (int)px) / 2 - UIS_H(2)), "OK", px,
                 XMB_KEY_LABEL_SEL, true);
     }
 
-    static const Hint h[] = {{'X', "OK"}};
+    static const Hint h[] = {{'X', TRN("OK")}};
     draw_hints_bar(h, 1);
 }

@@ -25,17 +25,15 @@
 #include <ssl/ssl.h>
 
 #include "update_check.h"
+#include "https_client.h"
 #include "http.h"    // HTTP_USER_AGENT (GitHub rejects requests without one)
 #include "timing.h"
 #include "plog.h"
 
-// Point straight at the current repo.  The old "Tuggs-Bunny" name only resolved
-// via GitHub's rename 301 -> /repositories/<id>/... redirect; RPCS3 follows that
-// transparently but the console's firmware HTTP client is far less reliable at
-// re-driving a redirected HTTPS request, so on real hardware the check could die
-// on the hop and the update popup never appeared.  A direct URL is one plain
-// request — no redirect for the firmware stack to choke on.
-#define UPDATE_URL "https://api.github.com/repos/MontyMcK/JellyFin-PS3/releases/latest"
+// This fork's own releases.  Use the repo's exact current name: a renamed repo
+// answers with a 301 redirect, which the console's firmware HTTP client does
+// not reliably follow, and the update popup would silently never appear.
+#define UPDATE_URL "https://api.github.com/repos/vortigauntlet/JellyFin-PS3-LosslessAudio/releases/latest"
 #define UPDATE_TIMEOUT_US (2 * 1000 * 1000)
 
 #define UPDATE_LOG_PATH "/dev_hdd0/tmp/update_detection.txt"
@@ -47,6 +45,7 @@ static bool             s_started = false;
 // so readers polling update_check_result() only ever see a complete result.
 static volatile bool s_done  = false;
 static bool          s_newer = false;
+static bool          s_ok    = false;   // a release tag was read, newer or not
 static char          s_latest[64];
 
 // The tag_name field sits near the front of the response; 16K is plenty even
@@ -163,9 +162,8 @@ static int ssl_accept_cb(s32 verErr, sslCert const certs[], int certNum,
 // step bailing to cleanup on failure.  netInitialize() has already run
 // (http_init() in main), so only the HTTP/SSL layers are set up here.
 static void do_check(void) {
-    void *http_pool = NULL, *ssl_pool = NULL, *cert_buf = NULL, *uri_pool = NULL;
-    bool  mod_http = false, mod_util = false, mod_https = false, mod_ssl = false;
-    bool  init_http = false, init_ssl = false, init_https = false;
+    void *uri_pool = NULL;
+    bool  have_rt = false;
     httpClientId client = 0;
     httpTransId  trans  = 0;
     s32 rc;
@@ -173,50 +171,10 @@ static void do_check(void) {
     ulog("update check: app=%s", APP_VERSION);
     ulog("url: %s", UPDATE_URL);
 
-    rc = sysModuleLoad(SYSMODULE_HTTP);
-    if (rc < 0) { ulog("FAIL sysModuleLoad(HTTP): 0x%08x", (u32)rc); goto cleanup; }
-    mod_http = true;
-    rc = sysModuleLoad(SYSMODULE_HTTP_UTIL);
-    if (rc < 0) { ulog("FAIL sysModuleLoad(HTTP_UTIL): 0x%08x", (u32)rc); goto cleanup; }
-    mod_util = true;
-    rc = sysModuleLoad(SYSMODULE_HTTPS);
-    if (rc < 0) { ulog("FAIL sysModuleLoad(HTTPS): 0x%08x", (u32)rc); goto cleanup; }
-    mod_https = true;
-    rc = sysModuleLoad(SYSMODULE_SSL);
-    if (rc < 0) { ulog("FAIL sysModuleLoad(SSL): 0x%08x", (u32)rc); goto cleanup; }
-    mod_ssl = true;
-    ulog("modules loaded");
-
-    http_pool = malloc(0x10000);
-    if (!http_pool) { ulog("FAIL http pool alloc"); goto cleanup; }
-    rc = httpInit(http_pool, 0x10000);
-    if (rc < 0) { ulog("FAIL httpInit: 0x%08x", (u32)rc); goto cleanup; }
-    init_http = true;
-
-    ssl_pool = malloc(0x40000);
-    if (!ssl_pool) { ulog("FAIL ssl pool alloc"); goto cleanup; }
-    rc = sslInit(ssl_pool, 0x40000);
-    if (rc < 0) { ulog("FAIL sslInit: 0x%08x", (u32)rc); goto cleanup; }
-    init_ssl = true;
-
-    {
-        u32 cert_size = 0;
-        rc = sslCertificateLoader(SSL_LOAD_CERT_ALL, NULL, 0, &cert_size);
-        if (rc < 0) { ulog("FAIL cert size query: 0x%08x", (u32)rc); goto cleanup; }
-        cert_buf = malloc(cert_size);
-        if (!cert_buf) { ulog("FAIL cert buf alloc (%u bytes)", cert_size); goto cleanup; }
-        rc = sslCertificateLoader(SSL_LOAD_CERT_ALL, (char*)cert_buf,
-                                  cert_size, NULL);
-        if (rc < 0) { ulog("FAIL cert load: 0x%08x", (u32)rc); goto cleanup; }
-        ulog("firmware certs loaded (%u bytes)", cert_size);
-
-        httpsData ca;
-        ca.ptr  = (char*)cert_buf;
-        ca.size = cert_size;
-        rc = httpsInit(1, &ca);
-        if (rc < 0) { ulog("FAIL httpsInit: 0x%08x", (u32)rc); goto cleanup; }
-        init_https = true;
-    }
+    // The firmware HTTP/SSL runtime is shared with the API client.
+    if (!https_rt_acquire()) { ulog("FAIL https runtime"); goto cleanup; }
+    have_rt = true;
+    ulog("https runtime up");
 
     rc = httpCreateClient(&client);
     if (rc < 0) { ulog("FAIL httpCreateClient: 0x%08x", (u32)rc); client = 0; goto cleanup; }
@@ -290,6 +248,7 @@ static void do_check(void) {
             ulog("FAIL no tag_name in response");
             goto cleanup;
         }
+        s_ok = true;
         int cmp = ver_cmp(tag, APP_VERSION);
         ulog("tag=%s app=%s cmp=%d -> %s", tag, APP_VERSION, cmp,
              cmp > 0 ? "UPDATE AVAILABLE" : "up to date");
@@ -306,17 +265,8 @@ static void do_check(void) {
 cleanup:
     if (trans)      httpDestroyTransaction(trans);
     if (client)     httpDestroyClient(client);
-    if (init_https) httpsEnd();
-    if (init_ssl)   sslEnd();
-    if (init_http)  httpEnd();
-    if (mod_ssl)    sysModuleUnload(SYSMODULE_SSL);
-    if (mod_https)  sysModuleUnload(SYSMODULE_HTTPS);
-    if (mod_util)   sysModuleUnload(SYSMODULE_HTTP_UTIL);
-    if (mod_http)   sysModuleUnload(SYSMODULE_HTTP);
     if (uri_pool)   free(uri_pool);
-    if (cert_buf)   free(cert_buf);
-    if (ssl_pool)   free(ssl_pool);
-    if (http_pool)  free(http_pool);
+    if (have_rt)    https_rt_release();
     ulog("done (newer=%d)", (int)s_newer);
 }
 
@@ -356,4 +306,23 @@ bool update_check_result(char *out, int out_size) {
 
 bool update_check_done(void) {
     return s_done;
+}
+
+int update_check_state(void) {
+    if (!s_started && !s_done) return UPD_IDLE;
+    if (!s_done)  return UPD_CHECKING;
+    if (s_newer)  return UPD_AVAILABLE;
+    return s_ok ? UPD_CURRENT : UPD_FAILED;
+}
+
+bool update_check_again(void) {
+    if (s_started && !s_done) return false;   // one at a time
+    update_check_shutdown();                  // reap the finished worker
+    s_done  = false;
+    s_newer = false;
+    s_ok    = false;
+    s_log_started = false;                    // a fresh trace file
+    __sync_synchronize();
+    update_check_start();
+    return s_started;
 }

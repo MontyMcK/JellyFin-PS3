@@ -5,6 +5,7 @@
 #include "jf_paths.h"
 #include "player_stats.h"
 #include "centermix.h"
+#include "ui_sfx.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -43,6 +44,26 @@ static u32          s_sil_blocks   = 0;
 
 u64 audio_block_count(void) { return s_audio_blocks; }
 
+// libaudio is initialised once for everyone who has a port open: the menu
+// sound effects (ui_sfx.cpp) keep one open while the music player opens
+// another, and a second audioInit() fails with ALREADY_INIT while an
+// early audioQuit() would pull the other port out from under it.
+// Main thread only, like every caller.
+static int s_sys_refs = 0;
+
+int audio_sys_acquire(void) {
+    if (s_sys_refs == 0) {
+        int rc = audioInit();
+        if (rc != 0) return rc;
+    }
+    s_sys_refs++;
+    return 0;
+}
+
+void audio_sys_release(void) {
+    if (s_sys_refs > 0 && --s_sys_refs == 0) audioQuit();
+}
+
 // ---- PCM source (defaults to the video pipeline's decoder) ----
 static audio_avail_fn    s_src_avail    = adec_pcm_available;
 static audio_read_fn     s_src_read     = adec_read_pcm;
@@ -71,16 +92,7 @@ void audio_set_volume(int pct) {
     if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
     if (pct == s_volume_pct) return;
-    int prev = s_volume_pct;
     s_volume_pct = pct;
-    // A playback freeze was reported right after a volume change, and the
-    // log had nothing to line it up against -- volume was not instrumented.
-    // One line per step so the next report can be placed on the timeline.
-    {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "volume: %d%% -> %d%%", prev, pct);
-        plog(buf);
-    }
     FILE *f = fopen(jf_data_path(VOLUME_FILE), "w");
     if (f) { fprintf(f, "%d\n", pct); fclose(f); }
 }
@@ -129,7 +141,7 @@ void audio_open(int channels) {
     char buf[128];
 
     crash_log("a2 sysAudioInit");
-    rc = audioInit();
+    rc = audio_sys_acquire();
     snprintf(buf, sizeof(buf), "audio: sysAudioInit rc=0x%x", rc);
     plog(buf);
     if (rc != 0) return;
@@ -181,7 +193,7 @@ void audio_open(int channels) {
     s_output_channels = opened;   // program capacity, not a fixed 5.1
     snprintf(buf, sizeof(buf), "audio: sysAudioPortOpen rc=0x%x port=%u", rc, s_audio_port);
     plog(buf);
-    if (rc != 0) { audioQuit(); return; }
+    if (rc != 0) { audio_sys_release(); return; }
     snprintf(buf, sizeof(buf), "audio_open: ch=%d blocks=%d",
              s_port_channels, (int)p.numBlocks);
     plog(buf);
@@ -231,7 +243,7 @@ void audio_open(int channels) {
     }
 
     if (audioCreateNotifyEventQueue(&s_audio_eq, &s_audio_key) != 0) {
-        audioPortClose(s_audio_port); audioQuit(); return;
+        audioPortClose(s_audio_port); audio_sys_release(); return;
     }
     rc = audioSetNotifyEventQueue(s_audio_key);
     snprintf(buf, sizeof(buf), "audio: audioSetNotifyEventQueue rc=0x%x", rc);
@@ -261,8 +273,81 @@ void audio_open(int channels) {
 // After receiving an event, blocks until the ring has a full 256-sample block
 // ready, sleeping 1ms per iteration up to a 30ms timeout.  On timeout writes
 // silence and logs a stall diagnostic rather than playing partial-fill noise.
+static bool s_paced = false;
+void audio_set_paced(bool on) { s_paced = on; }
+
+#define PACED_RUNWAY 5      // blocks ahead of the read cursor (of 8): ~27 ms
+
+static bool audio_write_pcm_paced(void) {
+    sys_event_t ev;
+    if (sysEventQueueReceive(s_audio_eq, &ev, 0) != 0) return false;
+    // NO backlog drain here.  A timeout of 0 means WAIT FOREVER on this OS,
+    // not "poll": a drain loop never ends (an event always comes), the port is
+    // never fed, and music_stop() then closes the port under the stuck thread
+    // -- the silent music + crash on leaving of 2026-09-25.  None is needed:
+    // the runway below is measured from the hardware's read cursor, so a
+    // queued event just finds the ring already topped up and writes nothing.
+    if (!s_data_start || !s_read_idx_ea || !s_num_blocks) return true;
+    const u32 nb = s_num_blocks;
+    const u32 rd = (u32)(*(volatile u64 *)(uintptr_t)s_read_idx_ea) % nb;
+    u32 ahead = (s_write_blk + nb - rd) % nb;
+    // The writer is on (or behind) the block being read: re-seat it just
+    // ahead of the hardware instead of writing into the past.
+    if (ahead == 0 || ahead > nb - 2) { s_write_blk = (rd + 1) % nb; ahead = 1; }
+    const u32 want = PACED_RUNWAY < nb - 1 ? PACED_RUNWAY : nb - 1;
+    while (ahead < want) {
+        float *blk = (float *)(uintptr_t)(s_data_start + s_write_blk * s_port_channels
+                                          * AUDIO_BLOCK_SAMPLES * sizeof(float));
+        if (s_port_channels == 2 && s_src_channels() == 2
+            && s_src_avail() >= AUDIO_BLOCK_SAMPLES) {
+            s_src_read(blk, AUDIO_BLOCK_SAMPLES);
+            apply_volume(blk, AUDIO_BLOCK_SAMPLES, 2);
+            s_pcm_blocks++;
+        } else {
+            memset(blk, 0, s_port_channels * AUDIO_BLOCK_SAMPLES * sizeof(float));
+            s_sil_blocks++;
+        }
+        s_write_blk = (s_write_blk + 1) % nb;
+        ahead++;
+        ++s_audio_blocks;
+    }
+    return true;
+}
+
+// Pause / resume for the video player's audio thread (2026-09-27).
+//
+// The hardware never stops: paused, it kept cycling the ring -- the last
+// ~85 ms looping -- and posting an event per block, while the writer stood
+// still.  On resume the writer's distance from the read cursor was then
+// arbitrary (the clock assumes it is fixed) and the queued events burst-wrote
+// blocks: after every pause, and every seek (which pauses), the sound sat up
+// to a ring's length away from where the clock said it was.
+//
+// Now: at pause, remember that distance and silence the ring; at resume,
+// throw the queued events away and put the writer back at the same distance.
+static u32 s_pause_ahead = 0;
+
+void audio_pause_output(bool paused) {
+    if (!s_audio_ok || s_paced || !s_data_start || !s_read_idx_ea || !s_num_blocks) return;
+    const u32 nb = s_num_blocks;
+    const u32 rd = (u32)(*(volatile u64 *)(uintptr_t)s_read_idx_ea) % nb;
+    if (paused) {
+        s_pause_ahead = (s_write_blk + nb - rd) % nb;
+        memset((void *)(uintptr_t)s_data_start, 0,
+               (size_t)nb * s_port_channels * AUDIO_BLOCK_SAMPLES * sizeof(float));
+    } else {
+        sys_event_t ev;
+        while (sysEventQueueReceive(s_audio_eq, &ev, 1) == 0) { }   // 1 us: poll
+        const u32 rd2 = (u32)(*(volatile u64 *)(uintptr_t)s_read_idx_ea) % nb;
+        u32 ahead = s_pause_ahead;
+        if (ahead == 0 || ahead >= nb) ahead = 1;
+        s_write_blk = (rd2 + ahead) % nb;
+    }
+}
+
 bool audio_write_pcm(void) {
     if (!s_audio_ok) return false;
+    if (s_paced) return audio_write_pcm_paced();
     sys_event_t ev;
     if (sysEventQueueReceive(s_audio_eq, &ev, 0) != 0) return false;
     if (s_data_start) {
@@ -286,7 +371,10 @@ bool audio_write_pcm(void) {
             if (s_port_channels == 2 && src_ch == 2) {
                 // Shipped stereo path — source reads straight into the block.
                 s_src_read(blk_buf, AUDIO_BLOCK_SAMPLES);
-                apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES, 2);
+                // IEC 61937 bursts are data, not sound: any gain would
+                // corrupt them.  The receiver owns the volume in passthrough.
+                if (!audio_passthrough_active())
+                    apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES, 2);
             } else {
                 // Source width != port width: stage the source frames, then
                 // place each one inside the wider port frame.  Static — this
@@ -329,7 +417,18 @@ bool audio_write_pcm(void) {
             // Decoder stall — write silence to keep DMA ring alive
             memset(blk_buf, 0, s_port_channels * AUDIO_BLOCK_SAMPLES * sizeof(float));
             s_sil_blocks++;
-            plog("audio: decoder stall");
+            // RATE-LIMITED.  A block is 5.33 ms, so a source that has stopped
+            // producing entirely writes ~188 of these a second -- 219 of them
+            // buried the last crash, which is the one thing the log had to
+            // survive.  One line a second, carrying the run length, says the
+            // same thing and leaves room for everything else.
+            static u32 s_stall_run = 0;
+            if ((s_stall_run++ % 188) == 0) {
+                char b[64];
+                snprintf(b, sizeof b, "audio: decoder stall (%u blocks)",
+                         (unsigned)s_stall_run);
+                plog(b);
+            }
         }
         // Per-channel peak of the block we just handed to the DMA engine —
         // the last point the app can observe its own audio.  This is what
@@ -382,11 +481,14 @@ bool audio_write_pcm(void) {
 
 void audio_close(void) {
     crash_log("ax1 audio_close enter");
-    if (!s_audio_ok) return;
+    // A video open suspended the menu sounds; bring them back however that
+    // open went (a no-op after music, which never suspends them).
+    if (!s_audio_ok) { ui_sfx_resume(); return; }
     // Put the wire format back before tearing the port down.  The output is a
     // shared console resource -- the XMB and the next app should not inherit a
     // coding type this app asked for.
     audio_bitstream_end();
+    audio_passthrough_request(false);
     crash_log("ax2 sysAudioPortStop");
     audioPortStop(s_audio_port);
     audioRemoveNotifyEventQueue(s_audio_key);
@@ -394,7 +496,7 @@ void audio_close(void) {
     audioPortClose(s_audio_port);
     sysEventQueueDestroy(s_audio_eq, 0);
     crash_log("ax4 sysAudioQuit");
-    audioQuit();
+    audio_sys_release();
     s_audio_ok    = false;
     s_data_start  = 0;
     s_num_blocks  = 0;
@@ -403,4 +505,5 @@ void audio_close(void) {
     s_port_channels   = 2;
     s_output_channels = 2;
     crash_log("ax5 audio_close done");
+    ui_sfx_resume();
 }

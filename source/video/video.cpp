@@ -5,6 +5,7 @@
 #include "plog.h"
 
 #include <stdio.h>
+#include <codec/vdec.h>   // VDEC_TS_INVALID
 #include <string.h>
 
 // -------------------------------------------------------
@@ -20,9 +21,15 @@ static u8      s_audio_pes_out[TS_APES_BUF_SIZE];
 // the PMT selects a stream.  Reset with the demux so a seek's PMT re-parse
 // re-applies it (a no-op in adec when nothing changed).
 static u8      s_codec_applied = TS_AUDIO_NONE;
+static u16     s_want_audio_pid = 0;     // see video_set_audio_pid
+static u64     s_pts_origin90   = 0;     // see video_set_pts_origin_us, in 90 kHz ticks
+
+void video_set_audio_pid(u16 pid) { s_want_audio_pid = pid; s_ts.want_audio_pid = pid; }
+void video_set_pts_origin_us(u64 us) { s_pts_origin90 = us * 9ULL / 100ULL; }
 
 void video_reset(void) {
     memset(&s_ts, 0, sizeof(s_ts));
+    s_ts.want_audio_pid = s_want_audio_pid;
     // The truncation counters live in ts_demux.cpp, not in TSState, so the
     // memset above does not reach them.  Zero them per playback session so
     // "pes=" in the heartbeat means this stream, not everything since boot.
@@ -35,6 +42,7 @@ void video_reset(void) {
 
 void video_reset_demux(void) {
     memset(&s_ts, 0, sizeof(s_ts));
+    s_ts.want_audio_pid = s_want_audio_pid;
     s_codec_applied = TS_AUDIO_NONE;
 }
 
@@ -50,6 +58,9 @@ static void video_route_audio(int ready, int alen) {
         if (s_ts.audio_codec == TS_AUDIO_AC3)         want = ADEC_CODEC_AC3;
         else if (s_ts.audio_codec == TS_AUDIO_DTS)    want = ADEC_CODEC_DTS;
         else if (s_ts.audio_codec == TS_AUDIO_TRUEHD) want = ADEC_CODEC_TRUEHD;
+        else if (s_ts.audio_codec == TS_AUDIO_AAC)    want = ADEC_CODEC_AAC;
+        else if (s_ts.audio_codec == TS_AUDIO_FLAC)   want = ADEC_CODEC_FLAC;
+        else if (s_ts.audio_codec == TS_AUDIO_PCM)    want = ADEC_CODEC_PCM;
         adec_set_codec(want);
         s_codec_applied = s_ts.audio_codec;
     }
@@ -64,6 +75,7 @@ static void video_route_audio(int ready, int alen) {
                 s_audio_pes_out[2], s_audio_pes_out[3], alen);
             plog(buf);
         }
+        { extern volatile const char *g_dec_stage; g_dec_stage = "adec_push_pes"; }
         adec_push_pes(s_audio_pes_out, alen);
     }
 }
@@ -103,8 +115,11 @@ bool video_feed_ts(const u8 *pkt) {
                            s_audio_pes_out, &alen);
     if (ready & 1) {
         const u8 *h264; int h264_len; u64 pts;
-        if (pes_payload(s_pes_out, vlen, &h264, &h264_len, &pts))
+        if (pes_payload(s_pes_out, vlen, &h264, &h264_len, &pts)) {
+            if (s_pts_origin90 && pts != (u64)VDEC_TS_INVALID)
+                pts = pts > s_pts_origin90 ? pts - s_pts_origin90 : 0;
             vdec_submit(h264, h264_len, pts);
+        }
     }
 
     video_route_audio(ready, alen);

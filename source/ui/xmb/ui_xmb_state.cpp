@@ -2,16 +2,26 @@
 // ui_visuals.h.  All mutation happens in the xmb/ input handlers.
 
 #include "ui_internal.h"
+#include "i18n.h"
 
 // Only the three fixed app screens are seeded here.  Every library tab from
 // XMB_TAB_LIB0 up is filled in by xmb_detect_tabs() once the server's Views
 // are known, so the count and the labels come from the user's own library
 // names rather than from this table.
 XMBTab g_tabs[XMB_TAB_COUNT] = {
-    {"Search",   "?", "", TABKIND_SEARCH,   true},
-    {"Home",     ">", "", TABKIND_HOME,     true},
-    {"Settings", "*", "", TABKIND_SETTINGS, true},
+    {TRN("Search"),   "?", "", TABKIND_SEARCH,   true},
+    {TRN("Home"),     ">", "", TABKIND_HOME,     true},
+    {TRN("Settings"), "*", "", TABKIND_SETTINGS, true},
 };
+
+// The names Jellyfin gives the libraries it creates, and the app's own tabs.  A tab's label is the
+// library's name as the server has it; tr() turns these into the interface language and leaves any
+// name the user chose alone.  Never read: it is what marks the strings for tools/i18n.py.
+static const char *const k_server_names[] = {
+    TRN("Movies"), TRN("Shows"), TRN("TV Shows"), TRN("Music"), TRN("Playlists"), TRN("Collections"),
+    TRN("Live TV"), TRN("Media"), TRN("Library"),
+};
+const char *const *xmb_server_names(int *n) { *n = (int)(sizeof k_server_names / sizeof k_server_names[0]); return k_server_names; }
 
 XMBTabKind xmb_kind(int tab) {
     if (tab < 0 || tab >= XMB_TAB_COUNT) return TABKIND_GENERIC;
@@ -99,5 +109,7 @@ char g_tab_name_filter[XMB_TAB_COUNT][4];
 // Settings tab state
 int   g_settings_sel      = 0;
 bool  g_settings_confirm  = false;
+int   g_settings_cat      = -1;
+int   g_settings_catsel   = 0;
 bool  g_overscan_calib    = false;
 float g_overscan_calib_prev = 0.0f;

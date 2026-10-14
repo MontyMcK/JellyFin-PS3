@@ -3,10 +3,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
 #include <unistd.h>   // usleep between detection retries
+#include <sys/thread.h>
 
 #include "ui_internal.h"
 #include "jellyfin_api.h"
+#include "server_discovery.h"
+#include "wol_net.h"
 #include "plog.h"
 #include "../../build_config.h"   // SHOW_PLAYLISTS_TAB
 
@@ -31,17 +35,43 @@
 #define DETECT_TABS_TRIES     6
 #define DETECT_TABS_RETRY_US  1500000
 
-// One attempt at fetching and parsing /Users/{id}/Views.  Returns false only
+// The Media tab -- the internal disk's folders and USB drives -- is the last of
+// the tabs whatever the server says, and is there when it says nothing: it
+// needs no server.  `next` is the first free slot.
+static void add_media_tab(int next) {
+    if (next >= XMB_TAB_COUNT) return;
+    XMBTab *tb = &g_tabs[next];
+    memset(tb, 0, sizeof(*tb));
+    snprintf(tb->label, sizeof(tb->label), "%s", TRN("Media"));
+    tb->icon    = "#";
+    tb->kind    = TABKIND_LOCAL;
+    tb->enabled = true;
+}
+
+// The last Views request's HTTP status: below 0 means nothing answered at
+// all (as opposed to a server that answered with an error).
+static int s_detect_status = 0;
+
+bool xmb_server_unreachable(void) { return s_detect_status < 0; }
+
+// The saved server is answering at a new address (server_discovery.h): use
+// it from now on, and next launch too.
+static void adopt_server(const char *addr) {
+    char b[400];
+    snprintf(b, sizeof b, "server: moved %.150s -> %.150s", g_server, addr);
+    plog(b);
+    snprintf(g_server, sizeof g_server, "%s", addr);
+    save_config();
+}
+
+// Fill the library slots from one /Users/{id}/Views reply.  Returns false only
 // when the request or the parse failed outright — a reply that parses to
 // zero libraries is a real answer, not a miss, so it does not retry.
-static bool detect_tabs_once(void) {
+static bool detect_tabs_parse(int status, const char *buf) {
+    s_detect_status = status;
     for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
         memset(&g_tabs[t], 0, sizeof(g_tabs[t]));
     int next = XMB_TAB_LIB0;
-
-    char url[512];
-    snprintf(url, sizeof(url), "%s/Users/%s/Views", g_server, g_userid);
-    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
 
     // Both exits below used to return silently, so a failure here looked
     // identical to a server with no libraries: no tabs, no explanation.  That
@@ -53,16 +83,18 @@ static bool detect_tabs_once(void) {
         snprintf(b, sizeof(b),
                  "detect_tabs: http=%d for /Users/*/Views", status);
         plog(b);
+        add_media_tab(next);
         return false;
     }
 
-    const char *p = strstr(responseBuffer, "\"Items\":[");
+    const char *p = strstr(buf, "\"Items\":[");
     if (!p) {
         char b[192];
         snprintf(b, sizeof(b),
                  "detect_tabs: no Items[] in %d-byte reply, head=[%.90s]",
-                 (int)strlen(responseBuffer), responseBuffer);
+                 (int)strlen(buf), buf);
         plog(b);
+        add_media_tab(next);
         return false;
     }
     p += 9;
@@ -87,13 +119,13 @@ static bool detect_tabs_once(void) {
         xmb_json_str_range(obj, olen, "Name",           name, sizeof(name));
         if (!id[0]) continue;
 
-        if (next >= XMB_TAB_COUNT) {
+        if (next >= XMB_TAB_COUNT - 1) {        // (the last slot is the Media tab's)
             // More libraries than the tab bar can hold.  Say so rather than
             // dropping them silently — silent dropping is the bug this whole
             // change exists to fix.
             char b[96];
             snprintf(b, sizeof(b), "detect_tabs: OVER %d libraries, skipping '%s'",
-                     XMB_LIB_MAX, name);
+                     XMB_LIB_MAX - 1, name);
             plog(b);
             break;
         }
@@ -111,6 +143,9 @@ static bool detect_tabs_once(void) {
         // playlists but X fell through to xmb_play_item(), which tries to
         // hand a Playlist to the video player, so nothing opened.
         else if (strcmp(ct, "playlists") == 0) kind = TABKIND_PLAYLISTS;
+        // Live TV is not a folder to browse: it has its own channel list and
+        // guide (xmb/ui_livetv.cpp), drawn from /LiveTv, not from this view.
+        else if (strcmp(ct, "livetv")    == 0) kind = TABKIND_LIVETV;
         else                                   kind = TABKIND_GENERIC;
 
         // The Music tab already reaches these through its Playlists sub-tab,
@@ -128,8 +163,11 @@ static bool detect_tabs_once(void) {
         XMBTab *tb = &g_tabs[next];
         memset(tb, 0, sizeof(*tb));
         snprintf(tb->label, sizeof(tb->label), "%s",
-                 name[0] ? name : "Library");
-        strncpy(tb->library_id, id, sizeof(tb->library_id) - 1);
+                 name[0] ? name : TRN("Library"));
+        // No library to list for Live TV: leaving the id empty keeps the
+        // frame loop from fetching "items" for a tab that has none.
+        if (kind != TABKIND_LIVETV)
+            strncpy(tb->library_id, id, sizeof(tb->library_id) - 1);
         tb->kind    = kind;
         tb->icon    = "#";
         tb->enabled = true;
@@ -144,18 +182,99 @@ static bool detect_tabs_once(void) {
     { char b[64];
       snprintf(b, sizeof(b), "detect_tabs: %d libraries", next - XMB_TAB_LIB0);
       plog(b); }
+    add_media_tab(next);
     return true;
+}
+
+static bool detect_tabs_once(void) {
+    char url[512];
+    snprintf(url, sizeof(url), "%s/Users/%s/Views", g_server, g_userid);
+    int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
+    return detect_tabs_parse(status, responseBuffer);
+}
+
+// The XMB's background retry.  The request runs on a worker: an unreachable
+// server costs a whole connect timeout (about 5 s), and on the render thread
+// that froze the menu once per retry.  Only the parse, which writes g_tabs,
+// runs on the render thread, from xmb_detect_tabs_poll().
+//
+// When nothing answers at all, the worker also looks for the server at a new
+// address before giving up on this round.
+namespace {
+const int        BG_BUF = 128 * 1024;   // a Views reply is a few KB per library
+char            *s_bg_buf;
+char             s_bg_url[512];
+char             s_bg_server[sizeof g_server];
+char             s_bg_userid[sizeof g_userid];
+char             s_bg_token[sizeof g_token];
+char             s_bg_moved[160];
+int              s_bg_status;
+volatile int     s_bg_state;            // 0 idle, 1 running, 2 reply ready
+sys_ppu_thread_t s_bg_tid;
+
+void bg_main(void *) {
+    s_bg_status = http_request(0, s_bg_url, NULL, s_bg_token, s_bg_buf, BG_BUF);
+    if (s_bg_status < 0) wol_send_saved();       // a sleeping server PC (Settings > Server MAC Address)
+    if (s_bg_status < 0 &&
+        sd_find_moved(s_bg_server, s_bg_userid, s_bg_token, s_bg_moved, sizeof s_bg_moved)) {
+        snprintf(s_bg_url, sizeof s_bg_url, "%s/Users/%s/Views", s_bg_moved, s_bg_userid);
+        s_bg_status = http_request(0, s_bg_url, NULL, s_bg_token, s_bg_buf, BG_BUF);
+    }
+    __sync_synchronize();
+    s_bg_state = 2;
+    sysThreadExit(0);
+}
+}   // namespace
+
+bool xmb_detect_tabs_start(void) {
+    if (s_bg_state != 0) return true;
+    if (!s_bg_buf) s_bg_buf = (char *)malloc(BG_BUF);
+    if (!s_bg_buf) return false;
+    s_bg_buf[0] = 0;
+    s_bg_moved[0] = 0;
+    snprintf(s_bg_url, sizeof s_bg_url, "%s/Users/%s/Views", g_server, g_userid);
+    snprintf(s_bg_server, sizeof s_bg_server, "%s", g_server);
+    snprintf(s_bg_userid, sizeof s_bg_userid, "%s", g_userid);
+    snprintf(s_bg_token, sizeof s_bg_token, "%s", g_token);
+    s_bg_state = 1;
+    static char name[] = "jf_views";
+    if (sysThreadCreate(&s_bg_tid, bg_main, NULL, 1300, 64 * 1024,
+                        THREAD_JOINABLE, name) != 0) {
+        s_bg_state = 0;
+        return false;
+    }
+    return true;
+}
+
+int xmb_detect_tabs_poll(void) {
+    if (s_bg_state != 2) return -1;
+    u64 r;
+    sysThreadJoin(s_bg_tid, &r);
+    __sync_synchronize();
+    // A reply for another session (signed out and in again meanwhile) is dropped.
+    const bool same = strcmp(s_bg_userid, g_userid) == 0 &&
+                      (strcmp(s_bg_server, g_server) == 0 || s_bg_moved[0]);
+    if (same && s_bg_moved[0] && s_bg_status == 200) adopt_server(s_bg_moved);
+    const bool ok = same && detect_tabs_parse(s_bg_status, s_bg_buf);
+    s_bg_state = 0;
+    free(s_bg_buf);
+    s_bg_buf = NULL;
+    return ok ? 1 : 0;
+}
+
+bool xmb_have_server_tabs(void) {
+    for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
+        if (g_tabs[t].enabled && g_tabs[t].kind != TABKIND_LOCAL) return true;
+    return false;
 }
 
 // Build one tab per Jellyfin library, retrying a dropped request rather than
 // leaving the user with no library tabs for the rest of the session.
 // Re-runnable: each attempt clears every library slot first, so a re-login or
 // a server-side change cannot leave a stale tab behind.
-// One attempt, for the XMB's background retry: the render loop must not sit
-// inside the full retry set, which can block for tens of seconds.
-bool xmb_detect_tabs_once(void) { return detect_tabs_once(); }
 
 void xmb_detect_tabs(void) {
+    bool looked = false;
     for (int try_n = 1; try_n <= DETECT_TABS_TRIES; try_n++) {
         if (detect_tabs_once()) {
             if (try_n > 1) {
@@ -164,6 +283,18 @@ void xmb_detect_tabs(void) {
                 plog(b);
             }
             return;
+        }
+        // Nothing answered.  The server may have moved (a new DHCP address):
+        // look for it now, and once more later in case the console's own
+        // network was the one still coming up.
+        if (s_detect_status < 0 && (try_n == 1 || (try_n == 4 && !looked))) {
+            if (try_n == 1) wol_send_saved();    // a sleeping server PC: wake it while we look
+            char moved[160];
+            if (sd_find_moved(g_server, g_userid, g_token, moved, sizeof moved)) {
+                adopt_server(moved);
+                looked = true;
+                continue;   // straight to the next try, at the new address
+            }
         }
         if (try_n < DETECT_TABS_TRIES) {
             char b[64];
@@ -180,6 +311,27 @@ void xmb_detect_tabs(void) {
       snprintf(b, sizeof(b), "detect_tabs: GAVE UP after %d tries - no library tabs",
                DETECT_TABS_TRIES);
       plog(b); }
+}
+
+// Runs on the boot worker (boot_anim_run) while the main thread only draws,
+// so nothing else is using responseBuffer, g_tabs or the Home rows.  The
+// Home prefetch is skipped when no library came back: that is a server that
+// is not answering, and five more requests at up to 29 s each would hold the
+// boot for minutes.  The XMB then loads the rows itself, as it always did,
+// and its background detect_tabs retry takes over.
+static volatile bool s_prepared = false;
+
+void xmb_prepare(void) {
+    xmb_detect_tabs();
+    // The Media tab is always there, so it does not count as an answer.
+    if (xmb_have_server_tabs()) xmb_home_prefetch();
+    s_prepared = true;
+}
+
+bool xmb_take_prepared(void) {
+    bool p = s_prepared;
+    s_prepared = false;
+    return p;
 }
 
 static void xmb_build_items_url(char *url, int url_size, int tab,
@@ -259,7 +411,7 @@ static void xmb_build_items_url(char *url, int url_size, int tab,
     snprintf(url, url_size,
         "%s/Users/%s/Items?ParentId=%s&StartIndex=%d&Limit=%d"
         "&SortBy=SortName&SortOrder=Ascending%s"
-        "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Container,Tags",
         g_server, g_userid, lid, start_index, limit, name_filt);
 }
 
@@ -276,7 +428,7 @@ void xmb_fetch_tab_items(int tab) {
         snprintf(url, sizeof(url),
             "%s/Users/%s/Items/Resume?Limit=%d&Recursive=true"
             "&MediaTypes=Video"
-            "&Fields=Genres,RunTimeTicks,ProductionYear,Container",
+            "&Fields=Genres,RunTimeTicks,ProductionYear,Container,Tags",
             g_server, g_userid, XMB_ITEMS_MAX);
         int status = http_request(0, url, NULL, g_token,
                                   responseBuffer, RESPONSE_SIZE);
@@ -309,7 +461,7 @@ int xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
     char url[512];
     snprintf(url, sizeof(url),
         "%s/Shows/%s/Seasons?userId=%s&StartIndex=%d&Limit=%d"
-        "&Fields=ProductionYear,RunTimeTicks",
+        "&Fields=ProductionYear,RunTimeTicks,Tags",
         g_server, series_id, g_userid, start_index, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;
@@ -327,7 +479,7 @@ int xmb_fetch_episodes(const char *series_id, const char *season_id,
     snprintf(url, sizeof(url),
         "%s/Shows/%s/Episodes?seasonId=%s&userId=%s"
         "&StartIndex=%d&Limit=%d"
-        "&Fields=ProductionYear,RunTimeTicks,Genres,Container",
+        "&Fields=ProductionYear,RunTimeTicks,Genres,Container,Tags",
         g_server, series_id, season_id, g_userid, start_index, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;
@@ -358,7 +510,7 @@ bool xmb_fetch_next_episode(const char *episode_id, XMBItem *out) {
 
     snprintf(url, sizeof(url),
         "%s/Shows/%s/Episodes?userId=%s&StartItemId=%s&Limit=2"
-        "&Fields=ProductionYear,RunTimeTicks,Genres,Container",
+        "&Fields=ProductionYear,RunTimeTicks,Genres,Container,Tags",
         g_server, series_id, g_userid, episode_id);
     status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return false;
@@ -400,7 +552,7 @@ int xmb_fetch_playlist_items(const char *playlist_id, XMBItem *arr, int max,
     char url[512];
     snprintf(url, sizeof(url),
         "%s/Playlists/%s/Items?userId=%s&StartIndex=0&Limit=%d"
-        "&Fields=Genres,RunTimeTicks,ProductionYear",
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Tags",
         g_server, playlist_id, g_userid, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;
@@ -417,7 +569,7 @@ int xmb_fetch_collection_items(const char *collection_id, XMBItem *arr, int max,
     snprintf(url, sizeof(url),
         "%s/Users/%s/Items?ParentId=%s"
         "&StartIndex=%d&Limit=%d"
-        "&Fields=Genres,RunTimeTicks,ProductionYear,Container"
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Container,Tags"
         "&SortBy=SortName&SortOrder=Ascending",
         g_server, g_userid, collection_id, start_index, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
@@ -435,7 +587,7 @@ int xmb_fetch_similar(const char *item_id, XMBItem *arr, int max) {
     char url[512];
     snprintf(url, sizeof(url),
         "%s/Items/%s/Similar?userId=%s&limit=%d"
-        "&Fields=Genres,RunTimeTicks,ProductionYear",
+        "&Fields=Genres,RunTimeTicks,ProductionYear,Tags",
         g_server, item_id, g_userid, max);
     int status = http_request(0, url, NULL, g_token, responseBuffer, RESPONSE_SIZE);
     if (status != 200) return 0;

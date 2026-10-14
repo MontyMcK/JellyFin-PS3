@@ -14,9 +14,9 @@
 CC      ?= cc
 CXX     ?= c++
 CFLAGS  ?= -O2 -Wall
-CFLAGS  += -I../source/audio -I../source/audio/a52 -I../source/util
+CFLAGS  += -I../source/audio -I../source/audio/a52 -I../source/util -I../source/i18n
 CXXFLAGS ?= -O2 -Wall
-CXXFLAGS += -I../source/api -I../source/net
+CXXFLAGS += -I../source/api -I../source/net -I../source/i18n
 
 A52_DIR  = ../source/audio/a52
 A52_SRCS = $(A52_DIR)/parse.c $(A52_DIR)/bit_allocate.c $(A52_DIR)/bitstream.c \
@@ -30,6 +30,8 @@ DTS_MAP_SRC  = ../source/audio/dts_map.c
 DTS_EXSS_SRC = ../source/audio/dts_exss.c
 DTS_STREAM_SRC = ../source/audio/dts_stream.c
 TRACK_SRC    = ../source/util/track_codec.c
+PGS_SRC      = ../source/player/subtitles_pgs.c
+TRICKPLAY_INFO_SRC = ../source/api/trickplay_info.c
 
 # Vendored FFmpeg MLP/TrueHD decoder: mlp_api.c is the whole decoder in one
 # translation unit (source/audio/mlp/PROVENANCE.md), so only it and the
@@ -50,10 +52,24 @@ DCAHD_SRCS = ../source/audio/dcahd_api.c ../source/audio/dcahd_xll.c \
 DTS_HD_DEPS = $(DTS_STREAM_SRC) $(DTS_MAP_SRC) $(DTS_EXSS_SRC) $(DCA_SRCS) \
               ../source/audio/truehd_map.c $(DCAHD_SRCS)
 
-all: test_ac3_map test_ac3_decode test_media_sources \
+all: test_wave_scope test_ac3_map test_ac3_decode test_iec61937 test_media_sources test_subtitles \
+     test_subtitles_pgs test_trickplay_info test_media_segments \
      test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
      test_truehd_map test_truehd_decode \
-     test_dts_hd test_dts_xll_dump
+     test_dts_hd test_dts_xll_dump test_text_runs test_utf8 test_theme test_layout test_circle_blit \
+     test_wave_kernel test_wave_spline test_wave_ribbon test_wave_field \
+     test_wave_audio test_wave_motion test_wave_layers \
+     test_wave_cam test_wave_light test_wave_gel test_spine test_depth test_facts test_stream_budget \
+     test_experience test_json_unescape test_boot_seq test_wave_motes \
+     test_wave_nav test_daynight test_canyon test_display_mode test_wave_look test_wave_drop test_offline test_stream_request test_jbuf_order \
+     test_settings_model test_settings_model_nostats test_userdata test_livetv test_server_discovery test_rx_gap test_livetv_prefs test_chapters test_wol test_icons test_live_watch test_picture_resume test_mohasi_fs test_lfs_path test_lfs test_h264_sps test_mkv_demux test_mkv_ts test_local_probe test_local_play test_local_names test_local_resume test_resample test_aac test_flac test_lossless test_sub_conv test_local_subs test_local_tags test_local_audio test_local_music test_music_engine test_i18n test_i18n_text test_line_break test_clock_fmt
+
+test_iec61937: test_iec61937.c ../source/audio/iec61937.c $(A52_SRCS)
+	$(CC) $(CFLAGS) -o $@ $^ -lm
+
+# ffmpeg's spdif muxer is the reference for the IEC 61937 bursts.
+tones51.spdif: tones51.ac3
+	ffmpeg -y -loglevel error -i $< -c copy -f spdif $@
 
 test_ac3_map: test_ac3_map.c $(MAP_SRC)
 	$(CC) $(CFLAGS) -o $@ $^ -lm
@@ -85,8 +101,293 @@ test_truehd_map: test_truehd_map.c ../source/audio/truehd_map.c
 test_truehd_decode: test_truehd_decode.c $(TRUEHD_SRCS)
 	$(CC) $(MLP_CFLAGS) $(CFLAGS) -o $@ $^ -lm
 
-test_media_sources: test_media_sources.cpp ../source/api/media_sources.cpp
+# subtitles.cpp is compiled straight into the test with its console-only
+# dependencies stubbed, so what is tested is the code the PS3 runs.
+test_subtitles: test_subtitles.cpp ../source/player/subtitles.cpp $(PGS_SRC)
+	$(CXX) $(CXXFLAGS) -o $@ test_subtitles.cpp $(PGS_SRC)
+
+test_media_sources: test_media_sources.cpp ../source/api/media_sources.cpp ../source/api/version_summary.c
 	$(CXX) $(CXXFLAGS) -o $@ $^
+
+test_subtitles_pgs: test_subtitles_pgs.c $(PGS_SRC)
+	$(CC) $(CFLAGS) -o $@ $^
+
+test_media_segments: test_media_segments.c ../source/api/media_segments.c
+	$(CC) $(CFLAGS) -I../source/api -o $@ $^ -lm
+
+test_trickplay_info: test_trickplay_info.c $(TRICKPLAY_INFO_SRC)
+	$(CC) $(CFLAGS) -o $@ $^
+
+# Offline downloads: the SAME source/offline core the PS3 build compiles,
+# with dl_platform.h backed by dl_fake.cpp (a real temp directory and a
+# scripted fake HTTP server) instead of dl_ps3.cpp.  -Wextra because this
+# code is new and can afford to be held to it.
+OFFLINE_DIR  = ../source/offline
+OFFLINE_SRCS = $(OFFLINE_DIR)/dl_model.cpp $(OFFLINE_DIR)/dl_http.cpp \
+               $(OFFLINE_DIR)/dl_store.cpp $(OFFLINE_DIR)/dl_manager.cpp \
+               $(OFFLINE_DIR)/dl_ts.cpp $(OFFLINE_DIR)/dl_request.cpp \
+               $(OFFLINE_DIR)/dl_service.cpp $(OFFLINE_DIR)/dl_library.cpp \
+               $(OFFLINE_DIR)/dl_ui.cpp $(OFFLINE_DIR)/dl_season.cpp \
+               ../source/i18n/i18n.c ../source/i18n/i18n_tables.c
+# Stage 3: the downloader shares the PLAYER's stream decision, so the test
+# links the player's real stream_request.cpp and what it calls -- the real
+# quality ladder (vquality.cpp), track labels (track_codec.c) and
+# url_encode_query (jellyfin_api.cpp).  host/ppu-types.h stands in for
+# PSL1GHT's integer typedefs; nothing else is stubbed.
+SHARED_SRCS  = ../source/player/stream/stream_request.cpp \
+               ../source/player/stream/stream_local.cpp \
+               ../source/util/vquality.cpp ../source/util/jf_paths.cpp \
+               ../source/api/jellyfin_api.cpp
+OFFLINE_INC  = -I$(OFFLINE_DIR) -I../source/player/stream -I../source/api \
+               -I../source/net -I../source/util -Ihost
+track_codec_host.o: $(TRACK_SRC)
+	$(CC) $(CFLAGS) -c -o $@ $<
+test_offline: test_offline.cpp dl_fake.cpp dl_fake.h $(OFFLINE_SRCS) \
+              $(SHARED_SRCS) track_codec_host.o $(wildcard $(OFFLINE_DIR)/*.h) \
+              ../source/player/stream/stream_request.h \
+              ../source/player/stream/stream_local.h
+	$(CXX) $(CXXFLAGS) -Wextra $(OFFLINE_INC) -o $@ \
+	    test_offline.cpp dl_fake.cpp $(OFFLINE_SRCS) $(SHARED_SRCS) \
+	    track_codec_host.o
+
+# Decode-order pictures leave the jitter buffer in timestamp order.
+test_jbuf_order: test_jbuf_order.cpp ../source/video/jbuf.cpp
+	$(CXX) $(CXXFLAGS) -Ihoststub -I../source/video -I../source/util -I../source -o $@ test_jbuf_order.cpp
+
+# The stream request decision, pinned to byte-exact URLs.
+test_stream_request: test_stream_request.cpp stream_golden_cases.h \
+                     stream_golden_urls.inc $(SHARED_SRCS) track_codec_host.o \
+                     ../source/player/stream/stream_request.h
+	$(CXX) $(CXXFLAGS) -Wextra $(OFFLINE_INC) -I. -o $@ \
+	    test_stream_request.cpp ../source/player/stream/stream_request.cpp \
+	    ../source/util/vquality.cpp ../source/util/jf_paths.cpp \
+	    ../source/api/jellyfin_api.cpp track_codec_host.o
+
+# The Settings screen model (rows, sections, layout, scrolling), built with
+# the player statistics row compiled in and out.
+test_settings_model: test_settings_model.c ../source/ui/settings_model.c \
+                     ../source/ui/settings_model.h ../source/net/update_page.h
+	$(CC) $(CFLAGS) -Wextra -I../source/ui -I../source/net -o $@ \
+	    test_settings_model.c ../source/ui/settings_model.c
+test_settings_model_nostats: test_settings_model.c ../source/ui/settings_model.c \
+                     ../source/ui/settings_model.h ../source/net/update_page.h
+	$(CC) $(CFLAGS) -Wextra -DENABLE_PLAYER_STATS=0 -I../source/ui -I../source/net -o $@ \
+	    test_settings_model.c ../source/ui/settings_model.c
+
+# The favourite / played request builders (method and path).
+test_userdata: test_userdata.cpp ../source/api/userdata_request.h
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/api -I../source/net -o $@ test_userdata.cpp
+
+# Live TV: the parsers (against fixtures/livetv_*.json), the ISO-8601 time
+# arithmetic and the channel list's rules.
+test_livetv: test_livetv.cpp ../source/api/livetv.cpp ../source/api/livetv.h \
+             ../source/api/json_lite.h fixtures/livetv_channels.json \
+             fixtures/livetv_programs.json
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/api -o $@ test_livetv.cpp ../source/api/livetv.cpp
+
+# The embedded icon font: every ICON_* has ink at the sizes the UI draws.
+test_icons: test_icons.cpp ../source/ui/icons.h ../source/ui/fonts/tabler_icons.h
+	$(CXX) $(CXXFLAGS) -I../source/gfx -I../source/ui -o $@ test_icons.cpp
+
+# Wake-on-LAN: the MAC address text and the magic packet.
+test_wol: test_wol.cpp ../source/net/wol.c ../source/net/wol.h
+	$(CC) $(CFLAGS) -Wextra -I../source/net -c -o wol_t.o ../source/net/wol.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/net -o $@ test_wol.cpp wol_t.o
+
+# Chapters: the item JSON's Chapters list and the menu labels.
+test_chapters: test_chapters.cpp ../source/api/chapters.cpp ../source/api/chapters.h ../source/api/json_lite.h
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/api -o $@ test_chapters.cpp ../source/api/chapters.cpp
+
+# Live TV, the viewer's own arrangement: hidden categories, recents, the pages offered.
+test_livetv_prefs: test_livetv_prefs.cpp ../source/api/livetv_prefs.c ../source/api/livetv_prefs.h
+	$(CC) $(CFLAGS) -Wextra -I../source/api -c -o livetv_prefs_t.o ../source/api/livetv_prefs.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/api -o $@ test_livetv_prefs.cpp livetv_prefs_t.o
+
+# Server discovery: the UDP 7359 reply parser and the URL rules.
+# Sender backoff seen from the receiving end (the stream's receive window).
+test_rx_gap: test_rx_gap.cpp ../source/player/stream/rx_gap.h
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/player/stream -o $@ test_rx_gap.cpp
+
+test_server_discovery: test_server_discovery.cpp ../source/net/server_discovery_parse.cpp \
+                       ../source/net/server_discovery.h ../source/api/json_lite.h
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/net -o $@ test_server_discovery.cpp ../source/net/server_discovery_parse.cpp
+
+# Live TV: when the player has to ask for a fresh stream (header-only rules).
+test_picture_resume: test_picture_resume.cpp ../source/player/core/picture_size.h ../source/ui/xmb/ui_resume.cpp ../source/ui/xmb/ui_resume.h
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/player/core -I../source/ui/xmb -o $@ test_picture_resume.cpp ../source/ui/xmb/ui_resume.cpp
+
+test_live_watch: test_live_watch.c ../source/player/core/live_watch.h
+	$(CC) $(CFLAGS) -Wextra -I../source/player/core -o $@ test_live_watch.c
+
+# Local files: path parsing and the browser's rules (pure).
+test_lfs_path: test_lfs_path.cpp ../source/local/lfs_path.cpp ../source/local/lfs_path.h
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/local -o $@ test_lfs_path.cpp ../source/local/lfs_path.cpp
+
+# H.264 sequence parameter sets: real x264 SPS units (fixtures/h264/make_sps.py).
+test_h264_sps: test_h264_sps.cpp ../source/video/h264_sps.c ../source/video/h264_sps.h fixtures/h264/sps_fixtures.inc
+	$(CC) $(CFLAGS) -Wextra -I../source/video -c -o h264_sps_host.o ../source/video/h264_sps.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/video -o $@ test_h264_sps.cpp h264_sps_host.o
+
+# Matroska demuxer: hand-built files for the odd structures, ffmpeg-made ones for real data.
+test_mkv_demux: test_mkv_demux.cpp mkv_builder.h ../source/video/mkv_demux.cpp ../source/video/mkv_demux.h $(wildcard fixtures/mkv/*)
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/video -o $@ test_mkv_demux.cpp ../source/video/mkv_demux.cpp
+
+# Matroska as MPEG-TS, read back through the player's own TS demuxer (ts_demux.cpp, built against hoststub/).
+test_mkv_ts: test_mkv_ts.cpp mkv_builder.h ../source/video/mkv_ts.cpp ../source/video/mkv_ts.h              ../source/video/mkv_demux.cpp ../source/video/ts_demux.cpp ../source/video/ts_demux.h $(wildcard fixtures/mkv/*)
+	$(CC) $(CFLAGS) -c -o aac_adts_p.o ../source/audio/aac_adts.c
+	$(CC) $(CFLAGS) -c -o flac_dec_p.o ../source/audio/flac_dec.c
+	$(CC) $(CFLAGS) -c -o resample_p.o ../source/audio/resample.c
+	$(CXX) $(CXXFLAGS) -Wextra -Ihoststub -I../source/video -I../source/util -I../source/audio -o $@ test_mkv_ts.cpp 	    ../source/video/mkv_ts.cpp ../source/video/mkv_demux.cpp ../source/video/ts_demux.cpp aac_adts_p.o flac_dec_p.o resample_p.o ../source/i18n/i18n.c ../source/i18n/i18n_tables.c -lm
+
+# What a local video file is, which track to start with (Matroska, TS and m2ts fixtures).
+PROBE_SRC = ../source/local/local_probe.cpp ../source/video/mkv_demux.cpp ../source/video/mkv_ts.cpp             ../source/video/h264_sps.c ../source/player/stream/stream_local.cpp ../source/offline/dl_ts.cpp             ../source/util/lang_names.c
+test_local_probe: test_local_probe.cpp $(PROBE_SRC) ../source/local/local_probe.h $(wildcard fixtures/mkv/* fixtures/ts/*)
+	$(CC) $(CFLAGS) -c -o h264_sps_p.o ../source/video/h264_sps.c
+	$(CC) $(CFLAGS) -c -o lang_names_p.o ../source/util/lang_names.c
+	$(CC) $(CFLAGS) -c -o aac_adts_p.o ../source/audio/aac_adts.c
+	$(CC) $(CFLAGS) -c -o flac_dec_p.o ../source/audio/flac_dec.c
+	$(CC) $(CFLAGS) -c -o resample_p.o ../source/audio/resample.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/local -I../source/video -I../source/util -I../source/audio -I../source/player/stream -I../source/offline 	    -o $@ test_local_probe.cpp ../source/local/local_probe.cpp ../source/video/mkv_demux.cpp ../source/video/mkv_ts.cpp 	    ../source/player/stream/stream_local.cpp ../source/offline/dl_ts.cpp h264_sps_p.o lang_names_p.o aac_adts_p.o flac_dec_p.o resample_p.o ../source/i18n/i18n.c ../source/i18n/i18n_tables.c -pthread -lm
+
+# AAC: the ADTS and config helpers, the channel map, and the libfaad glue (adec_aac.cpp) with the resampler, over
+# ffmpeg-made files.  Needs libfaad (apt: libfaad-dev).
+test_aac: test_aac.cpp ../source/audio/aac_adts.c ../source/audio/chan_map.c ../source/audio/adec_aac.cpp ../source/audio/adec_out.cpp ../source/audio/resample.c \
+          ../source/audio/aac_adts.h ../source/audio/chan_map.h ../source/audio/adec_aac.h $(wildcard fixtures/aac/*)
+	$(CC) $(CFLAGS) -O2 -Wextra -c -o aac_adts_t.o ../source/audio/aac_adts.c
+	$(CC) $(CFLAGS) -O2 -Wextra -c -o chan_map_t.o ../source/audio/chan_map.c
+	$(CC) $(CFLAGS) -O2 -c -o resample_t.o ../source/audio/resample.c
+	$(CXX) $(CXXFLAGS) -Wextra -Ihoststub -I../source/audio -I../source/util -o $@ test_aac.cpp ../source/audio/adec_aac.cpp ../source/audio/adec_out.cpp \
+	    aac_adts_t.o chan_map_t.o resample_t.o -lfaad -lm
+
+# FLAC and PCM from a Matroska file, end to end: mkv_ts, the demuxer, the slots, the decoders, what comes out.
+test_lossless: test_lossless.cpp ../source/audio/adec_flac.cpp ../source/audio/adec_pcm.cpp ../source/audio/adec_out.cpp ../source/audio/flac_dec.c  ../source/audio/chan_map.c ../source/audio/resample.c ../source/video/mkv_ts.cpp ../source/video/mkv_demux.cpp ../source/video/ts_demux.cpp  ../source/audio/aac_adts.c $(wildcard fixtures/flac/*)
+	$(CC) $(CFLAGS) -O2 -c -o flac_dec_l.o ../source/audio/flac_dec.c
+	$(CC) $(CFLAGS) -O2 -c -o chan_map_l.o ../source/audio/chan_map.c
+	$(CC) $(CFLAGS) -O2 -c -o resample_l.o ../source/audio/resample.c
+	$(CC) $(CFLAGS) -O2 -c -o aac_adts_l.o ../source/audio/aac_adts.c
+	$(CXX) $(CXXFLAGS) -Wextra -Ihoststub -I../source/video -I../source/util -I../source/audio -o $@ test_lossless.cpp ../source/audio/adec_flac.cpp  ../source/audio/adec_pcm.cpp ../source/audio/adec_out.cpp ../source/video/mkv_ts.cpp ../source/video/mkv_demux.cpp ../source/video/ts_demux.cpp  flac_dec_l.o chan_map_l.o resample_l.o aac_adts_l.o -lm
+
+# The FLAC decoder, against ffmpeg-made files and frames made by the test's own encoder; built with the address and
+# undefined-behaviour sanitizers.
+test_flac: test_flac.cpp ../source/audio/flac_dec.c ../source/audio/flac_dec.h $(wildcard fixtures/flac/*)
+	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -c -o flac_dec_t.o ../source/audio/flac_dec.c
+	$(CXX) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/audio -o $@ test_flac.cpp flac_dec_t.o -lm
+
+# What a music file says about itself: the fixtures and byte-built tags, damaged files under the sanitizers.
+test_local_tags: test_local_tags.cpp ../source/local/local_tags.c ../source/local/local_tags.h $(wildcard fixtures/music/*)
+	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -c -o local_tags_t.o ../source/local/local_tags.c
+	$(CXX) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/local -o $@ test_local_tags.cpp local_tags_t.o
+
+# A music file decoded to 48 kHz stereo: the fixtures, built WAVE files, failing and damaged files; sanitizers on.
+test_local_audio: test_local_audio.cpp minimp3_impl.c ../source/local/local_audio.c ../source/local/local_audio.h ../source/local/local_tags.c \
+        ../source/audio/flac_dec.c ../source/audio/chan_map.c ../source/audio/resample.c $(wildcard fixtures/music/*)
+	for f in ../source/local/local_audio.c ../source/local/local_tags.c ../source/audio/flac_dec.c ../source/audio/chan_map.c ../source/audio/resample.c minimp3_impl.c; do \
+	    $(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/audio -I../source/local -c -o $$(basename $$f .c)_a.o $$f || exit 1; done
+	$(CXX) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/local -o $@ test_local_audio.cpp \
+	    local_audio_a.o local_tags_a.o flac_dec_a.o chan_map_a.o resample_a.o minimp3_impl_a.o -lm
+
+# A folder of music files as an album: order, names, the cover registry (threads, sanitizers).
+test_local_music: test_local_music.cpp ../source/local/local_music.c ../source/local/local_music.h ../source/local/lfs_path.cpp ../source/local/lfs_path.h
+	$(CC) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/local -I../source/i18n -c -o local_music_t.o ../source/local/local_music.c
+	$(CXX) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/local -c -o lfs_path_m.o ../source/local/lfs_path.cpp
+	$(CXX) -O1 -g -Wall -Wextra -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/local -o $@ test_local_music.cpp local_music_t.o lfs_path_m.o ../source/i18n/i18n.c ../source/i18n/i18n_tables.c -lpthread
+
+# The music engine on files from a drive: music/music_player.cpp itself, with pthreads and a recording sound card for the console's services (hoststub_music/).
+MENG_SRC = ../source/local/local_audio.c ../source/local/local_tags.c ../source/audio/flac_dec.c ../source/audio/chan_map.c ../source/audio/resample.c minimp3_impl.c
+MENG_INC = -Ihoststub_music -Ihoststub -I../source/music -I../source/audio -I../source/local -I../source/util -I../source/player/stream -I../source/video -I../source/ui/render
+test_music_engine: test_music_engine.cpp ../source/music/music_player.cpp ../source/music/music_player.h $(MENG_SRC) ../source/local/lfs_path.cpp $(wildcard fixtures/music/*) $(wildcard hoststub_music/*) $(wildcard hoststub_music/*/*)
+	for f in $(MENG_SRC); do $(CC) -O1 -g -Wall -fsanitize=address,undefined -fno-sanitize-recover=undefined -I../source/audio -I../source/local -c -o me_$$(basename $$f .c).o $$f || exit 1; done
+	$(CXX) -O1 -g -Wall -fsanitize=address,undefined -fno-sanitize-recover=undefined $(MENG_INC) -c -o me_lfs_path.o ../source/local/lfs_path.cpp
+	$(CXX) -O1 -g -Wall -fsanitize=address,undefined -fno-sanitize-recover=undefined $(MENG_INC) -o $@ test_music_engine.cpp ../source/music/music_player.cpp me_*.o -lpthread -lm
+
+# The music decoders built little-endian (the host) and big-endian (the PS3's byte order, run under qemu-ppc64) and compared:
+# tags and properties exactly, samples to a hair (see cmp_floats.c).  Skipped when the cross compiler is missing.
+.PHONY: endian_music
+endian_music: test_local_audio_endian.c cmp_floats.c $(MENG_SRC) ../source/local/local_audio.h $(wildcard fixtures/music/*)
+	$(CC) -O2 -Wall -I../source/audio -I../source/local -o em_le test_local_audio_endian.c $(MENG_SRC) -lm
+	$(CC) -O2 -Wall -o cmp_floats cmp_floats.c -lm
+	./em_le em_le.txt em_le.bin fixtures/music
+	@if command -v $(PPC64CC) >/dev/null && command -v $(QEMU_PPC64) >/dev/null; then \
+	    $(PPC64CC) -static -O2 -ffp-contract=off -Wall -I../source/audio -I../source/local -o em_be test_local_audio_endian.c $(MENG_SRC) -lm && \
+	    $(QEMU_PPC64) ./em_be em_be.txt em_be.bin fixtures/music && \
+	    cmp em_le.txt em_be.txt && ./cmp_floats em_le.bin em_be.bin 2e-6 && echo 'music decoders: big-endian run agrees'; \
+	else echo 'endian_music: no powerpc64 cross compiler or qemu-ppc64, skipped'; fi
+
+# Sample-rate conversion to the port's 48 kHz.
+test_resample: test_resample.cpp ../source/audio/resample.c ../source/audio/resample.h
+	$(CC) $(CFLAGS) -O2 -Wextra -c -o resample_host.o ../source/audio/resample.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/audio -o $@ test_resample.cpp resample_host.o -lm
+
+# The subtitles of a Matroska file end to end: mkv_ts, the sink, the conversions, the player's subtitles.cpp.
+test_local_subs: test_local_subs.cpp mkv_builder.h ../source/player/subtitles.cpp ../source/local/local_subs.cpp ../source/local/sub_conv.c ../source/video/mkv_ts.cpp
+	$(CC) $(CFLAGS) -c -o sub_conv_s.o ../source/local/sub_conv.c
+	$(CC) $(CFLAGS) -c -o subs_pgs_s.o ../source/player/subtitles_pgs.c
+	$(CC) $(CFLAGS) -c -o aac_adts_s.o ../source/audio/aac_adts.c
+	$(CC) $(CFLAGS) -c -o flac_dec_s.o ../source/audio/flac_dec.c
+	$(CC) $(CFLAGS) -O2 -c -o resample_s.o ../source/audio/resample.c
+	$(CXX) $(CXXFLAGS) -Wextra -Ihoststub -I../source/local -I../source/video -I../source/util -I../source/audio -I../source/player -o $@ test_local_subs.cpp ../source/local/local_subs.cpp \
+	    ../source/video/mkv_ts.cpp ../source/video/mkv_demux.cpp sub_conv_s.o subs_pgs_s.o aac_adts_s.o flac_dec_s.o resample_s.o -lm
+
+# Matroska subtitle blocks as text and as .sup segments.
+test_sub_conv: test_sub_conv.cpp ../source/local/sub_conv.c ../source/local/sub_conv.h
+	$(CC) $(CFLAGS) -Wextra -I../source/local -c -o sub_conv_host.o ../source/local/sub_conv.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/local -o $@ test_sub_conv.cpp sub_conv_host.o
+
+# The Media browser's names for files, and its resume table.
+test_local_names: test_local_names.cpp ../source/local/local_names.c ../source/local/local_names.h
+	$(CC) $(CFLAGS) -Wextra -I../source/local -c -o local_names_host.o ../source/local/local_names.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/local -o $@ test_local_names.cpp local_names_host.o ../source/i18n/i18n.c ../source/i18n/i18n_tables.c
+
+test_local_resume: test_local_resume.cpp ../source/local/local_resume.c ../source/local/local_resume.h
+	$(CC) $(CFLAGS) -Wextra -I../source/local -c -o local_resume_host.o ../source/local/local_resume.c
+	$(CXX) $(CXXFLAGS) -Wextra -I../source/local -o $@ test_local_resume.cpp local_resume_host.o
+
+# The demuxer's audio-track choice over the TS fixtures, and the stream clock of a file entered part way.
+test_local_play: test_local_play.cpp $(PROBE_SRC) ../source/video/ts_demux.cpp ../source/video/ts_demux.h \
+                 ../source/player/stream/stream_local.h $(wildcard fixtures/ts/*)
+	$(CC) $(CFLAGS) -c -o h264_sps_p.o ../source/video/h264_sps.c
+	$(CC) $(CFLAGS) -c -o lang_names_p.o ../source/util/lang_names.c
+	$(CC) $(CFLAGS) -c -o aac_adts_p.o ../source/audio/aac_adts.c
+	$(CC) $(CFLAGS) -c -o flac_dec_p.o ../source/audio/flac_dec.c
+	$(CC) $(CFLAGS) -c -o resample_p.o ../source/audio/resample.c
+	$(CXX) $(CXXFLAGS) -Wextra -Ihoststub -I../source/local -I../source/video -I../source/util -I../source/audio -I../source/player/stream -I../source/offline \
+	    -o $@ test_local_play.cpp ../source/video/ts_demux.cpp ../source/local/local_probe.cpp ../source/video/mkv_demux.cpp \
+	    ../source/video/mkv_ts.cpp ../source/player/stream/stream_local.cpp ../source/offline/dl_ts.cpp h264_sps_p.o lang_names_p.o aac_adts_p.o flac_dec_p.o resample_p.o ../source/i18n/i18n.c ../source/i18n/i18n_tables.c -lm
+
+# lfs: drives, hotplug, paths, listings and reads, over directory trees and the NTFS / exFAT images.
+LFS_SRC = test_lfs.cpp lfs_port_host.cpp ../source/local/lfs.cpp ../source/local/lfs_path.cpp
+test_lfs: $(LFS_SRC) mohasi_host_storage.c ../source/local/lfs.h ../source/local/lfs_port.h           ../source/local/lfs_path.h $(wildcard ../third_party/mohasi_fs/*.h) $(wildcard fixtures/fs/*.img.gz)
+	$(CC) -O2 -Wall -Wno-misleading-indentation -I../third_party/mohasi_fs -c -o mohasi_ntfs.o ../third_party/mohasi_fs/ntfs.c
+	$(CC) -O2 -Wall -Wno-misleading-indentation -I../third_party/mohasi_fs -c -o mohasi_exfat.o ../third_party/mohasi_fs/exfat.c
+	$(CC) -O2 -Wall -I../third_party/mohasi_fs -c -o mohasi_storage.o mohasi_host_storage.c
+	$(CXX) -O2 -Wall -Wextra -I../source/local -I../source/i18n -I../third_party/mohasi_fs -o $@ $(LFS_SRC) ../source/i18n/i18n.c ../source/i18n/i18n_tables.c mohasi_ntfs.o mohasi_exfat.o mohasi_storage.o -lpthread
+
+# The vendored NTFS / exFAT readers (third_party/mohasi_fs) against images made by the Linux
+# drivers (fixtures/fs/make_images.sh), on a fake storage device that reads the image.
+MOHASI     = ../third_party/mohasi_fs
+MOHASI_SRC = test_mohasi_fs.c mohasi_host_storage.c $(MOHASI)/ntfs.c $(MOHASI)/exfat.c
+MOHASI_DEP = $(MOHASI_SRC) $(MOHASI)/ntfs.h $(MOHASI)/exfat.h $(MOHASI)/jf_port.h \
+             $(wildcard fixtures/fs/*.img.gz)
+test_mohasi_fs: $(MOHASI_DEP)
+	$(CC) -O2 -Wall -Wextra -Wno-misleading-indentation -I$(MOHASI) -o $@ $(MOHASI_SRC)
+
+# exFAT stays read-only: exfat.c must not grow a write path back (no write syscall, no raw syscall
+# trampolines, no allocator).  NTFS writes, through jf_port.h's writeStorageRaw only.
+# (Comments are stripped first; the wording of a comment is not code.)
+check-mohasi-readonly:
+	@bad=$$(sed -e 's@//.*@@' $(MOHASI)/exfat.c | grep -n -E '\b603\b|STORAGE_WRITE|writeSectors|writeStorageRaw|allocateClusters|scCall|sys_storage_write' \
+	        | sed "s@^@$(MOHASI)/exfat.c: @"; \
+	    sed -e 's@//.*@@' $(MOHASI)/ntfs.c | grep -n -E '\b603\b|scCall|sys_storage_write|lv2syscall' \
+	        | sed "s@^@$(MOHASI)/ntfs.c: @"); \
+	if [ -n "$$bad" ]; then echo "write path or raw syscall found where it must not be:"; echo "$$bad"; exit 1; fi; \
+	echo "mohasi: exFAT read-only, NTFS writes only through jf_port"
+
+# The same, built big-endian and run under qemu-ppc64 (skipped when the cross compiler is missing).
+test_mohasi_fs_be: $(MOHASI_DEP)
+	@if command -v powerpc64-linux-gnu-gcc >/dev/null && command -v qemu-ppc64 >/dev/null; then \
+	    powerpc64-linux-gnu-gcc -static -O2 -Wall -Wno-misleading-indentation -I$(MOHASI) -o $@ $(MOHASI_SRC) && \
+	    qemu-ppc64 ./$@; \
+	else echo "test_mohasi_fs_be: no powerpc64 cross compiler or qemu-ppc64, skipped"; fi
 
 test_dts_hd: test_dts_hd.c $(DTS_HD_DEPS)
 	$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o $@ $^ -lm
@@ -111,6 +412,57 @@ test_dts_hd: test_dts_hd.c $(DTS_HD_DEPS)
 #   qemu-ppc64 ./dump_be dtsma.dts be.pcm && cmp be.pcm dtsma.ref
 test_dts_xll_dump: test_dts_xll_dump.c $(DTS_HD_DEPS)
 	$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o $@ $^ -lm
+
+# ---------------------------------------------------------------------------
+# Byte-order agreement -- `make -f Makefile.host endian`
+# ---------------------------------------------------------------------------
+# The DTS-HD MA path spent a while suspected of a big-endian bug that could
+# only be found "with hardware in the loop".  It was not endianness at all
+# (see ../source/audio/dcahd/PROVENANCE.md), but the way that was PROVED is
+# worth keeping runnable instead of leaving it as a shell command in a note:
+# build the identical decoder for big-endian PPC64, run it under qemu, and
+# compare byte for byte with the host build.
+#
+# test_dts_xll_dump writes every sample explicitly little-endian, byte by
+# byte, so the output file encodes VALUES rather than the host's byte order.
+# The two runs therefore match if and only if the two builds compute the same
+# numbers.
+#
+# The big-endian build deliberately uses -O3 -maltivec, which is what the PS3
+# Makefile gives these objects (dcahd_api.o / dcahd_xll.o / dcahd_compat.o get
+# -O3, and -mcpu=cell implies AltiVec).  That matters: -O3 turns on
+# -ftree-vectorize, and auto-vectorised big-endian PowerPC is exactly where a
+# byte-order bug would hide.  Building at -O2 would test the wrong thing.
+#
+# ENDIAN_FIXTURE defaults to the synthesised core-only tones, which exercises
+# the CORE path -- and the core is on the lossless critical path, because
+# DTS-HD MA is usually residual-encoded (lossless = core + residual).  To cover
+# XLL itself, point it at a fixture extracted from a real disc rip:
+#
+#   make -f Makefile.host endian ENDIAN_FIXTURE=dtsma.dts
+#
+PPC64CC        ?= powerpc64-linux-gnu-gcc
+QEMU_PPC64     ?= qemu-ppc64
+ENDIAN_FIXTURE ?= tones51.dts
+
+.PHONY: endian
+endian: $(ENDIAN_FIXTURE)
+	@echo "== building little-endian (host) =="
+	@$(CC) $(DCAHD_CFLAGS) $(CFLAGS) -o dump_le test_dts_xll_dump.c $(DTS_HD_DEPS) -lm
+	@echo "== building big-endian ppc64, -O3 -maltivec (the console's flags) =="
+	@$(PPC64CC) $(DCAHD_CFLAGS) $(CFLAGS) -O3 -maltivec -mabi=altivec -static \
+	    -o dump_be test_dts_xll_dump.c $(DTS_HD_DEPS) -lm
+	@echo "== little-endian run =="
+	@./dump_le $(ENDIAN_FIXTURE) out_le.pcm
+	@echo "== big-endian run (under qemu) =="
+	@$(QEMU_PPC64) ./dump_be $(ENDIAN_FIXTURE) out_be.pcm
+	@if cmp -s out_le.pcm out_be.pcm; then \
+	    echo "PASS: byte-identical across byte orders ($(ENDIAN_FIXTURE))"; \
+	else \
+	    echo "FAIL: the two byte orders disagree --"; \
+	    cmp -l out_le.pcm out_be.pcm | wc -l; \
+	    exit 1; \
+	fi
 
 tones51.ac3:
 	ffmpeg -y -loglevel error \
@@ -151,8 +503,9 @@ tones51.thd:
 tones51.thd.ref: tones51.thd
 	ffmpeg -y -loglevel error -i tones51.thd -c:a pcm_s32le -f s32le $@
 
-check: all tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
+check: all tones51.ac3 tones51.spdif tones51.dts tones51.thd tones51.thd.ref
 	./test_ac3_map
+	./test_iec61937 tones51.ac3 tones51.spdif
 	./test_ac3_decode tones51.ac3
 	./test_dts_map
 	./test_dts_decode tones51.dts
@@ -163,11 +516,450 @@ check: all tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 	./test_truehd_decode tones51.thd tones51.thd.ref
 	./test_dts_hd tones51.dts
 	./test_media_sources
+	./test_subtitles
+	./test_subtitles_pgs
+	./test_trickplay_info
+	./test_media_segments
+	./test_text_runs
+	./test_utf8
+	./test_circle_blit
+	./test_theme
+	./test_layout
+	./test_wave_kernel
+	./test_wave_spline
+	./test_wave_ribbon
+	./test_wave_field
+	./test_wave_audio
+	./test_wave_motion
+	./test_wave_layers
+	./test_wave_cam
+	./test_wave_light
+	./test_wave_gel
+	./test_wave_drop
+	./test_spine
+	./test_depth
+	./test_stream_budget
+	./test_facts
+	./test_experience
+	./test_json_unescape
+	./test_boot_seq
+	./test_wave_motes
+	./test_canyon
+	./test_display_mode
+	./test_offline
+	./test_stream_request
+	./test_jbuf_order
+	./test_settings_model
+	./test_settings_model_nostats
+	./test_userdata
+	./test_livetv
+	./test_server_discovery
+	./test_rx_gap
+	./test_livetv_prefs
+	./test_chapters
+	./test_wol
+	./test_icons
+	./test_live_watch
+	./test_picture_resume
+	./test_lfs_path
+	./test_lfs
+	./test_h264_sps
+	./test_mkv_demux
+	./test_mkv_ts
+	./test_local_probe
+	./test_local_play
+	./test_local_names
+	./test_local_resume
+	./test_resample
+	./test_aac
+	./test_flac
+	./test_lossless
+	./test_sub_conv
+	./test_local_subs
+	./test_local_tags
+	./test_local_audio
+	./test_local_music
+	./test_music_engine
+	./test_i18n
+	./test_i18n_text
+	./test_line_break
+	./test_clock_fmt
+	python3 ../tools/i18n.py check
+	$(MAKE) -f Makefile.host check-mohasi-readonly
+	./test_mohasi_fs
+	$(MAKE) -f Makefile.host test_mohasi_fs_be
+	$(MAKE) -f Makefile.host endian_music
 
 clean:
-	rm -f test_ac3_map test_ac3_decode test_media_sources \
+	rm -f test_ac3_map test_ac3_decode test_media_sources test_subtitles \
+	      test_subtitles_pgs test_trickplay_info \
 	      test_dts_map test_dts_decode test_dts_stream test_dts_exss test_track_codec \
 	      test_truehd_map test_truehd_decode test_dts_hd test_dts_xll_dump \
+	      test_text_runs test_utf8 test_theme test_layout test_circle_blit \
+	      test_wave_kernel test_wave_spline test_wave_ribbon test_wave_field \
+	      test_wave_audio test_wave_motion test_wave_layers \
+	      test_wave_cam test_wave_light test_wave_gel test_spine test_depth test_facts test_stream_budget test_experience test_json_unescape test_boot_seq test_wave_motes test_display_mode \
+	      test_offline test_stream_request track_codec_host.o \
+	      test_settings_model test_settings_model_nostats test_userdata test_livetv test_server_discovery test_rx_gap test_livetv_prefs test_chapters test_wol test_icons test_live_watch test_picture_resume \
+	      test_mohasi_fs test_mohasi_fs_be test_lfs_path \
 	      tones51.ac3 tones51.dts tones51.thd tones51.thd.ref
 
-.PHONY: all check clean
+.PHONY: all check clean check-mohasi-readonly
+
+# 24p output decision record (source/video/display_mode.c).  Pure C, no PS3
+# headers, fixtures taken from a real videoGetDeviceInfo dump.
+test_display_mode: test_display_mode.c ../source/video/display_mode.c ../source/video/display_mode.h
+	$(CC) $(CFLAGS) -I../source/video -o $@ test_display_mode.c ../source/video/display_mode.c
+
+# ---------------------------------------------------------------------------
+# GPU text runs vs. the per-glyph blit they replace.
+#
+# ui_text.cpp is compiled ON THE HOST here, with hoststub/ standing in for the
+# PSL1GHT headers it includes (types, plus no-op RSX transfer calls the TTF
+# path never reaches).  That is deliberate: the point is to run the REAL glyph
+# walk against the REAL run walk, not a host reimplementation of either, so a
+# divergence in kerning, pen truncation or coverage combining shows up here
+# instead of as text that shifts a pixel when the gate is flipped.
+# See the header comment in test_text_runs.cpp.
+TEXT_INC = -Ihoststub -I../source/ui -I../source/ui/render -I../source/ui/fonts \
+           -I../source/gfx -I../source/util -I../source
+test_text_runs: test_text_runs.cpp ../source/ui/render/ui_text.cpp
+	$(CXX) $(CXXFLAGS) $(TEXT_INC) -o $@ test_text_runs.cpp -lm
+
+# Runtime theming (Phase 1 of the XMB revamp).  Compiles the REAL theme.cpp --
+# hoststub/sys/file.h maps the three LV2 directory syscalls theme_scan() uses
+# onto POSIX opendir/readdir -- and checks it against the REAL themes/*.ini the
+# package ships, so a mistyped built-in or a regression in the inline-comment
+# stripping fails here rather than on the console.
+THEME_INC = -Ihoststub -I../source/ui -I../source/util
+test_theme: test_theme.cpp ../source/ui/theme.cpp ../themes/xmb-wave.ini
+	$(CXX) $(CXXFLAGS) $(THEME_INC) -o $@ test_theme.cpp
+
+# XMB layout sanity across resolutions.  Guards the class of mistake that is
+# invisible in source and obvious on a TV: a chrome band that grows into the
+# content, a negative card height, a hints bar overlapping the grid.
+LAYOUT_INC = -Ihoststub -I../source/ui -I../source/ui/render -I../source/ui/fonts -I../source/gfx -I../source/util -I../source
+test_layout: test_layout.cpp ../source/ui/ui_visuals.h ../source/ui/theme.h \
+             ../source/ui/render/spine.h ../source/ui/render/depth.h
+	$(CXX) $(CXXFLAGS) $(LAYOUT_INC) -o $@ test_layout.cpp
+
+# Handoff section 3.0 typefaces, verified against this client's stb_truetype
+# rather than against a browser -- see the header comment in test_fonts.cpp.
+FONTS_INC = -Ihoststub -I../source/gfx
+test_fonts: test_fonts.cpp ../source/gfx/stb_truetype.h
+	$(CXX) $(CXXFLAGS) $(FONTS_INC) -Wno-unused-function -o $@ test_fonts.cpp -lm
+
+# ---------------------------------------------------------------------------
+# Wave geometry pipeline -- four header-only scalar kernels, four tests.
+#
+#   wave_kernel.h  damped spring chain      -> node positions
+#   wave_spline.h  uniform cubic B-spline   -> dense smooth polyline
+#   wave_ribbon.h  strip generation         -> WaveVert-compatible vertices
+#   wave_field.h   three animated layers    -> the seam ui_wave.cpp samples
+#
+# These are portable scalar C with no libm, no PS3 headers and no RSX state,
+# so the host build compiles the SAME code the console runs rather than a
+# stand-in for it -- which is the point, because the numerical contracts
+# between the three stages are exactly what is easy to get subtly wrong and
+# impossible to debug on a TV.
+#
+# The tests link -lm: the KERNELS may not use libm, but the tests checking
+# them may, and comparing wk_sinf and wr_rsqrt against the real sinf/sqrtf is
+# a far better check than a table of hand-written expected values.
+#
+# test_wave_ribbon.c also asserts the vertex struct's offsets, its 20-byte
+# payload, its 24-byte stride and its 8-byte alignment.  ui_wave.cpp explains
+# what an unpadded 20-byte version costs: a merged 64-bit store landing
+# misaligned in RSX local memory wedges the GPU and needs a power cycle.  That
+# is worth a compile-time guard and a runtime one.
+WAVE_HDRS = ../source/ui/render/wave_kernel.h \
+            ../source/ui/render/wave_spline.h \
+            ../source/ui/render/wave_ribbon.h \
+            ../source/ui/render/wave_field.h
+
+test_wave_kernel: test_wave_kernel.c ../source/ui/render/wave_kernel.h
+	$(CC) $(CFLAGS) -o $@ test_wave_kernel.c -lm
+
+test_wave_spline: test_wave_spline.c ../source/ui/render/wave_kernel.h \
+                  ../source/ui/render/wave_spline.h
+	$(CC) $(CFLAGS) -o $@ test_wave_spline.c -lm
+
+test_wave_ribbon: test_wave_ribbon.c $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -o $@ test_wave_ribbon.c -lm
+
+# The seam itself: three chains through one adapter.  This is the only wave
+# test that exercises the COMBINATION -- bounded together, distinct from each
+# other, pinned at the screen edges, reproducible from a seed -- which is what
+# the renderer actually depends on and what no single stage test can see.
+test_wave_field: test_wave_field.c $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -o $@ test_wave_field.c -lm
+
+# ---------------------------------------------------------------------------
+# JellyWave -- the approved translucent-gel design, three more header-only
+# scalar kernels and three tests.
+#
+#   wave_cam.h    world -> clip, through ONE fixed camera
+#   wave_light.h  one shared light, two LUTs, ACES tone map
+#   wave_gel.h    the stadium section lofted along the solver's spine
+#
+# These SIT ON TOP of the geometry pipeline rather than replacing any of it:
+# wave_kernel.h, wave_spline.h, wave_field.h and wave_ribbon.h are all
+# untouched, and wave_gel.h consumes wf_field's sy[] exactly as ui_wave.cpp's
+# existing path does.  The design's own undulation term is what the solver
+# replaces; everything else about the silhouette is the design's.
+#
+# Why each test exists, in one line each:
+#
+#   test_wave_cam    the basis is nine hard-coded numbers that were solved
+#                    offline, and one wrong digit skews every vertex in a way
+#                    that looks like broken geometry rather than a bad camera.
+#                    It is re-derived here from its own definition.
+#
+#   test_wave_light  both LUTs are literal tables (a generated one would be
+#                    file-scope dynamic initialisation, which this target does
+#                    not want), so they are re-derived from their documented
+#                    formulas -- and the SHAPES are asserted separately,
+#                    because a flat-topped rim and a narrow specular core are
+#                    the two things a pow() cannot give and the whole reason
+#                    the tables exist.
+#
+#   test_wave_gel    runs the REAL solver into the REAL loft and checks the
+#                    four things that cannot be seen in source: the section is
+#                    convex (which is what makes the painter's sort EXACT with
+#                    no depth buffer), the band lands low and diagonal instead
+#                    of across the card grid, it overruns both screen edges at
+#                    16:9 and 4:3, and the rolled edge keeps real on-screen
+#                    thickness -- without which this is a flat ribbon with
+#                    expensive colours on it.
+JW_HDRS = ../source/ui/render/wave_cam.h \
+          ../source/ui/render/wave_light.h \
+          ../source/ui/render/wave_gel.h
+
+test_wave_cam: test_wave_cam.c ../source/ui/render/wave_cam.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_cam.c -lm
+
+test_wave_light: test_wave_light.c ../source/ui/render/wave_light.h \
+                 ../source/ui/render/wave_cam.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_light.c -lm
+
+test_wave_gel: test_wave_gel.c $(JW_HDRS) $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_gel.c -lm
+
+# The motes (JellyWave stage 9, not wired into the renderer yet): the cloud's
+# spread against its closed form, framing at 16:9 and 4:3, how long a glint
+# is held, and the field's TOTAL light frame to frame -- the strobe bound.
+# wave_motion.h and wave_audio.h are named rather than taken from AUDIO_HDRS,
+# which is defined further down and so is still empty when this line is read.
+test_wave_motes: test_wave_motes.c ../source/ui/render/wave_motes.h \
+                 ../source/ui/render/wave_motion.h \
+                 ../source/ui/render/wave_audio.h $(JW_HDRS) $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_motes.c -lm
+
+# The spine (README 2.9 depth model): per-level geometry, the divider/label
+# clearance through a transition, slot falloff and the eased motion clock.
+# Header-only pure C, like the JellyWave headers above.
+# The experience pass (render/art_colour.h, buffer_anim.h, experience.h):
+# artwork accent extraction and its cache, the buffering presentation's state
+# machine, the version selector's words and the ambient screensaver.
+test_experience: test_experience.c ../source/ui/render/art_colour.h \
+                 ../source/ui/render/buffer_anim.h ../source/ui/render/experience.h
+	$(CC) $(CFLAGS) -Wextra -o $@ test_experience.c ../source/i18n/i18n.c ../source/i18n/i18n_tables.c -lm
+
+# JSON string decoding (source/api/json_unescape.h): \u0027 and friends.
+test_json_unescape: test_json_unescape.c ../source/api/json_unescape.h
+	$(CC) $(CFLAGS) -Wextra -o $@ test_json_unescape.c
+
+test_spine: test_spine.c ../source/ui/render/spine.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_spine.c -lm
+
+# The depth engine (render/depth.h): the layouts every category's three
+# levels are drawn from, and a verbatim copy of spine6's Home geometry to
+# prove the move onto the engine changed nothing.
+# What a quality step asks the server for, audio included (2026-09-24).
+test_stream_budget: test_stream_budget.c ../source/player/core/stream_budget.h
+	$(CC) $(CFLAGS) -Wextra -I../source/player/core -o $@ test_stream_budget.c
+
+test_depth: test_depth.c ../source/ui/render/depth.h ../source/ui/render/spine.h
+	$(CC) $(CFLAGS) -Wextra -I../source/ui/render -o $@ test_depth.c -lm
+
+# Item facts (the Home queue's tech strip): the stream-to-words parser.
+test_facts: test_facts.cpp ../source/api/facts_parse.cpp ../source/api/api_facts.h
+	$(CXX) $(CXXFLAGS) -Ihoststub -o $@ test_facts.cpp ../source/api/facts_parse.cpp
+
+# ---------------------------------------------------------------------------
+# Cold-boot animation -- the timeline is header-only pure C (boot_seq.h), so
+# every path through it runs here: XMB early and late, a login screen
+# instead, a skip, stalled frames, NaN frame times, 3000 random
+# interleavings.  It asserts that nothing can wedge, that nothing pops
+# (every visible value checked frame to frame at 60 Hz), and that the last
+# frame is EXACTLY the static lockup -- the renderer (boot_anim.cpp) only
+# draws what this computes.  See docs/boot-animation.md.
+test_boot_seq: test_boot_seq.c ../source/ui/render/boot_seq.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_boot_seq.c -lm
+
+# ---------------------------------------------------------------------------
+# Audio-reactive wave -- three more header-only scalar kernels, three tests.
+#
+#   wave_audio.h   PCM -> musical features   (filterbank, envelopes, onsets)
+#   wave_motion.h  features -> parameters    (smoothing + SLEW LIMITING)
+#   wave_layers.h  parameters -> per-layer geometry and colour
+#
+# See docs/wave-audio-spec.md.  These attach to the geometry pipeline
+# WITHOUT modifying it: the motion stage's drive, perturb and timescale go
+# into wk_step (or wf_step) through arguments those already take, and the
+# layer stage is a post-transform on ws_build's output feeding wr_build
+# unchanged.
+#
+# Each test has ONE assertion it exists for, and each of the three caught a
+# real defect that every other check in its own file passed against:
+#
+#   test_wave_audio    every band's maximum must be its OWN band.  A
+#                      three-pole cascade is sharper on paper and moves
+#                      every band's peak into the band above it;
+#                      boundedness and finiteness both pass against that.
+#
+#   test_wave_motion   every slew-limited parameter must move by at most
+#                      its declared rate times dt, on every frame, under
+#                      deliberately hostile input.  That is what makes the
+#                      wave's calm a property of the code rather than of
+#                      having picked good envelope constants.
+#
+#   test_wave_layers   the layers must actually CROSS, and the amplitude
+#                      budget must have real MARGIN rather than leaning on
+#                      the clamp.  Four parallel ribbons satisfy every
+#                      other assertion in that file and look like a bar
+#                      chart -- the first run found exactly that.
+#
+# test_wave_layers runs the WHOLE pipeline, PCM in and vertices out, for
+# about twelve minutes of simulated playback: a few seconds natively, and a
+# while under emulation.  The other two are instant.
+AUDIO_HDRS = ../source/ui/render/wave_audio.h \
+             ../source/ui/render/wave_motion.h \
+             ../source/ui/render/wave_layers.h
+
+test_wave_audio: test_wave_audio.c ../source/ui/render/wave_audio.h
+	$(CC) $(CFLAGS) -o $@ test_wave_audio.c -lm
+
+test_wave_motion: test_wave_motion.c ../source/ui/render/wave_audio.h \
+                  ../source/ui/render/wave_motion.h
+	$(CC) $(CFLAGS) -o $@ test_wave_motion.c -lm
+
+test_wave_layers: test_wave_layers.c $(AUDIO_HDRS) $(WAVE_HDRS) $(JW_HDRS)
+	$(CC) $(CFLAGS) -o $@ test_wave_layers.c -lm
+
+
+# The colour is packed into one u32, so its BYTE order in the vertex buffer is
+# a property of the target, not of the source -- and the target is big-endian
+# PowerPC while this host is not.  test_wave_ribbon.c checks the packed value
+# (which is target-independent) and then checks the bytes against whichever
+# endianness it was built for, so running it under qemu for ppc64 verifies the
+# order the RSX will actually see.  Same toolchain the `endian` target above
+# uses.
+#
+# VERIFIED: on ppc64 the bytes at +16 come out 11 22 33 FF for
+# wr_put(r=0x11, g=0x22, b=0x33) -- r,g,b,a in that order, which is exactly
+# what the GCM_VERTEX_DATA_TYPE_U8 binding at vo+16 reads.  sizeof is 24 and
+# alignof is 8 on both byte orders.
+#
+# Ribbon first, then spline, then kernel, because that is both fastest-first
+# and most-relevant-first: the ribbon test carries every layout and byte-order
+# assertion plus the memcpy bit-pun in wr_rsqrt, and it finishes in seconds.
+# The kernel test runs on the order of a hundred million node updates (a dt
+# sweep, a 40k-step energy decay and a 108k-step run) -- under four seconds
+# natively, but several minutes under emulation.  Expect this target to take a
+# while for that last step.
+#
+#   make -f Makefile.host wave-endian
+.PHONY: wave-endian
+wave-endian:
+	@echo "== building the wave tests big-endian ppc64 =="
+	@$(PPC64CC) $(CFLAGS) -static -o wave_ribbon_be test_wave_ribbon.c -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_spline_be test_wave_spline.c -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_kernel_be test_wave_kernel.c -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_field_be  test_wave_field.c  -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_audio_be  test_wave_audio.c  -lm
+	@$(PPC64CC) $(CFLAGS) -static -o wave_motion_be test_wave_motion.c -lm
+	@echo "== running them under qemu (the kernel one is slow) =="
+	@$(QEMU_PPC64) ./wave_ribbon_be
+	@$(QEMU_PPC64) ./wave_spline_be
+	@$(QEMU_PPC64) ./wave_kernel_be
+	@$(QEMU_PPC64) ./wave_field_be
+	@$(QEMU_PPC64) ./wave_audio_be
+	@$(QEMU_PPC64) ./wave_motion_be
+	@rm -f wave_kernel_be wave_spline_be wave_ribbon_be wave_field_be \
+	       wave_audio_be wave_motion_be
+
+# ---------------------------------------------------------------------------
+# Does the text path read UTF-8?
+#
+# Same harness as test_text_runs: the REAL ui_text.cpp and ui_draw.cpp compiled
+# against hoststub/, because the thing being checked is that FIVE separate
+# string walks (measure, blit, run box, run raster, vcentered measure) plus the
+# JSON escape decoder all agree on where one character ends and the next begins.
+# A host reimplementation would agree with itself and prove nothing.
+test_utf8: test_utf8.cpp ../source/ui/render/ui_text.cpp \
+           ../source/ui/render/ui_draw.cpp
+	$(CXX) $(CXXFLAGS) $(TEXT_INC) -o $@ test_utf8.cpp -lm
+
+# ---------------------------------------------------------------------------
+# The circular headshot blit (v1.0 cast row).
+#
+# render/circle_blit.h is header-only scalar C with no PS3 headers, so the test
+# compiles the SAME rasteriser the console runs.  What it is really guarding is
+# that nothing outside the circle is ever written: the headshots sit over the
+# animated wave, and the anti-aliasing is done against the source image rather
+# than the framebuffer precisely so the blit never reads video memory (`bpx`
+# must stay 0).  That trade only holds if the write mask is exact.
+test_circle_blit: test_circle_blit.c ../source/ui/render/circle_blit.h
+	$(CC) $(CFLAGS) -o $@ test_circle_blit.c -lm
+
+test_wave_scope: test_wave_scope.c ../source/ui/render/wave_scope.h ../source/ui/render/wave_deform.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_scope.c -lm
+
+test_wave_look: test_wave_look.c ../source/ui/render/wave_look.h ../source/ui/render/wave_gel.h ../source/ui/render/wave_light.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_look.c -lm
+
+# JellyDrop (wave_drop.h): morph 0 is JellyWave bit for bit; the bell is
+# finite, centred and sized at every point of the morph; the motion settles;
+# the core and the orbit project.
+test_wave_drop: test_wave_drop.c ../source/ui/render/wave_drop.h ../source/ui/render/jd_bell_geom.h $(JW_HDRS) $(WAVE_HDRS)
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_drop.c -lm
+
+test_wave_nav: test_wave_nav.c ../source/ui/render/wave_nav.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_nav.c -lm
+
+test_daynight: test_daynight.c ../source/ui/render/bg_gradient.h
+	$(CC) $(CFLAGS) -Ihoststub -I../source/ui/render -o $@ test_daynight.c -lm
+
+test_canyon: test_canyon.c ../source/music/sv_spectrum.h ../source/ui/render/canyon.h
+	$(CC) $(CFLAGS) -I../source/music -I../source/ui/render -o $@ test_canyon.c -lm
+
+test_wave_snow: test_wave_snow.c ../source/ui/render/wave_snow.h
+	$(CC) $(CFLAGS) -I../source/ui/render -o $@ test_wave_snow.c -lm
+
+# The interface language: lookup, fallback, codes, the generated catalog tables.
+test_i18n: test_i18n.c ../source/i18n/i18n.c ../source/i18n/i18n_tables.c ../source/i18n/i18n.h
+	$(CC) $(CFLAGS) -Wextra -o $@ test_i18n.c ../source/i18n/i18n.c ../source/i18n/i18n_tables.c
+
+# Translations vs the fonts and the screen: glyph coverage, kana sizing, Settings rows fitting their boxes.
+test_i18n_text: test_i18n_text.cpp ../source/ui/settings_model.c ../source/i18n/i18n.c ../source/i18n/i18n_tables.c ../source/gfx/notosansjp.h
+	$(CXX) $(CXXFLAGS) $(FONTS_INC) -I../source/ui -I../source/net -Wno-unused-function -c -o test_i18n_text.o test_i18n_text.cpp
+	$(CC) $(CFLAGS) -I../source/ui -I../source/net -c -o ti_model.o ../source/ui/settings_model.c
+	$(CC) $(CFLAGS) -c -o ti_i18n.o ../source/i18n/i18n.c
+	$(CC) $(CFLAGS) -c -o ti_tables.o ../source/i18n/i18n_tables.c
+	$(CXX) -o $@ test_i18n_text.o ti_model.o ti_i18n.o ti_tables.o -lm
+
+# Where to break a line of server text: spaces, CJK without spaces, never inside a UTF-8 sequence.
+test_line_break: test_line_break.c ../source/ui/render/line_break.h
+	$(CC) $(CFLAGS) -Wextra -I../source/ui/render -o $@ test_line_break.c
+
+# The corner clock and date, as the XMB writes them.
+test_clock_fmt: test_clock_fmt.c ../source/ui/render/clock_fmt.h
+	$(CC) $(CFLAGS) -Wextra -I../source/ui/render -o $@ test_clock_fmt.c
+
+# The NTFS write path end to end (third_party/mohasi_fs/README.md, Tests): not part of check -- it needs
+# mkntfs, ntfscat and the ntfs-3g headers (apt: ntfs-3g ntfs-3g-dev).  NTFS_MODE=quick|full|cut512.
+.PHONY: ntfs-write-check
+ntfs-write-check:
+	bash fixtures/fs/ntfs_write_check.sh $(or $(NTFS_MODE),quick)
+	bash fixtures/fs/ntfs_write_check.sh quick be

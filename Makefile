@@ -5,7 +5,9 @@ $(error "Please set PSL1GHT in your environment. export PSL1GHT=<path>")
 endif
 
 ICON0       := $(CURDIR)/ICON0.PNG
-SFOXML      := $(PS3DEV)/bin/sfo.xml
+# sfo.xml: the stock template plus ITEM_PRIORITY (pins the app to the top of
+# the Game column, as ManaGunZ does) and the APP_VER the XMB shows.
+SFOXML      := $(CURDIR)/sfo.xml
 
 include $(PSL1GHT)/ppu_rules
 
@@ -19,14 +21,16 @@ SOURCES     := source source/audio source/audio/a52 source/audio/dca \
                source/player source/player/core source/player/hud source/player/gpu \
                source/player/threads source/player/stream \
                source/ui source/ui/input source/ui/osk source/ui/xmb source/ui/render \
-               source/util source/cache source/video source/music
+               source/util source/cache source/video source/music source/spu \
+               source/offline source/local third_party/mohasi_fs source/i18n
 DATA        := data
 INCLUDES    := source/audio source/audio/dcahd \
                source/audio/mlp/ff source/audio/mlp/ff/libavcodec \
                source/gfx source/net source/api \
                source/player source/player/hud source/player/gpu source/player/stream \
                source/ui source/ui/render source/ui/fonts \
-               source/util source/cache source/video source/music
+               source/util source/cache source/video source/music source/spu \
+               source/offline source/local third_party/mohasi_fs source/i18n
 
 TITLE       := Jellyfin PS3
 APPID       := JFPS30000
@@ -73,6 +77,13 @@ mlp_api.o: CFLAGS += -Wno-dangling-else
 # result is bit-exact at -O3 on BOTH x86-64 and big-endian PPC64 (the PPU's
 # byte order) -- 806 of 806 frames.  Lossless output is a property that fails
 # loudly under that test, so it is the right thing to gate an optimisation on.
+# jf_spu.cpp hand-vectorises the animation kernel with AltiVec intrinsics.
+# -mcpu=cell targets the right core but does not by itself put the compiler in
+# the ABI the <altivec.h> intrinsics need, so state both.  Measured 13.3x over
+# the scalar form -- that factor is the whole reason the PPU path is viable
+# and the SPU pool is optional (docs/spu-feasibility.md).
+jf_spu.o:      CFLAGS += -maltivec -mabi=altivec -O3
+
 mlp_api.o:     CFLAGS += -O3
 dcahd_api.o:   CFLAGS += -O3
 dcahd_xll.o:   CFLAGS += -O3
@@ -80,9 +91,14 @@ dcahd_compat.o:CFLAGS += -O3
 adec.o:        CFLAGS += -O3
 adec_truehd.o: CFLAGS += -O3
 adec_dts.o:    CFLAGS += -O3
+adec_aac.o:    CXXFLAGS += -I$(PORTLIBS)/include
 
-LIBS        := -lvdec -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm \
-               -lnet -lsysmodule -lssl -lhttp -lhttputil
+# -lsysfs: sysFsGetFreeSize, so offline downloads can check HDD space before
+# and during a transfer (source/offline/dl_ps3.cpp).  Nothing else in the
+# app calls into libsysfs; its file I/O is lv2 syscalls.
+# -lfaad: AAC in files from a drive (source/audio/adec_aac.cpp), from the portlibs.
+LIBS        := -L$(PORTLIBS)/lib -lfaad -lvdec -laudio -lrsx -lgcm_sys -lio -lsysutil -lrt -llv2 -lm \
+               -lnet -lsysmodule -lssl -lhttp -lhttputil -lsysfs
 
 LIBDIRS     :=
 
@@ -99,7 +115,18 @@ CFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.c)))
 CPPFILES := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.cpp)))
 sFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.s)))
 SFILES   := $(foreach dir,$(SOURCES),$(notdir $(wildcard $(dir)/*.S)))
-BINFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.bin)))
+# data/*.bin is found by a wildcard, and a wildcard is evaluated when this
+# Makefile is PARSED -- which happens before the `spubin` recipe has run and
+# created data/jf_spu_kernel.bin.  On a clean tree the SPU kernel object was
+# therefore never added to OFILES and the link failed with an undefined
+# reference to jf_spu_kernel_bin.  It only ever appeared to work because an
+# earlier build had left the .bin lying around for the next parse to find, and
+# `make pkg` after a failed `make` then "succeeded" on that second pass.
+#
+# Name it explicitly instead of discovering it; keep the wildcard for the rest.
+SPU_KERNEL_BIN := jf_spu_kernel.bin
+BINFILES := $(filter-out $(SPU_KERNEL_BIN),\
+                $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.bin))))
 TTFFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.ttf)))
 PNGFILES := $(foreach dir,$(DATA),$(notdir $(wildcard $(dir)/*.png)))
 
@@ -109,7 +136,8 @@ else
 	export LD := $(CXX)
 endif
 
-export OFILES := $(addsuffix .o,$(BINFILES)) \
+export OFILES := $(SPU_KERNEL_BIN).o \
+                 $(addsuffix .o,$(BINFILES)) \
                  $(addsuffix .o,$(TTFFILES)) \
                  $(addsuffix .o,$(PNGFILES)) \
                  $(CPPFILES:.cpp=.o) $(CFILES:.c=.o) \
@@ -123,15 +151,28 @@ export INCLUDE := $(foreach dir,$(INCLUDES),-I$(CURDIR)/$(dir)) \
 export LIBPATHS := $(foreach dir,$(LIBDIRS),-L$(dir)/lib) \
                    $(LIBPSL1GHT_LIB)
 
-.PHONY: $(BUILD) clean run pkg
+.PHONY: $(BUILD) clean run pkg spubin
 
-$(BUILD):
+# `spubin` is defined below but must NOT become the default goal.  Adding it as
+# the first target in this file silently made a bare `make` build only the SPU
+# kernel and exit 0 -- so the app was never compiled, "BUILD OK" meant nothing,
+# and the real errors only surfaced later under `make pkg`.  State the goal
+# explicitly rather than depending on target order.
+.DEFAULT_GOAL := $(BUILD)
+
+# The SPU worker kernel is built first: it produces data/jf_spu_kernel.bin,
+# which the bin2o rule below turns into an object the PPU side links against.
+spubin:
+	@$(MAKE) --no-print-directory -C source/spu/kernel
+
+$(BUILD): spubin
 	@[ -d $@ ] || mkdir -p $@
 	@$(MAKE) --no-print-directory -C $(BUILD) -f $(CURDIR)/Makefile
 
 clean:
 	@echo clean ...
-	@rm -fr $(BUILD) *.elf *.self *.pkg *.gnpdrm.pkg *.map
+	@$(MAKE) --no-print-directory -C source/spu/kernel clean
+	@rm -fr $(BUILD) *.elf *.self *.pkg *.gnpdrm.pkg *.map data/jf_spu_kernel.bin
 
 run:
 	make

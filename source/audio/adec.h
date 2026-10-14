@@ -17,6 +17,10 @@ typedef enum {
     ADEC_CODEC_TRUEHD = 3,// vendored FFmpeg MLP decoder, up to 7.1, LOSSLESS —
                           // TrueHD, including the bed of a Dolby Atmos track
                           // (see adec_truehd.h)
+    ADEC_CODEC_AAC = 4,   // libfaad, up to 5.1, ADTS frames, any rate converted to 48 kHz
+                          // (local files only; see adec_aac.h)
+    ADEC_CODEC_FLAC = 5,  // audio/flac_dec.c, lossless, up to 8 channels (local files; adec_flac.h)
+    ADEC_CODEC_PCM = 6,   // uncompressed audio of a Matroska file (local files; adec_pcm.h)
 } adec_codec_t;
 
 // Switch decoder.  Call from the demux when the PMT selects the audio
@@ -25,6 +29,10 @@ typedef enum {
 // survives adec_flush(), so a seek keeps the codec the demux chose.
 void adec_set_codec(adec_codec_t codec);
 adec_codec_t adec_get_codec(void);
+
+// Local files: microseconds taken off every audio PES PTS (see video_set_pts_origin_us).  Survives
+// adec_flush(); the player sets it per session.
+void adec_set_pts_origin_us(u64 us);
 
 // Spawn the dedicated audio decode thread.  Call after adec_init().
 void adec_start(void);

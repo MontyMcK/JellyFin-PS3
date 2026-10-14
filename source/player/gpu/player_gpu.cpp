@@ -12,6 +12,7 @@
 #include "video_shaders.h"
 #include "player_rsx.h"
 #include "video.h"      // vid_frame_bytes()
+#include "../core/player_picture.h"   // picture_get(): the width/height the user set
 
 // -------------------------------------------------------
 // Video GPU blit state (allocated per playback session)
@@ -49,6 +50,7 @@ volatile bool s_vid_b_present   = false;
 // vid_gpu_draw compares against this and rebuilds, otherwise the frame is
 // stretched onto the stale full-screen quad.
 static u32 s_vid_quad_fw = 0, s_vid_quad_fh = 0;
+static PicSize s_vid_quad_pic = { PIC_DEFAULT, PIC_DEFAULT, PIC_FIT };   // and the picture size it carries
 
 // -------------------------------------------------------
 // vid_gpu_build_quad — aspect-correct letterbox fit of a fw×fh frame
@@ -82,6 +84,24 @@ static void vid_gpu_build_quad(u32 fw, u32 fh) {
     float cy0 = 1.0f - (float)oy0v / display_height * 2.0f;
     float cy1 = 1.0f - (float)(oy0v + sh) / display_height * 2.0f;
 
+    // Fill / Stretch (Select): the picture grows about the centre; Fill's excess
+    // is what the screen edge crops.  Fit keeps the numbers above untouched.
+    const PicSize pic0 = picture_get();
+    if (pic0.aspect != PIC_FIT) {
+        unsigned ow, oh;
+        pic_aspect_apply(pic0.aspect, sw, sh, display_width, display_height, &ow, &oh);
+        cx1 = (float)ow / display_width;   cx0 = -cx1;
+        cy0 = (float)oh / display_height;  cy1 = -cy0;
+    }
+
+    // The user's picture size (L1 in the player): the fitted picture scaled about
+    // the screen centre, each axis on its own.
+    const PicSize pic = picture_get();
+    const float kx = (float)pic.w / 100.0f, ky = (float)pic.h / 100.0f;
+    cx0 *= kx; cx1 *= kx;
+    cy0 *= ky; cy1 *= ky;
+    s_vid_quad_pic = pic;
+
     float *v = (float*)s_vid_vbuf;
     v[0]=cx0; v[1]=cy0; v[2]=0.f; v[3]=1.f; v[4]=0.f; v[5]=0.f;      // TL
     v[6]=cx1; v[7]=cy0; v[8]=0.f; v[9]=1.f; v[10]=1.f; v[11]=0.f;    // TR
@@ -97,11 +117,22 @@ static void vid_gpu_build_quad(u32 fw, u32 fh) {
     plog(buf);
 }
 
+// A VRAM allocation failed: release what was taken and report failure, so the
+// caller backs out of playback instead of binding a NULL texture.
+void vid_gpu_free(void);
+static bool vid_gpu_fail(const char *what) {
+    char m[96];
+    snprintf(m, sizeof m, "vid_gpu: VRAM allocation FAILED (%s) -- playback aborted", what);
+    plog(m);
+    vid_gpu_free();
+    return false;
+}
+
 // -------------------------------------------------------
 // vid_gpu_init — allocate RSX buffers, build vertex quad, load FP ucode
 // -------------------------------------------------------
 
-void vid_gpu_init(u32 fw, u32 fh) {
+bool vid_gpu_init(u32 fw, u32 fh) {
     // Planar: allocate Y (fw×fh) + Cb/Cr (½×½) as three independent RSX
     // textures, double-buffered, for frame A and B.  Height padded to a
     // macroblock to match the decoder's coded size.
@@ -113,8 +144,9 @@ void vid_gpu_init(u32 fw, u32 fh) {
             u32 sz[3] = { ysz, csz, csz };
             for (int p = 0; p < 3; p++) {
                 s_yuvA_buf[db][p] = (u8*)rsxMemalign(64, sz[p]);
-                rsxAddressToOffset(const_cast<u8*>(s_yuvA_buf[db][p]), &s_yuvA_off[db][p]);
                 s_yuvB_buf[db][p] = (u8*)rsxMemalign(64, sz[p]);
+                if (!s_yuvA_buf[db][p] || !s_yuvB_buf[db][p]) return vid_gpu_fail("YUV plane");
+                rsxAddressToOffset(const_cast<u8*>(s_yuvA_buf[db][p]), &s_yuvA_off[db][p]);
                 rsxAddressToOffset(const_cast<u8*>(s_yuvB_buf[db][p]), &s_yuvB_off[db][p]);
             }
         }
@@ -127,6 +159,7 @@ void vid_gpu_init(u32 fw, u32 fh) {
     void *fp_ucode; u32 fp_size;
     rsxFragmentProgramGetUCode(vid_fpo, &fp_ucode, &fp_size);
     s_vid_fp_buf = (u32*)rsxMemalign(256, fp_size);
+    if (!s_vid_fp_buf) return vid_gpu_fail("passthrough FP");
     memcpy(s_vid_fp_buf, fp_ucode, fp_size);
     rsxAddressToOffset(s_vid_fp_buf, &s_vid_fp_off);
 
@@ -137,18 +170,21 @@ void vid_gpu_init(u32 fw, u32 fh) {
         void *yfp_ucode; u32 yfp_size;
         rsxFragmentProgramGetUCode(yuv_fpo, &yfp_ucode, &yfp_size);
         s_vid_fp_buf_yuv = (u32*)rsxMemalign(256, yfp_size);
+        if (!s_vid_fp_buf_yuv) return vid_gpu_fail("BT.709 FP");
         memcpy(s_vid_fp_buf_yuv, yfp_ucode, yfp_size);
         rsxAddressToOffset(s_vid_fp_buf_yuv, &s_vid_fp_off_yuv);
 
         rsxFragmentProgram *y601_fpo = (rsxFragmentProgram*)video_fp_yuv601_data;
         rsxFragmentProgramGetUCode(y601_fpo, &yfp_ucode, &yfp_size);
         s_vid_fp_buf_yuv601 = (u32*)rsxMemalign(256, yfp_size);
+        if (!s_vid_fp_buf_yuv601) return vid_gpu_fail("BT.601 FP");
         memcpy(s_vid_fp_buf_yuv601, yfp_ucode, yfp_size);
         rsxAddressToOffset(s_vid_fp_buf_yuv601, &s_vid_fp_off_yuv601);
     }
 
     // 4 vertices: float4 pos + float2 uv = 24 bytes each
     s_vid_vbuf = (u8*)rsxMemalign(128, 4 * 24);
+    if (!s_vid_vbuf) return vid_gpu_fail("quad vertices");
     rsxAddressToOffset(s_vid_vbuf, &s_vid_vbuf_off);
 
     // fw/fh here are the *allocated* size; vid_gpu_draw rebuilds the quad
@@ -156,6 +192,7 @@ void vid_gpu_init(u32 fw, u32 fh) {
     vid_gpu_build_quad(fw, fh);
 
     plog("vid_gpu: init done");
+    return true;
 }
 
 // -------------------------------------------------------
@@ -183,7 +220,10 @@ void vid_gpu_draw(bool render_blend, float blend_factor, u32 fw, u32 fh) {
     // The decoder corrects the jbuf dimensions on the first decoded frame
     // (and that happens during pre-fill, before the first draw reads the
     // quad) — refit the letterbox instead of stretching into the old one.
-    if (fw != s_vid_quad_fw || fh != s_vid_quad_fh)
+    const PicSize pic = picture_get();
+    if (fw != s_vid_quad_fw || fh != s_vid_quad_fh ||
+        pic.w != s_vid_quad_pic.w || pic.h != s_vid_quad_pic.h ||
+        pic.aspect != s_vid_quad_pic.aspect)
         vid_gpu_build_quad(fw, fh);
     rsx_draw_frame(render_blend, blend_factor, fw, fh);
 }

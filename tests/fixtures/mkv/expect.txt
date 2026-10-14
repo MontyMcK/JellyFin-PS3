@@ -1,0 +1,10 @@
+av.mkv 1 video h264 48 0.000000
+av.mkv 2 audio ac3 63 -0.005000
+av.mkv 3 audio mp3 85 -0.023000
+av.mkv 4 subtitle subrip 2 -0.023000
+live.mkv 1 video h264 48 0.000000
+live.mkv 2 audio ac3 63 -0.005000
+live.mkv 3 subtitle subrip 2 0.200000
+dts.mkv 1 video h264 24 0.000000
+dts.mkv 2 audio dts 94 0.000000
+dts.mkv 3 audio flac 11 0.000000

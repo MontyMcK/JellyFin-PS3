@@ -1,13 +1,13 @@
 # Dolby TrueHD / Atmos Support — Design & Implementation
 
 Status: **implemented**, extends the `surround-5.1` feature alongside
-[dts-hd.md](dts-hd.md). Default **OFF** (Settings → Surround must be cycled to
-"HD"); with it off, every code path is the AC-3 path or the shipped stereo
+[dts-hd.md](dts-hd.md). Default **OFF** (Settings → Audio Output must be
+cycled to "5.1" or "7.1"); with it off, every code path is the shipped stereo
 path, unchanged.
 
 ## 1. Summary
 
-The Surround setting's third state, **HD**, asks Jellyfin to **stream-copy**
+The Audio Output setting's surround states, **5.1** and **7.1**, ask Jellyfin to **stream-copy**
 the source's own HD audio track instead of transcoding it. That state already
 covered DTS; this document covers the Dolby half:
 

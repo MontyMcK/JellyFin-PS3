@@ -23,21 +23,49 @@
 
 #include "music_player.h"
 #include "music_fft.h"
+#include "music_sv.h"          // Canyon visualizer: stereo tap
+#include "ui_wave_audio.h"
 #include "minimp3.h"
 #include "audio.h"
 #include "stream.h"
 #include "plog.h"
+#include "jf_paths.h"           // jf_data_path(): the wave look-ahead file
+extern void crash_log(const char *msg);   // survives a death plog does not
 #include "timing.h"
 #include "jellyfin_api.h"
 #include "ui_internal.h"        // xmb_json_* helpers for the track fetch
+#include "lfs.h"                // files on a drive
+#include "lfs_path.h"
+#include "local_audio.h"
 
 extern u32 running;
 
 // ---- PCM ring (interleaved float L/R pairs, power of two) ----
-#define MPCM_CAP 32768          // ~683 ms at 48 kHz
+// 5.5 s at 48 kHz (2 MB).  It was 683 ms, and the gapless handover only
+// starts once a track is fully decoded INTO this ring -- so the next track's
+// five blocking server calls (stopped report, transcode stop, PlaybackInfo,
+// playing report, and the stream open, which waits for the server to start
+// a new transcode) had 683 ms at most before the ring ran dry: the gap.
+#define MPCM_CAP 262144
+
+// Encoder padding at a gapless handover: an MP3 transcode starts with a
+// silent info frame (1152) and the encoder's delay (~1105), and ends padded
+// to a whole frame.  Trimmed at the boundary only, only while the samples are
+// below GAP_TRIM_THRESH (-60 dBFS -- a real quiet passage is far above the
+// decoder's noise floor on digital silence), and never more than
+// GAP_TRIM_MAX from each side.
+#define GAP_TRIM_MAX    2400
+#define GAP_TRIM_THRESH 1.0e-3f
 static float        s_ring[MPCM_CAP * 2];
 static int          s_wr = 0, s_rd = 0;
 static volatile int s_n  = 0;
+static u64          s_pushed_total = 0;   // pairs ever pushed since the last flush
+static u64          s_read_total   = 0;   // pairs ever read since the last flush
+// Pre-roll: a freshly started track is held until the ring has ~200 ms, so it
+// starts clean instead of stuttering through its first network reads.
+static volatile bool s_hold = false;
+static int  s_trim_lead = 0;          // leading silence still to drop (gapless)
+static bool s_gap_log   = false;      // log the queue at the handover's first samples
 static sys_mutex_t  s_pcm_mtx;
 static bool         s_pcm_mtx_ok = false;
 
@@ -48,12 +76,14 @@ static bool         s_pcm_mtx_ok = false;
 static MusicTrack   s_queue[MUSIC_QUEUE_MAX];
 static int          s_order[MUSIC_QUEUE_MAX];
 static int          s_count  = 0;
-static volatile int s_pos    = 0;
+static volatile int s_pos    = 0;      // the track being DECODED
+static volatile int s_ui_pos = 0;      // the track being HEARD (what the UI shows)
 static volatile bool s_shuffle = false;
 static volatile bool s_run     = false;   // threads should keep going
 static volatile bool s_active  = false;   // queue not yet finished
 static volatile bool s_paused  = false;
 static volatile bool s_started = false;   // music_start() .. music_stop()
+static bool          s_local    = false;   // the queue is files on a drive: nothing is reported to a server
 
 // Commands (UI writes arg then cmd; stream thread consumes).
 enum { MCMD_NONE = 0, MCMD_NEXT, MCMD_PREV, MCMD_SEEK, MCMD_JUMP, MCMD_STOP };
@@ -69,47 +99,108 @@ static u32  s_duration = 0;
 static char s_src_info[40] = "";
 static char s_session_id[80] = "";
 
+// GAPLESS.  When a track's stream is fully downloaded and decoded, the next
+// track is set up and decoded straight into the same ring behind it, instead
+// of waiting for the ring to drain.  The handover is a boundary in the ring:
+// once playback consumes past s_bnd_at, the heard track becomes s_bnd_pos
+// (elapsed, duration and source line switch with it, sample-exact).
+static volatile bool s_bnd_pending = false;   // read without the lock by a track waiting for it (play_local_track)
+static u64  s_bnd_at      = 0;
+static int  s_bnd_pos     = 0;
+static u32  s_bnd_dur     = 0;
+static char s_bnd_src[40] = "";
+
 static sys_ppu_thread_t s_stream_tid = 0;
 static sys_ppu_thread_t s_pump_tid   = 0;
-static sys_ppu_thread_t s_report_tid = 0;
-
-// Playstate reporting runs on its own thread (below).  It used to run on
-// whichever thread wanted it: the 10 s heartbeat on the stream thread, and
-// the pause toggle on the UI thread.  Each is a blocking HTTP round trip,
-// and when the connect fails -- which it does whenever the stream socket has
-// eaten libnet's pool -- it costs the full 5 s connect timeout.  On the
-// console that was: press pause, the whole UI freezes for five seconds; the
-// stream thread's heartbeat hits the same wall, the PCM ring drains, the
-// pump writes silence ("decoder stall" x200), then everything lurches back.
-// The reporter absorbs those stalls where nothing depends on them.
-static volatile bool s_report_now = false;   // pause toggled: push state ASAP
+// music_stop() no longer waits for the stream thread (see there); the next
+// music_start() joins it before touching any state it shares.
+static bool             s_stream_unjoined = false;
 
 // -------------------------------------------------------
 // PCM ring + audio source callbacks
 // -------------------------------------------------------
 
+// ---- the wave's look-ahead ----
+// The wave hears the ring s_wave_lead pairs AHEAD of the read cursor.  What it
+// shows reaches the eye late: ~40 ms of hardware DMA after this tap, the
+// frame's accumulation, a rebuild interval and the worker (~25-50 ms), then
+// the flip -- ~100 ms all told, so a drum hit landed about a frame-and-a-half
+// after it was heard.  Feeding it early by the same amount puts the hit on
+// the beat.  jellyfin_wavelead.txt, in ms: absent = 100, 0 = the old tap
+// (what is audible now), at most 400.  Read at music_start().
+//
+// s_wave_fed counts pairs handed to the wave, in s_read_total's coordinates:
+// every pair is fed once, in order, never twice.  When the ring holds less
+// than the lead (a track's first moments) it feeds what there is; if it ever
+// falls behind the read cursor it feeds the pairs being read instead.
+#define WAVELEAD_FILE    "jellyfin_wavelead.txt"
+#define WAVELEAD_DEF_MS  100
+#define WAVELEAD_CHUNK   16384                 // pairs per read call, at most
+static int   s_wave_lead = WAVELEAD_DEF_MS * 48;
+static u64   s_wave_fed  = 0;
+static float s_wave_buf[WAVELEAD_CHUNK * 2];
+
+static int wavelead_setting(void) {
+    FILE *f = fopen(jf_data_path(WAVELEAD_FILE), "r");
+    if (!f) return WAVELEAD_DEF_MS;
+    int v = WAVELEAD_DEF_MS;
+    if (fscanf(f, "%d", &v) != 1) v = WAVELEAD_DEF_MS;
+    fclose(f);
+    if (v < 0) v = 0;
+    if (v > 400) v = 400;
+    return v;
+}
+
 static void mring_flush(void) {
     sysMutexLock(s_pcm_mtx, 0);
     s_wr = s_rd = 0;
     s_n  = 0;
+    s_pushed_total = s_read_total = 0;
+    s_wave_fed = 0;
+    s_bnd_pending = false;
     sysMutexUnlock(s_pcm_mtx);
 }
 
 static int mring_space(void) { return MPCM_CAP - s_n; }
 
+static inline bool gap_quiet(float l, float r) {
+    return (l < GAP_TRIM_THRESH && l > -GAP_TRIM_THRESH &&
+            r < GAP_TRIM_THRESH && r > -GAP_TRIM_THRESH);
+}
+
+// Drop the old track's trailing padding from the NEWEST end of the ring (the
+// reader takes from the oldest end, so this never touches what it is on).
+static int mring_trim_tail(int max) {
+    int dropped = 0;
+    sysMutexLock(s_pcm_mtx, 0);
+    while (dropped < max && s_n > 4096) {
+        const int k = (s_wr - 1) & (MPCM_CAP - 1);
+        if (!gap_quiet(s_ring[k * 2], s_ring[k * 2 + 1])) break;
+        s_wr = k; s_n--; s_pushed_total--; dropped++;
+    }
+    sysMutexUnlock(s_pcm_mtx);
+    return dropped;
+}
+
 static void mring_push(const float *lr, int n_pairs) {
     sysMutexLock(s_pcm_mtx, 0);
     for (int i = 0; i < n_pairs; i++) {
         if (s_n >= MPCM_CAP) break;
+        if (s_trim_lead > 0) {                    // the new track's leading padding
+            if (gap_quiet(lr[i * 2], lr[i * 2 + 1])) { s_trim_lead--; continue; }
+            s_trim_lead = 0;
+        }
         s_ring[s_wr * 2    ] = lr[i * 2    ];
         s_ring[s_wr * 2 + 1] = lr[i * 2 + 1];
         s_wr = (s_wr + 1) & (MPCM_CAP - 1);
         s_n++;
+        s_pushed_total++;
     }
     sysMutexUnlock(s_pcm_mtx);
 }
 
-static int music_pcm_avail(void) { return s_n; }
+// Paused or pre-rolling: report nothing, and the paced writer plays silence.
+static int music_pcm_avail(void) { return (s_paused || s_hold) ? 0 : s_n; }
 
 // Music is stereo by design — the pluggable source contract reports frames
 // of this fixed width (see audio_set_source in audio.h).
@@ -125,13 +216,54 @@ static int music_read_pcm(float *buf, int n_pairs) {
         s_n--;
         got++;
     }
-    s_consumed += (u64)got;
+    if (s_bnd_pending && s_read_total + (u64)got >= s_bnd_at) {
+        // Crossed into the next track: it is the one being heard now.
+        s_consumed    = s_read_total + (u64)got - s_bnd_at;
+        s_seek_base   = 0;
+        s_ui_pos      = s_bnd_pos;
+        s_duration    = s_bnd_dur;
+        memcpy(s_src_info, s_bnd_src, sizeof(s_src_info));
+        s_bnd_pending = false;
+    } else {
+        s_consumed += (u64)got;
+    }
+    const u64 rt0 = s_read_total;
+    s_read_total += (u64)got;
+    // The wave's share, gathered under the same lock (see WAVELEAD_FILE).
+    int wn = 0;
+    if (s_wave_lead > 0) {
+        const u64 rt1 = s_read_total;
+        if (s_wave_fed < rt0) s_wave_fed = rt0;
+        while (s_wave_fed < rt1 && wn < WAVELEAD_CHUNK) {       // behind: what is heard now
+            const int i = (int)(s_wave_fed - rt0);
+            s_wave_buf[wn * 2] = buf[i * 2]; s_wave_buf[wn * 2 + 1] = buf[i * 2 + 1];
+            wn++; s_wave_fed++;
+        }
+        u64 target = rt1 + (u64)s_wave_lead;
+        if (target > rt1 + (u64)s_n) target = rt1 + (u64)s_n;
+        while (s_wave_fed < target && wn < WAVELEAD_CHUNK) {    // ahead, from the ring
+            const int k = (s_rd + (int)(s_wave_fed - rt1)) & (MPCM_CAP - 1);
+            s_wave_buf[wn * 2] = s_ring[k * 2]; s_wave_buf[wn * 2 + 1] = s_ring[k * 2 + 1];
+            wn++; s_wave_fed++;
+        }
+    }
     sysMutexUnlock(s_pcm_mtx);
     // Visualizer tap lives here, not at decode time: these samples hit the
     // hardware DMA ring (~40 ms of latency) now, while the decode cursor can
     // run ~700 ms ahead through the PCM ring — bars must move with what's
     // audible, not with what's buffered.
     music_viz_push(buf, got);
+    // Third consumer: the Canyon visualizer wants L and R separately
+    // (ui_canyon.cpp / sv_spectrum.h).  A copy into a ring, nothing more --
+    // on the AUDIBLE tap, like the bars: Canyon applies its own look-ahead.
+    music_sv_push(buf, got);
+    // Second consumer: the XMB's background wave.  See
+    // source/ui/render/ui_wave_audio.h.  Cheap (fourteen one-pole filters per
+    // sample) and a no-op while the gate is off.  It hears the ring a little
+    // AHEAD of what is audible (WAVELEAD_FILE above), so that what it shows
+    // arrives on screen with the sound rather than after it.
+    if (s_wave_lead > 0) wave_audio_push(s_wave_buf, wn);
+    else                 wave_audio_push(buf, got);
     return got;
 }
 
@@ -191,10 +323,10 @@ static void upper_copy(char *dst, int cap, const char *src) {
 // PlaybackInfo for the track: session id, duration, and the SOURCE
 // container/bitrate (responseBuffer still holds the reply — MediaSources[0]
 // carries the first "Container"/"Bitrate" occurrences).
-static void track_session_setup(const MusicTrack *t) {
+static void track_session_setup(const MusicTrack *t, u32 *dur_out, char *src_out) {
+    char s_src_info[40] = "";           // shadows: filled here, committed by the caller
+    u32  s_duration     = t->duration_secs;
     s_session_id[0] = '\0';
-    s_src_info[0]   = '\0';
-    s_duration      = t->duration_secs;
 
     unsigned total = 0;
     if (jellyfin_get_play_session_id(t->id, s_session_id,
@@ -213,6 +345,8 @@ static void track_session_setup(const MusicTrack *t) {
         else if (cu[0])
             snprintf(s_src_info, sizeof(s_src_info), "%s", cu);
     }
+    *dur_out = s_duration;
+    memcpy(src_out, s_src_info, sizeof(s_src_info));
 }
 
 static void build_audio_url(char *url, int url_sz, const char *item_id,
@@ -256,32 +390,219 @@ static u64 elapsed_ticks(void) {
 // transcode (which began at offset 0) and StartTimeTicks is ignored: the
 // track audibly restarts from 0:00.  The kill via /Videos/ActiveEncodings
 // doesn't reliably take for audio jobs the way it does for video.
-static int play_one_track(u32 start_secs) {
-    const MusicTrack *t = &s_queue[s_order[s_pos]];
+static bool s_natural_end = false;   // the last track ended by running out, fully decoded
 
-    mring_flush();
-    music_viz_reset();
+// Whether the track whose audio is at the end of the ring carries encoder padding that a gapless handover trims
+// (a transcoded MP3, an MP3 without a LAME header).  A lossless file, or an MP3 with the encoder's delay and
+// padding in its header, is exact: nothing is cut from it.
+static bool s_prev_pads = true;
+
+// The start of a track's session: a fresh ring and clocks or, at a gapless handover, the boundary in the ring where
+// the next track begins.  `pads`: this track's start is padded (see s_prev_pads).
+static void track_begin(const MusicTrack *t, u32 start_secs, bool gapless, bool pads) {
+    if (!gapless) {
+        mring_flush();
+        music_viz_reset();
+        music_sv_reset();
+        sysMutexLock(s_pcm_mtx, 0);
+        s_consumed  = 0;
+        s_seek_base = start_secs;
+        s_ui_pos    = s_pos;
+        s_duration  = t->duration_secs;
+        s_src_info[0] = '\0';
+        sysMutexUnlock(s_pcm_mtx);
+        s_hold = true;
+        s_trim_lead = 0;
+        s_gap_log   = false;
+    } else {
+        // Everything of the previous track is in the ring already: this one
+        // starts where it ends -- minus both tracks' encoder padding.
+        const int tail = s_prev_pads ? mring_trim_tail(GAP_TRIM_MAX) : 0;
+        s_trim_lead = pads ? GAP_TRIM_MAX : 0;
+        s_gap_log   = pads;
+        {
+            char b[96];
+            snprintf(b, sizeof b, "music: gapless handover, %d ms queued, %d padding samples trimmed from the tail",
+                     (int)((long long)s_n * 1000 / 48000), tail);
+            plog(b);
+        }
+        sysMutexLock(s_pcm_mtx, 0);
+        s_bnd_at      = s_pushed_total;
+        s_bnd_pos     = s_pos;
+        s_bnd_dur     = t->duration_secs;
+        s_bnd_src[0]  = '\0';
+        s_bnd_pending = true;
+        sysMutexUnlock(s_pcm_mtx);
+    }
+    s_prev_pads = pads;
+}
+
+// The length and the source line of the track being set up, to whichever of the heard track and the one queued
+// behind it (a gapless handover) it is.
+static void publish_track_info(u32 dur, const char *src) {
+    sysMutexLock(s_pcm_mtx, 0);
+    if (s_bnd_pending && s_bnd_pos == s_pos) {
+        s_bnd_dur = dur;
+        snprintf(s_bnd_src, sizeof(s_bnd_src), "%s", src);
+    } else if (s_ui_pos == s_pos) {
+        s_duration = dur;
+        snprintf(s_src_info, sizeof(s_src_info), "%s", src);
+    }
+    sysMutexUnlock(s_pcm_mtx);
+}
+
+// ---- a file on a drive ----
+
+static int s_local_fails = 0;           // tracks in a row that could not be opened (the drive is gone)
+
+struct LocalSrc {
+    int        fd;
+    LaMeta     meta;
+    LaDecoder *dec;
+};
+
+static int local_rd(void *ctx, uint64_t off, uint8_t *buf, int len) {
+    return lfs_read(*(const int *)ctx, off, buf, (uint32_t)len);
+}
+
+static bool local_open(const char *path, LocalSrc *s) {
+    s->dec = NULL;
+    s->fd = lfs_open(path);
+    if (s->fd < 0) return false;
+    const uint64_t size = lfs_size(s->fd);
+    if (!la_read_meta(local_rd, &s->fd, size, la_kind_of(path), &s->meta) || !la_can_decode(&s->meta) ||
+        !(s->dec = la_open(local_rd, &s->fd, size, &s->meta))) {
+        lfs_close(s->fd);
+        s->fd = -1;
+        return false;
+    }
+    return true;
+}
+
+static void local_close(LocalSrc *s) {
+    la_close(s->dec);
+    s->dec = NULL;
+    if (s->fd >= 0) lfs_close(s->fd);
+    s->fd = -1;
+}
+
+// Play the track at the current queue position (a file) from start_secs.  Returns the MCMD_* that ended it,
+// as play_one_track does.  The file is decoded straight into the ring, a little at a time, until the ring is
+// full; a track that has been fully decoded hands over to the next one gaplessly, as a streamed one does.
+static int play_local_track(const MusicTrack *t, u32 start_secs, bool gapless) {
+    LocalSrc src;
+    src.fd = -1;
+    src.dec = NULL;
+    if (gapless) {
+        // Only one boundary can be pending in the ring.  A track short enough to be decoded behind the one before it
+        // while that one's own boundary has not been heard yet waits for it, so what the screen shows follows the sound.
+        while (s_bnd_pending && running && s_run && s_cmd == MCMD_NONE) usleep(5000);
+        if (!s_run) return MCMD_STOP;
+        const int c = take_cmd();
+        if (c != MCMD_NONE) return c;
+        // The ring still holds the end of the track before it: open the file first, so a bad one can be skipped
+        // without cutting that off.
+        if (!local_open(t->path, &src)) {
+            plog("music: a file could not be opened, skipping it");
+            s_natural_end = true;
+            const bool end_of_queue = ++s_local_fails >= 3 || s_pos + 1 >= s_count;
+            // The track before it is still in the ring: let it play out before the queue ends.
+            while (end_of_queue && s_n >= 256 && running && s_run && s_cmd == MCMD_NONE) usleep(10000);
+            return s_local_fails >= 3 ? MCMD_STOP : MCMD_NEXT;
+        }
+        track_begin(t, start_secs, true, !la_gapless_trimmed(src.dec));
+    } else {
+        track_begin(t, start_secs, false, true);
+        if (!local_open(t->path, &src)) {
+            plog("music: a file could not be opened, skipping it");
+            usleep(300000);
+            return (++s_local_fails >= 3) ? MCMD_STOP : MCMD_NEXT;
+        }
+        s_prev_pads = !la_gapless_trimmed(src.dec);
+        if (start_secs > 0) la_seek(src.dec, start_secs);
+    }
+    s_local_fails = 0;
+    {
+        char b[160], line[40];
+        la_format_line(&src.meta, line, sizeof line);
+        snprintf(b, sizeof b, "music: track %d/%d start=%us file %.60s [%s]%s", s_pos + 1, s_count, start_secs,
+                 lfs_path_leaf(t->path), line, gapless ? " (gapless)" : "");
+        plog(b);
+        publish_track_info(src.meta.duration_secs ? src.meta.duration_secs : t->duration_secs, line);
+    }
+
+    static float pcm[2048 * 2];                // the stream thread's alone
+    bool eof = false, failed = false;
+    int ret = MCMD_NONE;
+    while (running && s_run) {
+        const int c = take_cmd();
+        if (c != MCMD_NONE) { ret = c; break; }
+        bool progressed = false;
+        if (!eof && mring_space() >= 2048) {
+            const int n = la_decode(src.dec, pcm, 2048);
+            if (n > 0) {
+                mring_push(pcm, n);
+                progressed = true;
+            } else {
+                eof = true;
+                failed = n < 0;
+                if (failed) plog("music: a file could not be read to its end (the drive was removed?)");
+            }
+        }
+        if (s_hold && (s_n >= 9600 || eof)) s_hold = false;               // ~200 ms pre-roll
+
+        if (eof && !failed && s_pos + 1 < s_count) {
+            // Fully decoded with a track after it: hand over now, while the ring still plays this one out.
+            s_natural_end = true;
+            ret = MCMD_NEXT;
+            break;
+        }
+        if (eof) {
+            if (s_n < 256) { ret = MCMD_NEXT; break; }                    // drained
+            usleep(10000);
+        } else if (!progressed) {
+            usleep(10000);                                                // the ring is full: let the DMA drain
+        }
+    }
+    if (ret == MCMD_NONE) ret = MCMD_STOP;                                // app quit / engine stop
+    if (failed && ret == MCMD_NEXT) s_local_fails++;
+    local_close(&src);
+    return ret;
+}
+
+static int play_one_track(u32 start_secs, bool gapless) {
+    if (!s_run) return MCMD_STOP;
+    crash_log("m0 track start");
+    const MusicTrack *t = &s_queue[s_order[s_pos]];
+    s_natural_end = false;
+    if (t->path[0]) return play_local_track(t, start_secs, gapless);
+
     mp3dec_init(&s_dec);
-    s_consumed  = 0;
-    s_seek_base = start_secs;
+    track_begin(t, start_secs, gapless, true);
 
     char buf[160];
-    snprintf(buf, sizeof(buf), "music: track %d/%d start=%us id=%.16s",
-             s_pos + 1, s_count, start_secs, t->id);
+    snprintf(buf, sizeof(buf), "music: track %d/%d start=%us id=%.16s%s",
+             s_pos + 1, s_count, start_secs, t->id, gapless ? " (gapless)" : "");
     plog(buf);
 
-    track_session_setup(t);
+    {
+        u32  dur = t->duration_secs;
+        char src[40] = "";
+        track_session_setup(t, &dur, src);
+        publish_track_info(dur, src);
+    }
+    // Each of these is a blocking round trip.  A stop requested meanwhile
+    // (the user left the screen) ends the track here rather than starting a
+    // stream nobody will hear.
+    if (!s_run) { crash_log("m0x stopped before stream"); return MCMD_STOP; }
     jellyfin_report_playing(t->id, s_session_id,
                             (u64)start_secs * 10000000ULL);
+    if (!s_run) { crash_log("m0x stopped before stream"); return MCMD_STOP; }
+    crash_log("m0b stream_open");
 
     char url[1024];
     build_audio_url(url, sizeof(url), t->id, start_secs);
-    // 64 KB, not the video path's 512: a 320 kbps MP3 is 40 KB/s, and the
-    // server produces the transcode far faster than that, so the socket
-    // buffer sits full for the whole track.  Sized to the video default it
-    // held the entire libnet pool and every other connect in the app failed
-    // for as long as music played (thumbnails, playstate, the works).
-    int sock = stream_open_rcvbuf(url, 64);
+    int sock = stream_open(url);
     if (sock < 0) {
         plog("music: stream_open failed, skipping track");
         jellyfin_report_stopped(t->id, s_session_id, elapsed_ticks());
@@ -291,16 +612,44 @@ static int play_one_track(u32 start_secs) {
 
     // MP3 byte buffer: reads append at buf_len, decode consumes at buf_pos,
     // leftovers slide back to the front when the tail runs out of room.
-    static u8 mp3[65536];
+    // 256 KB, ~6.5 s at 320 kbps: when the download finishes this is what
+    // covers setting up the next track without a gap.
+    static u8 mp3[262144];
+    #define MP3_MIN_AHEAD 16384
     int  buf_pos = 0, buf_len = 0;
     bool eof = false;
+    u64  last_prog_us = timing_get_us();
     int  ret = MCMD_NONE;
+    // Tempo diagnosis ("the first second is sped up" after an Up Next jump):
+    // the stream's real format, and how much actually played in the first
+    // three seconds -- 144000 frames at 48 kHz means real time.
+    const u64 diag_t0 = timing_get_us();
+    const u64 diag_c0 = s_consumed;
+    bool diag_fmt = false, diag_rate = false;
 
     while (running && s_run) {
         int c = take_cmd();
         if (c != MCMD_NONE) { ret = c; break; }
-        // (Progress reporting lives on the reporter thread; nothing here may
-        // block on the server or the ring runs dry.)
+
+        // ~10 s progress heartbeat keeps the server's session view honest.
+        //
+        // ASYNC, and it has to be: this thread is the only thing refilling a
+        // ring that holds 683 ms of audio, and the blocking version of this
+        // call stalled it for a whole server round trip every ten seconds.
+        // That is the dropout you could hear.
+        u64 now = timing_get_us();
+        if (!diag_rate && now - diag_t0 >= 3000000ULL) {
+            char d[112];
+            snprintf(d, sizeof d, "music: first 3 s played %llu frames (real time = 144000)%s",
+                     (unsigned long long)(s_consumed - diag_c0), gapless ? " [gapless]" : "");
+            plog(d);
+            diag_rate = true;
+        }
+        if (now - last_prog_us >= 10000000ULL) {
+            last_prog_us = now;
+            jellyfin_report_progress_async(t->id, s_session_id, elapsed_ticks(),
+                                           s_paused);
+        }
 
         // Fill: keep a healthy sync window ahead of the decoder.  A read
         // timeout (rd == 0) falls through to decode whatever is buffered so
@@ -310,13 +659,23 @@ static int play_one_track(u32 start_secs) {
             if (rd < 0) eof = true;
             else if (rd > 0) {
                 buf_len += 188;
-                if (buf_len - buf_pos < 8192) continue;    // buffer more first
+                if (buf_len - buf_pos < MP3_MIN_AHEAD) continue;   // buffer more first
             }
         }
 
         // Decode while there's data and the ring has room for a frame.
         bool progressed = false;
-        while (buf_pos < buf_len) {
+        // WHOLE FRAMES ONLY.  minimp3 treats a frame cut off by the end of
+        // the buffer as junk: it skips it and resyncs, losing audio.  The
+        // loop used to decode right up to the last buffered byte after every
+        // 188-byte read, which at the start of a track (ring empty) dropped
+        // ~18% of the frames -- measured on the server's own transcode: 150.3 s
+        // decoded of a 184.6 s track.  The music jumped forward: the
+        // "sped-up first second" after a skip or an Up Next pick.  Keep
+        // MP3_MIN_AHEAD buffered (many frames, and minimp3's sync lookahead)
+        // until the stream has ended; with it the same file decodes to the
+        // exact sample.
+        while (buf_len - buf_pos >= (eof ? 1 : MP3_MIN_AHEAD)) {
             if (mring_space() < 1300) break;   // ring nearly full
             mp3dec_frame_info_t info;
             short pcm[MINIMP3_MAX_SAMPLES_PER_FRAME];
@@ -325,11 +684,26 @@ static int play_one_track(u32 start_secs) {
             if (info.frame_bytes <= 0) break;  // needs more bytes
             buf_pos += info.frame_bytes;
             progressed = true;
+            if (!diag_fmt && samples > 0) {
+                char d[112];
+                snprintf(d, sizeof d, "music: stream %d Hz, %d ch, %d kbps, first frame after %llu ms",
+                         info.hz, info.channels, info.bitrate_kbps,
+                         (unsigned long long)((timing_get_us() - diag_t0) / 1000));
+                plog(d);
+                diag_fmt = true;
+            }
             if (samples > 0) {
                 static float out[MINIMP3_MAX_SAMPLES_PER_FRAME * 2];
                 int pairs = frame_to_48k(pcm, samples, info.channels, info.hz,
                                          out, MINIMP3_MAX_SAMPLES_PER_FRAME);
                 mring_push(out, pairs);
+                if (s_gap_log && s_trim_lead == 0) {
+                    char b[80];
+                    snprintf(b, sizeof b, "music: next track's audio arrived with %d ms still queued",
+                             (int)((long long)s_n * 1000 / 48000));
+                    plog(b);
+                    s_gap_log = false;
+                }
             }
         }
 
@@ -340,6 +714,17 @@ static int play_one_track(u32 start_secs) {
             buf_pos  = 0;
         }
 
+        if (s_hold && (s_n >= 9600 || eof)) s_hold = false;   // ~200 ms pre-roll
+
+        if (eof && !progressed && buf_pos < buf_len && mring_space() >= 1300)
+            buf_pos = buf_len;                 // trailing bytes that are not a frame
+        if (eof && buf_pos >= buf_len && s_pos + 1 < s_count) {
+            // Fully decoded with a track after it: hand over now, while the
+            // ring still plays this one out (gapless).
+            s_natural_end = true;
+            ret = MCMD_NEXT;
+            break;
+        }
         if (eof) {
             // Drained when less than one DMA block (256 samples) remains:
             // the pump can never consume a final partial block (it writes
@@ -364,19 +749,44 @@ static int play_one_track(u32 start_secs) {
     }
     if (ret == MCMD_NONE) ret = MCMD_STOP;     // app quit / engine stop
 
+    // CRASH MARKERS, not plog: plog queues into a ring that a writer thread
+    // drains, so the last lines before a death are exactly the ones that never
+    // reach the file -- which is why the last crash could be narrowed to "in
+    // here somewhere" and no further. crash_log() writes immediately.
+    //
+    // This is the sequence a seek runs too, four blocking HTTP calls deep,
+    // which is where the app died with a "stopped" report already delivered
+    // and no line after it.
+    crash_log("m1 track end: netClose");
     netClose(sock);
+    crash_log("m2 report_stopped");
     jellyfin_report_stopped(t->id, s_session_id, elapsed_ticks());
+    crash_log("m3 stop_transcode");
     jellyfin_stop_transcode(s_session_id);
+    crash_log("m4 track end done");
     return ret;
 }
 
 static void music_stream_thread(void *arg) {
     (void)arg;
     u32 start_secs = 0;
+    bool gapless = false;
     while (running && s_run) {
-        int end = play_one_track(start_secs);
+        int end = play_one_track(start_secs, gapless);
         start_secs = 0;
+        gapless = false;
         if (!s_run || end == MCMD_STOP) break;
+        if (end == MCMD_NEXT && s_natural_end) {
+            if (s_pos + 1 < s_count) { s_pos = s_pos + 1; gapless = true; continue; }
+            break;
+        }
+        // A user command acts on the track being HEARD.  If the next one was
+        // already being decoded behind it, drop that and start from the heard
+        // track's position.
+        sysMutexLock(s_pcm_mtx, 0);
+        if (s_bnd_pending) s_bnd_pending = false;
+        s_pos = s_ui_pos;
+        sysMutexUnlock(s_pcm_mtx);
         if (end == MCMD_NEXT) {
             if (s_pos + 1 < s_count) s_pos = s_pos + 1;
             else break;                        // queue finished
@@ -392,7 +802,11 @@ static void music_stream_thread(void *arg) {
         }
     }
     s_active = false;
+    // A stop's cancel flag was for THIS thread's stream_open; nothing else
+    // may inherit it (the video player's stream_open reads the same flag).
+    if (!s_run) g_stream_cancel = false;
     plog("music: stream thread exit");
+    crash_log("m9 stream thread exit");
     sysThreadExit(0);
 }
 
@@ -403,37 +817,12 @@ static void music_stream_thread(void *arg) {
 static void music_pump_thread(void *arg) {
     (void)arg;
     while (running && s_run) {
-        if (s_paused || !s_active || !audio_write_pcm())
+        // Always serviced, even paused or finished: the paced writer then
+        // plays silence instead of the hardware looping its last 40 ms.
+        if (!audio_write_pcm())
             usleep(1000);
     }
     plog("music: pump thread exit");
-    sysThreadExit(0);
-}
-
-// -------------------------------------------------------
-// Reporter thread — playstate to the server, off everyone else's path
-// -------------------------------------------------------
-
-static void music_report_thread(void *arg) {
-    (void)arg;
-    u64 last_us = timing_get_us();
-    while (running && s_run) {
-        u64 now = timing_get_us();
-        bool due = s_report_now || (now - last_us >= 10000000ULL);
-        if (due && s_active && s_session_id[0] && s_pos < s_count) {
-            s_report_now = false;
-            last_us = now;
-            // A stale track id or a session id mid-rewrite (the stream
-            // thread owns both) costs one wrong heartbeat, which the next
-            // one corrects; a lock here would put the stream thread behind
-            // this thread's HTTP again.
-            jellyfin_report_progress(s_queue[s_order[s_pos]].id, s_session_id,
-                                     elapsed_ticks(), s_paused);
-        } else {
-            usleep(100000);
-        }
-    }
-    plog("music: report thread exit");
     sysThreadExit(0);
 }
 
@@ -443,6 +832,14 @@ static void music_report_thread(void *arg) {
 
 bool music_start(const MusicTrack *tracks, int count, int start_idx) {
     if (s_started || count <= 0) return false;
+    // The previous session's stream thread may still be finishing a network
+    // call it was in when that screen closed; it shares every static below.
+    if (s_stream_unjoined) {
+        u64 r;
+        sysThreadJoin(s_stream_tid, &r);
+        s_stream_unjoined = false;
+    }
+    g_stream_cancel = false;
     if (count > MUSIC_QUEUE_MAX) count = MUSIC_QUEUE_MAX;
     if (start_idx < 0)      start_idx = 0;
     if (start_idx >= count) start_idx = count - 1;
@@ -458,7 +855,16 @@ bool music_start(const MusicTrack *tracks, int count, int start_idx) {
     s_count     = count;
     for (int i = 0; i < count; i++) s_order[i] = i;
     s_pos       = start_idx;
+    s_ui_pos    = start_idx;
+    s_hold      = true;
     s_shuffle   = false;
+    {
+        const int ms = wavelead_setting();
+        s_wave_lead = ms * 48;             // 48 kHz pairs
+        char b[80];
+        snprintf(b, sizeof b, "music: wave look-ahead %d ms (%s)", ms, WAVELEAD_FILE);
+        plog(b);
+    }
     srand((unsigned)timing_get_us());
     s_cmd       = MCMD_NONE;
     s_paused    = false;
@@ -468,37 +874,62 @@ bool music_start(const MusicTrack *tracks, int count, int start_idx) {
     s_src_info[0] = '\0';
     mring_flush();
     music_viz_reset();
+    music_sv_reset();
 
     audio_set_source(music_pcm_avail, music_read_pcm, music_channels);
     audio_open(2);   // music path is stereo by design
+    audio_set_paced(true);
 
-    s_run        = true;
-    s_active     = true;
-    s_started    = true;
-    s_report_now = false;
+    s_run     = true;
+    s_active  = true;
+    s_started = true;
+    // Before the threads exist, so neither of the two callers can race it up.
+    s_local = tracks[0].path[0] != '\0';
+    s_local_fails = 0;
+    s_prev_pads = true;
+    if (!s_local) jellyfin_report_init();
     sysThreadCreate(&s_pump_tid, music_pump_thread, NULL,
                     700, 0x8000, THREAD_JOINABLE, (char*)"jf_mpump");
     sysThreadCreate(&s_stream_tid, music_stream_thread, NULL,
                     850, 0x20000, THREAD_JOINABLE, (char*)"jf_music");
-    // Lowest of the three: it only ever talks to the server, and a stalled
-    // report must lose to the pump and the decoder, never the other way.
-    sysThreadCreate(&s_report_tid, music_report_thread, NULL,
-                    1200, 0x10000, THREAD_JOINABLE, (char*)"jf_mreport");
     return true;
+}
+
+// The video player calls this before it opens a stream: a music session that
+// was closed mid-network-call may still own its thread and the shared
+// stream_open cancel flag.  Blocks only in that rare case.
+void music_join_stale(void) {
+    if (s_started || !s_stream_unjoined) return;
+    u64 r;
+    sysThreadJoin(s_stream_tid, &r);
+    s_stream_unjoined = false;
+    g_stream_cancel = false;
 }
 
 void music_stop(void) {
     if (!s_started) return;
+    crash_log("m5 music_stop");
     s_cmd = MCMD_STOP;
     s_run = false;
     g_stream_cancel = true;   // unblock a stream_open header wait
     u64 retval;
-    sysThreadJoin(s_stream_tid, &retval);
+    // NOT the stream thread.  2026-09-24: after a network stall the user
+    // switched track and then left; that thread was inside the track change's
+    // blocking HTTP calls (session, playing report, stream open -- up to 5 s
+    // each on a dead network) and this join froze the whole screen behind
+    // them.  It only touches the PCM ring, its socket and HTTP, all safe to
+    // let finish on their own: it sees s_run and ends, and music_start()
+    // joins it before a new session reuses anything.
     sysThreadJoin(s_pump_tid, &retval);
-    sysThreadJoin(s_report_tid, &retval);   // may be inside a 5 s connect wait
-    g_stream_cancel = false;
+    s_stream_unjoined = true;
+    crash_log("m6 pump joined");
     audio_close();
+    audio_set_paced(false);
     audio_set_source(NULL, NULL, NULL);   // hand the port back to the video path
+    // Let a queued progress report go out, then retire the worker.  Bounded at
+    // one second: leaving the music screen must not wait on a server that has
+    // stopped answering.
+    if (!s_local) jellyfin_report_flush();
     s_started = false;
     s_active  = false;
     plog("music: stopped");
@@ -506,12 +937,24 @@ void music_stop(void) {
 
 void music_toggle_pause(void) {
     s_paused = !s_paused;
-    plog(s_paused ? "music: paused" : "music: resumed");
-    // Push the state promptly so the server UI flips too -- from the
-    // reporter thread.  This runs on the UI thread, and the report is a
-    // blocking round trip that used to freeze the screen for its whole
-    // timeout whenever the server was slow to accept.
-    s_report_now = true;
+    // Logged because the last hardware freeze happened within a second of a
+    // pause and there was no way to tell, afterwards, whether the app stopped
+    // because of the pause or merely while paused.
+    {
+        char b[64];
+        snprintf(b, sizeof b, "music: %s at %llus",
+                 s_paused ? "PAUSE" : "RESUME",
+                 (unsigned long long)(elapsed_ticks() / 10000000ULL));
+        plog(b);
+    }
+    // Push the state so the server UI flips too -- but hand it to the report
+    // thread, because this runs on the RENDER LOOP, from the music screen's
+    // input handler.  The blocking version froze every frame until the server
+    // answered, which is a whole second of dead UI for a button press whose
+    // own effect (the flag above) is instant.
+    if (s_ui_pos < s_count && !s_local)
+        jellyfin_report_progress_async(s_queue[s_order[s_ui_pos]].id, s_session_id,
+                                       elapsed_ticks(), s_paused);
 }
 
 void music_next(void) { s_cmd = MCMD_NEXT; }
@@ -523,7 +966,9 @@ void music_next(void) { s_cmd = MCMD_NEXT; }
 // through either rewrite, so playback is never interrupted.
 void music_set_shuffle(bool on) {
     if (s_count <= 1) { s_shuffle = on; return; }
-    int cur_idx = s_order[s_pos];
+    sysMutexLock(s_pcm_mtx, 0);
+    const int dec_idx = s_order[s_pos];
+    int cur_idx = s_order[s_ui_pos];
     if (on) {
         int n = 0;
         int rest[MUSIC_QUEUE_MAX];
@@ -535,17 +980,20 @@ void music_set_shuffle(bool on) {
         }
         s_order[0] = cur_idx;
         for (int i = 0; i < n; i++) s_order[i + 1] = rest[i];
-        s_pos = 0;
     } else {
         for (int i = 0; i < s_count; i++) s_order[i] = i;
-        s_pos = cur_idx;
     }
+    for (int i = 0; i < s_count; i++) {
+        if (s_order[i] == cur_idx) s_ui_pos = i;
+        if (s_order[i] == dec_idx) { s_pos = i; if (s_bnd_pending) s_bnd_pos = i; }
+    }
+    sysMutexUnlock(s_pcm_mtx);
     s_shuffle = on;
 }
 
 bool music_is_shuffle(void) { return s_shuffle; }
 
-int music_current_pos(void) { return s_pos; }
+int music_current_pos(void) { return s_ui_pos; }
 
 int music_track_at(int pos) {
     if (pos < 0 || pos >= s_count) return -1;
@@ -577,7 +1025,7 @@ void music_jump(int queue_pos) {
 
 bool music_is_active(void)    { return s_started && s_active; }
 bool music_is_paused(void)    { return s_paused; }
-int  music_current_index(void){ return s_order[s_pos]; }
+int  music_current_index(void){ return s_order[s_ui_pos]; }
 
 u32 music_elapsed_secs(void) {
     return s_seek_base + (u32)(s_consumed / 48000ULL);

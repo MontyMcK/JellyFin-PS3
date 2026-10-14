@@ -2,6 +2,7 @@
 #include <ppu-types.h>
 #include <io/pad.h>
 #include "rsxutil.h"
+#include "i18n.h"
 
 #define FONT_SCALE   2
 #define CHAR_SIZE    (8 * FONT_SCALE)
@@ -12,6 +13,13 @@ typedef struct {
     u8 cross, circle, square, triangle;
     u8 start, select;
     u8 l1, r1, l2, r2;
+    u8 l3, r3;              // stick clicks (pad only)
+    // Media keys, from the Blu-ray remote and keyboards (see ui_input.cpp).
+    // No pad sets these, and they never borrow a pad button: START already
+    // means stop in the player.
+    u8 play, pause, playpause, stop;
+    u8 ffwd, rew, next, prev;
+    u8 subtitle, audio, info;
 } ButtonState;
 
 // -------------------------------------------------------
@@ -35,6 +43,7 @@ typedef struct {
 
 // Defined in main.cpp; every input loop reads this.
 extern u32 running;
+extern volatile u32 g_sys_overlay;   // system overlay up (main.cpp)
 
 // Defined in ui.cpp
 extern ButtonState btn_cur;
@@ -45,7 +54,11 @@ extern ButtonState btn_prev;
 
 // Auto-repeat for held navigation (menus).  True on the initial press, then again
 // at a steady rate while the button stays held — for scrolling lists/grids.
-enum { NAV_up, NAV_down, NAV_left, NAV_right, NAV_REPEAT_SLOTS };
+// square is in here because the search screen uses it as backspace, and a
+// backspace you cannot hold down is barely a backspace -- fixing a typo four
+// letters back would be four separate presses.  The slots array is sized by
+// NAV_REPEAT_SLOTS, so adding one is all that is needed.
+enum { NAV_up, NAV_down, NAV_left, NAV_right, NAV_square, NAV_media, NAV_REPEAT_SLOTS };
 #define NAV_DELAY_US   350000ULL   // hold this long before repeat kicks in
 #define NAV_REPEAT_US  140000ULL   // then ~7 steps/sec (raise to slow it down)
 bool btn_nav_repeat(bool held, int slot);
@@ -53,9 +66,17 @@ bool btn_nav_repeat(bool held, int slot);
 
 void update_buttons(padData *pad);
 
+// Keyboard support; call once after ioPadInit().  Pads and the Blu-ray
+// remote need nothing beyond ioPadInit().
+void input_init(void);
+
 // Reads all active pad slots, ORs their button data into one merged padData,
 // calls update_buttons() exactly once. Returns true if any pad was active.
 bool poll_buttons(void);
+
+// Menus: the remote's |<< >>| and << >> keys also press L1 / R1 (tab
+// switching).  Call right after poll_buttons().
+void input_media_keys_as_shoulders(void);
 
 // Seed btn_prev = btn_cur from the live pad so held buttons
 // from a previous screen don't fire as new presses.
@@ -71,11 +92,17 @@ void drawText(u32 x, u32 y, const char *text);
 void drawTextf(u32 x, u32 y, const char *fmt, ...);
 void drawTextScaled(u32 x, u32 y, const char *text, int px);
 void drawTTF(u32 x, u32 y, const char *text, float px, u32 color, bool bold = false);
+// Make server text drawable (2026-09-27): line breaks become " \xC2\xB7 ",
+// emoji modifiers go, and every character NO UI font has is dropped instead
+// of drawing as a box -- debrid version names are full of emoji.  In place.
+void ttf_clean_text(char *s, int cap);
 // drawTTF with the string's ink box vertically centred on cy — measures the
 // actual glyph extents, so labels align with icon/glyph centrelines exactly.
 void drawTTF_vcentered(u32 x, int cy, const char *text, float px, u32 color,
                        bool bold = false);
 void drawIcon(u32 x, u32 y, int codepoint, float px, u32 color);
+// drawIcon at an opacity, 0..255 (255 = drawIcon).  See ui_text.cpp.
+void drawIconA(u32 x, u32 y, int codepoint, float px, u32 color, u32 alpha);
 void drawHeader(void);
 void decode_unicode_escapes(char *str);
 
@@ -90,6 +117,21 @@ void drawRect(u32 x, u32 y, u32 w, u32 h, u32 color);
 // framebuffer per pixel, which is slow on RSX local memory — keep the area
 // small (hairlines, thin frames); never large fills.
 void drawRectBlend(u32 x, u32 y, u32 w, u32 h, u32 color, u8 alpha);
+// Opaque blit of a sub-rectangle [sx,sy,sw,sh) from a src bitmap (src_stride
+// pixels per row, 0x00RRGGBB, no alpha) to (dx,dy) on the current CPU draw
+// target. Same target/scissor rules as drawRect -- honours cpu_rt_begin, so
+// it draws into the HUD's offscreen overlay texture when that is bound, or
+// the framebuffer otherwise. No source scaling: callers crop, they don't resize.
+void drawBitmapRect(const u32 *src, u32 src_stride,
+                    u32 sx, u32 sy, u32 sw, u32 sh, u32 dx, u32 dy);
+// Same crop as drawBitmapRect, but each SOURCE pixel's own alpha byte
+// (0xAARRGGBB) drives per-pixel coverage against the destination instead of
+// a flat overwrite -- for real (non-uniform) transparency, e.g. a PGS
+// subtitle bitmap's anti-aliased glyph edges. Src pixels with alpha 0 are
+// skipped entirely (cheap early-out for the fully-transparent background
+// most subtitle bitmaps are mostly made of).
+void drawBitmapRectAlpha(const u32 *src, u32 src_stride,
+                         u32 sx, u32 sy, u32 sw, u32 sh, u32 dx, u32 dy);
 void cpuClearFb(u32 color);   // clear entire framebuffer
 
 // Vertical scissor for the CPU draw primitives (drawRect/drawRectBlend,
@@ -136,11 +178,51 @@ static inline u32 argb_over(u32 dst, u32 color, u32 a) {
 // -------------------------------------------------------
 void ui_run_xmb(void);
 
+// Everything the XMB's first frame would otherwise block on: the library
+// list, then every Home row.  main.cpp runs it on a worker thread behind the
+// cold-boot animation, so the first XMB frame arrives with its data instead
+// of stalling on five HTTP requests -- one a frame -- under the reveal.
+// ui_run_xmb() then skips its own detect_tabs, once.  Must not run while
+// anything else uses responseBuffer.
+void xmb_prepare(void);
+
 // -------------------------------------------------------
 // Legacy on-screen keyboard (used by login flow).
 // Returns 1 = confirmed, -1 = cancelled.
 // -------------------------------------------------------
-int  get_input(char *out, int max_len, const char *prompt, bool is_password);
+// keep_text: start with what `out` already holds (it must be a valid string)
+// instead of an empty field.
+int  get_input(char *out, int max_len, const char *prompt, bool is_password, bool keep_text = false);
+
+// -------------------------------------------------------
+// Offline downloads (xmb/ui_downloads.cpp, Stage 5)
+// -------------------------------------------------------
+// Full-screen overlays that own input until Circle.  Settings opens both;
+// main.cpp offers the Offline library when sign-in fails.
+void xmb_show_downloads(void);
+void xmb_show_offline(void);
+// Two-option confirm, the safe option first and selected.  True = action.
+bool xmb_dl_confirm(const char *title, const char *line, const char *safe,
+                    const char *action);
+// A one-option notice in the same style, for a refusal the user can only read.
+void xmb_dl_notice(const char *title, const char *line);
+// Whole-season download (xmb/ui_season.cpp): the sheet Triangle opens on a
+// season, the progress line beside the breadcrumb, and the stop at exit.
+void xmb_season_download_sheet(const XMBItem *season);
+void xmb_season_toast_draw(void);
+void xmb_season_stop(void);
+// The Live TV list refreshes on a worker thread (xmb/ui_livetv.cpp); at exit it
+// is told to stop and joined.
+void xmb_livetv_stop(void);
+// The Media screen (drives, then folders and files; xmb/ui_media.cpp) as a screen of its own: the
+// sign-in failure screen's way to what needs no server.  Returns when the user backs out.
+void xmb_show_media(void);
+// If there are downloads to play, ask whether to open them.  True when the
+// Offline library was opened (the caller then retries sign-in as before).
+bool xmb_offer_offline_after_login_failure(void);
+// The saved server is not answering: offer to enter its address.  True when
+// the address changed (the caller retries at once).
+bool xmb_server_unreachable_prompt(void);
 
 // One-time setup: upload font bitmap, configure RSX blend.
 void ui_init(void);

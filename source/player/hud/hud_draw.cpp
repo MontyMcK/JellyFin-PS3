@@ -23,9 +23,13 @@
 #include "player_rsx.h"
 #include "ui.h"
 #include "ui_visuals.h"
+#include "trickplay.h"
 #include "rsxutil.h"
 #include "plog.h"
+#include "timing.h"   // timing_get_us(): the channel banner expires
 #include "audio.h"   // audio_get_volume() for the volume slider
+#include "audio_bitstream.h"   // audio_passthrough_active(): the receiver owns the volume
+#include "../core/player_picture.h"   // picture_get(): the picture-shape chip
 
 // -------------------------------------------------------
 // Overlay buffers + compose-on-change state
@@ -48,7 +52,10 @@ struct OvlKey {
     s32  focus, incr_idx;
     s32  menu_sel, menu_cur, menu_n;
     s32  vol_pct;
-    u8   paused, cc, menu_vis, title_on, vol_active;
+    s32  aspect;                       // Fit / Fill / Stretch (picture_size.h)
+    s32  live_permille;
+    u32  live_epoch;
+    u8   paused, cc, menu_vis, title_on, vol_active, scrubbing, live, banner_on, solo;
     char audio[64];
 };
 static OvlKey s_ovl_key;
@@ -164,7 +171,7 @@ static void draw_pp_symbol(int cx, int cy, bool paused, u32 color) {
 }
 
 // Speaker/volume glyph drawn with CPU primitives (the embedded Tabler font is a
-// 20-glyph subset with no volume icon).  A filled box + cone with two sound-wave
+// 21-glyph subset with no volume icon).  A filled box + cone with two sound-wave
 // arcs, centred at (cx, cy) inside a box of height h.
 #define SPK_PUT(X,Y) do { int _x=(X),_y=(Y); \
     if (_x>=0 && (u32)_x<tw && _y>=0 && (u32)_y<th) cpu_draw_row((u32)_y)[_x]=color; } while (0)
@@ -277,7 +284,7 @@ static void draw_menu(int dw, int dh) {
         drawTTF((u32)(mx0 + MENU_PAD + MENU_DOT_COL),
                 (u32)(row_cy - (int)(ROW_TEXT_PX * 0.5f)),
                 g_hud.menu_items[i], ROW_TEXT_PX,
-                (i == g_hud.menu_sel) ? HUD_FOCUSED : 0x0099A0BCUL);
+                (i == g_hud.menu_sel) ? HUD_FOCUSED : XMB_TEXT_DIM);
     }
 }
 
@@ -285,15 +292,9 @@ static void draw_menu(int dw, int dh) {
 // hud_compose — render the full overlay into the staging buffer
 // -------------------------------------------------------
 
-static void hud_compose(u64 elapsed_us, bool paused) {
-    // Wipe the rows the previous compose drew, then track this one's span.
-    if (s_ovl_prev_y1 > s_ovl_prev_y0)
-        memset(s_ovl_stage + (u32)s_ovl_prev_y0 * s_ovl_w, 0,
-               (u32)(s_ovl_prev_y1 - s_ovl_prev_y0) * s_ovl_w * 4);
-    s_ovl_y0 = (int)s_ovl_h;
-    s_ovl_y1 = 0;
-
-    cpu_rt_begin(s_ovl_stage, s_ovl_w, s_ovl_h);
+// The pre-revamp HUD: one strip, focusable transport controls.  Moved out of
+// hud_compose() unchanged; it is what jellyfin_spine.txt=0 still draws.
+static void hud_body_v2(u64 elapsed_us, bool paused, bool scrubbing) {
 
     // CRT overscan inset: lift the effective bottom by oy and pad the left/right
     // edges by ox so the transport row, times and buttons clear the bezel (#21).
@@ -372,6 +373,30 @@ static void hud_compose(u64 elapsed_us, bool paused) {
     drawRect((u32)(track_x0 + fill_w), (u32)track_y, (u32)(track_w - fill_w), TRACK_H, HUD_ACCENT_DIM);
     draw_circle(track_x0 + fill_w, track_y + TRACK_H / 2, SCRUB_R, HUD_ACCENT);
 
+    // ---- Trickplay scrub preview (only while actively hold-scrubbing) ----
+    // Never appears for a quick ±10s tap -- scrubbing is set from
+    // ps->seek.state == SEEK_SCRUB specifically, not from pending_secs, so an
+    // armed-but-not-yet-committed tap never shows it either. Absent-title and
+    // fetch-failure both just mean trickplay_current() returns NULL, which
+    // draws nothing here -- identical to today's plain bar, per design.
+    if (scrubbing) {
+        const TrickplayTile *tp = trickplay_current();
+        if (tp && tp->sheet_rgb && tp->tile_w > 0 && tp->tile_h > 0) {
+            int card_w = tp->tile_w + CARD_PAD * 2;
+            int card_h = tp->tile_h + CARD_PAD * 2;
+            int card_x = (track_x0 + fill_w) - card_w / 2;
+            if (card_x < lpad)               card_x = lpad;
+            if (card_x + card_w > dw - rpad) card_x = dw - rpad - card_w;
+            int card_y = track_y - CARD_GAP - card_h;
+
+            ovl_dim((u32)card_x, (u32)card_y, (u32)card_w, (u32)card_h, 235);
+            drawBitmapRect(tp->sheet_rgb, (u32)tp->sheet_w,
+                           (u32)tp->tile_x, (u32)tp->tile_y,
+                           (u32)tp->tile_w, (u32)tp->tile_h,
+                           (u32)(card_x + CARD_PAD), (u32)(card_y + CARD_PAD));
+        }
+    }
+
     // ---- Time labels (centred vertically on ctrl row) ----
     // drawTTF y ≈ top of glyph; shift up by half px to visually centre.
     int time_y = ctrl_cy - (int)(ROW_TEXT_PX * 0.5f);
@@ -421,7 +446,14 @@ static void hud_compose(u64 elapsed_us, bool paused) {
                  (u32)w_cc, 2, HUD_ACCENT);
 
     // ---- Volume slider (vertical, above the speaker) while adjusting ----
-    if (g_hud.vol_active) {
+    if (g_hud.vol_active && audio_passthrough_active()) {
+        // Nothing is mixed here: the receiver decodes and owns the level.
+        const char *msg = "Volume is set on your soundbar or receiver";
+        const int mw = ttf_text_width(msg, ROW_TEXT_PX) + 28;
+        const int mx = spk_x + w_spk / 2 - mw + 24, my = strip_y - 12 - 38;
+        ovl_dim((u32)mx, (u32)my, (u32)mw, 34, 205);
+        drawTTF((u32)(mx + 14), (u32)(my + 8), msg, ROW_TEXT_PX, HUD_FOCUSED);
+    } else if (g_hud.vol_active) {
         int vol       = audio_get_volume();          // 0..100
         int spk_cx    = spk_x + w_spk / 2;
         int track_x   = spk_cx - VOL_TRACK_W / 2;
@@ -446,6 +478,24 @@ static void hud_compose(u64 elapsed_us, bool paused) {
 
     if (g_hud.menu_visible && g_hud.menu_n > 0)
         draw_menu(dw, dh);
+
+}
+
+#include "hud_v3.inc"
+
+static void hud_compose(u64 elapsed_us, bool paused, bool scrubbing) {
+    // Wipe the rows the previous compose drew, then track this one's span.
+    if (s_ovl_prev_y1 > s_ovl_prev_y0)
+        memset(s_ovl_stage + (u32)s_ovl_prev_y0 * s_ovl_w, 0,
+               (u32)(s_ovl_prev_y1 - s_ovl_prev_y0) * s_ovl_w * 4);
+    s_ovl_y0 = (int)s_ovl_h;
+    s_ovl_y1 = 0;
+
+    cpu_rt_begin(s_ovl_stage, s_ovl_w, s_ovl_h);
+
+    if (g_hud.banner_solo)  v3_draw_banner();       // the bar itself stays away
+    else if (g_spine_on)    hud_body_v3(elapsed_us, paused, scrubbing);
+    else                    hud_body_v2(elapsed_us, paused, scrubbing);
 
     cpu_rt_end();
 
@@ -478,8 +528,8 @@ static void hud_compose(u64 elapsed_us, bool paused) {
 // about once a second (when the time string ticks) or on input.
 // -------------------------------------------------------
 
-void hud_draw(u64 elapsed_us, bool paused) {
-    if (!g_hud.visible) return;
+void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
+    if (!g_hud.visible && !g_hud.banner_solo) return;
     if (!s_ovl_stage || !s_ovl_tex) return;   // alloc failed: no HUD
 
     OvlKey key;
@@ -498,12 +548,19 @@ void hud_draw(u64 elapsed_us, bool paused) {
     key.title_on     = (paused && g_hud.title[0]) ? 1 : 0;
     key.vol_active   = g_hud.vol_active ? 1 : 0;
     key.vol_pct      = audio_get_volume();
+    key.aspect       = picture_get().aspect;
+    key.scrubbing    = scrubbing ? 1 : 0;
+    key.live         = g_hud.live ? 1 : 0;
+    key.live_permille = g_hud.live_permille;
+    key.live_epoch   = g_hud.live_epoch;
+    key.solo         = g_hud.banner_solo ? 1 : 0;
+    key.banner_on    = (g_hud.banner[0] && timing_get_us() < g_hud.banner_until_us) ? 1 : 0;
     snprintf(key.audio, sizeof(key.audio), "%s", g_hud.audio_label);
 
     if (!s_ovl_key_valid || memcmp(&key, &s_ovl_key, sizeof(key)) != 0) {
         s_ovl_key       = key;
         s_ovl_key_valid = true;
-        hud_compose(elapsed_us, paused);
+        hud_compose(elapsed_us, paused, scrubbing);
     }
 
     rsx_draw_hud_overlay(s_ovl_tex_off, s_ovl_w, s_ovl_h);

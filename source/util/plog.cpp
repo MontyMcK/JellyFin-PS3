@@ -79,6 +79,10 @@ static void plog_thread_fn(void *arg) {
 
 void plog_start(void) {
     if (s_plog_running) return;
+    // Keep the last run's log: a session that ended in a black screen or a
+    // hard power-off is exactly the one worth reading, and "w" wiped it.
+    remove("/dev_hdd0/tmp/player_log.prev.txt");
+    rename("/dev_hdd0/tmp/player_log.txt", "/dev_hdd0/tmp/player_log.prev.txt");
     s_plog_file    = fopen("/dev_hdd0/tmp/player_log.txt", "w");
     s_plog_running = true;
     sysThreadCreate(&s_plog_tid, plog_thread_fn, NULL,
@@ -106,7 +110,9 @@ void plog_stop(void) {
 // (which is wiped on boot).  See jf_paths.h.
 #define PLOG_SETTINGS_NAME "jellyfin_settings.txt"
 
-static bool s_plog_enabled = false;   // off by default
+// On by default, so a log exists when a problem is reported.  plog=0 in the
+// settings file (Settings > Debug Logging) turns it off.
+static bool s_plog_enabled = true;
 
 bool plog_enabled(void) { return s_plog_enabled; }
 
@@ -119,7 +125,7 @@ static void plog_save_setting(void) {
 }
 
 void plog_load_setting(void) {
-    s_plog_enabled = false;
+    s_plog_enabled = true;
     FILE *f = fopen(jf_data_path(PLOG_SETTINGS_NAME), "r");
     if (f) {
         char line[64];

@@ -17,6 +17,8 @@ typedef struct {
                           // Now Playing art follows this per track
     u32  duration_secs;   // from RunTimeTicks (0 if unknown)
     int  track_num;       // IndexNumber, 0 if unknown
+    char path[256];       // a file on a drive (an lfs path): the engine plays it through local/local_audio and
+                          // reports nothing to a server.  Empty = a Jellyfin track, by id.
 } MusicTrack;
 
 // Fetch an album's audio tracks in disc/track order.  Returns the count.
@@ -34,6 +36,8 @@ bool music_start(const MusicTrack *tracks, int count, int start_idx);
 // Stop playback and tear everything down (joins threads, closes the audio
 // port, restores the video pipeline's PCM source).  Safe to call twice.
 void music_stop(void);
+// Join a music stream thread left finishing by music_stop(), if any.
+void music_join_stale(void);
 
 // ---- controls (UI thread, non-blocking) ----
 void music_toggle_pause(void);

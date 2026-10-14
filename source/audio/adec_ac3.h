@@ -24,3 +24,7 @@ void adec_ac3_reset(void);
 // syncframes may straddle PES boundaries, so a partial tail is carried over
 // to the next call.  Runs on the adec thread only.
 void adec_ac3_decode_payload(const u8 *es, int len);
+
+// Passthrough: instead of decoding, pack each syncframe as an IEC 61937
+// burst (2 channels, 1536 frames) and push that.  Set by adec_set_codec().
+void adec_ac3_set_passthrough(bool on);

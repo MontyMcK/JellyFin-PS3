@@ -4,6 +4,7 @@
 #include "adec.h"
 #include "ac3_map.h"
 #include "plog.h"
+#include "iec61937.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -27,6 +28,38 @@ static u8           s_carry[AC3_CARRY_BYTES];
 static int          s_carry_len = 0;
 static bool         s_logged_frame = false;
 static u32          s_bad_frames   = 0;
+static bool         s_passthrough  = false;
+
+void adec_ac3_set_passthrough(bool on) {
+    if (on != s_passthrough) {
+        s_passthrough = on;
+        plog(on ? "adec_ac3: passthrough -- packing frames, not decoding"
+                : "adec_ac3: decoding");
+    }
+}
+
+// One syncframe -> one IEC 61937 burst -> 6 ring pushes of 256 stereo frames.
+// int16 / 32768 is exact in float, so the port gets the burst bit-exact as
+// long as nothing downstream applies gain (audio.cpp skips volume for this).
+static void push_burst(const u8 *frame, int len) {
+    static int16_t burst[IEC61937_AC3_FRAMES * 2];   // adec thread only
+    static float   stage[256 * 2];
+    if (iec61937_pack_ac3(frame, len, burst) != IEC61937_AC3_FRAMES) {
+        if ((s_bad_frames++ % 128) == 0) plog("adec_ac3: frame does not fit a burst");
+        return;
+    }
+    if (!s_logged_frame) {
+        s_logged_frame = true;
+        char b[64];
+        snprintf(b, sizeof(b), "adec_ac3: first burst, frame %d bytes", len);
+        plog(b);
+    }
+    for (int blk = 0; blk < 6; blk++) {
+        const int16_t *src = burst + blk * 256 * 2;
+        for (int i = 0; i < 256 * 2; i++) stage[i] = (float)src[i] / 32768.0f;
+        adec_push_frames(stage, 256);
+    }
+}
 
 bool adec_ac3_open(int out_channels) {
     adec_ac3_close();
@@ -74,6 +107,12 @@ static void decode_carry(void) {
         int fl = a52_syncinfo(s_carry + off, &flags, &srate, &brate);
         if (fl <= 0) { off++; continue; }         // false sync
         if (s_carry_len - off < fl) break;        // incomplete frame — wait
+
+        if (s_passthrough) {
+            push_burst(s_carry + off, fl);
+            off += fl;
+            continue;
+        }
 
         int      f     = s_req_flags;
         sample_t level = 1.0f;

@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "jellyfin_api.h"
+#include "json_unescape.h"   // \u0027 & co. -> UTF-8
 
 // -------------------------------------------------------
 // Global session state
@@ -26,9 +27,7 @@ int json_get_string(const char *json, const char *key, char *out, int out_size) 
     const char *p = strstr(json, search);
     if (!p) return 0;
     p += strlen(search);
-    int i = 0;
-    while (*p && *p != '"' && i < out_size-1) out[i++] = *p++;
-    out[i] = '\0';
+    json_unescape(p, p + strlen(p), out, out_size);
     return 1;
 }
 
@@ -42,9 +41,7 @@ int json_get_in_range(const char *start, int len,
     while (p + slen <= end) {
         if (memcmp(p, search, slen) == 0) {
             p += slen;
-            int i = 0;
-            while (p < end && *p != '"' && i < out_size-1) out[i++] = *p++;
-            out[i] = '\0';
+            json_unescape(p, end, out, out_size);
             return 1;
         }
         p++;
@@ -128,4 +125,33 @@ int parse_jf_items(const char *json, JFItem *arr, int max) {
         if (tmp.id[0]) arr[count++] = tmp;
     }
     return count;
+}
+
+// -------------------------------------------------------
+// Item identity (offline downloads)
+// -------------------------------------------------------
+
+bool jellyfin_parse_item_identity(const char *json, JFItemIdentity *out) {
+    memset(out, 0, sizeof(*out));
+    out->season  = -1;
+    out->episode = -1;
+    if (!json || !json[0]) return false;
+    json_get_string(json, "SeriesName", out->series_name, sizeof(out->series_name));
+    json_get_string(json, "SeriesId",   out->series_id,   sizeof(out->series_id));
+    // The needles start with a quote, so "IndexNumber" cannot match inside
+    // "ParentIndexNumber".
+    out->season  = json_get_int(json, "ParentIndexNumber", -1);
+    out->episode = json_get_int(json, "IndexNumber", -1);
+    out->year    = json_get_int(json, "ProductionYear", 0);
+    const char *rt = strstr(json, "\"RunTimeTicks\":");
+    if (rt) {
+        rt += strlen("\"RunTimeTicks\":");
+        while (*rt == ' ') rt++;
+        unsigned long long ticks = strtoull(rt, NULL, 10);
+        out->runtime_secs = (unsigned)(ticks / 10000000ULL);
+    }
+    out->has_backdrop = strstr(json, "\"BackdropImageTags\":[\"") != NULL;
+    json_get_string(json, "ParentBackdropItemId", out->parent_backdrop_id,
+                    sizeof(out->parent_backdrop_id));
+    return true;
 }

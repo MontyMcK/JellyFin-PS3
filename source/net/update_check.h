@@ -3,7 +3,10 @@
 // Version built into this binary.  Keep in step with the GitHub release tag
 // (leading 'v'/'V' is ignored when comparing, so "2.0-beta" matches
 // "V2.0-beta").  Bump this when cutting a release.
-#define APP_VERSION "2.6-beta"
+#define APP_VERSION "3.2"
+
+// Where a newer release is, as the popup and Settings show it.
+#include "update_page.h"
 
 // One-shot background check of the project's GitHub releases.  Runs entirely
 // on its own low-priority thread: start it once after http_init() succeeds
@@ -27,3 +30,12 @@ bool update_check_done(void);
 // APP_VERSION; copies the release tag (e.g. "V2.1") into out.  Poll it from
 // a render loop — it never blocks.
 bool update_check_result(char *out, int out_size);
+
+// Where the check stands, for Settings > Software Update.
+enum { UPD_IDLE, UPD_CHECKING, UPD_CURRENT, UPD_AVAILABLE, UPD_FAILED };
+int update_check_state(void);
+
+// Settings: run the check again (X on Software Update).  False while one is
+// still running.  Its memory (~0.5 MB for HTTPS/SSL) comes from the heap as
+// it is then; if that is short the check fails and says so, nothing worse.
+bool update_check_again(void);

@@ -1,0 +1,50 @@
+# Cline rules — JellyFin-PS3 (PS3 homebrew, PSL1GHT/ps3dev)
+
+## Hard rules
+1. This is **PS3 homebrew** built with PSL1GHT + ps3dev, PowerPC **big-endian**,
+   32-bit, no glibc extensions, no C++ exceptions/RTTI, no std::filesystem.
+2. **Never invent a firmware/PSL1GHT API.** `cellAudio*`, `sysModule*`, `sys*`,
+   `gcm*`, `vdec*`, `spu*` — if the exact symbol is not in a file I have pasted
+   into this conversation, you do not know it exists. Say "I need the header
+   for X" and stop. A plausible-looking call that does not exist costs an hour
+   of build failures.
+3. Do not search or open files I did not name. If you think you need another
+   file, ask for it by path instead of guessing at its contents.
+4. Never edit these without being told explicitly: `Makefile`, anything under
+   `source/audio/mlp/ff/` (vendored FFmpeg), `source/gfx/stb_*.h`,
+   `source/ui/fonts/*.h`, `source/audio/dca*/tables_*.h`, `*.zip`.
+   They are vendored, generated, or huge.
+5. Change one file per task unless I say otherwise. Do not refactor, rename,
+   reformat, or "clean up" anything I did not ask about.
+6. C files in `source/audio/` are C, not C++. Keep `extern "C"` boundaries as
+   they are. `.cpp` under `source/player/`, `source/api/`, `source/ui/` is C++.
+
+## Style
+- Match the file you are editing: its brace style, naming, comment density.
+- No new dependencies, no new global state, no new threads.
+- Byte/bitstream code: be explicit about endianness and about buffer bounds.
+  Assume the input is hostile and truncated.
+
+## Verification
+- Anything testable on the host goes through `tests/` +
+  `make -f tests/Makefile.host <target>`. That is the only build you can
+  reason about; the PS3 build happens in WSL and you cannot run it.
+- After an edit, state in one line what you changed and what could break.
+
+## SPU, AltiVec and renderer work
+7. **You write portable scalar kernels, not hardware code.** The pattern is
+   `source/spu/jf_anim_kernel.h`: header-only, pure C, no libm, no PS3
+   headers, struct-of-arrays, branchless. Follow it exactly.
+8. Never write, edit or propose: SPU intrinsics (`spu_*`, `si_*`), MFC/DMA
+   (`mfc_get`, `mfc_put`, tag masks), AltiVec intrinsics (`vec_*`), RSX state
+   or texture binds, `sysSpu*` calls. Never edit `source/spu/jf_spu.cpp`,
+   `source/spu/kernel/`, `source/gfx/rsxutil.cpp`, or `source/ui/render/
+   ui_card_gpu.cpp` / `ui_text_gpu.cpp`. A wrong bind wedges the GPU and costs
+   a power cycle; a wrong DMA silently corrupts the heap. Those are mine.
+9. Every kernel you write ships with a host test in `tests/` wired into
+   `tests/Makefile.host`, asserting numerical invariants (no NaN, bounded
+   energy, convergence), not golden values.
+10. The wave/particle system must be **original work**. If I paste parameter
+    values or physics descriptions, implement from those words. Never
+    reproduce, port or "match" XMB geometry, shaders or captured data, and
+    never ask me for such files.
