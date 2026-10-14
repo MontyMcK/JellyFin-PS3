@@ -4,6 +4,7 @@
 // user backs out (or the queue finishes).
 
 #include "ui.h"
+#include "music_player.h"      // MusicTrack
 
 // Album (from the Albums grid or an artist/genre sub-screen).  parent is
 // the breadcrumb segment before the album name — "Albums", or the artist/
@@ -20,3 +21,7 @@ void music_screen_open_songs(const XMBItem *items, int count, int start_idx);
 
 // Playlist: queue its tracks in playlist order.
 void music_screen_open_playlist(const XMBItem *playlist);
+
+// Files on a drive (MusicTrack::path set), starting at start_idx; `album` is the name shown under the track.  The
+// caller has finished its frame and issued the flip (as after loading_run): this does not.
+void music_screen_open_local(const MusicTrack *tracks, int count, int start_idx, const char *album);

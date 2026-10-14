@@ -11,7 +11,10 @@
 #include <ctype.h>
 
 #include "ui_internal.h"
+#include "settings_model.h"   // the Settings rows
+#include "dl_manager.h"       // dl_manager_ready(): the season sheet
 #include "ui_spine.h"        // each category remembers its focus
+#include "ui_sfx.h"          // the menu sounds
 #include "thumbnail_cache.h"
 #include "jellyfin_api.h"
 #include "player.h"
@@ -64,7 +67,10 @@ void xmb_switch_tab(int new_tab) {
     }
     if (new_tab == XMB_TAB_SETTINGS) {
         g_settings_sel = 0; g_settings_confirm = false;
+        g_settings_cat = -1; g_settings_catsel = 0;     // start on the list of categories
     }
+    if (xmb_kind(new_tab) == TABKIND_LIVETV) xmb_livetv_on_enter();
+    if (xmb_kind(new_tab) == TABKIND_LOCAL) xmb_media_on_enter();
     spine_focus_enter(new_tab);     // no-op with the gate off, or first visit
     // Home: reset focus and refetch the dynamic rows (Continue Watching /
     // Next Up change after every playback).
@@ -107,6 +113,7 @@ void xmb_play_item(const XMBItem *it, u32 resume_secs,
     strncpy(jf.name, it->name, sizeof(jf.name)-1);
     strncpy(jf.type, it->type, sizeof(jf.type)-1);
     show_player(&jf, resume_secs, media_source_id);
+    xmb_resume_note(it->id, player_last_position_secs(), player_last_total_secs());
 }
 
 // Play items[idx] and keep advancing through the list while the user
@@ -186,7 +193,7 @@ void xmb_play_episode_with_next(const XMBItem *first, u32 resume_secs,
         XMBItem next;
         bool have = xmb_fetch_next_episode(cur.id, &next);
         if (have)
-            player_arm_next("NEXT EPISODE", "Press SELECT for next episode");
+            player_arm_next(TR("NEXT EPISODE"), TR("Press SELECT for next episode"));
         xmb_play_item(&cur, resume, media_source_id);
         if (!have || !player_take_next_request()) break;
         cur    = next;
@@ -227,59 +234,46 @@ static bool xmb_input_settings(void) {
         if (BTN_PRESSED(circle)) g_settings_confirm = false;
         return false;
     }
-    // Triangle: what the highlighted setting does.  The panel follows the
-    // selection while it is up; Triangle again or O closes it (O does nothing
-    // else while it is open).
-    if (BTN_PRESSED(triangle)) {
-        // Spine: the row turns over like a poster's quick-peek.  Without the
-        // spine (no peek layer) the old in-place panel.
-        if (g_spine_on) { g_settings_help = false; settings_open_help_peek(); }
-        else            g_settings_help = !g_settings_help;
+    if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
+    if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
+
+    const int ncat = settings_category_count();
+    if (g_settings_cat < 0) {
+        // The categories.  X (or Right) opens one.
+        if (BTN_REPEAT(up)   && g_settings_catsel > 0)        { g_settings_catsel--; ui_sfx_play(SFX_CURSOR); }
+        if (BTN_REPEAT(down) && g_settings_catsel < ncat - 1) { g_settings_catsel++; ui_sfx_play(SFX_CURSOR); }
+        if (BTN_PRESSED(cross) || BTN_PRESSED(right)) {
+            const setting_section sec = settings_category_at(g_settings_catsel);
+            g_settings_cat = (int)sec;
+            g_settings_sel = settings_category_row(sec, 0);
+            ui_sfx_play(SFX_DECIDE);
+        }
         return false;
     }
-    if (g_settings_help && BTN_PRESSED(circle)) { g_settings_help = false; return false; }
-    if (BTN_PRESSED(l1)) { g_settings_help = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
-    if (BTN_PRESSED(r1)) { g_settings_help = false; xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
-    if (BTN_REPEAT(up)   && g_settings_sel > 0)                      g_settings_sel--;
-    if (BTN_REPEAT(down) && g_settings_sel < XMB_SETTINGS_COUNT - 1) g_settings_sel++;
-    if (BTN_PRESSED(cross)) {
-        if (g_settings_sel == 0) g_settings_confirm = true;             // Log Out
-        if (g_settings_sel == 1) plog_set_enabled(!plog_enabled());     // Debug Logging
-        if (g_settings_sel == 2) {                                      // Screen Size
-            g_overscan_calib_prev = overscan_frac();
-            g_overscan_calib      = true;
+
+    // Inside a category: its settings.  O goes back to the list.
+    const setting_section sec = (setting_section)g_settings_cat;
+    const int nrows = settings_category_row_count(sec);
+    int k = settings_row_in_category(g_settings_sel);
+    if (BTN_PRESSED(circle)) { g_settings_cat = -1; ui_sfx_play(SFX_CANCEL); return false; }
+    if (BTN_REPEAT(up)   && k > 0)         { g_settings_sel = settings_category_row(sec, k - 1); ui_sfx_play(SFX_CURSOR); }
+    if (BTN_REPEAT(down) && k < nrows - 1) { g_settings_sel = settings_category_row(sec, k + 1); ui_sfx_play(SFX_CURSOR); }
+    // L2 / R2: the previous / next category, without going back to the list.
+    if (BTN_PRESSED(l2) || BTN_PRESSED(r2)) {
+        const int ci = settings_category_index(sec) + (BTN_PRESSED(r2) ? 1 : -1);
+        if (ci >= 0 && ci < ncat) {
+            const setting_section to = settings_category_at(ci);
+            g_settings_catsel = ci;
+            g_settings_cat    = (int)to;
+            g_settings_sel    = settings_category_row(to, 0);
+            ui_sfx_play(SFX_CURSOR);
         }
-        if (g_settings_sel == 3)                                        // 1080p (Alpha)
-            hd1080_set_enabled(!hd1080_enabled());
-        if (g_settings_sel == 4)                                        // Audio Output
-            surround_cycle();    // Stereo -> 5.1 -> [7.1 where offered]
-        if (g_settings_sel == 5)                                        // Dialogue Boost
-            centermix_cycle();   // Off -> +3 -> +6 -> +10
-        if (g_settings_sel == 6)                                        // Subtitle Font
-            subfont_cycle();     // Open Sans -> Noto Sans -> Roboto Cond.
-        if (g_settings_sel == 7)                                        // Subtitle Colour
-            subcolor_cycle();    // White -> Soft Yellow -> Soft Grey
-        if (g_settings_sel == 8)                                        // Theme
-            theme_cycle();       // XMB wave -> Golden Age -> any USRDIR/tmp .ini
-        if (g_settings_sel == 9)                                        // Menu Particles
-            menusnow_set_enabled(!menusnow_enabled());
-        if (g_settings_sel == 10)                                       // Day / Night Palette
-            daynight_set_enabled(!daynight_enabled());
-        if (g_settings_sel == 11)                                       // Wave Intensity
-            wave_audio_set_level((wave_audio_level() + 1) % 4);         // Off -> Normal -> Strong -> Max
-        if (g_settings_sel == 12)                                       // Auto Skip
-            autoskip_set_enabled(!autoskip_enabled());
-        if (g_settings_sel == 13)                                       // 24Hz Output
-            d24_set_enabled(!d24_enabled());
-        if (g_settings_sel == 14) {                                     // Software Update
-            if (update_check_state() == UPD_AVAILABLE) xmb_update_popup_reopen();
-            else                                       update_check_again();
-        }
-#if ENABLE_PLAYER_STATS
-        if (g_settings_sel == 15)                                       // Player Stats Overlay
-            statsovl_set_enabled(!statsovl_enabled());
-#endif
     }
+    // X: activate / next value.  Left / Right: previous / next value on value
+    // rows (toggles flip either way, action rows ignore them).
+    if (BTN_PRESSED(cross)) settings_activate(g_settings_sel);
+    if (BTN_PRESSED(left))  settings_step(g_settings_sel, -1);
+    if (BTN_PRESSED(right)) settings_step(g_settings_sel, +1);
     return false;
 }
 
@@ -365,6 +359,14 @@ static void xmb_input_tv_sub(void) {
     }
     if (BTN_REPEAT(left)) {
         if ((g_tv_sub_sel % C) > 0) g_tv_sub_sel--;
+    }
+    // Triangle on a SEASON (depth 1): the whole-season download sheet, when
+    // downloads are available.  (At depth 2 it is the episode's details.)
+    if (BTN_PRESSED(triangle) && g_tv_depth == 1 && g_tv_sub_count > 0 &&
+        g_tv_sub_sel < g_tv_sub_count && dl_manager_ready()) {
+        xmb_season_download_sheet(&g_tv_sub_items[g_tv_sub_sel]);
+        init_btns();
+        return;
     }
     // Triangle opens the info screen for an EPISODE, the same as it does for a
     // movie in the library grid — which is where the Version and Quality rows
@@ -460,8 +462,8 @@ static void xmb_input_col_sub(void) {
     }
     if (BTN_PRESSED(cross) && g_col_sub_count > 0 && g_col_sub_sel < g_col_sub_count) {
         xmb_play_list_with_next(g_col_sub_items, g_col_sub_count,
-                                g_col_sub_sel, "NEXT MOVIE",
-                                "Press SELECT for next movie");
+                                g_col_sub_sel, TR("NEXT MOVIE"),
+                                TR("Press SELECT for next movie"));
         g_col_depth = 0;
         g_col_sub_sel = 0;
         g_col_sub_scroll = 0;
@@ -586,6 +588,8 @@ bool xmb_handle_input_browse(void) {
     int tab = g_active_tab;
 
     if (tab == XMB_TAB_SETTINGS) return xmb_input_settings();
+    if (xmb_kind(tab) == TABKIND_LIVETV) return xmb_input_livetv();
+    if (xmb_kind(tab) == TABKIND_LOCAL) return xmb_input_media();
 
     // A quick-peek owns the input while it is up (spine gate only).
     if (peek_input()) return false;
@@ -757,7 +761,7 @@ bool xmb_handle_input_browse(void) {
         } else {
             // The Continue Watching row still launches straight at the saved
             // position.
-            int resume = (int)it->resume_secs;
+            int resume = (int)xmb_resume_for(it->id, it->resume_secs);
             if (resume >= 0) {
                 if (strcmp(it->type, "Episode") == 0)
                     xmb_play_episode_with_next(it, (u32)resume);

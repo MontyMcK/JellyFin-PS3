@@ -32,6 +32,7 @@ typedef enum {
 
 void        subfont_load(void);
 void        subfont_cycle(void);
+void        subfont_step(int dir);      // either way round (+1 / -1), saved once
 subfont_t   subfont_get(void);
 const char *subfont_label(void);
 

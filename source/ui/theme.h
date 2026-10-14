@@ -113,6 +113,7 @@ const char *theme_current_name(void);
  * Skips a file that fails to parse rather than stalling on it, so one bad
  * .ini in the folder cannot trap the user on a single theme. */
 void theme_cycle(void);
+void theme_step(int dir);    // either way round (+1 / -1); malformed files skipped
 
 /* Quality modes — see section 7 of the handoff README.  Phase 8 owns the
  * per-effect behaviour; what lives here is the mode itself, the forced-MINIMAL

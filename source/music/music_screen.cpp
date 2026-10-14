@@ -113,7 +113,7 @@ static bool  s_have_origin = false;     // the album tile's rect is known
 // JellyWave / JellyDrop / Off are the global wave mode (ui_wave.h, which the
 // menus cycle too, without Canyon); Canyon is this screen's viz mode, drawn
 // over whatever the wave mode is (JellyDrop, the step before it).  Holding Square while Canyon is up still picks its preset.
-static const char *const MVIS_NAME[4] = { "JellyWave", "JellyDrop", "Canyon", "Off" };
+static const char *const MVIS_NAME[4] = { "JellyWave", "JellyDrop", "Canyon", TRN("Off") };
 static int music_vis_cur(void) {
     if (viz_mode() == VIZ_CANYON) return 2;
     const int w = wave_vis_mode();
@@ -669,7 +669,7 @@ static void draw_queue_overlay(const MusicTrack *tracks, int count,
     drawRect((u32)mx, (u32)my, 1, (u32)mh, XMB_HAIRLINE);
     drawRect((u32)(mx + mw - 1), (u32)my, 1, (u32)mh, XMB_HAIRLINE);
 
-    drawTTF((u32)(mx + UIS_W(26)), (u32)(my + UIS_H(18)), "QUEUE", UIS_TF(14), XMB_TEXT_FAINT, true);
+    drawTTF((u32)(mx + UIS_W(26)), (u32)(my + UIS_H(18)), TR("QUEUE"), UIS_TF(14), XMB_TEXT_FAINT, true);
     if (music_is_shuffle())
         drawIcon((u32)(mx + UIS_W(92)), (u32)(my + UIS_H(16)), ICON_SHUFFLE, UIS_TF(18.0f), XMB_ACCENT);
     if (ctx_title[0])
@@ -733,7 +733,7 @@ static void draw_queue_overlay(const MusicTrack *tracks, int count,
         drawRect((u32)bar_x, (u32)(list_y + off), UIS_W(3), (u32)th, XMB_ACCENT);
     }
 
-    static const Hint h[] = {{'X', "Play"}, {'T', "Shuffle"}, {'C', "Close"}};
+    static const Hint h[] = {{'X', TRN("Play")}, {'T', TRN("Shuffle")}, {'C', TRN("Close")}};
     draw_hints_bar(h, 3);
 }
 
@@ -882,7 +882,7 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
     {
         // "Track 7 of 13 · Electronic · 320 kbps FLAC" (play-order position)
         char meta[160];
-        int  n = snprintf(meta, sizeof(meta), "Track %d of %d",
+        int  n = snprintf(meta, sizeof(meta), TR("Track %d of %d"),
                           music_current_pos() + 1, count);
         if (ctx->genre[0])
             n += snprintf(meta + n, sizeof(meta) - n, " \xC2\xB7 %s", ctx->genre);
@@ -907,7 +907,7 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
         int first = pos + 1;              // first upcoming position
         int n_up  = count - first;
 
-        drawTTF((u32)up_x, (u32)uy, "UP NEXT", UIS_TF(13),
+        drawTTF((u32)up_x, (u32)uy, TR("UP NEXT"), UIS_TF(13),
                 fa(s_fzone == FZ_QUEUE ? XMB_TEXT : XMB_TEXT_FAINT, ua), true);
 
         if (n_up > 0) {
@@ -1078,20 +1078,20 @@ static void draw_now_playing(const MusicCtx *ctx, const MusicTrack *tracks,
             // Select names the visualiser it switches TO (JellyWave ->
             // JellyDrop -> Off -> JellyWave).
             // Square names the visualiser it switches TO, in the corner.
-            const Hint h[6] = {{'l', ""}, {'r', "Skip"},   // L1/R1: prev/next track
-                               {'X', "Play"},
-                               {'T', "Shuffle"},
-                               {'C', "Back"},
+            const Hint h[6] = {{'l', ""}, {'r', TRN("Skip")},   // L1/R1: prev/next track
+                               {'X', TRN("Play")},
+                               {'T', TRN("Shuffle")},
+                               {'C', TRN("Back")},
                                {'S', music_vis_next_label()}};
             draw_hints_bar(h, 6);
         } else {
             // Select names the visualiser it switches TO (JellyWave ->
             // JellyDrop -> Off -> JellyWave).
             // Square names the visualiser it switches TO, in the corner.
-            const Hint h[6] = {{'l', ""}, {'r', "Skip"},   // L1/R1: prev/next track
-                               {'X', "Select"},
-                               {'T', "Shuffle"},
-                               {'C', "Back"},
+            const Hint h[6] = {{'l', ""}, {'r', TRN("Skip")},   // L1/R1: prev/next track
+                               {'X', TRN("Select")},
+                               {'T', TRN("Shuffle")},
+                               {'C', TRN("Back")},
                                {'S', music_vis_next_label()}};
             draw_hints_bar(h, 6);
         }
@@ -1379,9 +1379,10 @@ static void music_screen_run(const MusicCtx *ctx, int count, int start_idx) {
                 hb_us = now;
                 char b[160];
                 const u32 n = c_n ? c_n : 1;
-                snprintf(b, sizeof b, "music_screen: f=%u %s pos=%us gpu=%llu sync=%llu draw=%llu us/frame",
+                snprintf(b, sizeof b, "music_screen: f=%u %s focus=%.2f pos=%us gpu=%llu sync=%llu draw=%llu us/frame",
                          (unsigned)hb_frame,
                          music_is_paused() ? "PAUSED" : "playing",
+                         (double)s_focus_p,
                          (unsigned)music_elapsed_secs(),
                          (unsigned long long)(c_gpu / n), (unsigned long long)(c_sync / n),
                          (unsigned long long)(c_draw / n));
@@ -1416,9 +1417,9 @@ static void music_screen_run(const MusicCtx *ctx, int count, int start_idx) {
         if (s_viz_toast_us && timing_get_us() < s_viz_toast_us) {
             char vb[64];
             if (viz_mode() == VIZ_CANYON)
-                snprintf(vb, sizeof vb, "Visualizer: Canyon - %s", canyon_preset_name());
+                snprintf(vb, sizeof vb, TR("Visualizer: Canyon - %s"), canyon_preset_name());
             else
-                snprintf(vb, sizeof vb, "Visualizer: %s", MVIS_NAME[music_vis_cur()]);
+                snprintf(vb, sizeof vb, TR("Visualizer: %s"), tr(MVIS_NAME[music_vis_cur()]));
             draw_clipped((u32)UIS_W(40), (u32)(display_height * 0.12f), vb, UIS_TF(16),
                          fa(XMB_WHITE, s_scr_a), (int)(display_width * 0.5f));
         }
@@ -1467,7 +1468,7 @@ void music_screen_open_album(const XMBItem *album, const char *parent) {
     MusicCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
     snprintf(ctx.parent, sizeof(ctx.parent), "%s",
-             parent && parent[0] ? parent : "Albums");
+             tr(parent && parent[0] ? parent : "Albums"));
     snprintf(ctx.title,  sizeof(ctx.title),  "%s", album->name);
     snprintf(ctx.year,   sizeof(ctx.year),   "%s", album->year_str);
     snprintf(ctx.genre,  sizeof(ctx.genre),  "%s", album->genre);
@@ -1479,7 +1480,7 @@ void music_screen_open_album(const XMBItem *album, const char *parent) {
     loading_run([](void *a) {
                     auto *l = (decltype(ld) *)a;
                     l->count = music_fetch_album_tracks(l->id, s_tracks, MUSIC_QUEUE_MAX);
-                }, &ld, "Loading", true);
+                }, &ld, TR("Loading"), true);
     s_entry_flipped = true;
     music_screen_run(&ctx, ld.count, 0);
 }
@@ -1500,8 +1501,22 @@ void music_screen_open_songs(const XMBItem *items, int count, int start_idx) {
     }
     MusicCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
-    snprintf(ctx.parent, sizeof(ctx.parent), "Songs");
+    snprintf(ctx.parent, sizeof(ctx.parent), TR("Songs"));
     snprintf(ctx.genre,  sizeof(ctx.genre), "%s", items[start_idx].genre);
+    music_screen_run(&ctx, count, start_idx);
+}
+
+void music_screen_open_local(const MusicTrack *tracks, int count, int start_idx, const char *album) {
+    s_origin_pending = false; take_origin();
+    if (count > MUSIC_QUEUE_MAX) count = MUSIC_QUEUE_MAX;
+    if (count <= 0) return;
+    if (start_idx < 0 || start_idx >= count) start_idx = 0;
+    memcpy(s_tracks, tracks, (size_t)count * sizeof(MusicTrack));
+    MusicCtx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    snprintf(ctx.parent, sizeof(ctx.parent), TR("Media"));
+    snprintf(ctx.title,  sizeof(ctx.title),  "%s", album ? album : "");
+    s_entry_flipped = true;
     music_screen_run(&ctx, count, start_idx);
 }
 
@@ -1509,7 +1524,7 @@ void music_screen_open_playlist(const XMBItem *playlist) {
     s_origin_pending = false; take_origin();
     MusicCtx ctx;
     memset(&ctx, 0, sizeof(ctx));
-    snprintf(ctx.parent, sizeof(ctx.parent), "Playlists");
+    snprintf(ctx.parent, sizeof(ctx.parent), TR("Playlists"));
     snprintf(ctx.title,  sizeof(ctx.title),  "%s", playlist->name);
     int count = music_fetch_playlist_tracks(playlist->id, s_tracks,
                                             MUSIC_QUEUE_MAX);

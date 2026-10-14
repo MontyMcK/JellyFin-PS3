@@ -33,6 +33,7 @@ typedef enum {
 
 void        subcolor_load(void);
 void        subcolor_cycle(void);
+void        subcolor_step(int dir);     // either way round (+1 / -1), saved once
 subcolor_t  subcolor_get(void);
 const char *subcolor_label(void);
 

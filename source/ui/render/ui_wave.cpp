@@ -272,7 +272,7 @@ void wave_reveal_start(void)
 const char *wave_vis_next_label(void)
 {
     vis_load();
-    static const char *const next[3] = { "JellyDrop", "Off", "JellyWave" };
+    static const char *const next[3] = { "JellyDrop", TRN("Off"), "JellyWave" };
     return next[s_vis];
 }
 

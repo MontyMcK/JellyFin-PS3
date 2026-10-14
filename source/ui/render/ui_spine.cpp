@@ -165,6 +165,8 @@ static int spine_icon(int tab) {
     case TABKIND_PLAYLISTS: return ICON_MUSIC;
     case TABKIND_BOXSETS:   return ICON_COLLECTIONS;
     case TABKIND_SETTINGS:  return ICON_SETTINGS;
+    case TABKIND_LIVETV:    return ICON_ANTENNA;
+    case TABKIND_LOCAL:     return ICON_COLLECTIONS;
     default:                return ICON_PHOTO;
     }
 }
@@ -222,7 +224,8 @@ static void spine_open_column_item(int tab) {
         if (!xmb_home_open_focused()) spine_go(SPINE_L2);
         return;
     }
-    if (k == TABKIND_SEARCH || k == TABKIND_SETTINGS ||
+    if (k == TABKIND_SEARCH || k == TABKIND_SETTINGS || k == TABKIND_LIVETV ||
+        k == TABKIND_LOCAL ||
         !g_items_loaded[tab] || g_item_count[tab] <= 0 ||
         g_sel < 0 || g_sel >= g_item_count[tab]) {
         spine_go(SPINE_L2);
@@ -253,7 +256,8 @@ static void spine_open_column_active(void) { spine_open_column_item(g_active_tab
 static void spine_peek_column_item(int tab) {
     const int k = xmb_kind(tab);
     if (k == TABKIND_HOME) { xmb_home_peek_focused(); return; }
-    if (k == TABKIND_SEARCH || k == TABKIND_SETTINGS || k == TABKIND_MUSIC ||
+    if (k == TABKIND_SEARCH || k == TABKIND_SETTINGS || k == TABKIND_LIVETV ||
+        k == TABKIND_LOCAL || k == TABKIND_MUSIC ||
         !g_items_loaded[tab] || g_item_count[tab] <= 0 ||
         g_sel < 0 || g_sel >= g_item_count[tab])
         return;
@@ -293,10 +297,22 @@ bool spine_try_back(int tab) {
         break;
     case TABKIND_SETTINGS:
         if (g_settings_confirm || g_overscan_calib) return false;
-        leave = back || (up && g_settings_sel == 0);
+        if (g_settings_cat >= 0) return false;          // inside a category: O goes back to the list
+        leave = back || (up && g_settings_catsel == 0);
         break;
     case TABKIND_HOME:
         leave = back || (up && xmb_home_at_top());
+        break;
+    case TABKIND_LIVETV:
+        // The guide, a programme's details and a pending refresh all take O
+        // and Up themselves; only the channel list's top row hands them over.
+        if (xmb_livetv_modal()) return false;
+        leave = back || (up && xmb_livetv_at_top());
+        break;
+    case TABKIND_LOCAL:
+        // The folder browser and the details page are screens of their own
+        // that return here; this is only the list of drives.
+        leave = back || (up && xmb_media_at_top());
         break;
     case TABKIND_MUSIC:
         // The grid's top row already moves Up onto the Albums/Artists/...
@@ -410,7 +426,7 @@ void spine_draw(void) {
         const int t  = order[i];
         const int cx = sx(spine_slot_x_f((float)i - f));
         char label[sizeof(g_tabs[t].label)];
-        snprintf(label, sizeof label, "%s", g_tabs[t].label);
+        snprintf(label, sizeof label, "%s", tr(g_tabs[t].label));
         ui_upper_ascii(label);
 
         int lw = ttf_text_width_tracked(label, lpx, UI_FACE_TAB, track);
@@ -458,7 +474,8 @@ typedef char spine_focus_slots_fit[(XMB_TAB_COUNT <= DEPTH_MAX_CATS) ? 1 : -1];
 
 static bool spine_grid_tab(int tab) {
     const int k = xmb_kind(tab);
-    return tab != XMB_TAB_HOME && k != TABKIND_SEARCH && k != TABKIND_SETTINGS;
+    return tab != XMB_TAB_HOME && k != TABKIND_SEARCH && k != TABKIND_SETTINGS &&
+           k != TABKIND_LIVETV && k != TABKIND_LOCAL;
 }
 
 void spine_focus_leave(int tab, bool window_dropped) {

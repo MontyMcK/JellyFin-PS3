@@ -13,6 +13,9 @@
 #include "ui_spine.h"    // frame clock for the A-Z rail's glide
 #include "boot_anim.h"
 #include "icons.h"
+#include "clock_fmt.h"
+#include <sysutil/sysutil.h>
+#include <sys/systime.h>
 #include "stb_image.h"
 #include "ps_buttons_png.h"
 #include "jfmark_png.h"
@@ -35,11 +38,13 @@ static int tab_icon(int tab) {
     case TABKIND_PLAYLISTS:return ICON_MUSIC;
     case TABKIND_BOXSETS:  return ICON_COLLECTIONS;
     case TABKIND_SETTINGS: return ICON_SETTINGS;
+    case TABKIND_LIVETV:   return ICON_ANTENNA;
+    case TABKIND_LOCAL:    return ICON_COLLECTIONS;
     // Every custom / untyped library shares ONE icon, so they read as a
     // family rather than masquerading as a Collections library.
     //
     // ICON_PHOTO is the only sensible glyph left: the bundled Tabler font is
-    // a 20-glyph SUBSET (ui/fonts/tabler_icons.h) and all 20 are already
+    // a 21-glyph SUBSET (ui/fonts/tabler_icons.h) and all 21 are already
     // spoken for, so nothing is truly free.  This one at least never appears
     // in the tab bar — its only other use is a list placeholder in
     // ui_lists.cpp — so it collides with nothing the user sees up here.
@@ -225,12 +230,24 @@ void xmb_draw_topbar(void) {
 
     #undef ramp
     // Clock, right-aligned, with the date dimmer beside it.
-    time_t now = time(NULL);
-    struct tm *tm = localtime(&now);
-    if (!tm) return;
-    char t_str[8], d_str[8];
-    snprintf(t_str, sizeof(t_str), "%d:%02d", tm->tm_hour, tm->tm_min);
-    snprintf(d_str, sizeof(d_str), "%d/%d", tm->tm_mday, tm->tm_mon + 1);
+    // The console's own zone, summer time, 12/24 h and date order, read once a
+    // second (clock_fmt.h): what the XMB shows, not the C library's UTC guess.
+    static int s_off = 0, s_dfmt = CLK_DATE_MDY, s_tfmt = CLK_TIME_12H;
+    static u64 s_read_at = 0;
+    u64 sec = 0, nsec = 0;
+    sysGetCurrentTime(&sec, &nsec);
+    if (s_read_at == 0 || sec != s_read_at) {
+        s_read_at = sec;
+        s32 tz = 0, summer = 0, df = CLK_DATE_MDY, tf = CLK_TIME_12H;
+        if (sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_TIMEZONE, &tz) != 0) tz = 0;
+        if (sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_SUMMERTIME, &summer) != 0) summer = 0;
+        if (sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_DATE_FORMAT, &df) != 0) df = CLK_DATE_MDY;
+        if (sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_TIME_FORMAT, &tf) != 0) tf = CLK_TIME_12H;
+        s_off = (int)tz * 60 + (summer ? 3600 : 0);
+        s_dfmt = df; s_tfmt = tf;
+    }
+    char t_str[16], d_str[16];
+    clock_format((long long)sec, s_off, s_dfmt, s_tfmt, t_str, sizeof t_str, d_str, sizeof d_str);
     // v1.0 moved BOTH of these onto --font-tab (Satoshi).  The clock used to be
     // one of two things the display face was allowed; it is not any more, which
     // matters now that the display face is a subset with no colon -- a clock on
@@ -388,7 +405,7 @@ void xmb_draw_tabs(void) {
         const float px    = UIS_TF(11.5f);
         const float track = px * 0.04f;
         char label[sizeof(g_tabs[t].label)];
-        snprintf(label, sizeof label, "%s", g_tabs[t].label);
+        snprintf(label, sizeof label, "%s", tr(g_tabs[t].label));
         ui_upper_ascii(label);
 
         int lw = ttf_text_width_tracked(label, px, UI_FACE_TAB, track);
@@ -576,14 +593,14 @@ void xmb_draw_jumpbar(int tab) {
 // will switch it.
 void xmb_draw_music_subtabs(int x, int y, int active, bool focused) {
     static const char *labels[MUSIC_ST_COUNT] =
-        { "Albums", "Artists", "Playlists", "Genres", "Songs" };
+        { TRN("Albums"), TRN("Artists"), TRN("Playlists"), TRN("Genres"), TRN("Songs") };
     const float px = UIS_TF(16.0f);
     for (int i = 0; i < MUSIC_ST_COUNT; i++) {
         bool is_active = (i == active);
         u32 color = is_active ? (focused ? XMB_WHITE : XMB_TEXT)
                               : XMB_TEXT_FAINT;
-        drawTTF((u32)x, (u32)y, labels[i], px, color, is_active);
-        int w = ttf_text_width(labels[i], px, is_active);
+        drawTTF((u32)x, (u32)y, tr(labels[i]), px, color, is_active);
+        int w = ttf_text_width(tr(labels[i]), px, is_active);
         if (is_active)
             drawRect((u32)x, (u32)(y + UIS_H(24)), (u32)w, UIS_H(3),
                      focused ? XMB_KEY_SEL : XMB_ACCENT);
@@ -878,6 +895,7 @@ void draw_hints_bar(const Hint *hints, int n) {
 
     const int   icon_h  = UIS_H(24);
     const float text_px = UIS_TF(12.5f);      // section 3.1: 12.5px label
+    const bool  heavy   = (int)display_height < 720;   // a CRT loses thin strokes
     const int   gap_it  = UIS_H(8);           // icon to its label
     const int   gap_sep = UIS_H(22);          // section 3.1: items gap 22
 
@@ -892,7 +910,7 @@ void draw_hints_bar(const Hint *hints, int n) {
                      ? hint_badge_w()
                      : ps_btn_width(hints[i].glyph, icon_h);
         if (hints[i].label && hints[i].label[0]) {
-            total_w += gap_it + ttf_text_width(hints[i].label, text_px);
+            total_w += gap_it + ttf_text_width(tr(hints[i].label), text_px, heavy);
             if (i < n - 1) total_w += gap_sep;
         } else {
             total_w += gap_pair;
@@ -918,9 +936,9 @@ void draw_hints_bar(const Hint *hints, int n) {
         }
         if (hints[i].label && hints[i].label[0]) {
             x += gap_it;
-            drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), hints[i].label,
-                    text_px, XMB_TEXT_DIM);
-            x += ttf_text_width(hints[i].label, text_px);
+            drawTTF((u32)x, (u32)(cy - (int)(text_px * 0.55f)), tr(hints[i].label),
+                    text_px, heavy ? XMB_TEXT : XMB_TEXT_DIM, heavy);
+            x += ttf_text_width(tr(hints[i].label), text_px, heavy);
             if (i < n - 1) x += gap_sep;
         } else {
             x += gap_pair;

@@ -83,6 +83,22 @@ const PgsBitmap *subs_pgs_at(u64 pts_ms);
 // After a seek the cursor must not be trusted to walk forward.
 void subs_reset_cursor(void);
 
+// ---- local files --------------------------------------------------------------------------------------
+// A subtitle track of a file on a drive is not fetched whole: video/mkv_ts hands over its blocks as it reads the
+// file for the video and the sound, so cues appear a little ahead of the picture they belong to (blocks sit in the
+// cluster of their start time) and the lookups above work on whatever has arrived.  The decode thread adds, the
+// render thread reads; the tables are locked.
+//
+// Starts collecting a track of one kind (text cues or PGS display sets): forgets the one loaded, keeps the memory.
+void subs_local_begin(bool pgs);
+// The reader begins again from another place (a seek reopened the file): the cues so far go, the kind stays.
+void subs_local_restart(void);
+// A text cue, in milliseconds of the file's own time (the clock the player's position is on).  A cue with no end
+// (end <= start) shows for 2.5 s.  Dropped when the table is full or no text track is being collected.
+void subs_local_add_text(u32 start_ms, u32 end_ms, const char *text);
+// The .sup segments of a PGS display set (local/sub_conv.h makes them from a Matroska block).
+void subs_local_add_pgs(const uint8_t *sup, int len);
+
 #ifdef __cplusplus
 }
 #endif

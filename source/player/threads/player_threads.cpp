@@ -128,6 +128,8 @@ bool player_spawn_decode(PlayerState *ps) {
     ps->dec_ctx.frame_count = &ps->frame_count;
     ps->dec_ctx.sock        = ps->sock;
     ps->dec_ctx.dec_run     = &ps->dec_run;
+    ps->dec_ctx.ended       = ps->live ? &ps->stream_ended : NULL;
+    ps->stream_ended = false;
     ps->dec_run = true;
     int trc = sysThreadCreate(&ps->dec_tid, decode_thread_fn,
                               (void *)&ps->dec_ctx,
@@ -230,6 +232,14 @@ void decode_thread_fn(void *arg) {
             g_dec_stage = "batch";
             g_dec_iter++;
             if (rd < 0) {
+                if (ctx->ended) {
+                    // A live channel ending is the server dropping it: the
+                    // player reopens, so only this thread stops.
+                    plog("decode: live stream ended");
+                    *ctx->ended   = true;
+                    *ctx->dec_run = false;
+                    break;
+                }
                 plog("playing=0 reason=stream_eof");
                 lc_logf("decode: stream_read FAILED -> playing=0 (got_any_pkt=%d)",
                         (int)lc_got_pkt);
@@ -442,7 +452,9 @@ void progress_thread_fn(void *arg) {
     // The start report, off the display thread (see show_player).
     snprintf(item, sizeof item, "%s", g_prog.item);
     snprintf(sess, sizeof sess, "%s", g_prog.sess);
-    if (PROG_LIVE()) jellyfin_report_playing(item, sess, g_prog.base_us * 10ULL);
+    char live_id[128];
+    snprintf(live_id, sizeof live_id, "%s", g_prog.live_id);
+    if (PROG_LIVE()) jellyfin_report_playing(item, sess, g_prog.base_us * 10ULL, live_id);
 
     int tick = 0;
     u32 wd_iter = g_dec_iter;
@@ -468,7 +480,9 @@ void progress_thread_fn(void *arg) {
         if (!g_prog.pos_valid) continue;  // mid-seek flush: position unstable
         u64 pos_ticks = (g_prog.base_us + audio_get_clock_us()) * 10ULL;
         snprintf(sess, sizeof sess, "%s", g_prog.sess);   // re-minted per seek
-        jellyfin_report_progress(item, sess, pos_ticks, g_prog.paused);
+        snprintf(item, sizeof item, "%s", g_prog.item);   // a live channel changes
+        snprintf(live_id, sizeof live_id, "%s", g_prog.live_id);
+        jellyfin_report_progress(item, sess, pos_ticks, g_prog.paused, live_id);
     }
     #undef PROG_LIVE
 

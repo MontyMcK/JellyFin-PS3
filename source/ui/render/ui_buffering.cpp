@@ -38,7 +38,7 @@ static bool        s_on = false;
 static bool        s_flip_pending = false;
 static u64         s_last_draw = 0;
 static char        s_title[128];
-static char        s_label[48] = "BUFFERING";
+static char        s_label[48] = TRN("BUFFERING");
 static bool        s_show_pct = false;
 static const char *s_hint = NULL;
 static int         s_art = -1;           // GPU_TEX_* slot, or -1
@@ -62,7 +62,7 @@ void buffering_begin(const char *item_id, const char *title) {
     s_flip_pending = false;
     s_last_draw = 0;
     snprintf(s_title, sizeof s_title, "%s", title ? title : "");
-    snprintf(s_label, sizeof s_label, "PREPARING");
+    snprintf(s_label, sizeof s_label, "%s", TRN("PREPARING"));
     s_show_pct = false;
     s_hint = NULL;
     // Only artwork that is known to be THIS item's.  After an auto-advance to
@@ -160,8 +160,8 @@ static void draw_text(const buf_frame &f) {
     const int W = (int)display_width;
 
     if (s_label[0]) {
-        const int ew = xmb_eyebrow_width(s_label);
-        xmb_draw_eyebrow((W - ew) / 2, BY(408), s_label, art_mix(bg, XMB_TEXT_DIM, q));
+        const int ew = xmb_eyebrow_width(tr(s_label));
+        xmb_draw_eyebrow((W - ew) / 2, BY(408), tr(s_label), art_mix(bg, XMB_TEXT_DIM, q));
     }
     if (s_show_pct) {
         char pct[8];

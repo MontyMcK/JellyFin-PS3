@@ -32,6 +32,7 @@
 #include "satoshi_regular.h"      // --font-tab      400/500: date, cast names
 #include "michroma.h"             // --font-spec
 #include "mata_bold.h"            // the lockup wordmark, and nothing else
+#include "notosansjp.h"           // kana and kanji: the last link of every chain (Noto Sans JP, subset)
 #include "icons.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
@@ -74,6 +75,11 @@ static stbtt_fontinfo  s_font_lockup;    // Mata Bold
 static bool            s_display_ok = false, s_spec_ok = false;
 static bool            s_eyebrow_ok = false, s_tab_ok = false, s_tab_reg_ok = false;
 static bool            s_lockup_ok  = false;
+// The last link of every face chain: what no Latin face has (kana, kanji, CJK punctuation) comes
+// from here, for the Japanese interface and for Japanese titles from the server alike.
+static stbtt_fontinfo  s_font_jp;
+static bool            s_jp_ok = false;
+static float           s_jp_k  = 0.0f;   // scale per requested pixel; see chain_of()
 static bool            s_icons_ok    = false;
 
 // Gamma LUTs for correct anti-aliasing.  Blending coverage in linear light
@@ -137,7 +143,8 @@ static inline u8 aa_blend(u8 a, u8 fg, u8 bg) {
 #define GC_FONT_TAB     8
 #define GC_FONT_TABREG  9
 #define GC_FONT_LOCKUP 10
-#define GC_FONT_COUNT  11
+#define GC_FONT_JP     11
+#define GC_FONT_COUNT  12
 
 typedef struct {
     float px;
@@ -172,6 +179,7 @@ static inline int font_id_of(const stbtt_fontinfo *fi) {
     if (fi == &s_font_tab)     return GC_FONT_TAB;
     if (fi == &s_font_tab_reg) return GC_FONT_TABREG;
     if (fi == &s_font_lockup)  return GC_FONT_LOCKUP;
+    if (fi == &s_font_jp)      return GC_FONT_JP;
     return GC_FONT_REG;
 }
 
@@ -400,7 +408,29 @@ void drawChar(u32 x, u32 y, char c) {
     rsxSetTransferScaleSurface(context, &scale, &surface);
 }
 
+// The 8x8 bitmap font is ASCII only.  Text with anything else (an accent, kana) is set in the TTF
+// face instead, line by line, so a translated message is never drawn as the bytes of its UTF-8.
+static bool has_non_ascii(const char *s) {
+    for (; *s; s++) if ((unsigned char)*s >= 0x80) return true;
+    return false;
+}
+
 void drawText(u32 x, u32 y, const char *text) {
+    if (has_non_ascii(text)) {
+        char line[256];
+        for (const char *p = text; *p; ) {
+            const char *nl = strchr(p, '\n');
+            size_t n = nl ? (size_t)(nl - p) : strlen(p);
+            if (n > sizeof line - 1) n = sizeof line - 1;
+            memcpy(line, p, n);
+            line[n] = '\0';
+            drawTTF(x, y, line, (float)CHAR_SIZE + 2.0f, 0x00FFFFFF);
+            y += LINE_HEIGHT;
+            p += n;
+            if (*p == '\n') p++;
+        }
+        return;
+    }
     u32 cx = x;
     while (*text) {
         if (*text == '\n') { cx = x; y += LINE_HEIGHT; }
@@ -600,10 +630,14 @@ static void chain_of(int face, float px, FaceChain *c)
     default:
         break;
     }
+    if (s_jp_ok) c->fi[c->n++] = &s_font_jp;
 
     for (int i = 0; i < c->n; i++) {
         c->id[i]    = (u8)font_id_of(c->fi[i]);
-        c->scale[i] = stbtt_ScaleForPixelHeight(c->fi[i], px);
+        // The Japanese face is sized by the same em the Latin faces get (not by its own, taller,
+        // ascent + descent, which would draw kana noticeably smaller), and independently of which
+        // role's face it backs, because the glyph cache keys it by pixel size alone.
+        c->scale[i] = (c->fi[i] == &s_font_jp) ? px * s_jp_k : stbtt_ScaleForPixelHeight(c->fi[i], px);
     }
     c->baseline = (int)((float)s_ascent[c->id[0]] * c->scale[0]);
 }
@@ -1289,6 +1323,18 @@ void ttf_init(void) {
         s_noto_ok = true;
     if (stbtt_InitFont(&s_font_robocond, (unsigned char*)RobotoCondensed_Bold_ttf, 0))
         s_robocond_ok = true;
+    if (s_ttf_ok && stbtt_InitFont(&s_font_jp, (unsigned char*)NotoSansJP_otf, 0)) {
+        // em of Rodin per requested pixel, expressed per unit of the Japanese face's em
+        int asc = 0, desc = 0;
+        stbtt_GetFontVMetrics(&s_font, &asc, &desc, NULL);
+        const float rodin_upem = 1.0f / stbtt_ScaleForMappingEmToPixels(&s_font, 1.0f);
+        const float jp_upem    = 1.0f / stbtt_ScaleForMappingEmToPixels(&s_font_jp, 1.0f);
+        if (asc - desc > 0 && jp_upem > 0.0f) {
+            s_jp_k  = (rodin_upem / (float)(asc - desc)) / jp_upem;
+            s_jp_ok = true;
+        }
+    }
+    if (!s_jp_ok) plog("ttf: Japanese face unavailable");
 
     // Ascent is size-independent — read it once here instead of on every call.
     if (s_ttf_ok)

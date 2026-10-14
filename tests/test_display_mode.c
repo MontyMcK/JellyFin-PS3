@@ -55,7 +55,8 @@ static void test_film(void)
     CHECK(dm_classify_film(24000, 1000) == DM_FILM_24);
     // 23.976 NOT snapped is not film: it would mean the snap broke upstream.
     CHECK(dm_classify_film(23976, 1000) == DM_FILM_NONE);
-    CHECK(dm_classify_film(25, 1) == DM_FILM_NONE);
+    CHECK(dm_classify_film(25, 1) == DM_FILM_25);
+    CHECK(dm_classify_film(25000, 1001) == DM_FILM_NONE);
     CHECK(dm_classify_film(30000, 1001) == DM_FILM_NONE);
     CHECK(dm_classify_film(30, 1) == DM_FILM_NONE);
     CHECK(dm_classify_film(50, 1) == DM_FILM_NONE);
@@ -162,8 +163,28 @@ static void test_decide(void)
     d = dm_decide(DM_FILM_23976, 1, 1920, 1080, DM_RES_1080, DM_RATE_24FAM_A, P, yes, ON);
     CHECK(d.attempt == 0);
 
+    // 25fps content: a candidate on a 59.94 output, never on one already at 50.
+    d = dm_decide(DM_FILM_25, 1, 1920, 1080, DM_RES_1080, DM_RATE_59_94, P, yes, ON);
+    CHECK(d.candidate == 1 && d.attempt == 1);
+    d = dm_decide(DM_FILM_25, 1, 1920, 1080, DM_RES_1080, DM_RATE_50, P, yes, ON);
+    CHECK(d.candidate == 0 && d.attempt == 0);
+    d = dm_decide(DM_FILM_25, 1, 1920, 1080, DM_RES_1080, DM_RATE_59_94, P, no, ON);
+    CHECK(d.candidate == 1 && d.attempt == 0);
+    d = dm_decide(DM_FILM_25, 1, 1920, 1080, DM_RES_1080, DM_RATE_59_94, 0, yes, ON);
+    CHECK(d.attempt == 0);                        // interlaced output: leave it
+    // 24Hz bits being on the output does not stop a 25fps switch to 50.
+    d = dm_decide(DM_FILM_25, 1, 1920, 1080, DM_RES_1080, DM_RATE_24FAM_A, P, yes, ON);
+    CHECK(d.attempt == 1);
+    {
+        const dm_mode m50[] = { { DM_RES_1080, DM_RATE_59_94 | DM_RATE_50 } };
+        const dm_mode mno[] = { { DM_RES_1080, DM_RATE_59_94 } };
+        CHECK(dm_display_rate_support(m50, 1, DM_RES_1080, DM_RATE_50) == DM_SUPPORT_YES);
+        CHECK(dm_display_rate_support(mno, 1, DM_RES_1080, DM_RATE_50) == DM_SUPPORT_NO);
+        CHECK(dm_display_rate_support(m50, 1, DM_RES_720, DM_RATE_50) == DM_SUPPORT_UNKNOWN);
+    }
+
     // attempt requires ALL of: film, confident, supported, enabled.
-    for (int f = 0; f <= 2; f++)
+    for (int f = 0; f <= 3; f++)
         for (int c = 0; c <= 1; c++)
             for (int s = 0; s <= 2; s++)
                 for (int e = 0; e <= 1; e++) {

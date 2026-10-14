@@ -464,13 +464,25 @@ static void test_one_scale(const char *label, u32 w, u32 h) {
 
     // Type scales with geometry, not independently: one row's height and the
     // type that sits in it have to move together or the text drifts within it.
-    float t = UIS_TF(12.0f);
+    float t = UIS_TF(24.0f);
     char buf[160];
-    snprintf(buf, sizeof buf, "UIS_TF(12) = %.2f, XMB_ROW_H/88*12 = %.2f",
-             (double)t, (double)((float)XMB_ROW_H / 88.0f * 12.0f));
+    snprintf(buf, sizeof buf, "UIS_TF(24) = %.2f, XMB_ROW_H/88*24 = %.2f",
+             (double)t, (double)((float)XMB_ROW_H / 88.0f * 24.0f));
     ck("type scales with the rows it sits in",
-       t > (float)XMB_ROW_H / 88.0f * 12.0f - 1.0f &&
-       t < (float)XMB_ROW_H / 88.0f * 12.0f + 1.0f, buf);
+       t > (float)XMB_ROW_H / 88.0f * 24.0f - 1.0f &&
+       t < (float)XMB_ROW_H / 88.0f * 24.0f + 1.0f, buf);
+
+    // ...except that type the scale would take under the legibility floor is held
+    // at it on a low-resolution screen (uis_tf): 12 px scaled to 8 on a 480 line
+    // CRT was unreadable.  At 720p and up the floor is out of play.
+    const float small = UIS_TF(12.0f);
+    const float prop  = (float)XMB_ROW_H / 88.0f * 12.0f;
+    snprintf(buf, sizeof buf, "UIS_TF(12) = %.2f at %ux%u (proportional %.2f)",
+             (double)small, (unsigned)display_width, (unsigned)display_height, (double)prop);
+    ck("small type keeps the legibility floor on a low-resolution screen",
+       (int)display_height >= 720 ? (small > prop - 1.0f && small < prop + 1.0f) : small >= 11.0f, buf);
+    ck("type authored below the floor keeps its authored size", UIS_TF(8.5f) >= 8.5f - 0.01f ||
+       (int)display_height >= 720, buf);
 }
 
 // ---------------------------------------------------------------------------

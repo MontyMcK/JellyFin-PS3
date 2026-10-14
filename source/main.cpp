@@ -19,6 +19,9 @@
 #include "ui_wave.h"   // wave_init() -- called here, not from ui_init()
 #include "http.h"
 #include "update_check.h"
+#include "dl_service.h"
+#include "lfs.h"
+#include "local_music_fs.h"    // lm_art_bytes
 #include <unistd.h>   // usleep
 #include "jellyfin_api.h"
 #include "thumbnail_cache.h"
@@ -39,10 +42,12 @@
 #include "statsovl.h"
 #include "menusnow.h"
 #include "autoskip.h"
+#include "i18n_store.h"
 #include "audio.h"
 #include "video.h"
 #include "player_hud.h"
 #include "slog.h"
+#include "server_discovery.h"
 #include "lclog.h"
 #include "jf_spu.h"
 #include "ui_card_gpu.h"
@@ -53,6 +58,10 @@ SYS_PROCESS_PARAM(1001, 0x8000000);
 
 // Defined here; declared extern in ui.h so all other modules can read it.
 u32 running = 0;
+// Non-zero while the system draws over the app (PS button menu, dialogs).
+// The system only renders that overlay on the app's own flips, so any loop
+// that idles without flipping must keep flipping while this is set.
+volatile u32 g_sys_overlay = 0;
 
 // -------------------------------------------------------
 // System callbacks
@@ -71,6 +80,8 @@ static void sysutil_exit_callback(u64 status, u64 param, void *usrdata) {
     lc_logf("sysutil: event status=0x%llx param=0x%llx",
             (unsigned long long)status, (unsigned long long)param);
     if (status == SYSUTIL_EXIT_GAME) running = 0;
+    if (status == SYSUTIL_DRAW_BEGIN) g_sys_overlay = 1;
+    if (status == SYSUTIL_DRAW_END)   g_sys_overlay = 0;
 }
 }
 
@@ -132,6 +143,7 @@ int main(int argc, const char *argv[]) {
     // ui_init() would have thrown away.
     crash_log("6.3 theme_load_setting");
     theme_load_setting();
+    i18n_load();           // the interface language: saved choice, or the console language
     // AFTER plog is up, deliberately: this decides whether card images go
     // through the RSX or the CPU blit, and which one is live has to be
     // visible in the log.  Called from ui_init() it ran before the logger
@@ -180,7 +192,7 @@ int main(int argc, const char *argv[]) {
         crash_log("7 splash drawHeader");
         drawHeader();
         crash_log("7b splash drawTTF");
-        drawTTF(40, 96, "Starting...", 16, 0x0099A0BC);
+        drawTTF(40, 96, TR("Starting..."), 16, 0x0099A0BC);
         crash_log("7c splash flip");
         flip();
     }
@@ -203,7 +215,7 @@ int main(int argc, const char *argv[]) {
         crash_log("8 FAILED");
         boot_anim_leave();
         drawHeader();
-        drawTTF(40, 96, "Network initialisation failed.", 16, 0x0099A0BC);
+        drawTTF(40, 96, TR("Network initialisation failed."), 16, 0x0099A0BC);
         flip();
         while (running) sysUtilCheckCallback();
         return 1;
@@ -280,10 +292,19 @@ int main(int argc, const char *argv[]) {
     }
 
     thumb_cache_init();
+    thumb_set_local_bytes(lm_art_bytes);        // covers of music files on a drive
     boot_anim_pump();
 
     crash_log("10 load_config");
     load_config();
+
+    // Offline downloads: the worker restores every item from the HDD (no
+    // network, off this thread), so what is already downloaded is usable
+    // whatever state the server is in.  It transfers nothing until there is
+    // a session -- a saved login counts; otherwise login releases it below.
+    crash_log("10b dl_service_start");
+    dl_service_start();
+    lfs_start();             // local media: the internal disk, and USB drives as they are plugged in
     {
         char buf[128];
         snprintf(buf, sizeof(buf), "10 server=%s token_len=%d userid=%s",
@@ -297,8 +318,18 @@ int main(int argc, const char *argv[]) {
             crash_log("11 get_server");
             slog_state("SERVER_URL_SCREEN");
             char new_server[256] = "http://";
+            {   // A server on this network fills the box in.
+                SdServer found[SD_MAX];
+                const int n = sd_discover(found, SD_MAX, 1200);
+                for (int i = 0; i < n; i++)
+                    if (strncmp(found[i].address, "http://127.", 11) != 0) {
+                        snprintf(new_server, sizeof new_server, "%s",
+                                 found[i].alt[0] ? found[i].alt : found[i].address);
+                        break;
+                    }
+            }
             if (get_input(new_server, sizeof(new_server),
-                          "Server URL (e.g. http://192.168.1.2:8096)", false) != 1)
+                          TR("Server URL (e.g. http://192.168.1.2:8096)"), false, true) != 1)
                 break;
             strncpy(g_server, new_server, sizeof(g_server)-1);
             g_server[sizeof(g_server)-1] = '\0';
@@ -309,9 +340,20 @@ int main(int argc, const char *argv[]) {
         if (!g_token[0]) {
             boot_anim_leave();
             crash_log("12 do_login");
-            if (!do_login()) { g_server[0] = '\0'; continue; }
+            if (!do_login()) {
+                // Signed out and the server will not have us (unreachable,
+                // or a bad password): what is already downloaded still plays.
+                // Opening it keeps the server URL, so sign-in can be retried
+                // straight after; declining keeps the old flow exactly.
+                if (xmb_offer_offline_after_login_failure()) continue;
+                g_server[0] = '\0';
+                continue;
+            }
             slog_state("LOGIN_OK userid=%s", g_userid);
         }
+
+        // A fresh (or restored) session: queued downloads may run again.
+        dl_service_refresh_auth();
 
         crash_log("13 show_main_menu");
         // Cold boot only: the library list and Home rows load on a worker
@@ -337,9 +379,17 @@ int main(int argc, const char *argv[]) {
             slog_state("SESSION_EXPIRED");
             jellyfin_session_expired();
         }
+        // Logged out or revoked: g_token is empty now, which holds the queue.
+        dl_service_refresh_auth();
     }
 
     crash_log("14 done");
+    // First, while the network is still up: the active download parks itself
+    // back in the queue with its data (resumes next launch).
+    xmb_season_stop();       // a season being queued reads the server: let it finish
+    xmb_livetv_stop();       // so does the Live TV list's refresh
+    dl_service_stop();
+    lfs_stop();
     update_check_shutdown();
     thumb_cache_shutdown();
     http_end();

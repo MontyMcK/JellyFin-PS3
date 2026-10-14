@@ -27,6 +27,8 @@ void timing_init(u32 fps_num, u32 fps_den);
 // content per real vblank; using a fixed 16683 assumes a 60Hz-family display and
 // mis-paces playback on a 50Hz (PAL) one.  Valid after timing_init().
 s64  timing_vblank_period_us(void);
+// True when the output mode is interlaced (480i/576i/1080i); set by timing_init.
+bool timing_display_interlaced(void);
 bool timing_is_1to1(void);          // display rate == content rate (24p output)
 
 // Non-blocking: returns true when it is time to display the next frame.

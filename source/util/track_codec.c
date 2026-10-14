@@ -41,6 +41,19 @@ bool track_label_is_truehd(const char *label) {
            has_token(label, "mlp");
 }
 
+bool track_label_is_ac3(const char *label) {
+    // Dolby Digital Plus is E-AC-3, spelled "EAC3", "E-AC-3", "DD+", "Digital
+    // Plus" or "Digital+".  It is a different codec that nothing here
+    // decodes or may pass through, so every one of those spellings answers
+    // false before the plain Dolby Digital spellings are considered.
+    if (has_token(label, "eac3") || has_token(label, "e-ac-3") ||
+        has_token(label, "e-ac3") || has_token(label, "dd+") ||
+        has_token(label, "plus") || has_token(label, "digital+"))
+        return false;
+    if (has_token(label, "ac3") || has_token(label, "ac-3")) return true;
+    return has_token(label, "dolby") && has_token(label, "digital");
+}
+
 bool track_label_is_hd_audio(const char *label) {
     return track_label_is_dts(label) || track_label_is_truehd(label);
 }

@@ -58,6 +58,11 @@ typedef struct {
 // exactly like subs_load() treats an empty SubRip fetch).
 int pgs_build_index(const uint8_t *buf, int len, PgsIndex *out);
 
+// The same, from where a previous scan stopped, for a stream that grows: indexes the epochs whose PCS segment lies in
+// buf[from..len) after those already in *idx, and returns the offset the scan reached (the start of a segment that is not
+// all there yet, or len) -- pass it as `from` next time.  pgs_build_index is this from 0 into an empty index.
+uint32_t pgs_index_extend(const uint8_t *buf, int len, uint32_t from, PgsIndex *idx);
+
 // Binary-search idx->epoch for the one active at time_ms, mirroring
 // subtitles.cpp's subs_text_at() lookup. Returns -1 if time_ms is before the
 // first epoch or the index is empty; otherwise an index into idx->epoch.

@@ -52,6 +52,7 @@ dm_film dm_classify_film(uint32_t fps_num, uint32_t fps_den)
     // unsnapped value means something upstream changed and should be seen.
     if ((uint64_t)fps_num * 1001 == (uint64_t)fps_den * 24000) return DM_FILM_23976;
     if ((uint64_t)fps_num == (uint64_t)fps_den * 24)           return DM_FILM_24;
+    if ((uint64_t)fps_num == (uint64_t)fps_den * 25)           return DM_FILM_25;
     return DM_FILM_NONE;
 }
 
@@ -73,12 +74,18 @@ const char *dm_fps_source_name(dm_fps_source src)
 
 dm_support dm_display_24p_support(const dm_mode *modes, int n, uint8_t res)
 {
+    return dm_display_rate_support(modes, n, res, DM_RATE_24FAM);
+}
+
+dm_support dm_display_rate_support(const dm_mode *modes, int n, uint8_t res,
+                                   uint16_t mask)
+{
     if (!modes || n < 0) return DM_SUPPORT_UNKNOWN;
     int listed = 0;
     for (int i = 0; i < n; i++) {
         if (modes[i].res != res) continue;
         listed = 1;
-        if (modes[i].rates & DM_RATE_24FAM) return DM_SUPPORT_YES;
+        if (modes[i].rates & mask) return DM_SUPPORT_YES;
     }
     // Listed without the bits is a firm "no".  Not listed at all is odd (we are
     // presumably running in that resolution) -- call it unknown, not no.
@@ -146,17 +153,22 @@ dm_decision dm_decide(dm_film film, int fps_confident,
         d.candidate_why = "output is interlaced";
     } else if (width < 1280 || height < 720) {
         d.candidate_why = "content below 720p";
-    } else if (display_rates & DM_RATE_24FAM) {
-        d.candidate_why = "output already reports a 24Hz-family rate";
+    } else if (film == DM_FILM_25 ? (display_rates & DM_RATE_50) != 0
+                                  : (display_rates & DM_RATE_24FAM) != 0) {
+        d.candidate_why = film == DM_FILM_25 ? "output already reports 50Hz"
+                                             : "output already reports a 24Hz-family rate";
     } else {
         d.candidate     = 1;
-        d.candidate_why = "24fps film on a non-24Hz 1080p output";
+        d.candidate_why = film == DM_FILM_25
+            ? "25fps content on a non-50Hz 1080p output"
+            : "24fps film on a non-24Hz 1080p output";
     }
 
     if (!d.candidate) {
         d.result_why = "not a candidate";
     } else if (support != DM_SUPPORT_YES) {
-        d.result_why = "display does not advertise 24Hz for 1080";
+        d.result_why = film == DM_FILM_25 ? "display does not advertise 50Hz for 1080"
+                                          : "display does not advertise 24Hz for 1080";
     } else if (!enabled) {
         d.result_why = "24p output is off (jellyfin_24p.txt)";
     } else {

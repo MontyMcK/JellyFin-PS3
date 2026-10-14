@@ -1,5 +1,6 @@
 // Subtitle colour — see subcolor.h.
 
+#include "i18n.h"
 #include "subcolor.h"
 #include "jf_paths.h"
 #include <stdio.h>
@@ -12,9 +13,9 @@ subcolor_t subcolor_get(void) { return s_col; }
 
 const char *subcolor_label(void) {
     switch (s_col) {
-    case SUBCOLOR_YELLOW: return "Soft Yellow";
-    case SUBCOLOR_GREY:   return "Soft Grey";
-    default:              return "White";
+    case SUBCOLOR_YELLOW: return TRN("Soft Yellow");
+    case SUBCOLOR_GREY:   return TRN("Soft Grey");
+    default:              return TRN("White");
     }
 }
 
@@ -53,10 +54,12 @@ static void subcolor_save(void) {
     fclose(f);
 }
 
-void subcolor_cycle(void) {
-    s_col = (subcolor_t)((s_col + 1) % SUBCOLOR_COUNT);
+void subcolor_step(int dir) {
+    s_col = (subcolor_t)((s_col + (dir < 0 ? SUBCOLOR_COUNT - 1 : 1)) % SUBCOLOR_COUNT);
     subcolor_save();
 }
+
+void subcolor_cycle(void) { subcolor_step(+1); }
 
 // Missing file => White, the broadcast default.
 void subcolor_load(void) {

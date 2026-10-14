@@ -56,7 +56,7 @@ void xmb_update_popup_draw(void) {
     drawRect((u32)mx, (u32)my, (u32)mw, (u32)mh, XMB_PANEL);
     hairline_frame(mx, my, mw, mh);
 
-    const char *title = "New version detected";
+    const char *title = TR("New version detected");
     int tw = ttf_text_width(title, UIS_TF(21), true);
     drawTTF((u32)(mx + (mw - tw) / 2), (u32)(my + UIS_H(28)), title, UIS_TF(21), XMB_TEXT, true);
 
@@ -65,13 +65,13 @@ void xmb_update_popup_draw(void) {
         const char *v = s_version;
         if (*v == 'v' || *v == 'V') v++;
         char line[80];
-        snprintf(line, sizeof(line), "Version %s", v);
+        snprintf(line, sizeof(line), TR("Version %s"), v);
         int lw = ttf_text_width(line, UIS_TF(14));
         drawTTF((u32)(mx + (mw - lw) / 2), (u32)(my + UIS_H(64)), line, UIS_TF(14), XMB_TEXT_DIM);
     }
     // Where to get it: the release page's .pkg, installed over this one.
     {
-        const char *l1 = "Get the new .pkg from";
+        const char *l1 = TR("Get the new .pkg from");
         const char *l2 = UPDATE_PAGE_TEXT;
         int w1 = ttf_text_width(l1, UIS_TF(13));
         int w2 = ttf_text_width(l2, UIS_TF(13));
@@ -93,6 +93,6 @@ void xmb_update_popup_draw(void) {
                 XMB_KEY_LABEL_SEL, true);
     }
 
-    static const Hint h[] = {{'X', "OK"}};
+    static const Hint h[] = {{'X', TRN("OK")}};
     draw_hints_bar(h, 1);
 }

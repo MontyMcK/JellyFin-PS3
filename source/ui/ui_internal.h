@@ -4,7 +4,9 @@
 // between the xmb/ source files.
 
 #include "ui.h"
+#include "xmb/ui_resume.h"  // xmb_resume_for()
 #include "ui_visuals.h"
+#include "livetv.h"       // JFChannel: the Live TV tab
 
 // -------------------------------------------------------
 // JSON helpers (xmb/ui_json.cpp)
@@ -32,9 +34,15 @@ int  xmb_next_enabled(int start, int dir);
 
 void xmb_detect_tabs(void);
 bool xmb_take_prepared(void);     // see xmb_prepare() in ui.h
-// One attempt only — for the XMB's background retry, which must not block
-// the render loop inside the full retry set.
-bool xmb_detect_tabs_once(void);
+// The XMB's background retry: start() sends one request from a worker;
+// poll() returns -1 while it is in flight (or none was started), else applies
+// the reply to g_tabs on the calling (render) thread: 1 libraries, 0 failed.
+bool xmb_detect_tabs_start(void);
+int  xmb_detect_tabs_poll(void);
+// A library from the server, not the always-present Media tab.
+bool xmb_have_server_tabs(void);
+// The last library request got no answer at all (as opposed to an error).
+bool xmb_server_unreachable(void);
 void xmb_fetch_tab_items(int tab);
 int  xmb_fetch_seasons(const char *series_id, XMBItem *arr, int max,
                        int start_index, int *out_total);
@@ -172,7 +180,29 @@ void depth_lib_prefetch(int tab, int n);
 // The same card turn for a Settings row: (x,y,w,h) is the row on screen.
 void peek_open_text(const char *title, const char *body, int x, int y, int w, int h);
 // Settings: open the highlighted row's description as a peek (ui_settings.cpp).
-void settings_open_help_peek(void);
+// Live TV tab (xmb/ui_livetv.cpp): the channel list and guide.
+void xmb_livetv_on_enter(void);
+bool xmb_input_livetv(void);          // the tab's input (it never exits the XMB)
+void xmb_livetv_gpu(void);            // GPU phase: guide cells and the focus ring
+void xmb_cpu_draw_livetv(void);       // CPU phase: logos and the progress bars
+void xmb_draw_livetv(void);           // text phase
+bool xmb_livetv_at_top(void);         // the list's first row (Up there leaves the tab)
+bool xmb_livetv_modal(void);          // the guide or a details panel has O and Up
+void xmb_livetv_hints(void);          // the tab's hint bar
+// Media tab (xmb/ui_media.cpp): the drives and the files on them.
+void xmb_media_on_enter(void);
+bool xmb_input_media(void);           // the tab's input (it never exits the XMB)
+void xmb_cpu_draw_media(void);        // CPU phase: the rows' panels
+void xmb_draw_media(void);            // text phase
+bool xmb_media_at_top(void);          // the first row (Up there leaves the tab)
+void xmb_media_hints(void);           // the tab's hint bar
+// The channel list in display order, for the player's channel up/down.
+#include "livetv_list.h"
+// X and Left/Right on a Settings row, by its position in the displayed order
+// (ui_settings.cpp owns what each row does).  Left/Right are ignored on
+// action rows; toggles flip on either direction.
+void settings_activate(int row);
+void settings_step(int row, int dir);
 bool peek_active(void);    // opening or open: owns input
 bool peek_visible(void);   // anything on screen, including the close
 void peek_draw_over(void);

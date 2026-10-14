@@ -54,6 +54,8 @@ static void or_pad(ButtonState *b, const padData *pad) {
     b->r1       |= pad->BTN_R1;
     b->l2       |= pad->BTN_L2;
     b->r2       |= pad->BTN_R2;
+    b->l3       |= pad->BTN_L3;
+    b->r3       |= pad->BTN_R3;
 }
 
 void update_buttons(padData *pad) {

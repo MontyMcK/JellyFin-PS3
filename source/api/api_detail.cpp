@@ -391,6 +391,9 @@ bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out) {
 
     parse_media_streams(resp, out->video_info, sizeof(out->video_info),
                               out->audio_info, sizeof(out->audio_info));
+    jellyfin_parse_item_identity(resp, &out->identity);
+    // Only UserData carries IsFavorite.
+    out->is_favourite = strstr(resp, "\"IsFavorite\":true") != NULL;
     plog("item_detail: ok");
     return true;
 }

@@ -82,6 +82,7 @@ bool wave_audio_active(void);
 int         wave_audio_level(void);
 const char *wave_audio_level_label(void);
 void        wave_audio_set_level(int level);
+void        wave_audio_step(int dir);      // +1 / -1 around Off, Normal, Strong, Max
 
 // Shared per-frame features for every visualizer preset (viz_frame.h).
 void wave_audio_viz(viz_frame *v);

@@ -511,17 +511,18 @@ void theme_load_setting(void) {
 // A file that fails to parse is SKIPPED rather than selected: theme_load()
 // leaves the previous theme standing on a malformed file, so without the skip
 // one bad .ini in the folder would look like the cycle being stuck.
-void theme_cycle(void) {
+void theme_step(int dir) {
     ThemeEntry e[THEME_MAX_ENTRIES];
     int n = theme_scan(e, THEME_MAX_ENTRIES);
     if (n <= 0) return;
+    const int d = dir < 0 ? -1 : 1;
 
     int cur = 0;
     for (int i = 0; i < n; i++)
         if (strcmp(e[i].name, g_theme.name) == 0) { cur = i; break; }
 
     for (int step = 1; step <= n; step++) {
-        int j = (cur + step) % n;
+        int j = ((cur + d * step) % n + n) % n;
         if (!e[j].path[0]) {                 // built-in: slot index IS the index
             theme_apply_builtin(j);
             theme_save_setting();
@@ -536,6 +537,8 @@ void theme_cycle(void) {
         theme_logf("theme: skipping malformed '%s'", e[j].path);
     }
 }
+
+void theme_cycle(void) { theme_step(+1); }
 
 // -------------------------------------------------------
 // Quality modes (section 7) — the mode itself; Phase 8 wires the effects

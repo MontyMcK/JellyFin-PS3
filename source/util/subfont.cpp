@@ -34,10 +34,12 @@ static void subfont_save(void) {
     fclose(f);
 }
 
-void subfont_cycle(void) {
-    s_font = (subfont_t)((s_font + 1) % SUBFONT_COUNT);
+void subfont_step(int dir) {
+    s_font = (subfont_t)((s_font + (dir < 0 ? SUBFONT_COUNT - 1 : 1)) % SUBFONT_COUNT);
     subfont_save();
 }
+
+void subfont_cycle(void) { subfont_step(+1); }
 
 // Missing file => Open Sans, which is what the UI already draws in.
 void subfont_load(void) {

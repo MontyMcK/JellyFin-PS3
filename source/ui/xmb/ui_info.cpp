@@ -18,6 +18,11 @@
 #include "slog.h"
 #include "detail_media.h"
 #include "thumbnail_cache.h"
+#include "player.h"       // show_player_offline
+#include "dl_manager.h"   // DOWNLOAD FOR OFFLINE (Stage 5)
+#include "dl_service.h"
+#include "dl_ui.h"
+#include "api_userdata.h"
 
 // The title band behind the header — a deep stripe over the backdrop (the
 // official page's grey bar, re-tinted to fit the theme).  Now the `detail_band`
@@ -49,7 +54,9 @@ static void info_clip_text(int x, int y, const char *text, float px,
         snprintf(fb, sizeof(fb), "%s", text);
         int fl = (int)strlen(fb);
         while (fl > 1) {
-            fb[--fl] = '\0';
+            fl--;
+            while (fl > 1 && ((unsigned char)fb[fl] & 0xC0) == 0x80) fl--;     // not inside a character
+            fb[fl] = '\0';
             char tr[164];
             snprintf(tr, sizeof(tr), "%s..", fb);
             if (ttf_text_width_face(tr, px, face) <= max_w) {
@@ -67,7 +74,9 @@ static void info_clip_text(int x, int y, const char *text, float px,
     snprintf(buf, sizeof(buf), "%s", text);
     int len = (int)strlen(buf);
     while (len > 1) {
-        buf[--len] = '\0';
+        len--;
+        while (len > 1 && ((unsigned char)buf[len] & 0xC0) == 0x80) len--;     // not inside a character
+        buf[len] = '\0';
         char trial[164];
         snprintf(trial, sizeof(trial), "%s..", buf);
         if (ttf_text_width(trial, px, bold) <= max_w) {
@@ -189,7 +198,7 @@ static int info_choose_version(const char *title,
                            pw - UIS_W(100), false);
         }
 
-        { static const Hint h[] = {{'X', "Select"}, {'C', "Back"}};
+        { static const Hint h[] = {{'X', TRN("Select")}, {'C', TRN("Back")}};
           draw_hints_bar(h, 2); }
         flip();
     }
@@ -227,6 +236,7 @@ static int info_choose_version(const char *title,
 #include "ui_spine.h"
 #include "ui_depth.h"      // the L2 -> L3 arrival
 #include "ui_text_gpu.h"
+#include "line_break.h"
 #include "http.h"
 #include "api_facts.h"
 #include "vremember.h"       // jellyfin_warm_playback()
@@ -245,27 +255,19 @@ static u32 info_mix(u32 a, u32 b, float t) {
     return out;
 }
 
-// Mark an item played on the server.  POST /Users/{user}/PlayedItems/{id},
-// the same call the web client makes.
-static bool info_mark_played(const char *item_id) {
-    char url[512];
-    static char resp[2048];
-    snprintf(url, sizeof url, "%s/Users/%s/PlayedItems/%s",
-             g_server, g_userid, item_id);
-    int st = http_request(HTTP_POST, url, "", g_token, resp, sizeof resp);
-    char msg[160];
-    snprintf(msg, sizeof msg, "info: mark played %s -> %d", item_id, st);
-    plog(msg);
-    const bool ok = st >= 200 && st < 300;
-    if (ok) g_play_gen++;         // Continue Watching / Next Up are now stale
-    return ok;
-}
-
 // The audio line without its leading language ("English EAC3 5.1" -> "EAC3
 // 5.1"), for the codec chip.  Unchanged when there is only one word.
 static void info_audio_chip(const char *audio, char *out, size_t cap) {
     const char *sp = strchr(audio, ' ');
     snprintf(out, cap, "%s", (sp && sp[1]) ? sp + 1 : audio);
+}
+
+// The bytes of `p` that make up its next line (render/line_break.h): broken at a space or after a CJK
+// character, never inside a UTF-8 sequence.  Width is summed per character; ignoring kerning is fine
+// for wrapping.
+static int fit_width(const char *ch, void *ctx) { return ttf_text_width(ch, *(const float *)ctx); }
+static int info_fit(const char *p, float px, int max_w, int cap) {
+    return lb_fit(p, max_w, cap, fit_width, &px);
 }
 
 // Word-wrap `text` at max_w, drawing up to max_lines at `pitch`.  Returns the
@@ -275,18 +277,9 @@ static int info_wrap(int x, int y, const char *text, float px, u32 colour,
     const char *p = text;
     int lines = 0;
     while (*p && lines < max_lines) {
-        int fit = 0, last_sp = -1, wpx = 0;
-        char buf[200], one[2] = { 0, 0 };
-        while (p[fit] && fit < (int)sizeof(buf) - 4) {
-            if (p[fit] == ' ') last_sp = fit;
-            one[0] = p[fit];
-            wpx += ttf_text_width(one, px);
-            if (wpx > max_w) break;
-            fit++;
-        }
-        const bool more = p[fit] != 0;
-        int take = (!more || fit >= (int)sizeof(buf) - 4) ? fit
-                 : (last_sp > 0 ? last_sp : fit);
+        char buf[200];
+        int take = info_fit(p, px, max_w, (int)sizeof(buf) - 4);
+        const bool more = p[take] != 0;
         if (take <= 0) take = 1;
         if (lines == max_lines - 1 && more && take < (int)strlen(p))
             snprintf(buf, sizeof buf, "%.*s...", take, p);   // last line: cut
@@ -306,7 +299,8 @@ static int info_chip_width(const char *label, float px, int face) {
     return ttf_text_width_face(label, px, face) + UIS_W(20);
 }
 
-enum { F3_RESUME, F3_PLAY, F3_START, F3_WATCHED, F3_VERSION, F3_QUALITY };
+enum { F3_RESUME, F3_PLAY, F3_START, F3_WATCHED, F3_FAVOURITE,
+       F3_VERSION, F3_QUALITY, F3_DOWNLOAD };
 
 // The details page's blocking loads, run behind loading_run().  Everything here
 // is thread-safe: the item fetches use responseBuffer while the render thread
@@ -369,13 +363,19 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
     XMBItemDetail detail;
     static JFMediaSources versions;
     int  version_sel = 0;
-    bool reload = true, exit_armed = false, watched = false;
+    bool reload = true, exit_armed = false, watched = false, favourite = false;
     Bitmap poster_cpu;               // CPU fallback when the upload fails
     memset(&poster_cpu, 0, sizeof poster_cpu);
     bool poster_gpu = false, back_gpu = false;
 
+    // The Download button's state, polled while the page is open.
+    DlStatus dl_st; bool dl_have = false;
+    memset(&dl_st, 0, sizeof dl_st);
+    u64  dl_next = 0, dl_toast_until = 0;
+    char dl_toast[160] = "";
+
     // Row 0: the action buttons; row 1: the selectors.  Built per title.
-    int row0[3], n0 = 0, row1[2], n1 = 0;
+    int row0[4], n0 = 0, row1[3], n1 = 0;
     int frow = 0, fcol = 0;
 
     // Layout, from the canvas.
@@ -397,7 +397,7 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
             memset(&ld, 0, sizeof ld);
             ld.it = it; ld.detail = &detail; ld.versions = &versions;
             ld.pw = PW; ld.ph = PH;
-            loading_run(info_load_work, &ld, "Loading", true);
+            loading_run(info_load_work, &ld, TR("Loading"), true);
             {
                 int remembered = vquality_for_item(it->id);
                 if (remembered >= 0) vquality_set((vquality_t)remembered);
@@ -409,6 +409,8 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
                 strcmp(it->type, "Video") == 0)
                 jellyfin_warm_playback(it->id);
             watched = false;
+            favourite = detail.is_favourite;
+            dl_have = false; dl_next = 0; dl_toast[0] = '\0';
 
             // Poster: into VRAM once.  Kept in main memory only if that fails.
             Bitmap poster = ld.poster;
@@ -439,14 +441,20 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
 
             thumb_cache_retarget();     // cast headshots come from the card cache
 
-            const bool has_resume = it->resume_secs >= 10;
+            const bool has_resume = xmb_resume_for(it->id, it->resume_secs) >= 10;
             n0 = 0;
             if (has_resume) { row0[n0++] = F3_RESUME; row0[n0++] = F3_START; }
             else            { row0[n0++] = F3_PLAY; }
             row0[n0++] = F3_WATCHED;
+            row0[n0++] = F3_FAVOURITE;
             n1 = 0;
             if (versions.n_sources > 1) row1[n1++] = F3_VERSION;
             row1[n1++] = F3_QUALITY;
+            // Download sits after Quality for the three playable types; row 0
+            // stays the "watch now" row.
+            if (strcmp(it->type, "Movie") == 0 || strcmp(it->type, "Episode") == 0 ||
+                strcmp(it->type, "Video") == 0)
+                row1[n1++] = F3_DOWNLOAD;
             frow = 0; fcol = 0;
             exit_armed = false;
             init_btns();
@@ -458,6 +466,18 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
             }
         }
         const XMBItem *it = &cur_item;
+        const bool dl_capable = strcmp(it->type, "Movie") == 0 ||
+                                strcmp(it->type, "Episode") == 0 ||
+                                strcmp(it->type, "Video") == 0;
+        const bool can_download = dl_capable && versions.n_sources > 0;
+        if (dl_capable && timing_get_us() >= dl_next) {
+            dl_next = timing_get_us() + 250000;
+            dl_have = dl_find(it->id, &dl_st);
+        }
+        DlUiContext dl_cx;
+        dl_cx.playback_block = dl_playback_blocking();
+        dl_cx.auth_held      = dl_auth_held();
+        dl_cx.ready          = dl_manager_ready();
 
         waitflip();
         sysUtilCheckCallback();
@@ -516,7 +536,7 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
             if (BTN_PRESSED(up)   && frow == 1)           { frow = 0; if (fcol >= n0) fcol = n0 - 1; }
             if (frow != 2 && BTN_PRESSED(cross)) {
                 if (focus == F3_RESUME || focus == F3_PLAY || focus == F3_START) {
-                    const u32 at = focus == F3_RESUME ? it->resume_secs : 0;
+                    const u32 at = focus == F3_RESUME ? xmb_resume_for(it->id, it->resume_secs) : 0;
                     const char *source_id = versions.n_sources > 0
                         ? versions.source[version_sel].id : NULL;
                     if (strcmp(it->type, "Episode") == 0)
@@ -528,7 +548,22 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
                     info_skip_frame();
                     continue;
                 } else if (focus == F3_WATCHED) {
-                    if (!watched) watched = info_mark_played(it->id);
+                    if (!watched) {
+                        watched = jf_set_played(it->id, true);
+                        if (watched) g_play_gen++;     // Continue Watching / Next Up are stale
+                    }
+                } else if (focus == F3_FAVOURITE) {
+                    // Optimistic: flip now, put it back with a word if the
+                    // server refuses.
+                    const bool want = !favourite;
+                    favourite = want;
+                    if (jf_set_favourite(it->id, want)) {
+                        g_play_gen++;                  // Home's Favourites row is stale
+                    } else {
+                        favourite = !want;
+                        snprintf(dl_toast, sizeof dl_toast, "%s", TR("Couldn't update favourites"));
+                        dl_toast_until = timing_get_us() + 3000000ULL;
+                    }
                 } else if (focus == F3_VERSION) {
                     int chosen = info_choose_version(it->name, &versions, version_sel);
                     if (chosen >= 0) version_sel = chosen;
@@ -539,6 +574,47 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
                 } else if (focus == F3_QUALITY) {
                     vquality_next(+1);
                     vquality_remember_item(it->id, vquality_get());
+                } else if (focus == F3_DOWNLOAD) {
+                    // What X means here is dl_ui_item_action's (host-tested):
+                    // the version on screen, through the player's own stream
+                    // decision (dl_request).
+                    const DlUiAction a = dl_ui_item_action(dl_have ? &dl_st : NULL,
+                                                           can_download, &dl_cx);
+                    int r = DL_OK;
+                    if (a == DL_UI_START || a == DL_UI_RETRY) {
+                        JFItem jf;
+                        memset(&jf, 0, sizeof jf);
+                        snprintf(jf.id,   sizeof jf.id,   "%s", it->id);
+                        snprintf(jf.name, sizeof jf.name, "%s", it->name);
+                        snprintf(jf.type, sizeof jf.type, "%s", it->type);
+                        r = dl_download_item(&jf, &detail, &versions.source[version_sel]);
+                        if (r == DL_OK) {
+                            snprintf(dl_toast, sizeof dl_toast, "%s",
+                                     TR("Added to Downloads (Settings \xE2\x80\xBA Downloads)"));
+                        } else {
+                            const DlSpaceReport rep = dl_last_space_report();
+                            dl_ui_result_message(r, &rep, dl_toast, sizeof dl_toast);
+                        }
+                    } else if (a == DL_UI_PAUSE) {
+                        r = dl_pause(it->id);
+                        snprintf(dl_toast, sizeof dl_toast, "%s", dl_ui_result_text(r));
+                    } else if (a == DL_UI_RESUME) {
+                        r = dl_resume(it->id);
+                        snprintf(dl_toast, sizeof dl_toast, "%s", dl_ui_result_text(r));
+                    } else if (a == DL_UI_PLAY_OFFLINE) {
+                        const int resume = xmb_resume_choice(it);
+                        if (resume >= 0 && !show_player_offline(it->id, (u32)resume))
+                            snprintf(dl_toast, sizeof dl_toast, "%s",
+                                     TR("The offline copy is missing or damaged"));
+                        exit_armed = false;
+                        init_btns();
+                        dl_toast_until = timing_get_us() + 3000000ULL;
+                        dl_next = 0;
+                        info_skip_frame();
+                        continue;
+                    }
+                    dl_toast_until = timing_get_us() + 3000000ULL;
+                    dl_next = 0;
                 }
             }
         }
@@ -654,13 +730,33 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         // the cast), and every button is see-through so the wave moves behind
         // it.  The director line and the cast moved up into its old place.
         const int AY = IY(562), AH = UIS_H(44), AR = UIS_H(4), AG = UIS_W(12);
-        int ax[3], aww[3];
+        // Label text for an action button.  Shared by the layout (which sizes
+        // the box from it) and the draw below, so the two cannot disagree: a
+        // fixed box width overflowed on 4:3, where text scales but the box doesn't.
+        auto action_label = [&](int id, char *lab, size_t n) {
+            if (id == F3_RESUME) {
+                const u32 s = xmb_resume_for(it->id, it->resume_secs);
+                snprintf(lab, n, TR("Resume %u:%02u:%02u"), s / 3600u, (s / 60u) % 60u, s % 60u);
+            } else if (id == F3_PLAY)    snprintf(lab, n, TR("Play"));
+            else if (id == F3_START)     snprintf(lab, n, TR("Play from start"));
+            else if (id == F3_FAVOURITE) snprintf(lab, n, favourite ? TR("Favourited") : TR("Favourite"));
+            else                         snprintf(lab, n, watched ? TR("Watched") : TR("Mark as watched"));
+        };
+        int ax[4], aww[4];
         {
             int x = TX;
             for (int i = 0; i < n0; i++) {
                 const int id = row0[i];
                 aww[i] = UIS_W(id == F3_RESUME ? 200 : id == F3_PLAY ? 150
                              : id == F3_START ? 150 : 168);
+                {
+                    char lab[40]; action_label(id, lab, sizeof lab);
+                    const bool pr = (id == F3_RESUME || id == F3_PLAY);
+                    // glyph gutter (cross: label at 52; star: 26) + label + right pad
+                    const int need = ttf_text_width(lab, UIS_TF(15.0f), pr)
+                                   + (pr ? UIS_W(52 + 20) : id == F3_FAVOURITE ? UIS_W(26 + 40) : UIS_W(40));
+                    if (need > aww[i]) aww[i] = need;
+                }
                 ax[i] = x;
                 x += aww[i] + AG;
                 const bool primary = (id == F3_RESUME || id == F3_PLAY);
@@ -696,12 +792,45 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         }
 
         // Selectors (y=634, h=34, r=4).
+        auto sel_name = [&](int id) -> const char * {
+            return id == F3_VERSION ? TR("Version") : id == F3_DOWNLOAD ? TR("Offline") : TR("Quality");
+        };
+        auto sel_value = [&](int id, char *val, size_t n) {
+            if (id == F3_DOWNLOAD) {
+                // The live state: "Download", "Downloading 42%", "Play offline"...
+                dl_ui_item_label(dl_have ? &dl_st : NULL, can_download, &dl_cx, val, n);
+            } else if (id == F3_VERSION) {
+                snprintf(val, n, "%s", versions.source[version_sel].summary[0]
+                                          ? versions.source[version_sel].summary
+                                          : versions.source[version_sel].label);
+            } else {
+                u32 qw = 0, qh = 0; unsigned qbr = 0;
+                const vquality_t vq = vquality_get();
+                vquality_params(vq, hd1080_enabled(), display_width, display_height,
+                                &qw, &qh, NULL, NULL, &qbr);
+                if (qbr == 0) snprintf(val, n, TR("Original \xC2\xB7 direct play"));
+                else          snprintf(val, n, "%s \xC2\xB7 %u Mbps",
+                                       tr(vquality_label(vq)), qbr / 1000000u);
+            }
+        };
         const int SY = IY(634), SH = UIS_H(34);
-        int sx_[2], sw_[2];
+        int sx_[3], sw_[3];
         {
             int x = TX;
             for (int i = 0; i < n1; i++) {
-                sw_[i] = UIS_W(row1[i] == F3_VERSION ? 172 : 216);
+                sw_[i] = UIS_W(row1[i] == F3_VERSION ? 172 : 216);   // Quality and Download
+                {
+                    // Grow to fit "<name>  <value>" -- the name's width, not a fixed
+                    // 66 px offset, decides where the value starts (see sel_vx below).
+                    char val[64];
+                    sel_value(row1[i], val, sizeof val);
+                    const int nw = ttf_text_width(sel_name(row1[i]), UIS_TF(12.0f), false);
+                    const int vw2 = ttf_text_width(val, UIS_TF(12.5f), true);
+                    const int need = UIS_W(15) + nw + UIS_W(12) + vw2
+                                   + (row1[i] == F3_DOWNLOAD ? UIS_W(14) : UIS_W(28));
+                    if (need > sw_[i]) sw_[i] = need;
+                    if (sw_[i] > UIS_W(330)) sw_[i] = UIS_W(330);
+                }
                 sx_[i] = x;
                 x += sw_[i] + UIS_W(12);
                 wave_draw_rrect_outline_gpu(sx_[i], SY, sw_[i], SH, AR, 1,
@@ -725,6 +854,16 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
             drawRect((u32)(PXa - 1), (u32)(PYa + PHa), (u32)(PWa + 2), 1, XMB_HAIRLINE);
             drawRect((u32)(PXa - 1), (u32)(PYa - 1), 1, (u32)(PHa + 2), XMB_HAIRLINE);
             drawRect((u32)(PXa + PWa), (u32)(PYa - 1), 1, (u32)(PHa + 2), XMB_HAIRLINE);
+        }
+
+        // The Download button's progress: a thin bar along its bottom edge.
+        for (int i = 0; i < n1; i++) {
+            if (row1[i] != F3_DOWNLOAD || !dl_have || dl_st.rec.state == DL_COMPLETED) continue;
+            const int pm = dl_progress_permille(&dl_st.rec);
+            if (pm < 0) continue;
+            const int by = SY + SH - UIS_H(4), bw = sw_[i] - UIS_W(8);
+            drawRect((u32)(sx_[i] + UIS_W(4)), (u32)by, (u32)bw, UIS_H(2), XMB_HAIRLINE);
+            drawRect((u32)(sx_[i] + UIS_W(4)), (u32)by, (u32)(bw * pm / 1000), UIS_H(2), XMB_ACCENT);
         }
 
         // Cast: 58x87 (2:3) portraits on a 104 px pitch from x=313, y=493.  The
@@ -818,17 +957,19 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         for (int i = 0; i < n0; i++) {
             const int id = row0[i];
             char lab[40];
-            if (id == F3_RESUME) {
-                const u32 s = it->resume_secs;
-                snprintf(lab, sizeof lab, "Resume %u:%02u:%02u",
-                         s / 3600u, (s / 60u) % 60u, s % 60u);
-            } else if (id == F3_PLAY)    snprintf(lab, sizeof lab, "Play");
-            else if (id == F3_START)     snprintf(lab, sizeof lab, "Play from start");
-            else                         snprintf(lab, sizeof lab, watched ? "Watched" : "Mark as watched");
+            action_label(id, lab, sizeof lab);
             const bool primary = (id == F3_RESUME || id == F3_PLAY);
             const float bpx = UIS_TF(15.0f);
             const int lw = ttf_text_width(lab, bpx, primary);
             int lx = ax[i] + (aww[i] - lw) / 2;
+            if (id == F3_FAVOURITE) {
+                // The star (accent when set) and the label after it, centred together.
+                const int gw = UIS_W(26);
+                const int gx = ax[i] + (aww[i] - (gw + lw)) / 2;
+                drawIcon((u32)gx, (u32)(AY + (AH - UIS_H(18)) / 2), ICON_STAR, UIS_TF(18.0f),
+                         favourite ? XMB_ACCENT_ALT : XMB_TEXT_DIM);
+                lx = gx + gw;
+            }
             if (primary) {
                 // The 22 px cross glyph sits at the left, the label after it.
                 const int gx = ax[i] + UIS_W(20);
@@ -841,9 +982,9 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
 
         if (season_btn) {
             char sl[48];
-            if (detail.season_num == 0)      snprintf(sl, sizeof sl, "\xE2\x80\xB9  Back to Specials");
-            else if (detail.season_num > 0)  snprintf(sl, sizeof sl, "\xE2\x80\xB9  Back to Season %d", detail.season_num);
-            else                             snprintf(sl, sizeof sl, "\xE2\x80\xB9  Back to Season");
+            if (detail.season_num == 0)      snprintf(sl, sizeof sl, TR("\xE2\x80\xB9  Back to Specials"));
+            else if (detail.season_num > 0)  snprintf(sl, sizeof sl, TR("\xE2\x80\xB9  Back to Season %d"), detail.season_num);
+            else                             snprintf(sl, sizeof sl, TR("\xE2\x80\xB9  Back to Season"));
             const float spx = UIS_TF(13.0f);
             const int sw = ttf_text_width(sl, spx, frow == 2);
             drawTTF((u32)(PX + (PW - sw) / 2), (u32)(BSY + (BSH - (int)spx) / 2 - UIS_H(1)), sl, spx,
@@ -853,7 +994,7 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         // Director line.
         if (director) {
             char line[140];
-            snprintf(line, sizeof line, "Director \xC2\xB7 %s", director);
+            snprintf(line, sizeof line, TR("Director \xC2\xB7 %s"), director);
             drawTTF((u32)TX, (u32)IY(402), line, UIS_TF(13.0f), XMB_TEXT_FAINT);   // was 467
         }
 
@@ -871,38 +1012,40 @@ static void xmb_show_item_info_v3(const XMBItem *root) {
         // Selector labels.
         for (int i = 0; i < n1; i++) {
             const int y = SY + (SH - (int)UIS_TF(12.0f)) / 2 - UIS_H(1);
-            const char *name = row1[i] == F3_VERSION ? "Version" : "Quality";
+            const char *name = sel_name(row1[i]);
             drawTTF((u32)(sx_[i] + UIS_W(15)), (u32)y, name, UIS_TF(12.0f), XMB_TEXT_DIM);
             char val[64];
-            if (row1[i] == F3_VERSION) {
-                snprintf(val, sizeof val, "%s", versions.source[version_sel].summary[0]
-                                                  ? versions.source[version_sel].summary
-                                                  : versions.source[version_sel].label);
-            } else {
-                u32 qw = 0, qh = 0; unsigned qbr = 0;
-                const vquality_t vq = vquality_get();
-                vquality_params(vq, hd1080_enabled(), display_width, display_height,
-                                &qw, &qh, NULL, NULL, &qbr);
-                if (qbr == 0) snprintf(val, sizeof val, "Original \xC2\xB7 direct play");
-                else          snprintf(val, sizeof val, "%s \xC2\xB7 %u Mbps",
-                                       vquality_label(vq), qbr / 1000000u);
+            sel_value(row1[i], val, sizeof val);
+            const int vx = sx_[i] + UIS_W(15) + ttf_text_width(name, UIS_TF(12.0f), false) + UIS_W(12);
+            if (row1[i] == F3_DOWNLOAD) {
+                info_clip_text(vx, y, val, UIS_TF(12.5f), XMB_TEXT,
+                               sx_[i] + sw_[i] - vx - UIS_W(14), true);
+                continue;                       // not a drop-down: no arrow
             }
-            const int vx = sx_[i] + UIS_W(row1[i] == F3_VERSION ? 70 : 66);
             info_clip_text(vx, y, val, UIS_TF(12.5f), XMB_TEXT,
                            sx_[i] + sw_[i] - vx - UIS_W(24), true);
             drawTTF((u32)(sx_[i] + sw_[i] - UIS_W(18)), (u32)(y + UIS_H(1)),
                     "\xE2\x96\xBE", UIS_TF(10.0f), XMB_TEXT_FAINT);
         }
 
+        // The Download button's toast, a few seconds, above the selector row.
+        if (dl_toast[0] && timing_get_us() < dl_toast_until)
+            drawTTF((u32)TX, (u32)IY(609), dl_toast, UIS_TF(13.0f), 0x00E8B64CUL);
+
         // Hints: what X does on the focused control, and Back.
         {
             Hint h[2];
             h[0].glyph = 'X';
-            h[0].label = focus == F3_RESUME ? "Resume" : focus == F3_PLAY ? "Play"
-                       : focus == F3_START ? "Play from start"
-                       : focus == F3_WATCHED ? "Mark watched"
-                       : focus == F3_VERSION ? "Choose version" : "Change quality";
-            h[1].glyph = 'C'; h[1].label = "Back";
+            h[0].label = focus == F3_RESUME ? TR("Resume") : focus == F3_PLAY ? TR("Play")
+                       : focus == F3_START ? TR("Play from start")
+                       : focus == F3_WATCHED ? TR("Mark watched")
+                       : focus == F3_FAVOURITE ? (favourite ? TR("Remove favourite") : TR("Favourite"))
+                       : focus == F3_VERSION ? TR("Choose version")
+                       : focus == F3_DOWNLOAD
+                           ? dl_ui_action_label(dl_ui_item_action(dl_have ? &dl_st : NULL,
+                                                                  can_download, &dl_cx))
+                       : TR("Change quality");
+            h[1].glyph = 'C'; h[1].label = TR("Back");
             draw_hints_bar(h, 2);
         }
 
@@ -983,8 +1126,17 @@ void xmb_show_item_info(const XMBItem *root) {
     // Focus moves between the Play button and the More Like This row, which is
     // what Cross acts on.  (Gating this on "is the row visible" made Cross mean
     // Open even at the top of the page, so Play could never be pressed.)
-    enum { FOCUS_PLAY = 0, FOCUS_VERSION = 1, FOCUS_QUALITY = 2, FOCUS_SIM = 3 };
+    // FOCUS_DOWNLOAD sits beside Play on the same row (Left/Right).
+    enum { FOCUS_PLAY = 0, FOCUS_VERSION = 1, FOCUS_QUALITY = 2, FOCUS_SIM = 3,
+           FOCUS_DOWNLOAD = 4 };
     int focus = FOCUS_PLAY;
+
+    // Offline download state for this title, re-read ~4x a second (a lock and
+    // one ~2 KB copy) -- the button's label follows the transfer live.
+    DlStatus dl_st;
+    bool dl_have = false;
+    u64  dl_next = 0, dl_toast_until = 0;
+    char dl_toast[96] = "";
     int sim_sel = 0, sim_row_scroll = 0;
 
     int info_frames = 0;
@@ -1025,11 +1177,26 @@ void xmb_show_item_info(const XMBItem *root) {
             sim_sel  = 0; sim_row_scroll = 0;
             focus    = FOCUS_PLAY;
             exit_armed = false;
+            dl_have = false; dl_next = 0; dl_toast[0] = '\0';
             init_btns();
             slog_state("INFO_OPEN depth=%d item_id=%s name=%.40s",
                        nav_hops, cur->id, cur->name);
         }
         const XMBItem *it = &cur_item;
+        // A downloadable title: something the player plays, with its
+        // versions loaded (the download uses the selected one).
+        const bool dl_capable = strcmp(it->type, "Movie") == 0 ||
+                                strcmp(it->type, "Episode") == 0 ||
+                                strcmp(it->type, "Video") == 0;
+        const bool can_download = dl_capable && versions.n_sources > 0;
+        if (dl_capable && timing_get_us() >= dl_next) {
+            dl_next = timing_get_us() + 250000;
+            dl_have = dl_find(it->id, &dl_st);
+        }
+        DlUiContext dl_cx;
+        dl_cx.playback_block = dl_playback_blocking();
+        dl_cx.auth_held      = dl_auth_held();
+        dl_cx.ready          = dl_manager_ready();
 
         waitflip();
         sysUtilCheckCallback();
@@ -1050,6 +1217,7 @@ void xmb_show_item_info(const XMBItem *root) {
             // Row order down the page: Play, Version (only when there is a
             // real choice), Quality (always), then the recommendations.
             if (BTN_PRESSED(down)) {
+                if (focus == FOCUS_DOWNLOAD) focus = FOCUS_PLAY;   // same row
                 if (focus == FOCUS_PLAY && versions.n_sources > 1) {
                     focus = FOCUS_VERSION;
                     scroll_y = 0;
@@ -1070,7 +1238,11 @@ void xmb_show_item_info(const XMBItem *root) {
                     focus = FOCUS_PLAY;
                 scroll_y = 0;
             }
-            if (focus == FOCUS_SIM) {
+            if (focus == FOCUS_PLAY && dl_capable && BTN_PRESSED(right)) {
+                focus = FOCUS_DOWNLOAD;
+            } else if (focus == FOCUS_DOWNLOAD && BTN_PRESSED(left)) {
+                focus = FOCUS_PLAY;
+            } else if (focus == FOCUS_SIM) {
                 if (BTN_REPEAT(left)  && sim_sel > 0)             sim_sel--;
                 if (BTN_REPEAT(right) && sim_sel < n_similar - 1) sim_sel++;
             } else if (focus == FOCUS_VERSION && versions.n_sources > 1) {
@@ -1090,7 +1262,46 @@ void xmb_show_item_info(const XMBItem *root) {
                     vquality_remember_item(cur_item.id, vquality_get());
                 }
             }
-            if (BTN_PRESSED(cross)) {
+            if (BTN_PRESSED(cross) && focus == FOCUS_DOWNLOAD) {
+                // DOWNLOAD FOR OFFLINE and its follow-ups; the decision of what
+                // X means here is dl_ui_item_action's (host-tested).
+                const DlUiAction a = dl_ui_item_action(dl_have ? &dl_st : NULL,
+                                                       can_download, &dl_cx);
+                int r = DL_OK;
+                if (a == DL_UI_START || a == DL_UI_RETRY) {
+                    // The version on screen, the same one Play would stream,
+                    // through the same stream decision (dl_request).
+                    JFItem jf;
+                    memset(&jf, 0, sizeof(jf));
+                    snprintf(jf.id,   sizeof(jf.id),   "%s", it->id);
+                    snprintf(jf.name, sizeof(jf.name), "%s", it->name);
+                    snprintf(jf.type, sizeof(jf.type), "%s", it->type);
+                    r = dl_download_item(&jf, &detail, &versions.source[version_sel]);
+                    if (r == DL_OK) {
+                        snprintf(dl_toast, sizeof(dl_toast), "%s",
+                                 TR("Added to Downloads (Settings \xE2\x80\xBA Downloads)"));
+                    } else {
+                        const DlSpaceReport rep = dl_last_space_report();
+                        dl_ui_result_message(r, &rep, dl_toast, sizeof(dl_toast));
+                    }
+                } else if (a == DL_UI_PAUSE) {
+                    r = dl_pause(it->id);
+                    snprintf(dl_toast, sizeof(dl_toast), "%s", dl_ui_result_text(r));
+                } else if (a == DL_UI_RESUME) {
+                    r = dl_resume(it->id);
+                    snprintf(dl_toast, sizeof(dl_toast), "%s", dl_ui_result_text(r));
+                } else if (a == DL_UI_PLAY_OFFLINE) {
+                    int resume = xmb_resume_choice(it);
+                    if (resume >= 0 && !show_player_offline(it->id, (u32)resume))
+                        snprintf(dl_toast, sizeof(dl_toast),
+                                 TR("The offline copy is missing or damaged"));
+                    exit_armed = false;
+                    init_btns();
+                }
+                dl_toast_until = timing_get_us() + 3000000ULL;
+                dl_next = 0;
+                if (a == DL_UI_PLAY_OFFLINE) { info_skip_frame(); continue; }
+            } else if (BTN_PRESSED(cross)) {
                 if (focus == FOCUS_SIM) {
                     // Swap the page over to the highlighted recommendation.
                     // Copied by value first — the reload overwrites similar[].
@@ -1249,9 +1460,40 @@ void xmb_show_item_info(const XMBItem *root) {
                 u32 fg = pf ? XMB_KEY_LABEL_SEL : XMB_TEXT_DIM;
                 drawIcon((u32)(tx + UIS_W(16)), (u32)(Y + (bh - UIS_H(22)) / 2), ICON_PLAY,
                          UIS_TF(22.0f), fg);
-                drawTTF((u32)(tx + UIS_W(46)), (u32)(Y + (bh - UIS_H(20)) / 2 + 1), "Play",
+                drawTTF((u32)(tx + UIS_W(46)), (u32)(Y + (bh - UIS_H(20)) / 2 + 1), TR("Play"),
                         UIS_TF(20), fg, true);
+
+                // DOWNLOAD FOR OFFLINE, beside Play.  Its label is the live
+                // state (dl_ui_item_label); a thin bar shows the progress.
+                if (dl_capable) {
+                    char lbl[48];
+                    dl_ui_item_label(dl_have ? &dl_st : NULL, can_download, &dl_cx,
+                                     lbl, sizeof(lbl));
+                    const int dx = tx + bw + UIS_W(16), dw = UIS_W(250);
+                    const bool df = (focus == FOCUS_DOWNLOAD);
+                    drawRect((u32)dx, (u32)Y, (u32)dw, (u32)bh,
+                             df ? XMB_PANEL_HI : XMB_PANEL);
+                    if (df) {
+                        drawRect((u32)(dx - UIS_W(2)), (u32)(Y - UIS_H(2)), (u32)(dw + UIS_W(4)), UIS_H(2), XMB_FOCUS_RING);
+                        drawRect((u32)(dx - UIS_W(2)), (u32)(Y + bh), (u32)(dw + UIS_W(4)), UIS_H(2), XMB_FOCUS_RING);
+                        drawRect((u32)(dx - UIS_W(2)), (u32)(Y - UIS_H(2)), UIS_W(2), (u32)(bh + UIS_H(4)), XMB_FOCUS_RING);
+                        drawRect((u32)(dx + dw), (u32)(Y - UIS_H(2)), UIS_W(2), (u32)(bh + UIS_H(4)), XMB_FOCUS_RING);
+                    }
+                    const int pm = dl_have && dl_st.rec.state != DL_COMPLETED
+                                       ? dl_progress_permille(&dl_st.rec) : -1;
+                    if (pm >= 0) {
+                        drawRect((u32)dx, (u32)(Y + bh - UIS_H(4)), (u32)dw, UIS_H(4), XMB_HAIRLINE);
+                        drawRect((u32)dx, (u32)(Y + bh - UIS_H(4)), (u32)(dw * pm / 1000), UIS_H(4),
+                                 XMB_ACCENT);
+                    }
+                    info_clip_text(dx + UIS_W(16), Y + (bh - UIS_H(18)) / 2, lbl, UIS_TF(18),
+                                   df ? XMB_WHITE : XMB_TEXT_DIM, dw - UIS_W(32), df);
+                }
                 Y += bh + 18;
+                if (dl_toast[0] && timing_get_us() < dl_toast_until) {
+                    drawTTF((u32)tx, (u32)(Y - 14), dl_toast, 14, 0x00E8B64CUL);
+                    Y += 12;
+                }
             }
 
             // Version selector is shown only when it has a real choice.  X
@@ -1269,7 +1511,7 @@ void xmb_show_item_info(const XMBItem *root) {
                     drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + UIS_W(2)), 1,
                              XMB_HAIRLINE);
                 }
-                drawTTF_vcentered((u32)(tx + UIS_W(16)), Y + bh / 2, "Version", UIS_TF(16),
+                drawTTF_vcentered((u32)(tx + UIS_W(16)), Y + bh / 2, TR("Version"), UIS_TF(16),
                                   vf ? XMB_ACCENT : XMB_TEXT_FAINT, true);
                 info_clip_text(tx + UIS_W(118), Y + UIS_H(11),
                                versions.source[version_sel].label, UIS_TF(18),
@@ -1300,7 +1542,7 @@ void xmb_show_item_info(const XMBItem *root) {
                     drawRect((u32)(tx - 1), (u32)(Y + bh), (u32)(bw + UIS_W(2)), 1,
                              XMB_HAIRLINE);
                 }
-                drawTTF_vcentered((u32)(tx + UIS_W(16)), Y + bh / 2, "Quality", UIS_TF(16),
+                drawTTF_vcentered((u32)(tx + UIS_W(16)), Y + bh / 2, TR("Quality"), UIS_TF(16),
                                   qf ? XMB_ACCENT : XMB_TEXT_FAINT, true);
 
                 // Spell out what the setting actually asks the server for —
@@ -1317,13 +1559,13 @@ void xmb_show_item_info(const XMBItem *root) {
                     // a settings file written by an older build -- say what it
                     // is rather than printing a bitrate of zero.
                     snprintf(qtxt, sizeof(qtxt),
-                             "Original  (direct play, no re-encode)");
+                             TR("Original  (direct play, no re-encode)"));
                 else if (vq == VQ_AUTO)
-                    snprintf(qtxt, sizeof(qtxt), "Auto  (%ux%u, %u Mbps)",
+                    snprintf(qtxt, sizeof(qtxt), TR("Auto  (%ux%u, %u Mbps)"),
                              (unsigned)qw, (unsigned)qh, qbr / 1000000u);
                 else
                     snprintf(qtxt, sizeof(qtxt), "%s  (%u Mbps)",
-                             vquality_label(vq), qbr / 1000000u);
+                             tr(vquality_label(vq)), qbr / 1000000u);
                 // A quality value ("Auto  (1920x1080, 25 Mbps)") -- section 3.0
                 // gives codec and quality values to the spec face, "set one
                 // step smaller than its host line".
@@ -1345,22 +1587,10 @@ void xmb_show_item_info(const XMBItem *root) {
                 const char *p = detail.overview;
                 int lines_drawn = 0;
                 while (*p && lines_drawn < max_lines) {
-                    // Longest prefix that fits, broken at a space.
-                    // (Width accumulated per char; ignoring kerning is fine
-                    // for wrapping.)
-                    int  fit = 0, last_sp = -1;
-                    int  wpx = 0;
+                    // Longest prefix that fits, broken at a space or after a
+                    // CJK character, never inside a UTF-8 sequence.
                     char buf[160];
-                    char one[2] = { 0, 0 };
-                    while (p[fit] && fit < (int)sizeof(buf) - 1) {
-                        if (p[fit] == ' ') last_sp = fit;
-                        one[0] = p[fit];
-                        wpx += ttf_text_width(one, UIS_TF(19));
-                        if (wpx > wrap_w) break;
-                        fit++;
-                    }
-                    int take = (!p[fit] || fit >= (int)sizeof(buf) - 1) ? fit
-                             : (last_sp > 0 ? last_sp : fit);
+                    int take = info_fit(p, UIS_TF(19), wrap_w, (int)sizeof(buf) - 1);
                     if (take <= 0) take = 1;
                     snprintf(buf, sizeof(buf), "%.*s", take, p);
                     drawTTF((u32)tx, (u32)Y, buf, UIS_TF(19), XMB_TEXT);
@@ -1374,10 +1604,10 @@ void xmb_show_item_info(const XMBItem *root) {
 
             // Fact rows: faint label column, bright values.
             struct { const char *label; const char *value; } facts[] = {
-                { "Video",   detail.video_info  },
-                { "Audio",   detail.audio_info  },
-                { "Genres",  detail.genres      },
-                { "Studios", detail.studios     },
+                { TR("Video"),   detail.video_info  },
+                { TR("Audio"),   detail.audio_info  },
+                { TR("Genres"),  detail.genres      },
+                { TR("Studios"), detail.studios     },
             };
             for (int i = 0; i < 4; i++) {
                 if (!facts[i].value[0]) continue;
@@ -1400,7 +1630,7 @@ void xmb_show_item_info(const XMBItem *root) {
             // detail.people[] since before this fork, and this row has always
             // drawn them.  Only the shape, sizes and face changed.
             if (detail.n_people > 0) {
-                xmb_draw_eyebrow(X, sec, "Cast & Crew", XMB_TEXT_FAINT);
+                xmb_draw_eyebrow(X, sec, TR("Cast & Crew"), XMB_TEXT_FAINT);
                 sec += UIS_H(42);
                 const int dia = UIS_H(64);          // the circle
                 const int cw  = UIS_W(92);          // the column it sits in
@@ -1426,7 +1656,7 @@ void xmb_show_item_info(const XMBItem *root) {
             // More Like This — recommended poster cards.  Left/right selects a
             // card (Cross opens it); the row scrolls horizontally to follow.
             if (n_similar > 0) {
-                xmb_draw_eyebrow(X, sec, "More Like This", XMB_TEXT_FAINT);
+                xmb_draw_eyebrow(X, sec, TR("More Like This"), XMB_TEXT_FAINT);
                 sec += UIS_H(42);
                 const int cw = UIS_W(148), ch = SIM_CH, gap = UIS_W(22);
                 const int pitch = cw + gap;
@@ -1479,13 +1709,16 @@ void xmb_show_item_info(const XMBItem *root) {
         }
         {
             Hint h[3]; int nh = 0;
-            h[nh].glyph = 'C'; h[nh].label = "Back";  nh++;
-            if (max_scroll > 0) { h[nh].glyph = 'D'; h[nh].label = "Scroll"; nh++; }
+            h[nh].glyph = 'C'; h[nh].label = TR("Back");  nh++;
+            if (max_scroll > 0) { h[nh].glyph = 'D'; h[nh].label = TR("Scroll"); nh++; }
             h[nh].glyph = 'X';
-            h[nh].label = (focus == FOCUS_SIM)     ? "Open" :
-                          (focus == FOCUS_VERSION) ? "Choose version" :
-                          (focus == FOCUS_QUALITY) ? "Change quality" : "Play";
-            nh++;
+            h[nh].label = (focus == FOCUS_SIM)     ? TR("Open") :
+                          (focus == FOCUS_VERSION) ? TR("Choose version") :
+                          (focus == FOCUS_QUALITY) ? TR("Change quality") : TR("Play");
+            if (focus == FOCUS_DOWNLOAD)
+                h[nh].label = dl_ui_action_label(
+                    dl_ui_item_action(dl_have ? &dl_st : NULL, can_download, &dl_cx));
+            if (h[nh].label[0]) nh++;
             draw_hints_bar(h, nh);
         }
         flip();
@@ -1523,19 +1756,19 @@ void xmb_show_item_info(const XMBItem *root) {
 // Items with no meaningful resume point (< 10 s watched) skip the prompt and
 // return 0 (start from the beginning) so a fresh item plays immediately.
 int xmb_resume_choice(const XMBItem *it) {
-    if (!it || it->resume_secs < 10) return 0;
+    if (!it || xmb_resume_for(it->id, it->resume_secs) < 10) return 0;
 
     // Format the saved position as H:MM:SS / M:SS.
     char tstr[16];
-    u32 s = it->resume_secs;
+    u32 s = xmb_resume_for(it->id, it->resume_secs);
     if (s >= 3600) snprintf(tstr, sizeof(tstr), "%u:%02u:%02u",
                             s / 3600, (s % 3600) / 60, s % 60);
     else           snprintf(tstr, sizeof(tstr), "%u:%02u", s / 60, s % 60);
     char opt_resume[48];
-    snprintf(opt_resume, sizeof(opt_resume), "Resume from %s", tstr);
+    snprintf(opt_resume, sizeof(opt_resume), TR("Resume from %s"), tstr);
     char sub[48];
-    snprintf(sub, sizeof(sub), "Stopped at %s", tstr);
-    const char *opts[2] = { opt_resume, "Start from beginning" };
+    snprintf(sub, sizeof(sub), TR("Stopped at %s"), tstr);
+    const char *opts[2] = { opt_resume, TR("Start from beginning") };
 
     rsxSync();
     flip();
@@ -1555,7 +1788,7 @@ int xmb_resume_choice(const XMBItem *it) {
             if (BTN_PRESSED(up))     sel = 0;
             if (BTN_PRESSED(down))   sel = 1;
             if (BTN_PRESSED(cross)) {
-                int r = (sel == 0) ? (int)it->resume_secs : 0;
+                int r = (sel == 0) ? (int)xmb_resume_for(it->id, it->resume_secs) : 0;
                 init_btns();
                 return r;
             }
@@ -1603,7 +1836,7 @@ int xmb_resume_choice(const XMBItem *it) {
                               i == sel ? XMB_TEXT : XMB_TEXT_DIM);
         }
 
-        { static const Hint h[] = {{'X', "Select"}, {'C', "Back"}};
+        { static const Hint h[] = {{'X', TRN("Select")}, {'C', TRN("Back")}};
           draw_hints_bar(h, 2); }
         flip();
     }

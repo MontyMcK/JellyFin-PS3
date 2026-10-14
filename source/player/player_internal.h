@@ -5,6 +5,9 @@
 
 #include "jellyfin_api.h"
 #include "player_hud.h"
+#include "stream_local.h"
+#include "dl_library.h"
+#include "local_probe.h"
 
 // -------------------------------------------------------
 // Thread context structs (core/player.cpp spawns, threads/player_threads.cpp runs)
@@ -15,6 +18,8 @@ struct DecodeCtx {
     int           *frame_count;  // read-only for heartbeat (benign race)
     int            sock;
     volatile bool *dec_run;      // seek-only stop flag; cleared to pause just this thread
+    volatile bool *ended;        // live: set when the stream ends, and playback
+                                 // goes on; NULL = the end stops playback
 };
 
 struct AudioCtx {
@@ -47,6 +52,7 @@ struct ProgressShared {
     volatile u64  base_us;      // PlayerState.play_base_us
     char          item[64];
     char          sess[64];
+    char          live_id[128]; // Live TV: the opened stream, "" otherwise (98 chars)
 };
 extern ProgressShared g_prog;
 void progress_thread_fn(void *arg);
@@ -58,7 +64,7 @@ void progress_thread_fn(void *arg);
 
 // Which popup menu the HUD is showing — decides what a
 // HUD_ACTION_MENU_SELECT applies to.
-enum { PLAYER_MENU_NONE, PLAYER_MENU_AUDIO, PLAYER_MENU_SUBS };
+enum { PLAYER_MENU_NONE, PLAYER_MENU_AUDIO, PLAYER_MENU_SUBS, PLAYER_MENU_CHAPTERS };
 
 // R2/L2 tap/hold seek input state (core/player_seek.cpp).
 enum { SEEK_IDLE, SEEK_PRESS, SEEK_SCRUB };
@@ -75,7 +81,34 @@ struct PlayerSeekInput {
     bool resume_after_seek; // unpause once the seek lands
 };
 
+// A local file instead of a server stream: a downloaded media.ts (Stage 4), or
+// a video file from a drive or the Media browser.  Filled by
+// show_player_offline / show_player_file (core/player_local.cpp); NULL on the
+// online path, which then runs exactly as it always did.
+struct PlayerLocal {
+    char             path[256];
+    char             label[64];     // HUD/version label ("Offline")
+    StreamLocalIndex idx;           // transport streams: measured from the file at open
+    DlLocalPlan      plan;          // frame ceiling, runtime, download gate
+    // A file probed by show_player_file.  A download leaves these zero: a transport stream
+    // by construction, whose one audio track is the one that was downloaded.
+    LocalContainer   container;     // LM_NONE and LM_TS read alike
+    int              video_id;      // Matroska: the video track number
+    bool             have_tracks;
+    JFTracks         tracks;        // the audio the player can decode, and a Matroska file's subtitles it can draw;
+                                    //   index = track number / PID
+    int              start_audio;   // position in tracks.audio the session starts on
+    LocalSubKind     sub_kind[JF_MAX_STREAMS];   // LS_SRT / LS_ASS / LS_PGS of each of tracks.subs
+    int              start_sub;     // position in tracks.subs the session starts on (a forced one in the audio's language), -1 = off
+};
+
 struct PlayerState {
+    const PlayerLocal *local;    // NULL = online
+    // A Live TV channel: no length, no seeking, a fresh stream on every
+    // reopen.  `item` is the channel and changes when the channel does.
+    bool     live;
+    volatile bool stream_ended;  // live: the decode thread reached the end
+    bool     open_cancelled;     // the last reopen ended because the user pressed O
     const JFItem *item;
     u32      req_w, req_h;       // transcode size (H.264 level 3.1 cap)
     char     session_id[64];     // Jellyfin PlaySessionId (re-minted per seek)
@@ -126,6 +159,14 @@ struct PlayerState {
 
     PlayerSeekInput seek;
 };
+
+// The player body; show_player() is the online entry (local == NULL).
+void show_player_run(const JFItem *item, u32 resume_secs,
+                     const char *media_source_id, const PlayerLocal *local);
+
+// core/player_local.cpp -- (re)open ps->local's file at the entry nearest
+// target_us, setting ps->sock and ps->play_base_us (where it really landed).
+bool player_local_open(PlayerState *ps, u64 target_us);
 
 // -------------------------------------------------------
 // core/player_session.cpp — session helpers
@@ -231,7 +272,7 @@ extern volatile bool  s_vid_frame_ready;
 extern volatile u32   s_vid_uploaded_seq;
 extern volatile bool  s_vid_b_present;
 
-void vid_gpu_init(u32 fw, u32 fh);
+bool vid_gpu_init(u32 fw, u32 fh);   // false: VRAM allocation failed (already released)
 void vid_gpu_free(void);
 void vid_gpu_draw(bool render_blend, float blend_factor, u32 fw, u32 fh);
 // The loading spinner over the video (player.cpp), GPU phase; and the seek

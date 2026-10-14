@@ -1,5 +1,6 @@
 // XMB JSON parsing helpers (local, avoids changing jellyfin_api.cpp).
 
+#include "i18n.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -194,7 +195,7 @@ int parse_xmb_items_each(const char *json, XMBItem *arr, int max,
             int n = xmb_json_int_range(obj, olen, "ChildCount", 0);
             if (n > 0)
                 snprintf(it.duration_str, sizeof(it.duration_str),
-                         "%d Track%s", n, n == 1 ? "" : "s");
+                         n == 1 ? TR("%d Track") : TR("%d Tracks"), n);
         } else if (is_audio && ticks > 0) {
             int secs = (int)(ticks / 10000000LL);
             it.dur_secs = (u32)secs;
@@ -203,8 +204,8 @@ int parse_xmb_items_each(const char *json, XMBItem *arr, int max,
         } else if (ticks > 0) {
             int total_min = (int)(ticks / 600000000LL);
             int h = total_min / 60, m = total_min % 60;
-            if (h > 0) snprintf(it.duration_str, sizeof(it.duration_str), "%dh %dm", h, m);
-            else        snprintf(it.duration_str, sizeof(it.duration_str), "%dm", m);
+            if (h > 0) snprintf(it.duration_str, sizeof(it.duration_str), TR("%dh %dm"), h, m);
+            else        snprintf(it.duration_str, sizeof(it.duration_str), TR("%dm"), m);
         }
 
         xmb_json_first_arr_str(obj, olen, "Genres", it.genre, sizeof(it.genre));

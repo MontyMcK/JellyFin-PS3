@@ -65,7 +65,8 @@ typedef enum {
 typedef enum {
     DM_FILM_NONE   = 0,     // not 24fps-family content
     DM_FILM_23976  = 1,     // exactly 24000/1001
-    DM_FILM_24     = 2      // exactly 24/1
+    DM_FILM_24     = 2,     // exactly 24/1
+    DM_FILM_25     = 3      // exactly 25/1 (PAL-rate): wants a 50Hz output, 2:2
 } dm_film;
 
 typedef enum {
@@ -99,6 +100,9 @@ const char *dm_fps_source_name(dm_fps_source src);
 // Does the firmware report 24Hz-family support for resolution `res`?  Scans the
 // device's advertised mode list; n < 0 means the list could not be read.
 dm_support dm_display_24p_support(const dm_mode *modes, int n, uint8_t res);
+// Same scan for any rate bit(s): used with DM_RATE_50 for 25fps content.
+dm_support dm_display_rate_support(const dm_mode *modes, int n, uint8_t res,
+                                   uint16_t mask);
 
 // How content at fps_num/fps_den lands on a display at disp_num/disp_den,
 // e.g. "1:1", "3:2 pulldown", "2:2", "uneven x2.400".  Pure arithmetic.

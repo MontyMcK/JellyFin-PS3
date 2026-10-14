@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>   // NULL, for the default arguments below
 #include "http.h"
 
 #define JF_MAX   100
@@ -57,6 +58,25 @@ typedef struct {
     char role[64];    // "as The Terminator" / "Director" (character or job)
 } JFPerson;
 
+// Identity of an item beyond its name -- what an offline copy needs to be
+// shown without the server (series / season / episode, year, runtime) and
+// where its artwork comes from.  Parsed from the same item DTO the info
+// screen already fetches, so it costs no extra request.
+typedef struct {
+    char     series_name[128];   // "" for non-episodes
+    char     series_id[64];
+    int      season;             // ParentIndexNumber, -1 = n/a
+    int      episode;            // IndexNumber, -1 = n/a
+    int      year;               // ProductionYear, 0 = unknown
+    unsigned runtime_secs;       // RunTimeTicks / 10^7, 0 = unknown
+    bool     has_backdrop;       // the item has its own BackdropImageTags
+    char     parent_backdrop_id[64];  // ParentBackdropItemId (episodes), or ""
+} JFItemIdentity;
+
+// Pure: never fails on missing fields (they keep their "unknown" values).
+// Returns false only for a NULL/empty document.
+bool jellyfin_parse_item_identity(const char *json, JFItemIdentity *out);
+
 // Full per-item detail (populated by jellyfin_fetch_item_detail)
 typedef struct {
     char overview[1024];       // Plot summary
@@ -75,6 +95,8 @@ typedef struct {
     char     series_name[128];
     char     season_id[64];
     int      season_num;             // ParentIndexNumber; -1 unknown, 0 = Specials
+    bool     is_favourite;           // UserData.IsFavorite
+    JFItemIdentity identity;   // offline downloads (dl_request.cpp)
 } XMBItemDetail;
 
 bool jellyfin_fetch_item_detail(const char *item_id, XMBItemDetail *out);
@@ -118,10 +140,11 @@ typedef struct {
 // not stable across versions.
 typedef struct {
     char     id[96];             // MediaSourceId used by stream.ts
-    char     live_stream_id[96]; // populated after opening remote/live sources
+    char     live_stream_id[128]; // populated after opening remote/live sources (98 chars: see stream_request.h)
     char     label[128];         // MediaSource.Name (HUD display text)
     char     summary[96];        // "1080p · REMUX · DTS-HD MA 7.1 · 38.8 GB" (api/version_summary.h)
     unsigned runtime_secs;
+    unsigned long long size_bytes;   // MediaSource.Size; 0 = not reported
     JFTracks tracks;
 } JFMediaSource;
 
@@ -177,12 +200,17 @@ void jellyfin_stop_transcode(const char *session_id);
 // Playback-state reporting (POST /Sessions/Playing{,/Progress,/Stopped}).
 // pos_ticks is the absolute position in Jellyfin 100-ns ticks.  These keep
 // the server's Continue Watching / resume positions up to date.
+// live_stream_id non-empty = a Live TV channel: the report carries the
+// LiveStreamId, no position and CanSeek=false.
 void jellyfin_report_playing(const char *item_id, const char *session_id,
-                             unsigned long long pos_ticks);
+                             unsigned long long pos_ticks,
+                             const char *live_stream_id = NULL);
 void jellyfin_report_progress(const char *item_id, const char *session_id,
-                              unsigned long long pos_ticks, bool paused);
+                              unsigned long long pos_ticks, bool paused,
+                              const char *live_stream_id = NULL);
 void jellyfin_report_stopped(const char *item_id, const char *session_id,
-                             unsigned long long pos_ticks);
+                             unsigned long long pos_ticks,
+                             const char *live_stream_id = NULL);
 
 // The same progress report, handed to a worker thread instead of being waited
 // on.  For callers that must not block: the music pump thread (it is the only

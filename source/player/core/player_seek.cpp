@@ -34,6 +34,9 @@
 #include "jellyfin_api.h"
 #include "slog.h"
 #include "trickplay.h"
+#include "dl_manager.h"   // offline downloads yield to playback
+#include "api_livetv.h"   // jf_livestream_close
+#include "stream_request.h"   // stream_select_initial
 
 extern void crash_log(const char *msg);
 
@@ -169,8 +172,11 @@ HudAction player_seek_input_update(PlayerState *ps, HudAction act) {
 // -------------------------------------------------------
 
 bool player_execute_seek(PlayerState *ps) {
-    int delta = ps->seek.pending_secs;   // total accumulated during cooldown
+    // A live channel has no position: the "seek" is a reopen at the live edge
+    // (a track change, a channel change, a dropped stream, a long pause).
+    int delta = ps->live ? 0 : ps->seek.pending_secs;   // total accumulated during cooldown
     ps->seek.pending_secs = 0;
+    ps->open_cancelled = false;
     {
         char buf[64];
         snprintf(buf, sizeof(buf), "hud: seek %+d s (begin)", delta);
@@ -182,9 +188,9 @@ bool player_execute_seek(PlayerState *ps) {
     // not the stream-relative audio clock — otherwise each seek would
     // be measured from the post-seek stream's PTS 0 and walk backward.
     s64 cur_us    = (s64)ps->play_base_us + (s64)audio_get_clock_us();
-    s64 target_us = cur_us + (s64)delta * 1000000LL;
+    s64 target_us = ps->live ? 0 : cur_us + (s64)delta * 1000000LL;
     if (target_us < 0) target_us = 0;
-    if (ps->total_secs > 0 &&
+    if (!ps->live && ps->total_secs > 0 &&
         target_us > (s64)ps->total_secs * 1000000LL)
         target_us = (s64)ps->total_secs * 1000000LL;
     u64 start_ticks = (u64)target_us * 10ULL;  // us -> 100-ns ticks
@@ -249,7 +255,21 @@ bool player_execute_seek(PlayerState *ps) {
     crash_log("sk3 flushed");
 
     // 3) Re-request the stream at the new offset.
-    netClose(ps->sock);
+    stream_close(ps->sock);
+    ps->sock = -1;     // a failed reopen must not leave a closed fd to be closed again
+    if (ps->local) {
+        // Offline: no server to ask.  Find the entry point nearest the target
+        // in the file itself; player_local_open sets play_base_us to where it
+        // actually landed, which keeps the clock exact.
+        if (!player_local_open(ps, (u64)target_us)) {
+            plog("seek: local reopen FAILED");
+            crash_log("sk_fail local");
+            ps->playing = false;
+            return false;
+        }
+        crash_log("sk4 reopened");
+        player_prefill(ps, false, 20000);
+    } else {
     // Kill the existing transcode first, otherwise Jellyfin keeps
     // serving the in-progress job (which started at offset 0) and
     // the seek appears to reset to 0:00 instead of honouring the
@@ -260,6 +280,15 @@ bool player_execute_seek(PlayerState *ps) {
     // would make Jellyfin reuse the old job and ignore StartTimeTicks.
     char old_sid[64];
     snprintf(old_sid, sizeof old_sid, "%s", ps->session_id);
+    if (ps->live) {
+        // The old stream goes first: a tuner serves one, and an opened source
+        // belongs to the stream it was opened for, so the reopen asks for a
+        // source of its own.
+        if (old_sid[0]) jellyfin_stop_transcode(old_sid);
+        if (ps->source.live_stream_id[0]) jf_livestream_close(ps->source.live_stream_id);
+        ps->source.id[0] = ps->source.live_stream_id[0] = '\0';
+        ps->session_id[0] = '\0';
+    }
     // Stopping the transcode is not enough on its own: re-requesting
     // stream.ts with the SAME PlaySessionId makes Jellyfin reuse the
     // existing transcode job (which began at offset 0), so
@@ -286,7 +315,16 @@ bool player_execute_seek(PlayerState *ps) {
             // (and occasionally a new MediaSourceId).  Carry that resolution
             // into the stream.ts request while preserving the user's current
             // audio/subtitle selections across an ordinary seek.
-            if (opened.id[0]) {
+            if (ps->live && opened.id[0]) {
+                // The live source replaces the old one outright; a channel
+                // change also takes its tracks (see player.cpp).
+                ps->source = opened;
+                if (!ps->have_tracks) {
+                    ps->tracks      = opened.tracks;
+                    ps->have_tracks = true;
+                    stream_select_initial(&ps->tracks, true, &ps->cur_audio, &ps->cur_sub);
+                }
+            } else if (opened.id[0]) {
                 JFMediaSource *dst = &ps->source;
                 char old_label[128];
                 snprintf(old_label, sizeof(old_label), "%s", dst->label);
@@ -300,6 +338,11 @@ bool player_execute_seek(PlayerState *ps) {
                 if (source_runtime > 0) dst->runtime_secs = source_runtime;
                 if (dst->runtime_secs > 0) ps->total_secs = dst->runtime_secs;
             }
+        } else if (ps->live) {
+            // Nothing to stream without an opened source.
+            plog("live: PlaybackInfo failed");
+            ps->sock = -1;
+            return false;
         } else {
             plog("seek: PlaybackInfo failed, reusing old session");
             jellyfin_stop_transcode(old_sid);     // the same id: that job must die first
@@ -311,13 +354,18 @@ bool player_execute_seek(PlayerState *ps) {
     // and TorBox answered the second with a 5 s placeholder clip: the new
     // transcode encoded nothing and playback ended (an audio-track switch,
     // and a fast-forward before it).
-    if (strcmp(old_sid, ps->session_id) != 0) {
-        jellyfin_stop_transcode(old_sid);
+    if (!ps->live && strcmp(old_sid, ps->session_id) != 0) {
+        if (old_sid[0]) jellyfin_stop_transcode(old_sid);
         usleep(600000);
     }
     char surl[768];
     build_stream_url(surl, sizeof(surl), ps, start_ticks);
     plog_url("surl", surl);
+    // A track change can turn a light stream heavy (an HD audio copy):
+    // re-decide for offline downloads from the URL actually being opened.
+    // Live TV is always heavy: it transcodes for as long as it plays.
+    if (ps->live) dl_playback_begin_local(false);
+    else          dl_playback_begin(surl);
     // 3b/4) Open and re-prime, retrying with a growing wait.
     //
     // A debrid host rate-limits opens of the same file: the server's ffmpeg
@@ -327,10 +375,11 @@ bool player_execute_seek(PlayerState *ps) {
     // menu (2026-09-27).  So: up to four tries, 5 / 10 / 15 s apart, the last
     // picture and the spinner up the whole time, Circle to give up.
     static const unsigned RETRY_WAIT_MS[] = { 5000, 10000, 15000 };
-    const int max_tries = 1 + (int)(sizeof RETRY_WAIT_MS / sizeof RETRY_WAIT_MS[0]);
+    const int max_tries = ps->live ? 1 : 1 + (int)(sizeof RETRY_WAIT_MS / sizeof RETRY_WAIT_MS[0]);
     int nsock = -1;
     for (int attempt = 0; ; attempt++) {
         stream_set_wait_cb(player_seek_wait);      // spinner + Circle while the server thinks
+        if (ps->live) stream_set_header_deadline(20);
         nsock = stream_open(surl);
         stream_set_wait_cb(NULL);
         const bool cancelled = nsock < 0 &&
@@ -340,8 +389,7 @@ bool player_execute_seek(PlayerState *ps) {
             // The new stream's PTS restarts at ~0, so its clock now maps to
             // absolute media time target_us.
             ps->play_base_us = (u64)target_us;
-            { struct timeval tv; tv.tv_sec = 0; tv.tv_usec = 5000;   // the lv2 layout (16 bytes)
-              netSetSockOpt(ps->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); }
+            stream_set_timeout(ps->sock, 5000);
             crash_log("sk4 reopened");
             if (attempt > 0) video_reset_demux();
             // Re-prime: decode a few frames before resuming display so the
@@ -349,18 +397,21 @@ bool player_execute_seek(PlayerState *ps) {
             player_prefill(ps, false, 20000);
             if (jbuf_count() > 0 || !ps->playing || !running) break;
             plog("seek: reopen gave no picture (the server found nothing to send)");
-            netClose(ps->sock);
+            stream_close(ps->sock);
             ps->sock = -1;
         } else {
             char b[160];
             snprintf(b, sizeof b, "seek: stream_open FAILED (%.100s)", stream_last_error());
             plog(b);
         }
+        if (cancelled) ps->open_cancelled = true;
         if (cancelled || attempt + 1 >= max_tries || !running) {
             plog("playing=0 reason=seek_stream_open_failed");
             crash_log("sk_fail reopen");
             ps->sock = -1;
-            ps->playing = false;       // give up cleanly; loop will exit
+            // A live reopen is retried (or given up) by its caller; the audio
+            // and upload threads must still be running if it succeeds.
+            if (!ps->live) ps->playing = false;       // give up cleanly; loop will exit
             return false;
         }
         // Kill the job that produced nothing (the same PlaySessionId would be
@@ -381,11 +432,13 @@ bool player_execute_seek(PlayerState *ps) {
         }
         if (gave_up) {
             plog("playing=0 reason=seek_cancelled_by_user");
+            ps->open_cancelled = true;
             ps->sock = -1;
-            ps->playing = false;
+            if (!ps->live) ps->playing = false;
             return false;
         }
     }
+    }   // online
     subs_after_seek();      // the cue cursor must not walk on from the old spot
     crash_log("sk5 prefilled");
     {

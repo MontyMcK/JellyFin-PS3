@@ -92,22 +92,27 @@ void display_diag_session(u32 fps_num, u32 fps_den, dm_fps_source src,
 	u16 adv1080 = 0;
 	for (int i = 0; i < nmodes; i++)
 		if (modes[i].res == DM_RES_1080) adv1080 |= modes[i].rates;
-	const dm_support sup = dm_display_24p_support(modes, nmodes, DM_RES_1080);
+	const dm_film film = dm_classify_film(fps_num, fps_den);
+	const bool is25 = film == DM_FILM_25;
+	const dm_support sup = is25
+		? dm_display_rate_support(modes, nmodes, DM_RES_1080, DM_RATE_50)
+		: dm_display_24p_support(modes, nmodes, DM_RES_1080);
 	dm_rates_str(adv1080, rates, sizeof(rates));
 	snprintf(b, sizeof(b),
-	         "24p: DISPLAY capabilities 1080p rates=%s -> 24Hz-family %s"
+	         "24p: DISPLAY capabilities 1080p rates=%s -> %s %s"
 	         " (which bit is 23.976 is measured at switch time)",
-	         nmodes >= 0 ? rates : "unreadable", dm_support_name(sup));
+	         nmodes >= 0 ? rates : "unreadable",
+	         is25 ? "50Hz" : "24Hz-family", dm_support_name(sup));
 	plog(b);
 
 	// ---- CONTENT ----
-	const dm_film film = dm_classify_film(fps_num, fps_den);
 	const int confident = dm_fps_confident(src);
 	snprintf(b, sizeof(b),
 	         "24p: CONTENT %ux%u fps=%u/%u film=%s source=%s confidence=%s",
 	         (unsigned)width, (unsigned)height,
 	         (unsigned)fps_num, (unsigned)fps_den,
-	         film == DM_FILM_23976 ? "23.976" : film == DM_FILM_24 ? "24.000" : "no",
+	         film == DM_FILM_23976 ? "23.976" : film == DM_FILM_24 ? "24.000" :
+	         film == DM_FILM_25 ? "25.000" : "no",
 	         dm_fps_source_name(src), confident ? "detected" : "guessed");
 	plog(b);
 

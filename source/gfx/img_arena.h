@@ -35,3 +35,12 @@ size_t img_arena_peak(void);              // high-water mark, for tuning the siz
 void  *img_arena_malloc(size_t sz);
 void  *img_arena_realloc(void *p, size_t oldsz, size_t newsz);
 void   img_arena_free(void *p);
+
+// Decode-size cap.  stb_image's own limit is 16M pixels PER AXIS, which lets a
+// single oversized cover ask the heap for hundreds of MB.  Callers probe the
+// header (stbi_info_from_memory) and refuse anything past this before decoding;
+// 8 Mpx = 32 MB of RGBA, far above any card or hero image we request.
+#define IMG_MAX_PIXELS (8u * 1024u * 1024u)
+static inline bool img_dims_ok(int w, int h) {
+    return w > 0 && h > 0 && (unsigned long long)w * (unsigned long long)h <= IMG_MAX_PIXELS;
+}

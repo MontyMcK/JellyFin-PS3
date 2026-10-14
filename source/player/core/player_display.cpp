@@ -19,6 +19,7 @@
 #include "display_diag.h"
 #include "subfont.h"
 #include "subcolor.h"
+#include "vblend.h"
 #include <string.h>
 
 // Longest single rendered line. Cues are capped well below this in
@@ -243,14 +244,25 @@ one_to_one_done: ;
 #ifdef VID_DISABLE_BLEND
         bool b_ok  = false;   // force pure-A: no crossfade ever
 #else
-        bool b_ok  = (jbuf_peek_next() != NULL) && s_vid_b_present;
+        // Whole frames with pulldown only, unless blending is switched on
+        // (vblend.h).  Interlaced output scans each flip out as alternating
+        // fields, so a blend reads as back-and-forth motion on a CRT; and a
+        // TV that detects 3:2 pulldown sees blended frames as a broken cadence.
+        bool b_ok  = (jbuf_peek_next() != NULL) && s_vid_b_present &&
+                     !timing_display_interlaced() && vblend_enabled();
 #endif
 
         if (!b_ok || dur_a >= vblank_period_us) {
             // Pure-A: consume one vblank period, pop if frame exhausted
             const u32 seq0 = jbuf_peek_seq();
+            const s64 left = jbuf_peek_dur() - vblank_period_us;
             jbuf_consume_dur(vblank_period_us);
             jbuf_advance();
+            // The part of this vblank the old frame did not use belongs to the
+            // new one.  Dropping it held every 24 fps frame for 3 vblanks on a
+            // 59.94 Hz output (20 fps), and the A/V catch-up then dropped two
+            // frames every half second: the rubber-banding.
+            if (left < 0 && jbuf_peek_seq() != seq0) jbuf_consume_dur(-left);
             // A pop here is a NEW picture and must count as one.  At 59.94 a
             // film frame always ends in the crossfade branch below, so this
             // never mattered; at a 1:1 cadence (24p output, 2026-09-27) EVERY

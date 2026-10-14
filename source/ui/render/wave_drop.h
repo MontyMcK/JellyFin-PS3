@@ -131,7 +131,17 @@ typedef struct {
     float drop;                                // 1 on the frame a drop lands
 } jd_in;
 
+// Sine clocks.  Each is its own accumulated phase (rate x dt x pace, and x ts
+// where the rate follows the beat), wrapped at 2*pi like ph1..ph3 -- never
+// `t * rate`, which jumps whenever `t` wraps or `ts` changes.  PASS and TPOS
+// are read as cycles (phase / 2*pi) through jd_frac.
+enum { JD_C_FX, JD_C_FY, JD_C_SWELL, JD_C_TILT, JD_C_LEAN, JD_C_PASS, JD_C_STRAND,
+       JD_C_TPOS, JD_C_CORE, JD_C_REST, JD_C_U09, JD_C_U14, JD_C_U11, JD_C_U22, JD_NCLK };
+#define JD_CLK_RATES { 0.53f, 0.7f, 1.1f, 0.41f, 0.5f, 0.14f * 6.2831853f, 1.3f,                        0.07f * 6.2831853f, 2.1f, 0.8f, 0.9f, 1.4f, 1.1f, 2.2f }
+#define JD_CLK_SCALED { 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0 }
+
 typedef struct {
+    float cl[JD_NCLK];
     float t, ts, spin, spin_w;
     float bounce, bounce_v, jig, jig_v, rest, last_sil;
     float wx, wy, wvx, wvy, wt, w_amp, calm, wax;
@@ -282,7 +292,16 @@ static inline void jd_motion_step(jd_motion *m, const jd_in *F, float dt)
     m->glow   = jd_approach(m->glow, 0.62f - 0.32f * m->rest + 0.5f * F->rms * live + 0.35f * m->kick, dt, 0.18f);
     m->bright = jd_approach(m->bright, 0.9f + 0.12f * F->rms * live, dt, 0.5f);
     m->wph += dtp * m->ts * (0.22f + 0.35f * F->lowmid * live);
-    if (m->t > 3600.0f) m->t -= 3600.0f;             // the clocks below only need phase
+    {
+        static const float rate[JD_NCLK] = JD_CLK_RATES;
+        static const int   scl[JD_NCLK]  = JD_CLK_SCALED;
+        int i;
+        for (i = 0; i < JD_NCLK; i++) {
+            m->cl[i] += dtp * rate[i] * (scl[i] ? m->ts : 1.0f);
+            if (m->cl[i] > WK_TWO_PI) m->cl[i] -= WK_TWO_PI;
+        }
+    }
+    if (m->t > 3600.0f) m->t -= 3600.0f;             // t is bookkeeping only; every sine uses cl[]
 }
 
 // --- the pose: everything a build needs, one frame's worth -------------------
@@ -296,6 +315,7 @@ typedef struct {
     float   S0;             // ... without the swell (the core scales itself)
     float   R[9];           // local -> world, column-major: X, Y, Z columns
     jw_vec3 tc;             // toward the camera (unit)
+    float   cl[JD_NCLK];
     float   t, ts;
     float   swell, drop, jig, sq, shear, rip_a, rip_b, ph1, ph2, ph3, spread;
     float   glow, kick, spin, orbit, wph, rest;
@@ -304,6 +324,9 @@ typedef struct {
 // Where the bell sits: the screen point (cx, cy) in NDC (+y up), its height as
 // a fraction of the screen height, and the distance from the eye it floats at
 // (the design's DIST, 9.5).
+// The shaded colour never falls below this fraction of the albedo, so the
+// far side of the bell keeps its colour (scaled in with the morph).
+#define JD_AMB_FLOOR 0.40f
 #define JD_DIST     9.5f
 #define JD_VIEWBOX  72.0f
 
@@ -338,8 +361,8 @@ static inline void jd_place(const jd_motion *m, float morph, float aspect,
     // world height of the screen at DIST is 2 * DIST / focal
     s0 = (2.0f * JD_DIST / JW_FOCAL) * h_frac / JD_VIEWBOX;
     o->P = jw_v3(JW_EYE_X + dir.x * JD_DIST, JW_EYE_Y + dir.y * JD_DIST, JW_EYE_Z + dir.z * JD_DIST);
-    o->P.x += m->shift * 6.0f * s0 + 2.2f * s0 * wk_sinf(t * 0.53f * m->ts);      // a slow float
-    o->P.y += (m->bounce * 7.0f + 1.6f * wk_sinf(t * 0.7f * m->ts) - 12.0f * m->rest) * s0;
+    o->P.x += m->shift * 6.0f * s0 + 2.2f * s0 * wk_sinf(m->cl[JD_C_FX]);      // a slow float
+    o->P.y += (m->bounce * 7.0f + 1.6f * wk_sinf(m->cl[JD_C_FY]) - 12.0f * m->rest) * s0;
 
     // The camera (2026-09-27): it drifts slowly round the bell -- dollying in
     // and out and swinging above, below and to the sides -- on its own
@@ -349,8 +372,8 @@ static inline void jd_place(const jd_motion *m, float morph, float aspect,
         const float dolly = 0.28f * wk_sinf(ct * 0.105f) + 0.12f * wk_sinf(ct * 0.043f + 2.0f);
         s0 *= 1.0f + dolly;                                  // nearer = larger
     }
-    g = 1.0f + 0.13f * m->swell + 0.3f * m->drop + 0.03f * m->kick + 0.02f * wk_sinf(t * 1.1f * m->ts)
-      + 0.035f * m->rest * wk_sinf(t * 0.8f);
+    g = 1.0f + 0.13f * m->swell + 0.3f * m->drop + 0.03f * m->kick + 0.02f * wk_sinf(m->cl[JD_C_SWELL])
+      + 0.035f * m->rest * wk_sinf(m->cl[JD_C_REST]);
     o->S0 = s0;
     o->S  = s0 * g;
 
@@ -358,11 +381,11 @@ static inline void jd_place(const jd_motion *m, float morph, float aspect,
     // design's Euler 'ZXY' -- R = Rbase * Rz * Rx * Ry.
     bank = jd_clamp(m->wvx * 0.0011f, -0.25f, 0.25f);
     dive = jd_clamp(m->wvy * 0.0010f, -0.18f, 0.18f);
-    ex = 0.08f + m->tilt + 0.08f * wk_sinf(t * 0.41f * m->ts) + dive;
+    ex = 0.08f + m->tilt + 0.08f * wk_sinf(m->cl[JD_C_TILT]) + dive;
     ey = m->turn + 0.18f * wk_sinf(m->orbit) + m->yaw      // spins all the way round
        + 0.50f * wk_sinf(m->cam_t * 0.061f + 0.7f);        // the camera swings round it
     ex += 0.26f * wk_sinf(m->cam_t * 0.083f + 1.9f);       // ... and over and under it
-    ez = m->lean + 0.1f * wk_sinf(t * 0.5f * m->ts) - 0.03f * m->bounce_v + 0.22f * wk_sinf(m->roll) - bank;
+    ez = m->lean + 0.1f * wk_sinf(m->cl[JD_C_LEAN]) - 0.03f * m->bounce_v + 0.22f * wk_sinf(m->roll) - bank;
     Rb[0] = JW_RIGHT_X; Rb[1] = JW_RIGHT_Y; Rb[2] = JW_RIGHT_Z;
     Rb[3] = JW_UP_X;    Rb[4] = JW_UP_Y;    Rb[5] = JW_UP_Z;
     Rb[6] = -JW_FWD_X;  Rb[7] = -JW_FWD_Y;  Rb[8] = -JW_FWD_Z;
@@ -382,6 +405,7 @@ static inline void jd_place(const jd_motion *m, float morph, float aspect,
     jd_m3_mul(Rb, T2, o->R);
 
     o->tc    = jw_v3(-JW_FWD_X, -JW_FWD_Y, -JW_FWD_Z);
+    memcpy(o->cl, m->cl, sizeof o->cl);
     o->t     = t;
     o->ts    = m->ts;
     o->swell = m->swell; o->drop = m->drop; o->jig = m->jig; o->sq = m->sq;
@@ -417,7 +441,7 @@ static inline int jd_build_layer_k(const jw_layer *L, int li, const float *disp,
     const jd_layer *C;
     jw_layer Lb;
     float mk, e1, e2, sw, tw, oa, ob, ca, sa, cb, sb, Lk[9];
-    float dp, pass, pk, SGk, tpos, t_amp, t, ts, du, dk;
+    float dp, pass, pk, SGk, tpos, t_amp, du, dk;
     int i, j;
 
     if (!P || !(P->morph > 0.0f) || li < 0 || li >= JW_LAYERS)
@@ -426,8 +450,6 @@ static inline int jd_build_layer_k(const jw_layer *L, int li, const float *disp,
     if (ndisp < 2 || cap < JW_VERTS) return 0;
 
     C  = &JD_LAYER[li];
-    t  = P->t;
-    ts = P->ts;
     mk = jd_clamp((P->morph - (float)li * 0.1f) / 0.8f, 0.0f, 1.0f);
     e1 = jw_smooth(0.0f, 0.5f, mk);
     e2 = jw_smooth(0.15f, 1.0f, mk);
@@ -446,11 +468,11 @@ static inline int jd_build_layer_k(const jw_layer *L, int li, const float *disp,
     Lk[6] = sa; Lk[7] = -sb * ca; Lk[8] = cb * ca;
 
     // one swell passes front to back through the three bells: glassy -> mark -> opaque
-    dp = jd_frac(t * 0.14f * ts - PASS_OFF[li] * 0.12f);
+    dp = jd_frac(P->cl[JD_C_PASS] * (1.0f / WK_TWO_PI) - PASS_OFF[li] * 0.12f);
     pass = jd_expn(((dp - 0.1f) / 0.07f) * ((dp - 0.1f) / 0.07f)) * (0.35f + 1.8f * P->rip_a);
-    pk = 1.0f + 0.025f * wk_sinf(t * 1.3f * ts + (float)li * 2.09f) + 0.05f * P->jig * (float)li + 0.03f * pass;
+    pk = 1.0f + 0.025f * wk_sinf(P->cl[JD_C_STRAND] + (float)li * 2.09f) + 0.05f * P->jig * (float)li + 0.03f * pass;
     SGk = P->S * C->ls * pk;
-    tpos = jd_frac(t * 0.07f * ts + (float)li * 0.41f);
+    tpos = jd_frac(P->cl[JD_C_TPOS] * (1.0f / WK_TWO_PI) + (float)li * 0.41f);
     t_amp = C->tend * (2.5f + 22.0f * P->rip_a);
 
     du = (L->u1 - L->u0) / (float)(JW_STATIONS - 1);
@@ -510,8 +532,8 @@ static inline int jd_build_layer_k(const jw_layer *L, int li, const float *disp,
             jw_vec3 wp, sL, uL;
             dT -= jd_floor(dT + 0.5f);
             bump = jd_expn((dT / 0.06f) * (dT / 0.06f));
-            life = C->life * (wk_sinf(WK_PI * 4.0f * sl + t * 0.9f + (float)li)
-                              + 0.6f * wk_sinf(WK_PI * 10.0f * sl - t * 1.4f + (float)li * 2.0f))
+            life = C->life * (wk_sinf(WK_PI * 4.0f * sl + P->cl[JD_C_U09] + (float)li)
+                              + 0.6f * wk_sinf(WK_PI * 10.0f * sl - P->cl[JD_C_U14] + (float)li * 2.0f))
                  + t_amp * bump;
             X = st[0] + st[5] * life * 0.55f;
             Y = st[1] + st[6] * life * 0.55f;
@@ -520,7 +542,7 @@ static inline int jd_build_layer_k(const jw_layer *L, int li, const float *disp,
             X += P->spread * 3.2f * sxs * axv * (0.5f + 0.5f * wk_sinf(P->ph3 * 1.3f + sxs));
             Y += P->spread * 4.2f * axv * wk_sinf(P->ph3 + sxs * 1.7f);
             hwl = st[2] * C->thin * (1.0f + 0.06f * P->swell + 0.12f * pass) * rip
-                * (1.0f + 0.08f * wk_sinf(WK_PI * 8.0f * sl + t * 1.1f)) * (1.0f - 0.45f * bump * C->tend);
+                * (1.0f + 0.08f * wk_sinf(WK_PI * 8.0f * sl + P->cl[JD_C_U11])) * (1.0f - 0.45f * bump * C->tend);
             htl = hwl * (1.0f + 0.14f * P->swell + 0.3f * P->drop);   // a round tube
             lx = Lk[0] * X + Lk[3] * Y;
             ly = Lk[1] * X + Lk[4] * Y;
@@ -542,7 +564,7 @@ static inline int jd_build_layer_k(const jw_layer *L, int li, const float *disp,
             up = jw_norm(jw_v3(up.x + (uL.x - up.x) * e2, up.y + (uL.y - up.y) * e2, up.z + (uL.z - up.z) * e2));
             if (fl > 0.001f) {
                 // In flight the strand corkscrews about its own path.
-                const float a  = 7.0f * uk + t * 2.2f + (float)li * 2.1f;
+                const float a  = 7.0f * uk + P->cl[JD_C_U22] + (float)li * 2.1f;
                 const float rr = fl * SGk * 5.0f;
                 const float ka = jw_cosf(a) * rr, kb = wk_sinf(a) * rr;
                 p = jw_v3(p.x + s.x * ka + up.x * kb, p.y + s.y * ka + up.y * kb, p.z + s.z * ka + up.z * kb);
@@ -608,6 +630,12 @@ static inline int jd_build_layer_k(const jw_layer *L, int li, const float *disp,
                            + (q.z - P->P.z) * P->tc.z) / (30.0f * P->S), -1.0f, 1.0f) * e2;
             kd = 1.0f + 0.4f * dd + 0.22f * pass * e2 + 0.35f * fl;
             lit_c.r *= kd; lit_c.g *= kd; lit_c.b *= kd;
+            if (e2 > 0.0f) {            // ambient floor: the far side stays a body, not a hole
+                const float lo = JD_AMB_FLOOR * e2;
+                if (lit_c.r < lo * alb.r) lit_c.r = lo * alb.r;
+                if (lit_c.g < lo * alb.g) lit_c.g = lo * alb.g;
+                if (lit_c.b < lo * alb.b) lit_c.b = lo * alb.b;
+            }
             // the core's light on the ring's inner wall
             inward = in_sgn * nx;
             core_add = e2 * P->glow * 0.42f * jw_smooth(0.15f, 1.0f, inward)
@@ -685,7 +713,7 @@ static inline int jd_core_shell(const jd_pose *P, int k, float aspect,
     appear = jd_core_on(P);
     if (!(appear > 0.002f)) return 0;
     sc = P->S0 * (1.0f + 0.06f * P->swell + 0.3f * P->drop) * jd_back_out(appear);
-    pulse = 1.0f + 0.12f * P->swell + 0.06f * P->jig + 0.07f * wk_sinf(P->t * 2.1f * P->ts);
+    pulse = 1.0f + 0.12f * P->swell + 0.06f * P->jig + 0.07f * wk_sinf(P->cl[JD_C_CORE]);
     s = JD_CORE_SCALE[k] * pulse;
     sxk = s * (1.0f + 0.07f * P->sq);
     syk = s * (1.0f - 0.12f * P->sq);

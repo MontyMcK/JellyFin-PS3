@@ -47,6 +47,8 @@ typedef enum {
     TABKIND_PLAYLISTS,  // Jellyfin's "playlists" view — its own library
     TABKIND_GENERIC,    // homevideos / musicvideos / mixed / untyped
     TABKIND_SETTINGS,
+    TABKIND_LIVETV,     // Jellyfin's "livetv" view: its own channel list and guide
+    TABKIND_LOCAL,      // "Media": the internal disk's folders and USB drives, no server needed
 } XMBTabKind;
 
 typedef struct {
@@ -188,9 +190,19 @@ static inline int uis_h(int px) {
                      : px * uis_safe_h() / 720;
 }
 static inline float uis_tf(float px) {
-    return g_uis_pct ? px * (float)g_uis_pct / 100.0f
-                          * (float)uis_safe_h() / (float)display_height
-                     : px * (float)uis_safe_h() / 720.0f;
+    const float s = g_uis_pct ? px * (float)g_uis_pct / 100.0f
+                                    * (float)uis_safe_h() / (float)display_height
+                              : px * (float)uis_safe_h() / 720.0f;
+    // A floor under the proportional scale on a low-resolution display (a 480 or
+    // 576 line CRT).  The scale takes a 12.5 px label to 8 px there, thin strokes
+    // a CRT cannot draw, and a tester could not read the player bar.  Type that
+    // was authored at 11 px or more is never drawn smaller than 11; type authored
+    // below that keeps its authored size.  720p and 1080p are untouched.
+    if ((int)display_height < 720) {
+        const float floor_px = px < 11.0f ? px : 11.0f;
+        if (s < floor_px) return floor_px;
+    }
+    return s;
 }
 
 #define UIS_W(px)  uis_w((int)(px))
@@ -420,14 +432,13 @@ extern bool g_jumpbar_active;
 extern int  g_jumpbar_sel;
 extern char g_tab_name_filter[XMB_TAB_COUNT][4];
 
-// Settings tab state (defined in ui_xmb_state.cpp)
-// The "Player Stats Overlay" row only exists when the diagnostics module is
-// compiled in — a build with ENABLE_PLAYER_STATS 0 has nothing for it to
-// toggle, so the row goes away rather than sitting there doing nothing.
-#define XMB_SETTINGS_COUNT (15 + ENABLE_PLAYER_STATS)  // selectable settings entries
+// Settings tab state (defined in ui_xmb_state.cpp).  The rows themselves are
+// the model in ui/settings_model.c; g_settings_sel is a position in its
+// displayed order.
 extern int   g_settings_sel;       // highlighted settings entry
 extern bool  g_settings_confirm;   // true while the logout confirm prompt is up
-extern bool  g_settings_help;      // Triangle: the highlighted row's description is up
+extern int   g_settings_cat;       // -1: the list of categories; else the open category (a setting_section)
+extern int   g_settings_catsel;    // highlighted category in that list
 extern bool  g_overscan_calib;     // true while the overscan calibration screen is up
 extern float g_overscan_calib_prev; // frac to restore if calibration is cancelled
 

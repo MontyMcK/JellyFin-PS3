@@ -371,7 +371,10 @@ bool audio_write_pcm(void) {
             if (s_port_channels == 2 && src_ch == 2) {
                 // Shipped stereo path — source reads straight into the block.
                 s_src_read(blk_buf, AUDIO_BLOCK_SAMPLES);
-                apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES, 2);
+                // IEC 61937 bursts are data, not sound: any gain would
+                // corrupt them.  The receiver owns the volume in passthrough.
+                if (!audio_passthrough_active())
+                    apply_volume(blk_buf, AUDIO_BLOCK_SAMPLES, 2);
             } else {
                 // Source width != port width: stage the source frames, then
                 // place each one inside the wider port frame.  Static — this
@@ -485,6 +488,7 @@ void audio_close(void) {
     // shared console resource -- the XMB and the next app should not inherit a
     // coding type this app asked for.
     audio_bitstream_end();
+    audio_passthrough_request(false);
     crash_log("ax2 sysAudioPortStop");
     audioPortStop(s_audio_port);
     audioRemoveNotifyEventQueue(s_audio_key);

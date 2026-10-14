@@ -10,6 +10,10 @@ typedef enum {
     HUD_ACTION_MENU_SELECT,   // hud_menu_choice() gives the chosen entry
     HUD_ACTION_STOP,          // O on the redesigned HUD (spine gate on)
     HUD_ACTION_SKIP_SEGMENT,  // X on the "Skip Intro" badge (segments.h)
+    HUD_ACTION_CHANNEL_NEXT,  // Live TV: Up / NEXT -- never seen outside live mode
+    HUD_ACTION_CHANNEL_PREV,  //         Down / PREV
+    HUD_ACTION_CHAPTERS,      // R1: the chapter list (never in live mode)
+    HUD_ACTION_ASPECT,        // X on the picture-shape chip: Fit -> Fill -> Stretch
 } HudAction;
 
 // A skippable segment is on screen.  While it is and the bar is hidden, X
@@ -55,6 +59,23 @@ void      hud_set_cc_active(bool active);
 
 // Item title — shown top-left while playback is paused.
 void      hud_set_title(const char *title);
+
+// Live TV.  A live HUD has no seek bar and no seek keys: the bar shows how far
+// through the current programme it is, Up/Down and NEXT/PREV change channel.
+// `times` is "19:30 - 20:30"; permille < 0 = no programme data (no bar fill).
+void      hud_set_live(bool live);
+void      hud_set_live_programme(const char *title, const char *times, int permille);
+// The channel banner: two lines top-left, until `until_us` (timing_get_us()).
+// Shows the HUD.
+void      hud_set_banner(const char *line1, const char *line2, u64 until_us);
+
+// Put the bar away at once (the auto-hide does it after a few seconds).
+void      hud_hide(void);
+
+// The picture-size readout: the banner box alone, with no bar, until
+// hud_clear_picture_banner().  It needs the redesigned HUD (spine gate).
+void      hud_set_picture_banner(const char *line1, const char *line2);
+void      hud_clear_picture_banner(void);
 
 // Open a popup menu above the control bar (e.g. track selection).  The HUD
 // copies the item POINTERS only — the strings must outlive the menu.

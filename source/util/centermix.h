@@ -90,6 +90,7 @@ void          centermix_save(void);
 center_mode_t centermix_get(void);
 void          centermix_set(center_mode_t m);
 void          centermix_cycle(void);
+void          centermix_step(int dir);    // either way round (+1 / -1), saved once
 const char   *centermix_label(void);
 
 // True when the mode would change the samples — lets the caller skip the

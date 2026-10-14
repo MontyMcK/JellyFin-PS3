@@ -1,9 +1,14 @@
 #define MINIMP3_IMPLEMENTATION
+#include "audio_bitstream.h"
 #include "minimp3.h"
 #include "adec.h"
 #include "adec_ac3.h"
 #include "adec_dts.h"
 #include "adec_truehd.h"
+#include "adec_aac.h"
+#include "adec_flac.h"
+#include "adec_pcm.h"
+#include "resample.h"
 #include "audio.h"           // audio_output_channels() — port width drives ring width
 #include "plog.h"
 #include "timing.h"      // timing_get_us() — decode-cost telemetry
@@ -105,6 +110,7 @@ static sys_mutex_t      s_pcm_mtx;
 //   then advanced by N*1000000/48000 per decoded frame batch.
 // s_read_pts_us: stream PTS (us) of the read cursor — initialised to the first
 //   valid PES PTS, then advanced inside adec_read_pcm() as samples are consumed.
+static u64  s_pts_origin_us   = 0;      // local files: taken off every PES PTS (adec_set_pts_origin_us)
 static u64  s_next_pcm_pts_us = 0;
 static u64  s_read_pts_us     = 0;
 static bool s_pts_valid       = false;
@@ -215,6 +221,36 @@ static void push_samples(const short *pcm, int n, int channels) {
     sysMutexUnlock(s_pcm_mtx);
 }
 
+// An MP3 frame at its own rate (a file on a drive; the server is asked for 48 kHz): converted to the
+// port's before it is pushed.  The ring is two wide on this path.
+static Resampler *s_mp3_rs   = NULL;
+static int        s_mp3_rate = 0;
+
+static void mp3_drop_resampler(void) {
+    if (s_mp3_rs) { resample_close(s_mp3_rs); s_mp3_rs = NULL; }
+    s_mp3_rate = 0;
+}
+
+static void push_mp3(const short *pcm, int n, int channels, int hz) {
+    if (hz == 48000 || hz <= 0 || !resample_rate_supported(hz)) { push_samples(pcm, n, channels); return; }
+    if (!s_mp3_rs || s_mp3_rate != hz) {
+        mp3_drop_resampler();
+        s_mp3_rs = resample_open(hz, 2);
+        s_mp3_rate = hz;
+        if (!s_mp3_rs) { push_samples(pcm, n, channels); return; }
+    }
+    static float in[1152 * 2];
+    static float out[8192 * 2];                  // 1152 frames from 8 kHz make 6912, and the filter's tail
+    if (n > 1152) n = 1152;
+    for (int i = 0; i < n; i++) {
+        const float l = pcm[i * channels] * (1.0f / 32768.0f);
+        in[i * 2]     = l;
+        in[i * 2 + 1] = channels >= 2 ? pcm[i * channels + 1] * (1.0f / 32768.0f) : l;
+    }
+    const int made = resample_process(s_mp3_rs, in, n, out, 8192);
+    if (made > 0) adec_push_frames(out, made);
+}
+
 // Surround path (AC-3, DTS) — s_ring_ch-wide float frames, already in PS3
 // channel order (adec_ac3.cpp/ac3_map.c, adec_dts.cpp/dts_map.c).  Same
 // overflow policy and PTS advance as push_samples(); the two differ only in
@@ -253,9 +289,13 @@ void adec_push_frames(const float *frames, int n) {
 }
 
 // Hand elementary-stream bytes to whichever decoder currently owns the ring.
-static void adec_decode_es(const u8 *es, int len) {
+// head: the first chunk of a PES (a continuation chunk is the tail of the one before)
+static void adec_decode_es(const u8 *es, int len, bool head) {
     if (len <= 0) return;
     if (s_codec == ADEC_CODEC_AC3) { adec_ac3_decode_payload(es, len); return; }
+    if (s_codec == ADEC_CODEC_AAC) { adec_aac_decode_payload(es, len); return; }
+    if (s_codec == ADEC_CODEC_FLAC) { adec_flac_decode_payload(es, len); return; }
+    if (s_codec == ADEC_CODEC_PCM) { adec_pcm_decode_payload(es, len, head); return; }
     if (s_codec == ADEC_CODEC_DTS) { adec_dts_decode_payload(es, len); return; }
     if (s_codec == ADEC_CODEC_TRUEHD) {
         adec_truehd_decode_payload(es, len);
@@ -275,7 +315,7 @@ static void adec_decode_es(const u8 *es, int len) {
                          info.hz, info.channels, samples);
                 plog(fbuf);
             }
-            push_samples(pcm, samples, info.channels);
+            push_mp3(pcm, samples, info.channels, info.hz);
         }
         es  += info.frame_bytes;
         len -= info.frame_bytes;
@@ -285,14 +325,21 @@ static void adec_decode_es(const u8 *es, int len) {
 // cont = this buffer is a continuation chunk of the previous PES: raw ES
 // bytes, no header to strip and no PTS to read (adec_push_pes).
 static void adec_decode_pes(const u8 *pes, int pes_len, bool cont) {
+    // A local file entered part way: sound that comes before the entry point (the muxer runs
+    // audio ahead of the picture) is dropped, with the rest of its PES.  Clamped to 0 instead it
+    // would read as "no PTS" (audio_get_clock_us) and its time would run ahead of the picture's.
+    static bool s_skip_cont = false;
     if (cont) {
-        adec_decode_es(pes, pes_len);
+        if (!s_skip_cont) adec_decode_es(pes, pes_len, false);
         return;
     }
+    s_skip_cont = false;
     // Seed the write PTS from this packet's header.  On the very first valid PTS,
     // also initialise the read cursor so both cursors start from a coherent origin.
     u64 pes_pts_us;
     if (parse_pes_pts(pes, pes_len, &pes_pts_us)) {
+        if (pes_pts_us < s_pts_origin_us) { s_skip_cont = true; return; }
+        pes_pts_us -= s_pts_origin_us;
         sysMutexLock(s_pcm_mtx, 0);
         s_next_pcm_pts_us = pes_pts_us;
         if (!s_pts_valid) {
@@ -311,7 +358,7 @@ static void adec_decode_pes(const u8 *pes, int pes_len, bool cont) {
     if (pes[0] || pes[1] || pes[2] != 0x01) return;
     int hdr  = 9 + pes[8];
     if (hdr >= pes_len) return;
-    adec_decode_es(pes + hdr, pes_len - hdr);
+    adec_decode_es(pes + hdr, pes_len - hdr, true);
 }
 
 // Enqueue one chunk.  Caller holds s_pes_mtx.
@@ -466,9 +513,13 @@ void adec_flush(void) {
     sysMutexUnlock(s_pes_mtx);
     sysMutexLock(s_pcm_mtx, 0);
     mp3dec_init(&s_dec);
+    if (s_mp3_rs) resample_reset(s_mp3_rs);
     adec_ac3_reset();   // drop the partial-frame carry; codec choice survives
     adec_dts_reset();   // ditto for DTS (also clears a pending ext-substream skip)
     adec_truehd_reset();// ditto for TrueHD (also drops the major-sync lock)
+    adec_aac_reset();   // ditto for AAC (the decoder's overlap and the resampler's history)
+    adec_flac_reset();  // FLAC and PCM: the carry goes, and the next PES brings the header again
+    adec_pcm_reset();
     s_wr = s_rd = s_n = 0;
     s_next_pcm_pts_us = s_read_pts_us = 0;
     s_pts_valid = false;
@@ -495,6 +546,10 @@ void adec_stop(void) {
     adec_ac3_close();
     adec_dts_close();
     adec_truehd_close();
+    adec_aac_close();
+    adec_flac_close();
+    adec_pcm_close();
+    mp3_drop_resampler();
     s_codec   = ADEC_CODEC_MP3;
     s_ring_ch = 2;
     crash_log("adx5 adec_stop done");
@@ -531,9 +586,14 @@ static const char *adec_codec_name(adec_codec_t c) {
     case ADEC_CODEC_AC3: return "ac3";
     case ADEC_CODEC_DTS:    return "dts";
     case ADEC_CODEC_TRUEHD: return "truehd";
+    case ADEC_CODEC_AAC:    return "aac";
+    case ADEC_CODEC_FLAC:   return "flac";
+    case ADEC_CODEC_PCM:    return "pcm";
     default:                return "mp3";
     }
 }
+
+void adec_set_pts_origin_us(u64 us) { s_pts_origin_us = us; }
 
 void adec_set_codec(adec_codec_t codec) {
     // Ring width for the surround codecs follows the port that is actually
@@ -544,7 +604,16 @@ void adec_set_codec(adec_codec_t codec) {
     const int  port_ch   = audio_output_channels();
     const bool wide_port = port_ch >= 6;
     int want_ch = 2;
-    if (codec == ADEC_CODEC_AC3 || codec == ADEC_CODEC_DTS)
+    // Passthrough carries AC-3 only.  Anything else arriving on a bitstream
+    // wire would be sent as garbage, so hand the output back to LPCM and
+    // decode it (in stereo: the port was opened 2-wide for passthrough).
+    if (audio_passthrough_active() && codec != ADEC_CODEC_AC3) {
+        plog("adec_set_codec: passthrough needs AC-3, reverting output to LPCM");
+        audio_bitstream_end();
+    }
+    adec_ac3_set_passthrough(codec == ADEC_CODEC_AC3 && audio_passthrough_active());
+    if (codec == ADEC_CODEC_AC3 || codec == ADEC_CODEC_DTS || codec == ADEC_CODEC_AAC ||
+        codec == ADEC_CODEC_FLAC || codec == ADEC_CODEC_PCM)
         want_ch = wide_port ? 6 : 2;
     else if (codec == ADEC_CODEC_TRUEHD)
         // Never decode WIDER than the port actually is.  The port is now
@@ -563,6 +632,9 @@ void adec_set_codec(adec_codec_t codec) {
     if (codec != ADEC_CODEC_AC3)    adec_ac3_close();
     if (codec != ADEC_CODEC_DTS)    adec_dts_close();
     if (codec != ADEC_CODEC_TRUEHD) adec_truehd_close();
+    if (codec != ADEC_CODEC_AAC)    adec_aac_close();
+    if (codec != ADEC_CODEC_FLAC)   adec_flac_close();
+    if (codec != ADEC_CODEC_PCM)    adec_pcm_close();
 
     if (codec == ADEC_CODEC_AC3) {
         if (!adec_ac3_open(want_ch)) {
@@ -581,6 +653,24 @@ void adec_set_codec(adec_codec_t codec) {
     } else if (codec == ADEC_CODEC_TRUEHD) {
         if (!adec_truehd_open(want_ch)) {
             plog("adec_set_codec: TrueHD open failed, staying on MP3");
+            codec   = ADEC_CODEC_MP3;
+            want_ch = 2;
+        }
+    } else if (codec == ADEC_CODEC_AAC) {
+        if (!adec_aac_open(want_ch)) {
+            plog("adec_set_codec: AAC open failed, staying on MP3");
+            codec   = ADEC_CODEC_MP3;
+            want_ch = 2;
+        }
+    } else if (codec == ADEC_CODEC_FLAC) {
+        if (!adec_flac_open(want_ch)) {
+            plog("adec_set_codec: FLAC open failed, staying on MP3");
+            codec   = ADEC_CODEC_MP3;
+            want_ch = 2;
+        }
+    } else if (codec == ADEC_CODEC_PCM) {
+        if (!adec_pcm_open(want_ch)) {
+            plog("adec_set_codec: PCM open failed, staying on MP3");
             codec   = ADEC_CODEC_MP3;
             want_ch = 2;
         }

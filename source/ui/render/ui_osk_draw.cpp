@@ -1,6 +1,7 @@
 // Search tab rendering — search field, OSK (CPU key cells + RSX labels)
 // and the results list below it.
 
+#include "i18n.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -116,7 +117,7 @@ void xmb_rsx_draw_osk(void) {
             drawTTF((u32)tx, (u32)ty, disp, UIS_TF(18), XMB_TEXT);
         } else {
             if (cursor) drawTTF((u32)tx, (u32)ty, "_", UIS_TF(18), XMB_TEXT);
-            drawTTF((u32)(tx + UIS_W(14)), (u32)ty, "Search your library", UIS_TF(17),
+            drawTTF((u32)(tx + UIS_W(14)), (u32)ty, TR("Search your library"), UIS_TF(17),
                     XMB_TEXT_FAINT);
         }
     }
@@ -181,13 +182,13 @@ void xmb_rsx_draw_osk(void) {
         // whole window is indistinguishable from the search being broken --
         // which is exactly what it looked like before.
         char msg[96];
-        snprintf(msg, sizeof(msg), "Searching for \"%s\"...", g_search_buf);
+        snprintf(msg, sizeof(msg), TR("Searching for \"%s\"..."), g_search_buf);
         int mw = ttf_text_width(msg, UIS_TF(16));
         drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(10)),
                 msg, UIS_TF(16), XMB_TEXT_DIM);
     } else if (count == 0 && g_search_buf[0]) {
         char msg[96];
-        snprintf(msg, sizeof(msg), "No results for \"%s\"", g_search_buf);
+        snprintf(msg, sizeof(msg), TR("No results for \"%s\""), g_search_buf);
         int mw = ttf_text_width(msg, UIS_TF(16));
         drawTTF((u32)(((int)display_width - mw) / 2), (u32)(results_y + UIS_H(10)),
                 msg, UIS_TF(16), XMB_TEXT_FAINT);

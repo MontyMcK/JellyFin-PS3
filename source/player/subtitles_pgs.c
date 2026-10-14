@@ -53,11 +53,13 @@ static uint32_t next_segment(const uint8_t *buf, int len, uint32_t off,
     return next;
 }
 
-int pgs_build_index(const uint8_t *buf, int len, PgsIndex *out) {
-    out->n = 0;
-    if (!buf || len <= 0) return 0;
-    uint32_t off = 0;
+uint32_t pgs_index_extend(const uint8_t *buf, int len, uint32_t from, PgsIndex *out) {
+    if (!buf || len <= 0) return from;
+    uint32_t off = from;
     while (off < (uint32_t)len && out->n < PGS_MAX_EPOCHS) {
+        // a segment that is not all there yet (header or payload) is left for the next call, not half-read
+        if (off + 13 > (uint32_t)len || buf[off] != 'P' || buf[off + 1] != 'G') break;
+        if (off + 13 + rb16(buf + off + 11) > (uint32_t)len) break;
         PgsSeg seg;
         uint32_t next = next_segment(buf, len, off, &seg);
         if (next <= off) break;
@@ -72,6 +74,13 @@ int pgs_build_index(const uint8_t *buf, int len, PgsIndex *out) {
     }
     if (out->n == PGS_MAX_EPOCHS)
         logf_("pgs: index full (PGS_MAX_EPOCHS) -- later cues dropped");
+    return off;
+}
+
+int pgs_build_index(const uint8_t *buf, int len, PgsIndex *out) {
+    out->n = 0;
+    if (!buf || len <= 0) return 0;
+    pgs_index_extend(buf, len, 0, out);
     return out->n;
 }
 

@@ -14,17 +14,19 @@
 #include "hd1080.h"
 #include "vquality.h"
 #include "surround.h"
+#include "audio_bitstream.h"
 #include "track_codec.h"
 #include "ui.h"
 #include "ui_visuals.h"
 #include "rsxutil.h"
 #include "jellyfin_api.h"
 #include "jf_paths.h"
-#include "stream_budget.h"
+#include "stream_request.h"
+#include "directstream.h"
 
-// jellyfin_abudget.txt: 0 = ask for the step as VIDEO bitrate, the way every
-// build before 2026-09-24 did; missing or anything else = budget the audio
-// inside the step.  Read per request (a seek rebuilds the URL), which is rare.
+// jellyfin_abudget.txt: 0 asks for the quality step as the VIDEO bitrate;
+// missing or anything else budgets the audio inside the step.  Read per
+// request (a seek rebuilds the URL), which is rare.
 static bool stream_budget_enabled(void) {
     FILE *f = fopen(jf_data_path("jellyfin_abudget.txt"), "r");
     if (!f) return true;
@@ -40,9 +42,9 @@ static bool stream_budget_enabled(void) {
 void show_error(const char *line1, const char *line2) {
 #if !BUILD_FOR_RPCS3
     drawHeader();
-    drawText(40, 100, line1);
-    if (line2 && line2[0]) drawText(40, 130, line2);
-    drawText(40, 160, "O: back");
+    drawText(40, 100, tr(line1));
+    if (line2 && line2[0]) drawText(40, 130, tr(line2));
+    drawText(40, 160, TR("O: back"));
     flip();
 #else
     // Emulator: the bitmap-font (NV3089) glyph blits dead-lock the RSX FIFO in
@@ -95,187 +97,48 @@ const JFMediaSource *player_current_source(const PlayerState *ps) {
 // start_ticks is in Jellyfin's 100-ns units (seconds * 10,000,000).
 // The query string is otherwise identical so the server keeps the same
 // transcode session and we only change the start offset.
+//
+// The decision itself (quality ladder, copy vs transcode, HD audio copy,
+// stream indices) lives in stream/stream_request.cpp, shared with offline
+// downloads so the two can never choose differently.  This is the player's
+// adapter: its selection in, its session and offset on top.
 // -------------------------------------------------------
-// Audio/subtitle params are omitted at -1 (server default audio / no
-// subtitles).  Subtitles are burned in server-side (SubtitleMethod=Encode)
-// since the PS3 client has no subtitle renderer.
+
+void stream_prefs_current(StreamPrefs *out) {
+    out->quality     = vquality_get();
+    out->hd1080      = hd1080_enabled();
+    out->surround    = surround_enabled();
+    out->surround_hd = surround_hd_preferred();
+    out->display_w   = display_width;
+    out->display_h   = display_height;
+    out->budget      = stream_budget_enabled();
+    out->passthrough = audio_passthrough_wanted();
+    out->no_video_copy = !directstream_enabled();
+}
 
 void build_stream_url(char *url, int url_sz, const PlayerState *ps,
                       u64 start_ticks) {
-    int audio_idx = player_audio_stream_idx(ps);
-    int sub_idx   = player_sub_stream_idx(ps);
-    // 1080p (Alpha): 1080p exceeds baseline/level-3.1, so ask for a High-profile
-    // level-4.2 transcode at a higher ceiling bitrate.  Gated — OFF reproduces
-    // the exact baseline/31/4Mbps query the 720p ship path sends.
-    // Resolved through the quality row on the info screen; at its default
-    // (Auto) this is exactly the hd-toggle pair above it used to be.  Note
-    // req_w/req_h were resolved by the same call in player.cpp, so the URL
-    // and the jitter buffer cannot disagree about the frame size.
-    const bool  hd = hd1080_enabled();
-    const char *profile;
-    const char *level;
-    unsigned    vbitrate;
-    vquality_params(vquality_get(), hd, 0, 0, NULL, NULL,
-                    &profile, &level, &vbitrate);
-    // Surround 5.1 (Alpha): request an AC-3 5.1 transcode at the standard DVD
-    // rate.  Gated — OFF reproduces the exact stereo MP3 query the ship path
-    // sends.  This builder is reused by every seek (player_seek.cpp), so the
-    // codec choice is stable across seeks by construction.
-    const bool  surround = surround_enabled();
-    const char *acodec   = surround ? "ac3"    : "mp3";
-    unsigned    abitrate = surround ? 640000u  : 192000u;
-    int         achans   = surround ? 6        : 2;
-    // Surround "HD" mode: ask the server to STREAM-COPY the source's own HD
-    // audio track instead of transcoding it.  Copy is the only way either of
-    // these formats ever arrives — Jellyfin will not transcode TO them
-    // (ffmpeg's dca encoder is experimental and its truehd encoder tops out
-    // at 5.1) — and it is also the whole point:
-    //   * a DTS-HD MA / DTS:X track copied intact still carries the 5.1 core
-    //     this app decodes, at up to 1509 kbps;
-    //   * a TrueHD / Atmos track copied intact decodes here LOSSLESSLY, to
-    //     5.1 or 7.1.
-    // Either way there is no audio transcode on the server at all.
-    //
-    // Only asked for when the SELECTED track really is one of those (its
-    // label says so).  On any other track — including Dolby Digital Plus,
-    // which nothing here decodes — the request is the plain AC-3 one, which
-    // is why HD mode never plays worse than AC-3 mode.  Four knobs differ
-    // from the AC-3 request and all of them matter:
-    //   * AllowAudioStreamCopy=true — without it the server transcodes and
-    //     the "dts"/"truehd" preference lands on an encoder we do not want.
-    //   * no AudioBitrate — Jellyfin checks the requested audio bitrate
-    //     before allowing a copy, and a 1509 kbps DTS core (let alone a
-    //     multi-Mbps TrueHD stream) fails a 640 kbps ceiling, silently
-    //     demoting us to a transcode.
-    //   * MaxAudioChannels=8, not 6 — DTS-HD MA, DTS:X and TrueHD tracks are
-    //     routinely 7.1, and a 6-channel ceiling would refuse to copy them.
-    //     Copying them is right: TrueHD then plays as a real 7.1 program, and
-    //     what this app decodes out of a DTS-HD track is its 5.1 core either
-    //     way.
-    //   * ac3 is listed FIRST even though the HD codec is the one being asked
-    //     for.  Copy eligibility only asks whether the source codec appears
-    //     in the list; the order decides what an actual transcode would
-    //     encode to, and that must be ac3.
-    const char *hd_codec = NULL;
-    if (surround && surround_hd_preferred() && ps->cur_audio >= 0) {
-        const char *label = ps->tracks.audio[ps->cur_audio].label;
-        if      (track_label_is_dts(label))    hd_codec = "dts";
-        else if (track_label_is_truehd(label)) hd_codec = "truehd";
-    }
-    char aparams[128];
-    if (hd_codec) {
-        snprintf(aparams, sizeof(aparams),
-                 "&AudioCodec=ac3,%s,mp3&AudioSampleRate=48000"
-                 "&MaxAudioChannels=8", hd_codec);
-    } else {
-        snprintf(aparams, sizeof(aparams),
-                 "&AudioCodec=%s&AudioBitrate=%u&AudioSampleRate=48000"
-                 "&MaxAudioChannels=%d", acodec, abitrate, achans);
-    }
-    const char *copy_audio = hd_codec ? "true" : "false";
-    const JFMediaSource *source = player_current_source(ps);
-    const char *source_id = (source && source->id[0]) ? source->id : ps->item->id;
-    char encoded_source[288];
-    url_encode_query(source_id, encoded_source, sizeof(encoded_source));
-    // Video request.  vbitrate == 0 is DIRECT PLAY (the "Original" quality
-    // setting): ask the server to copy the source video through untouched.
-    //
-    // The ceiling has to be ABSENT, not just large.  Jellyfin checks the
-    // requested bitrate before it will allow a copy, so a 10 Mbps ask against
-    // a 30 Mbps remux does not clamp the copy -- it refuses it and re-encodes,
-    // silently. That is the same trap the HD audio path documents above for
-    // AudioBitrate, and it fails the same quiet way.
-    //
-    // MaxWidth/MaxHeight and MaxFramerate stay in both cases and act as the
-    // safety gate: a 4K or 60 fps source exceeds them, so the server scales it
-    // down rather than copying something this console cannot decode.
-    // Copy is ALWAYS permitted now, at every quality.  Jellyfin allows a copy
-    // when the source bitrate is <= the requested one, so a ceiling is a
-    // CEILING ON THE COPY, not an instruction to re-encode at that rate:
-    //
-    //   source <= ceiling -> copied untouched (full quality, no server CPU)
-    //   source >  ceiling -> transcoded to the ceiling, exactly as before
-    //
-    // Sending AllowVideoStreamCopy=false, as every mode but Original used to,
-    // forbade the copy even when the source would have fit comfortably --
-    // re-encoding an 8 Mbps file down to a 10 Mbps target for no reason. This
-    // is strictly better at every setting: it can only turn a transcode into
-    // a copy, never the reverse.
-    //
-    // The step is the WHOLE stream, not just its video (stream_budget.h): the
-    // audio that rides with it -- a lossless track copied untouched above all
-    // -- and the TS framing come out of it.  Measured 2026-09-24: a 25 Mbps
-    // step with DTS-HD MA copied put 27.6 Mbps on the wire against this
-    // console's ~25 Mbps receive ceiling, and the ring drained until the
-    // picture stalled.  jellyfin_abudget.txt = 0 puts the old request back.
-    unsigned vreq = vbitrate;
-    if (vbitrate != 0 && stream_budget_enabled()) {
-        int kind = STREAM_AUDIO_TRANSCODE;
-        unsigned reported = abitrate;
-        if (hd_codec) {
-            kind = strcmp(hd_codec, "truehd") == 0 ? STREAM_AUDIO_COPY_TRUEHD
-                                                   : STREAM_AUDIO_COPY_DTS;
-            reported = ps->tracks.audio[ps->cur_audio].bitrate;
-        }
-        const unsigned acost = stream_audio_cost(kind, reported);
-        vreq = stream_video_budget(vbitrate, acost);
+    StreamPrefs prefs;
+    stream_prefs_current(&prefs);
+    StreamSelection sel = { ps->item->id, player_current_source(ps),
+                            &ps->tracks, ps->cur_audio, ps->cur_sub,
+                            ps->sub_is_text || ps->sub_is_pgs, ps->live };
+    StreamRequest rq;
+    stream_request_resolve(&prefs, &sel, &rq);
+    // The frame ceiling the jitter buffer was allocated for at open.  A seek
+    // keeps it, so it can never ask for a different frame size.
+    rq.max_w = ps->req_w;
+    rq.max_h = ps->req_h;
+    if (rq.budgeted) {
         char lb[128];
         snprintf(lb, sizeof(lb),
                  "stream budget: step=%u video=%u audio=%u (%s, reported %u)",
-                 vbitrate, vreq, acost, hd_codec ? hd_codec : acodec, reported);
+                 rq.vbitrate, rq.vreq, rq.audio_cost,
+                 rq.hd_codec ? rq.hd_codec : rq.acodec, rq.audio_reported);
         plog(lb);
     }
-    char vparams[96];
-    if (vreq == 0)
-        snprintf(vparams, sizeof(vparams), "&AllowVideoStreamCopy=true");
-    else
-        snprintf(vparams, sizeof(vparams),
-                 "&VideoBitrate=%u&AllowVideoStreamCopy=true", vreq);
-
-    int n = snprintf(url, url_sz,
-        "%s/Videos/%s/stream.ts"
-        "?VideoCodec=h264"
-        "&Profile=%s"
-        "&Level=%s"
-        "&MaxWidth=%u&MaxHeight=%u"
-        "%s"
-        "%s"
-        "&MaxFramerate=30"
-        "&AllowAudioStreamCopy=%s"
-        "&DeviceId=%s&Static=false"
-        "&MediaSourceId=%s"
-        "&StartTimeTicks=%llu",
-        // The version's own id in the path, not the title's (2026-09-27):
-        // Gelato keeps every version as an item of its own, and asking
-        // /Videos/<title id>/stream.ts?MediaSourceId=<version> answers 404 --
-        // every play from Search, which lists the title, failed; Home lists
-        // the version and worked.  For an ordinary item the two ids are the
-        // same, and a stock Jellyfin alternate version is an item too.
-        g_server, source_id, profile, level, ps->req_w, ps->req_h, vparams,
-        aparams, copy_audio,
-        jf_device_id(), encoded_source, (unsigned long long)start_ticks);
-    if (source && source->live_stream_id[0] && n > 0 && n < url_sz) {
-        char encoded_live[288];
-        url_encode_query(source->live_stream_id, encoded_live, sizeof(encoded_live));
-        n += snprintf(url + n, url_sz - n, "&LiveStreamId=%s", encoded_live);
-    }
-    if (audio_idx >= 0 && n > 0 && n < url_sz)
-        n += snprintf(url + n, url_sz - n, "&AudioStreamIndex=%d", audio_idx);
-    // Only a subtitle this app cannot decode itself goes to the server to be
-    // burned in.  Asking for Encode forces a full video transcode, which
-    // throws away the stream-copy path and with it the source's lossless
-    // audio -- so a track drawn on-device (text via player/subtitles.cpp,
-    // or PGS via subtitles_pgs.h) must not appear in this URL at all.
-    // sub_is_text/sub_is_pgs are decided from the stream's Codec when the
-    // track is chosen; anything unrecognised (VOBSUB, or either fetch
-    // failing) counts as a bitmap and keeps the burn-in that has always
-    // worked.
-    if (sub_idx >= 0 && !ps->sub_is_text && !ps->sub_is_pgs && n > 0 && n < url_sz)
-        n += snprintf(url + n, url_sz - n,
-                      "&SubtitleStreamIndex=%d&SubtitleMethod=Encode", sub_idx);
-    if (ps->session_id[0] && n > 0 && n < url_sz) {
-        snprintf(url + n, url_sz - n, "&PlaySessionId=%s", ps->session_id);
-    }
+    stream_url_build(url, url_sz, &rq, g_server, jf_device_id(),
+                     ps->session_id, (unsigned long long)start_ticks);
 }
 
 // -------------------------------------------------------

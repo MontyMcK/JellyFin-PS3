@@ -126,3 +126,32 @@ int parse_jf_items(const char *json, JFItem *arr, int max) {
     }
     return count;
 }
+
+// -------------------------------------------------------
+// Item identity (offline downloads)
+// -------------------------------------------------------
+
+bool jellyfin_parse_item_identity(const char *json, JFItemIdentity *out) {
+    memset(out, 0, sizeof(*out));
+    out->season  = -1;
+    out->episode = -1;
+    if (!json || !json[0]) return false;
+    json_get_string(json, "SeriesName", out->series_name, sizeof(out->series_name));
+    json_get_string(json, "SeriesId",   out->series_id,   sizeof(out->series_id));
+    // The needles start with a quote, so "IndexNumber" cannot match inside
+    // "ParentIndexNumber".
+    out->season  = json_get_int(json, "ParentIndexNumber", -1);
+    out->episode = json_get_int(json, "IndexNumber", -1);
+    out->year    = json_get_int(json, "ProductionYear", 0);
+    const char *rt = strstr(json, "\"RunTimeTicks\":");
+    if (rt) {
+        rt += strlen("\"RunTimeTicks\":");
+        while (*rt == ' ') rt++;
+        unsigned long long ticks = strtoull(rt, NULL, 10);
+        out->runtime_secs = (unsigned)(ticks / 10000000ULL);
+    }
+    out->has_backdrop = strstr(json, "\"BackdropImageTags\":[\"") != NULL;
+    json_get_string(json, "ParentBackdropItemId", out->parent_backdrop_id,
+                    sizeof(out->parent_backdrop_id));
+    return true;
+}

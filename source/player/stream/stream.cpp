@@ -1,12 +1,15 @@
 #include "stream.h"
+#include "i18n.h"
 #include "plog.h"
 #include "jellyfin_api.h"
 #include "http.h"
 #include "timing.h"
 #include "jf_paths.h"
 #include "lclog.h"
+#include "rx_gap.h"
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ppu-types.h>
@@ -15,7 +18,11 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <net/poll.h>
+#include <unistd.h>
 #include <sysutil/sysutil.h>
+#include "lfs.h"        // local files: the internal disk and USB drives
+#include "local_probe.h" // local_m2ts_compact
+#include "mkv_ts.h"      // a Matroska file as MPEG-TS
 
 extern u32 running;
 
@@ -79,7 +86,7 @@ static int  s_carry_n = 0;
 // project has had to be A/B'd on hardware, and doing that over FTP costs
 // seconds where a rebuild and reinstall costs twenty minutes.
 #define SB_SIZE (256 * 1024)
-static u8   s_sb[SB_SIZE];
+static u8   s_sb[SB_SIZE] __attribute__((aligned(128)));   // 32-byte aligned: raw drive reads land in it directly
 static int  s_sb_n = 0;      // valid bytes in s_sb
 static int  s_sb_p = 0;      // read cursor
 static int  s_sb_req = 0;    // bytes to ask netRecv for; 0 until resolved
@@ -106,6 +113,11 @@ static void sb_reset(void) { s_sb_n = 0; s_sb_p = 0; }
 // Look at the socket without consuming anything: MSG_PEEK leaves every byte
 // for stream_read.  Only call this while no other thread is reading `sock`.
 void stream_probe(int sock, char *out, int outsz) {
+    if (stream_is_file(sock)) {          // a file handle is not a socket: no peek
+        snprintf(out, outsz, "file buffered=%d rx_total=%llu",
+                 s_sb_n - s_sb_p, (unsigned long long)s_rx_bytes);
+        return;
+    }
     static u8 peek[64 * 1024];
     const int n = netRecv(sock, peek, sizeof(peek), MSG_PEEK | MSG_DONTWAIT);
     const int e = n < 0 ? net_errno : 0;
@@ -137,11 +149,151 @@ static int netcfg_kb(const char *name, int def_kb, int max_kb) {
 // Refill when empty.  Returns bytes available (>0), 0 if the peer closed, or
 // -1 on receive timeout -- the same three outcomes netRecv gave the old code,
 // so the carry/resume logic above is unchanged.
+// The open local file (offline playback, a USB drive), or -1 when streaming a socket.
+// One stream at a time is all this module has ever supported (every piece
+// of its state is static); a file is simply the other kind of source.
+enum { FILE_TS, FILE_M2TS, FILE_MKV };
+static int      s_file_h   = -1;       // an lfs handle (a TS or an m2ts); -1 for a Matroska source and for a socket
+static int      s_file_kind = FILE_TS;
+static uint64_t s_file_pos = 0;        // where the next read of it starts (TS offsets, also for an m2ts)
+static int      s_file_err = 0;        // the lfs error that ended the last read, 0 = a clean end
+
+// A Matroska source: the parsed file is kept for the session (a seek or an audio change reopens
+// the TS view at another key frame, it does not parse the file again), the TS view per open.
+static MkvFile s_mkv;
+static bool    s_mkv_open = false;
+static int     s_mkv_h    = -1;
+static char    s_mkv_path[256];
+static MkvTs  *s_mkv_ts   = NULL;
+
+static bool file_active(void) { return s_file_h >= 0 || s_mkv_ts != NULL; }
+
+// Takes the lfs read of the Matroska parser; remembers why a read failed so a pulled drive is told apart.
+static int mkv_lfs_read(void *ctx, uint64_t off, uint8_t *buf, int len) {
+    const int got = lfs_read(*(const int *)ctx, off, buf, (uint32_t)len);
+    if (got < 0) { s_file_err = got; return -1; }
+    return got;
+}
+
+// What the open source holds, closed: the stream of a file, not the parsed Matroska file.
+static void file_close_stream(void) {
+    if (s_mkv_ts) { mkv_ts_close(s_mkv_ts); s_mkv_ts = NULL; }
+    if (s_file_h >= 0) { lfs_close(s_file_h); s_file_h = -1; }
+}
+
+// Receive window (see stream_open): the run starts at WIN_KB_FAST and falls
+// back to WIN_KB_SAFE for good once a connection shows sender backoff.
+#define WIN_KB_FAST 512
+#define WIN_KB_SAFE 128
+static int          s_win_kb          = 0;      // what the open socket asked for
+static bool         s_win_fixed       = false;  // jellyfin_rcvbuf.txt set it
+static int          s_win_fallback_kb = 0;      // 0 until a backoff is seen
+static volatile int s_win_reopen      = 0;      // the player should reopen
+static RxGap        s_gap;
+static bool         s_gap_fired       = false;
+
+static void gap_note(u64 t0, u64 t1, int n) {
+    if (s_gap_fired || file_active()) return;
+    if (!rx_gap_note(&s_gap, t0, t1, n)) return;
+    s_gap_fired = true;
+    if (s_win_fixed || s_win_kb <= WIN_KB_SAFE) {
+        lc_logf("stream: %llu KB then %llu ms of silence (window %d KB, %s)",
+                (unsigned long long)(s_gap.bytes / 1024),
+                (unsigned long long)((t1 - s_gap.run_start) / 1000), s_win_kb,
+                s_win_fixed ? "fixed by jellyfin_rcvbuf.txt" : "already the small one");
+        return;
+    }
+    lc_logf("stream: %llu KB then %llu ms of silence at a %d KB window: the sender "
+            "is backing off -- %d KB for the rest of this run, reopening",
+            (unsigned long long)(s_gap.bytes / 1024),
+            (unsigned long long)((t1 - s_gap.run_start) / 1000), s_win_kb, WIN_KB_SAFE);
+    s_win_fallback_kb = WIN_KB_SAFE;
+    s_win_reopen = 1;
+}
+
+bool stream_window_reopen_pending(void) { return s_win_reopen != 0; }
+bool stream_window_reopen_take(void) {
+    if (!s_win_reopen) return false;
+    s_win_reopen = 0;
+    return true;
+}
+
+// Receive pacing.  A capture on 2026-10-12 (pktmon on the server PC, gigabit
+// Ethernet) showed what the burst-and-silence pattern is: while the reader
+// pulls as fast as it can -- the pre-roll, or refilling an empty ring -- the
+// window stays wide open, the sender puts a full window on the wire at line
+// rate, a segment is lost, and the retransmission is lost too, so the sender
+// backs off 0.6, 1.2, 2.4, ~5 s.  It happened at 512, 128 and 48 KB windows.
+// The same connection never lost a segment once playback was the reader's
+// pace (ring full): the window sat near zero and every send was a small
+// step clocked by our reads.
+//
+// So the reader keeps that pace itself.  It never pulls faster than
+// s_pace_bps, in requests of at most PACE_CHUNK, which keeps the advertised
+// window small and the sender ACK-clocked.  The sleep happens OUTSIDE netRecv,
+// so rx_gap (which only counts time blocked in netRecv) does not mistake it
+// for a silent sender.  jellyfin_rxpace.txt (Mbps, 0 = off) overrides it.
+#define PACE_MBPS_DEF 0     // off unless jellyfin_rxpace.txt asks; it did not cure the stalls
+#define PACE_CHUNK    (64 * 1024)
+#define PACE_BURST    (128 * 1024)
+static u64 s_pace_bps   = 0;   // bytes per second, 0 = unpaced
+static u64 s_pace_t0    = 0;   // when this connection's budget started
+static u64 s_pace_bytes = 0;   // bytes received since s_pace_t0
+
+static void pace_reset(int mbps) {
+    s_pace_bps   = mbps > 0 ? (u64)mbps * 1000000ull / 8ull : 0;
+    s_pace_t0    = 0;
+    s_pace_bytes = 0;
+}
+
+// Sleep until the budget allows another read.
+static void pace_wait(void) {
+    if (!s_pace_bps) return;
+    const u64 now = timing_get_us();
+    if (!s_pace_t0) { s_pace_t0 = now; return; }
+    const u64 allowed = (now - s_pace_t0) * s_pace_bps / 1000000ull + PACE_BURST;
+    if (s_pace_bytes <= allowed) return;
+    u64 us = (s_pace_bytes - allowed) * 1000000ull / s_pace_bps;
+    if (us > 200000) us = 200000;
+    usleep((useconds_t)us);
+}
+
 static int sb_fill(int sock) {
     if (s_sb_p < s_sb_n) return s_sb_n - s_sb_p;
     s_sb_p = s_sb_n = 0;
+    if (file_active()) {
+        // Local file: the same buffer, filled from the disk.  A file never
+        // times out; its end is the stream's end (0 = "closed"), and so is a
+        // read error, which stream_file_removed() then tells apart.
+        int got;
+        if (s_file_kind == FILE_MKV) {
+            got = mkv_ts_read(s_mkv_ts, s_sb, SB_SIZE);
+            if (got < 0 && !s_file_err) s_file_err = LFS_E_IO;
+            if (got <= 0) return 0;
+            s_rx_bytes += (u64)got;
+            s_sb_n = got;
+            return s_sb_n;
+        }
+        if (s_file_kind == FILE_M2TS) {
+            // whole 192-byte packets, stripped in place to 188; positions count in the stripped stream
+            got = lfs_read(s_file_h, s_file_pos / 188u * 192u, s_sb, SB_SIZE / 192 * 192);
+            if (got <= 0) { s_file_err = got < 0 ? got : 0; return 0; }
+            got = local_m2ts_compact(s_sb, got);
+        } else {
+            got = lfs_read(s_file_h, s_file_pos, s_sb, SB_SIZE);
+            if (got <= 0) { s_file_err = got < 0 ? got : 0; return 0; }
+        }
+        if (got == 0) return 0;                      // a partial packet at the end of the file
+        s_file_pos += (uint64_t)got;
+        s_rx_bytes += (u64)got;
+        s_sb_n = got;
+        return s_sb_n;
+    }
+    pace_wait();
+    int req = s_sb_req ? s_sb_req : SB_SIZE;
+    if (s_pace_bps && req > PACE_CHUNK) req = PACE_CHUNK;
     u64 t0 = timing_get_us();
-    int n = netRecv(sock, s_sb, s_sb_req ? s_sb_req : SB_SIZE, 0);
+    int n = netRecv(sock, s_sb, req, 0);
     u64 dt = timing_get_us() - t0;
     s_rx_wait_us += dt;
     s_rx_calls++;
@@ -162,8 +314,10 @@ static int sb_fill(int sock) {
             }
         }
     }
+    gap_note(t0, t0 + dt, n > 0 ? n : 0);
     if (n <= 0) return n;
     s_rx_bytes += (u64)n;
+    s_pace_bytes += (u64)n;
     if (dt > 50000) {
         char lb[64];
         snprintf(lb, sizeof(lb), "net_stall: %llums bytes=%d",
@@ -196,10 +350,39 @@ static int sb_read(int sock, u8 *dst, int want) {
 // Why the last stream_open() failed, for the error screen: "Stream connection
 // failed" alone cannot tell a refused connection from a server that answered
 // 400 because the MediaSourceId was wrong, and those need different fixes.
-static char s_last_error[64] = "";
+static char s_last_error[64] = "";      // English: logged, and read by the logic that looks for "Cancelled"
+static char s_last_error_ui[128] = "";  // the same message in the interface language, for the error screen
+
+static void clear_err(void) { s_last_error[0] = '\0'; s_last_error_ui[0] = '\0'; }
+
+// The English into s_last_error and, formatted from the translated format string, into s_last_error_ui.
+// Each call wraps its format in the TRN marker, which is how tools/i18n.py finds it.
+static void set_err(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void set_err(const char *fmt, ...) {
+    va_list ap, ap2;
+    va_start(ap, fmt);
+    va_copy(ap2, ap);
+    vsnprintf(s_last_error, sizeof s_last_error, fmt, ap);
+    vsnprintf(s_last_error_ui, sizeof s_last_error_ui, tr(fmt), ap2);
+    va_end(ap2);
+    va_end(ap);
+}
+
+static unsigned s_hdr_deadline_secs = 0;
+void stream_set_header_deadline(unsigned secs) { s_hdr_deadline_secs = secs; }
 
 int stream_open(const char *url) {
+    const u64 hdr_deadline_us = s_hdr_deadline_secs
+        ? (u64)s_hdr_deadline_secs * 1000000ULL : STREAM_HDR_DEADLINE_US;
+    s_hdr_deadline_secs = 0;
+    file_close_stream();
     const char *p = url;
+    if (strncmp(p, "https://", 8) == 0) {
+        // The API works over TLS; the video socket path does not (see
+        // net/https_client.h).  Say so instead of connecting in plaintext.
+        plog("stream: https:// servers cannot be streamed -- use http:// for playback");
+        return -1;
+    }
     if (strncmp(p, "http://", 7) == 0) p += 7;
 
     char host[256]; int port = 8096; char path[512];
@@ -228,28 +411,47 @@ int stream_open(const char *url) {
     // negotiated in the SYN, so raising the buffer afterwards cannot widen the
     // window beyond 64 KB.
     {
-        // 512 KB.  It was briefly cut to 128 to match libnet's pool, on the
-        // reasoning that asking for four times the whole shared pool was
-        // incoherent and that Movian asks for exactly 128 here on this same
-        // console (net_psl1ght.c) while its POSIX backend asks for 192.
-        // Sound reasoning. Wrong answer -- measured back to back at 1080p 25,
-        // same film:
-        //
-        //             net median   frames on time   heartbeats with ring empty
-        //   128 KB      24.7 Mbps        81%                  15%
-        //   512 KB      31.1 Mbps        97%                   0%
-        //
-        // So the request is not clamped to the pool in any way that helps,
-        // and a larger one measurably wins. Borrowing a constant from another
-        // project is reasoning, not measurement; this is the measurement.
+        // Which window depends on how the SERVER reaches the network, which
+        // the console cannot see (docs/network-notes.md):
+        //  - 512 KB is measurably faster when the sender is paced, e.g. a
+        //    server on Wi-Fi (31 vs 25 Mbps against 128 KB).
+        //  - From a gigabit wired sender, 512 KB lets it put more in flight
+        //    than libnet's 128 KB pool can hold.  One drop and the segments
+        //    queued behind the hole use up the pool, the retransmission that
+        //    would fill it is dropped too, and the stream sits through the
+        //    sender's doubling backoff: ~1.7 MB bursts every 6-9 s.
+        // So every run starts at 512 and, the first time a connection shows
+        // that backoff (rx_gap.h), drops to 128 -- Movian's value on this
+        // console -- for the rest of the run, and the player reopens at the
+        // same position.  A new run tries 512 again, so a server that moves
+        // between Wi-Fi and Ethernet gets the right one either way.
         //
         // getsockopt reports the request rather than what is funded, so this
-        // cannot be settled by reading it back -- hence the knob
-        // (jellyfin_rcvbuf.txt, in KB) rather than another guess.
-        int rb = netcfg_kb("jellyfin_rcvbuf.txt", 512, 2048) * 1024;
+        // cannot be settled by reading it back.  jellyfin_rcvbuf.txt (KB)
+        // fixes the window and turns the fallback off.
+        const int knob_kb = netcfg_kb("jellyfin_rcvbuf.txt", 0, 2048);
+        s_win_fixed = knob_kb > 0;
+        s_win_kb    = s_win_fixed ? knob_kb
+                    : (s_win_fallback_kb ? s_win_fallback_kb : WIN_KB_FAST);
+        int rb = s_win_kb * 1024;
+        rx_gap_reset(&s_gap);           // a new connection: nothing seen yet
+        s_gap_fired  = false;
+        s_win_reopen = 0;
         setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rb, sizeof(rb));
         s_sb_req = netcfg_kb("jellyfin_netbuf.txt", SB_SIZE / 1024,
                              SB_SIZE / 1024) * 1024;
+        {
+            // 0 in the file turns pacing off; absent = the default.
+            int mbps = PACE_MBPS_DEF;
+            FILE *pf = fopen(jf_data_path("jellyfin_rxpace.txt"), "r");
+            if (pf) {
+                int v = -1;
+                if (fscanf(pf, "%d", &v) == 1 && v >= 0) mbps = v > 1000 ? 1000 : v;
+                fclose(pf);
+            }
+            pace_reset(mbps);
+            lc_logf("stream: rx pacing %d Mbps (window %d KB)", mbps, s_win_kb);
+        }
     }
 
     struct sockaddr_in addr;
@@ -261,8 +463,7 @@ int stream_open(const char *url) {
     addr.sin_addr.s_addr = htonl((na<<24)|(nb<<16)|(nc<<8)|nd);
 
     if (netConnect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        snprintf(s_last_error, sizeof(s_last_error),
-                 "Could not connect to %s:%d", host, port);
+        set_err(TRN("Could not connect to %s:%d"), host, port);
         netClose(sock); return -1;
     }
 
@@ -317,8 +518,7 @@ int stream_open(const char *url) {
         }
         if (n == 0) {
             plog("stream_open: closed before headers");
-            snprintf(s_last_error, sizeof(s_last_error),
-                     "Server closed the connection");
+            set_err(TRN("Server closed the connection"));
             netClose(sock); return -1;
         }
         // n < 0: receive timeout — the server hasn't started responding yet.
@@ -330,17 +530,16 @@ int stream_open(const char *url) {
         // Let the caller keep the screen alive and offer a way out.
         if (s_wait_cb && !s_wait_cb((unsigned)((now - hdr_t0) / 1000ULL))) {
             plog("stream_open: cancelled by user");
-            snprintf(s_last_error, sizeof(s_last_error),
-                     "Cancelled while waiting for the server");
+            set_err(TRN("Cancelled while waiting for the server"));
             netClose(sock); return -1;
         }
-        if (now - hdr_t0 >= STREAM_HDR_DEADLINE_US) {
+        if (now - hdr_t0 >= hdr_deadline_us) {
             plog("stream_open: header timeout");
             // Two minutes with no headers usually means the server is still
             // grinding on the transcode — a 4K HEVC source re-encoded to
             // H.264 is the classic case.
-            snprintf(s_last_error, sizeof(s_last_error),
-                     "Server did not respond in 120s (still transcoding?)");
+            set_err(TRN("Server did not respond in %us (still transcoding?)"),
+                    (unsigned)(hdr_deadline_us / 1000000ULL));
             netClose(sock); return -1;
         }
         if (now - hdr_log_us >= 5000000ULL) {
@@ -388,17 +587,159 @@ int stream_open(const char *url) {
         plog(buf);
     }
     if (status != 200) {
-        snprintf(s_last_error, sizeof(s_last_error), "Server returned HTTP %d",
-                 status);
+        set_err(TRN("Server returned HTTP %d"), status);
         netClose(sock); return -1;
     }
 
-    s_last_error[0] = '\0';
+    clear_err();
     return sock;
+}
+
+// -------------------------------------------------------------------------
+// Local files (offline playback)
+// -------------------------------------------------------------------------
+
+#define STREAM_FILE_TAG 0x40000000   // lv2 socket ids are small; never this
+
+bool stream_is_file(int h) { return h >= 0 && (h & STREAM_FILE_TAG) != 0; }
+bool stream_file_removed(void) { return s_file_err == LFS_E_REMOVED; }
+
+// The state every file source starts from: no chunking, no carried packet, an empty buffer.
+static void file_stream_reset(int kind) {
+    s_file_kind    = kind;
+    s_file_err     = 0;
+    s_chunked      = false;
+    s_chunk_remain = -1;
+    s_chdr_n       = 0;
+    s_ctrail       = 0;
+    s_carry_n      = 0;
+    sb_reset();
+    clear_err();
+}
+
+static int file_open_at(const char *path, u64 offset, int kind) {
+    file_close_stream();
+    const int fd = lfs_open(path);
+    if (fd < 0) {
+        set_err(fd == LFS_E_REMOVED ? TRN("The drive was removed") : TRN("Could not open the file"));
+        return -1;
+    }
+    // an m2ts offset counts in the stripped stream: 188 of every 192 bytes
+    const uint64_t at = kind == FILE_M2TS ? offset / 188u * 192u : offset;
+    if (at > lfs_size(fd)) {
+        lfs_close(fd);
+        set_err(TRN("Could not seek the file"));
+        return -1;
+    }
+    s_file_h   = fd;
+    s_file_pos = offset;
+    file_stream_reset(kind);
+    char b[96];
+    snprintf(b, sizeof(b), "stream_open_file: fd=%d offset=%llu%s", (int)fd,
+             (unsigned long long)offset, kind == FILE_M2TS ? " (m2ts)" : "");
+    plog(b);
+    return (int)(STREAM_FILE_TAG | (u32)fd);
+}
+
+int stream_open_file(const char *path, u64 offset) { return file_open_at(path, offset, FILE_TS); }
+int stream_open_m2ts(const char *path, u64 ts_offset) { return file_open_at(path, ts_offset, FILE_M2TS); }
+
+int stream_open_mkv(const char *path, int video_track, int audio_track, int sub_track, MkvSubSink sub_sink,
+                    void *sub_ctx, u64 start_ns, u64 *actual_start_ns) {
+    file_close_stream();
+    if (s_mkv_open && strcmp(path, s_mkv_path) != 0) stream_local_release();
+    if (!s_mkv_open) {
+        const int fd = lfs_open(path);
+        if (fd < 0) {
+            set_err(fd == LFS_E_REMOVED ? TRN("The drive was removed") : TRN("Could not open the file"));
+            return -1;
+        }
+        s_file_err = 0;
+        s_mkv_h = fd;
+        if (mkv_open(&s_mkv, mkv_lfs_read, &s_mkv_h, lfs_size(fd)) != 0) {
+            if (s_file_err == LFS_E_REMOVED)  set_err(TRN("The drive was removed"));
+            else if (s_mkv.err[0])            set_err("%s", s_mkv.err);
+            else                              set_err(TRN("Could not read the Matroska file"));
+            lfs_close(fd);
+            s_mkv_h = -1;
+            return -1;
+        }
+        s_mkv_open = true;
+        snprintf(s_mkv_path, sizeof(s_mkv_path), "%s", path);
+    }
+    file_stream_reset(FILE_MKV);
+    char why[64] = "";
+    s_mkv_ts = mkv_ts_open_subs(&s_mkv, video_track, audio_track, sub_track, sub_sink, sub_ctx, start_ns, actual_start_ns,
+                                why, sizeof why);
+    if (!s_mkv_ts) {
+        if (s_file_err == LFS_E_REMOVED)  set_err(TRN("The drive was removed"));
+        else if (why[0])                  set_err("%s", why);
+        else                              set_err(TRN("Could not start the Matroska file"));
+        return -1;
+    }
+    char b[96];
+    snprintf(b, sizeof(b), "stream_open_mkv: v=%d a=%d start=%llums", video_track, audio_track,
+             (unsigned long long)(actual_start_ns ? *actual_start_ns / 1000000ULL : 0));
+    plog(b);
+    return (int)(STREAM_FILE_TAG | (u32)s_mkv_h);
+}
+
+void stream_local_release(void) {
+    file_close_stream();
+    if (s_mkv_open) {
+        mkv_close(&s_mkv);
+        s_mkv_open = false;
+    }
+    if (s_mkv_h >= 0) { lfs_close(s_mkv_h); s_mkv_h = -1; }
+    s_mkv_path[0] = '\0';
+    mkv_ts_release();
+}
+
+void stream_close(int h) {
+    if (stream_is_file(h)) {
+        file_close_stream();         // a Matroska file stays parsed until stream_local_release
+        sb_reset();
+        return;
+    }
+    if (h >= 0) netClose(h);
+}
+
+void stream_set_timeout(int h, u32 usec) {
+    if (stream_is_file(h)) return;    // a file never waits on anyone
+    // jellyfin_rcvtimeo.txt (microseconds) overrides the caller's value.
+    // A capture on 2026-10-12 showed the console's network going quiet for
+    // ~10 s at a time only while the reader sat in netRecv timing out every
+    // 5 ms; this lets that be A/B'd over FTP without a rebuild.
+    {
+        FILE *f = fopen(jf_data_path("jellyfin_rcvtimeo.txt"), "r");
+        if (f) {
+            int v = 0;
+            if (fscanf(f, "%d", &v) == 1 && v >= 1000 && v <= 2000000) usec = (u32)v;
+            fclose(f);
+        }
+        lc_logf("stream: receive timeout %u us", (unsigned)usec);
+    }
+    // The lv2 call takes a 16-byte struct timeval; any smaller layout is
+    // silently ignored and reads then block for seconds.
+    struct timeval tv;
+    tv.tv_sec  = usec / 1000000u;
+    tv.tv_usec = usec % 1000000u;
+    netSetSockOpt(h, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
+
+u8 *stream_scratch(int *cap) {
+    // Free exactly when nothing is being streamed: before an open, and
+    // during a seek (the old stream is closed first).
+    *cap = SB_SIZE;
+    return s_sb;
 }
 
 const char *stream_last_error(void) {
     return s_last_error[0] ? s_last_error : "Could not reach the server";
+}
+
+const char *stream_last_error_ui(void) {
+    return s_last_error_ui[0] ? s_last_error_ui : TR("Could not reach the server");
 }
 
 // Stash the partial packet so the next call resumes instead of losing bytes.
@@ -423,7 +764,10 @@ static int stream_save_carry(const u8 *buf, int got) {
 bool stream_readable(int sock, int timeout_ms) {
     if (s_carry_n > 0 || s_sb_p < s_sb_n) return true;
     struct pollfd pfd; pfd.fd = sock; pfd.events = POLLIN; pfd.revents = 0;
-    return netPoll(&pfd, 1, timeout_ms) != 0;     // < 0: let the read report it
+    const u64 t0 = timing_get_us();
+    const int r = netPoll(&pfd, 1, timeout_ms);   // < 0: let the read report it
+    if (r == 0) gap_note(t0, timing_get_us(), 0); // waited, nothing came
+    return r != 0;
 }
 
 int stream_read(int sock, u8 *buf, int size) {

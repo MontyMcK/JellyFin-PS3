@@ -15,6 +15,28 @@
 #include "plog.h"
 #endif
 
+// The cue tables are written by the decode thread when the file is a local one (cues arrive as it reads the
+// file, subs_local_*) and read by the render thread: one mutex, taken by everything that touches them.  The host
+// test (JF_SUBTITLES_TEST) is single-threaded.
+#ifdef JF_SUBTITLES_TEST
+#define SUB_LOCK()   ((void)0)
+#define SUB_UNLOCK() ((void)0)
+static void sub_lock_init(void) {}
+#else
+#include <sys/mutex.h>
+static sys_mutex_t s_sub_mtx;
+static bool        s_sub_mtx_ok = false;
+// Created on first use, by subs_clear() at the start of a playback, before any second thread has cues to write.
+static void sub_lock_init(void) {
+    if (s_sub_mtx_ok) return;
+    sys_mutex_attr_t attr;
+    sysMutexAttrInitialize(attr);
+    if (sysMutexCreate(&s_sub_mtx, &attr) == 0) s_sub_mtx_ok = true;
+}
+#define SUB_LOCK()   do { if (s_sub_mtx_ok) sysMutexLock(s_sub_mtx, 0); } while (0)
+#define SUB_UNLOCK() do { if (s_sub_mtx_ok) sysMutexUnlock(s_sub_mtx); } while (0)
+#endif
+
 #define SUB_MAX_CUES   4096
 #define SUB_TEXT_LEN   200
 
@@ -40,6 +62,7 @@ static SubMode s_mode = SUB_NONE;
 static uint8_t  *s_pgs_raw     = NULL;   // the whole .sup body, kept resident
 static int        s_pgs_raw_len = 0;
 static PgsIndex   s_pgs_index;
+static uint32_t   s_pgs_scanned = 0;     // local files: how far into s_pgs_raw the index reaches
 
 static uint32_t  *s_pgs_px      = NULL;  // decoded-bitmap scratch, grows on demand
 static int         s_pgs_px_cap = 0;     // pixels
@@ -51,9 +74,9 @@ bool subs_active(void) { return s_mode != SUB_NONE; }
 
 bool subs_is_pgs(void) { return s_mode == SUB_PGS; }
 
-void subs_reset_cursor(void) { s_cursor = 0; }
+void subs_reset_cursor(void) { SUB_LOCK(); s_cursor = 0; SUB_UNLOCK(); }
 
-void subs_clear(void)
+static void clear_locked(void)
 {
     s_mode = SUB_NONE;
     s_n = 0;
@@ -63,8 +86,18 @@ void subs_clear(void)
     // already carved up, and holding it costs nothing the player was going
     // to use.
     s_pgs_index.n   = 0;
+    s_pgs_raw_len   = 0;
+    s_pgs_scanned   = 0;
     s_pgs_cur_epoch = -1;
     s_pgs_cur_ok    = false;
+}
+
+void subs_clear(void)
+{
+    sub_lock_init();
+    SUB_LOCK();
+    clear_locked();
+    SUB_UNLOCK();
 }
 
 // "00:01:23,456" -> milliseconds.  Accepts '.' as well as ',' because WebVTT
@@ -242,7 +275,7 @@ int subs_load_pgs(const char *item_id, const char *media_source_id, int stream_i
     return n;
 }
 
-const char *subs_text_at(u64 pts_ms)
+static const char *text_at_locked(u64 pts_ms)
 {
     if (s_n <= 0) return NULL;
     const u32 t = (u32)pts_ms;
@@ -279,7 +312,7 @@ const char *subs_text_at(u64 pts_ms)
     return NULL;
 }
 
-const PgsBitmap *subs_pgs_at(u64 pts_ms)
+static const PgsBitmap *pgs_at_locked(u64 pts_ms)
 {
     if (s_mode != SUB_PGS || s_pgs_index.n <= 0) return NULL;
 
@@ -325,4 +358,96 @@ const PgsBitmap *subs_pgs_at(u64 pts_ms)
     s_pgs_cur_epoch = idx;
     s_pgs_cur_ok    = ok;
     return ok ? &s_pgs_cur : NULL;
+}
+
+const char *subs_text_at(u64 pts_ms)
+{
+    SUB_LOCK();
+    const char *t = text_at_locked(pts_ms);
+    SUB_UNLOCK();
+    return t;                  // into the table: cues are only ever appended while it is read, and cleared with the reader stopped
+}
+
+const PgsBitmap *subs_pgs_at(u64 pts_ms)
+{
+    SUB_LOCK();
+    const PgsBitmap *b = pgs_at_locked(pts_ms);
+    SUB_UNLOCK();
+    return b;
+}
+
+// ---- local files ----------------------------------------------------------------------------------------------
+
+void subs_local_begin(bool pgs)
+{
+    sub_lock_init();
+    SUB_LOCK();
+    clear_locked();
+    if (pgs && !s_pgs_raw) s_pgs_raw = (uint8_t *)malloc(PGS_SUP_MAX);
+    if (!pgs && !s_cues) s_cues = (SubCue *)malloc(sizeof(SubCue) * SUB_MAX_CUES);
+    if (pgs ? s_pgs_raw != NULL : s_cues != NULL) s_mode = pgs ? SUB_PGS : SUB_TEXT;
+#ifndef JF_SUBTITLES_TEST
+    else plog("subs: out of memory for a local subtitle track");
+#endif
+    SUB_UNLOCK();
+}
+
+void subs_local_restart(void)
+{
+    SUB_LOCK();
+    const SubMode keep = s_mode;
+    clear_locked();
+    s_mode = keep;
+    SUB_UNLOCK();
+}
+
+void subs_local_add_text(u32 start_ms, u32 end_ms, const char *text)
+{
+    if (!text || !text[0]) return;
+    SUB_LOCK();
+    if (s_mode == SUB_TEXT) {
+        if (s_n >= SUB_MAX_CUES) {
+            // More cues than the table holds (a long film, an anime): playback goes forward, so the older half goes.
+            const int drop = SUB_MAX_CUES / 2;
+            memmove(s_cues, s_cues + drop, sizeof(SubCue) * (size_t)(s_n - drop));
+            s_n -= drop;
+            s_cursor = 0;
+        }
+        SubCue *c = &s_cues[s_n];
+        c->start_ms = start_ms;
+        c->end_ms   = end_ms > start_ms ? end_ms : start_ms + 2500;
+        snprintf(c->text, SUB_TEXT_LEN, "%s", text);
+        s_n++;
+    }
+    SUB_UNLOCK();
+}
+
+// Display sets arrive in time order and only the present matters: when the buffer or the index would overflow, the
+// older display sets go, all but the last two (the one on screen and the one before it).
+static void pgs_make_room_locked(int len)
+{
+    if (s_pgs_raw_len + len <= PGS_SUP_MAX && s_pgs_index.n + 4 < PGS_MAX_EPOCHS) return;
+    uint32_t from = (uint32_t)s_pgs_raw_len;                    // nothing indexed: nothing to keep
+    if (s_pgs_index.n >= 2) from = s_pgs_index.epoch[s_pgs_index.n - 2].pcs_offset;
+    else if (s_pgs_index.n == 1) from = s_pgs_index.epoch[0].pcs_offset;
+    if (from > (uint32_t)s_pgs_raw_len) from = (uint32_t)s_pgs_raw_len;
+    memmove(s_pgs_raw, s_pgs_raw + from, (size_t)s_pgs_raw_len - from);
+    s_pgs_raw_len -= (int)from;
+    s_pgs_index.n   = 0;
+    s_pgs_scanned   = pgs_index_extend(s_pgs_raw, s_pgs_raw_len, 0, &s_pgs_index);
+    s_pgs_cur_epoch = -1;
+    s_pgs_cur_ok    = false;
+}
+
+void subs_local_add_pgs(const uint8_t *sup, int len)
+{
+    if (!sup || len <= 0) return;
+    SUB_LOCK();
+    if (s_mode == SUB_PGS && s_pgs_raw) pgs_make_room_locked(len);
+    if (s_mode == SUB_PGS && s_pgs_raw && s_pgs_raw_len + len <= PGS_SUP_MAX) {
+        memcpy(s_pgs_raw + s_pgs_raw_len, sup, (size_t)len);
+        s_pgs_raw_len += len;
+        s_pgs_scanned = pgs_index_extend(s_pgs_raw, s_pgs_raw_len, s_pgs_scanned, &s_pgs_index);
+    }
+    SUB_UNLOCK();
 }

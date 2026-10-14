@@ -30,6 +30,7 @@
 #include <sys/thread.h>
 
 #include "thumbnail_cache.h"
+#include "lfs.h"            // artwork of a download on a USB drive
 #include "bitmap.h"
 #include "http.h"
 #include "jellyfin_api.h"
@@ -45,6 +46,9 @@
 static u32 d_req = 0, d_claim_ok = 0, d_claim_fail = 0, d_size_drop = 0,
            d_fail_drop = 0, d_fetch_ok = 0, d_fetch_fail = 0, d_decode_fail = 0,
            d_steal_drop = 0, d_get_hit = 0, d_get_miss = 0;
+// Timing, to decide whether hardware JPEG decode (cellJpgDec) would pay: wall
+// time of the HTTP fetch and of the stb decode, per second (us, count, max).
+static u32 d_net_us = 0, d_net_n = 0, d_net_max = 0, d_dec_us = 0, d_dec_n = 0, d_dec_max = 0;
 static bool d_fetch_gated = false;   // fetch thread's last-known gate state
 
 // Sized for the Home shelf, which shows several rows of cards at once (more
@@ -117,6 +121,30 @@ static inline u32 img_stamp(const u32 *p, u32 row_words, u32 w, u32 h) {
 // Path segment for each ThumbImg.
 static const char *img_name(u8 img) {
     return (img == THUMB_IMG_THUMB) ? "Thumb" : "Primary";
+}
+
+static ThumbLocalResolver s_local_resolver = NULL;
+void thumb_set_local_source(ThumbLocalResolver resolve) { s_local_resolver = resolve; }
+static ThumbLocalBytes s_local_bytes = NULL;
+void thumb_set_local_bytes(ThumbLocalBytes provide) { s_local_bytes = provide; }
+
+// A whole local file into buf.  Returns its length, or -1 when it is missing
+// or does not fit.
+static int read_local_file(const char *path, uint8_t *buf, int cap) {
+    if (path[0] && path[0] != '/') {           // a download on a USB drive: an lfs path
+        const int h = lfs_open(path);
+        if (h < 0) return -1;
+        const uint64_t size = lfs_size(h);
+        const int n = (size == 0 || size > (uint64_t)cap) ? -1 : lfs_read(h, 0, buf, (uint32_t)size);
+        lfs_close(h);
+        return (n <= 0 || (uint64_t)n != size) ? -1 : n;
+    }
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    const size_t n = fread(buf, 1, (size_t)cap, f);
+    const bool more = fgetc(f) != EOF;
+    fclose(f);
+    return (n == 0 || more) ? -1 : (int)n;
 }
 
 static ThumbSlot        s_slots[THUMB_CACHE_SIZE];
@@ -275,13 +303,33 @@ static void fetch_thread_fn(void *arg) {
         // size (portrait posters or landscape stills as requested).
         // format=Jpeg keeps PNG originals from arriving huge and slow.
         char url[512];
-        snprintf(url, sizeof(url),
-            "%s/Items/%s/Images/%s?fillWidth=%d&fillHeight=%d"
-            "&quality=75&format=Jpeg",
-            g_server, item_id, img_name(img), tw, th);
+        char lpath[160];
+        const bool local = s_local_resolver && s_local_resolver(item_id, lpath, sizeof lpath);
+        // "logo:<id>" is a channel logo: fitted inside the slot and never
+        // cropped, since cropping a wordmark cuts the name off.
+        const bool logo = strncmp(item_id, "logo:", 5) == 0;
+        if (logo)
+            snprintf(url, sizeof(url),
+                "%s/Items/%s/Images/Primary?maxWidth=%d&maxHeight=%d"
+                "&quality=85&format=Jpeg",
+                g_server, item_id + 5, tw, th);
+        else
+            snprintf(url, sizeof(url),
+                "%s/Items/%s/Images/%s?fillWidth=%d&fillHeight=%d"
+                "&quality=75&format=Jpeg",
+                g_server, item_id, img_name(img), tw, th);
 
-        glogf("fetch START %s %dx%d", item_id, tw, th);
-        int bytes = http_fetch_binary(url, g_token, s_fetch_buf, FETCH_BUF_SIZE);
+        glogf("fetch START %s %dx%d%s", item_id, tw, th, local ? " (local)" : "");
+        // A provider's own key is answered by the provider alone; any other goes to a local file or the server.
+        const u64 t_net0 = timing_get_us();
+        int bytes = s_local_bytes ? s_local_bytes(item_id, s_fetch_buf, FETCH_BUF_SIZE) : 0;
+        if (bytes == 0)
+            bytes = local ? read_local_file(lpath, s_fetch_buf, FETCH_BUF_SIZE)
+                          : http_fetch_binary(url, g_token, s_fetch_buf, FETCH_BUF_SIZE);
+        {
+            const u32 us = (u32)(timing_get_us() - t_net0);
+            d_net_us += us; d_net_n++; if (us > d_net_max) d_net_max = us;
+        }
         if (bytes <= 0) {
             char msg[128];
             snprintf(msg, sizeof(msg), "thumb: fetch failed %s (%d)", item_id, bytes);
@@ -304,9 +352,17 @@ static void fetch_thread_fn(void *arg) {
         // pixels have been consumed.
         img_arena_begin();
 
-        int w, h, ch;
-        unsigned char *px = stbi_load_from_memory(
-            (const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch, 4);
+        const u64 t_dec0 = timing_get_us();
+        int w = 0, h = 0, ch;
+        unsigned char *px = NULL;
+        if (stbi_info_from_memory((const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch) && img_dims_ok(w, h))
+            px = stbi_load_from_memory((const stbi_uc*)s_fetch_buf, bytes, &w, &h, &ch, 4);
+        else
+            glogf("decode REFUSED %s %dx%d (over the %u px cap)", item_id, w, h, (unsigned)IMG_MAX_PIXELS);
+        {
+            const u32 us = (u32)(timing_get_us() - t_dec0);
+            d_dec_us += us; d_dec_n++; if (us > d_dec_max) d_dec_max = us;
+        }
         if (!px) {
             char msg[128];
             snprintf(msg, sizeof(msg), "thumb: decode failed %s", item_id);
@@ -352,14 +408,47 @@ static void fetch_thread_fn(void *arg) {
         // return different dimensions than requested, and a straight clamped
         // copy would letterbox instead of filling the card.  Every output
         // pixel is written, so no pre-clear is needed.
+        //
+        // A local image was not resized by anyone: it covers the card and the
+        // excess is cropped from the centre, as fillWidth/fillHeight does.
         Bitmap *bmp = &s_slots[si].bmp;
+        int sx0 = 0, sy0 = 0, sw = w, sh = h;
+        if (local && bmp->width && bmp->height) {
+            if ((u64)w * bmp->height > (u64)h * bmp->width) {      // wider than the card
+                sw  = (int)((u64)h * bmp->width / bmp->height);
+                sx0 = (w - sw) / 2;
+            } else {                                               // taller than the card
+                sh  = (int)((u64)w * bmp->height / bmp->width);
+                sy0 = (h - sh) / 2;
+            }
+            if (sw < 1) sw = 1;
+            if (sh < 1) sh = 1;
+        }
+        if (logo) {
+            // Fit inside the slot, centred, on the panel colour.
+            const u32 bg = XMB_THUMB_DIM;
+            for (u32 i = 0; i < bmp->width * bmp->height; i++) bmp->pixels[i] = bg;
+            u32 dw = bmp->width, dh = (u32)((u64)h * bmp->width / (w ? w : 1));
+            if (dh > bmp->height) { dh = bmp->height; dw = (u32)((u64)w * bmp->height / (h ? h : 1)); }
+            if (dw < 1) dw = 1;
+            if (dh < 1) dh = 1;
+            const u32 ox = (bmp->width - dw) / 2, oy = (bmp->height - dh) / 2;
+            for (u32 y = 0; y < dh; y++) {
+                u32 *dst = bmp->pixels + (oy + y) * bmp->width + ox;
+                const unsigned char *src = px + (size_t)((u64)y * h / dh) * w * 4;
+                for (u32 x = 0; x < dw; x++) {
+                    const unsigned char *sp = src + (size_t)((u64)x * w / dw) * 4;
+                    dst[x] = ((u32)sp[0] << 16) | ((u32)sp[1] << 8) | sp[2];
+                }
+            }
+        } else
         for (u32 y = 0; y < bmp->height; y++) {
             u32 *dst = bmp->pixels + y * bmp->width;
             const unsigned char *src =
-                px + (size_t)((u64)y * h / bmp->height) * w * 4;
+                px + (size_t)(sy0 + (int)((u64)y * sh / bmp->height)) * w * 4;
             for (u32 x = 0; x < bmp->width; x++) {
                 const unsigned char *s =
-                    src + (size_t)((u64)x * w / bmp->width) * 4;
+                    src + (size_t)(sx0 + (int)((u64)x * sw / bmp->width)) * 4;
                 dst[x] = ((u32)s[0] << 16) | ((u32)s[1] << 8) | s[2];
             }
         }
@@ -810,7 +899,7 @@ void thumb_cache_tick(void) {
         glogf("HB f=%u thr=%d gate=%d(hold=%u) slots E/Q/R=%d/%d/%d | "
               "req=%u qOK=%u qFULL=%u szDrop=%u failList=%u | "
               "fOK=%u fFail=%u dFail=%u drop=%u | get H/M=%u/%u | "
-              "freeKB=%u arenaPeak=%uKB/%uKB",
+              "freeKB=%u arenaPeak=%uKB/%uKB | net n=%u avg=%uus max=%uus dec n=%u avg=%uus max=%uus",
               frame, run ? 1 : 0, gated ? 1 : 0, hold,
               n_empty, n_queued, n_ready,
               d_req, d_claim_ok, d_claim_fail, d_size_drop, d_fail_drop,
@@ -818,7 +907,10 @@ void thumb_cache_tick(void) {
               d_get_hit, d_get_miss,
               meminfo_avail_kb(),
               (unsigned)(img_arena_peak() / 1024),
-              (unsigned)(img_arena_size() / 1024));
+              (unsigned)(img_arena_size() / 1024),
+              d_net_n, d_net_n ? d_net_us / d_net_n : 0, d_net_max,
+              d_dec_n, d_dec_n ? d_dec_us / d_dec_n : 0, d_dec_max);
+        d_net_us = d_net_n = d_net_max = d_dec_us = d_dec_n = d_dec_max = 0;
         d_req = d_claim_ok = d_claim_fail = d_size_drop = d_fail_drop = 0;
         d_fetch_ok = d_fetch_fail = d_decode_fail = d_steal_drop = 0;
         d_get_hit = d_get_miss = 0;

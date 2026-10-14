@@ -1,6 +1,7 @@
 // Video quality selection store — see vquality.h.
 
 #include "vquality.h"
+#include "i18n.h"
 #include "jf_paths.h"     // jf_data_path()
 #include <stdio.h>
 #include <string.h>
@@ -58,17 +59,17 @@ const char *vquality_label(vquality_t q) {
     switch (q) {
     // The three 1080p steps differ only in ceiling, so naming them by rank
     // reads as the ladder it is.  The row prints the Mbps alongside.
-    case VQ_1080P:    return "High";
-    case VQ_1080P_20: return "Very High";
-    case VQ_1080P_25: return "Max";
+    case VQ_1080P:    return TRN("High");
+    case VQ_1080P_20: return TRN("Very High");
+    case VQ_1080P_25: return TRN("Max");
     // Retired -- unreachable through the UI, kept so a stale saved digit
     // that slipped past sanitising still prints as itself rather than "Auto".
     case VQ_1080P_30: return "1080p 30";
-    case VQ_ORIGINAL: return "Original";
+    case VQ_ORIGINAL: return TRN("Original");
     case VQ_720P:  return "720p";
     case VQ_480P:  return "480p";
     case VQ_360P:  return "360p";
-    default:       return "Auto";
+    default:       return TRN("Auto");
     }
 }
 

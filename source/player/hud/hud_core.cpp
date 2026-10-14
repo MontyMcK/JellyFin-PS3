@@ -2,6 +2,7 @@
 // control row, popup menu cursor, and the public setter API.
 
 #include <stdio.h>
+#include <string.h>
 
 #include <ppu-types.h>
 
@@ -10,6 +11,7 @@
 #include "ui.h"
 #include "timing.h"
 #include "audio.h"
+#include "audio_bitstream.h"   // passthrough: the receiver owns the volume
 #include "ui_visuals.h"   // g_spine_on: the redesigned HUD's buttons
 #include "statsovl.h"
 
@@ -42,6 +44,13 @@ void hud_init(u32 total_secs, const char *audio_label) {
     g_hud.menu_choice  = -1;
     g_hud.menu_epoch   = 0;
     g_hud.title[0]     = '\0';
+    g_hud.live          = false;
+    g_hud.live_title[0] = g_hud.live_times[0] = '\0';
+    g_hud.live_permille = -1;
+    g_hud.live_epoch    = 0;
+    g_hud.banner[0] = g_hud.banner_sub[0] = '\0';
+    g_hud.banner_until_us = 0;
+    g_hud.banner_solo     = false;
     hud_gpu_init();
 }
 
@@ -50,7 +59,7 @@ void hud_shutdown(void) {
     hud_gpu_shutdown();
 }
 
-bool hud_is_visible(void) { return g_hud.visible; }
+bool hud_is_visible(void) { return g_hud.visible || g_hud.banner_solo; }
 int  hud_seek_delta(void) { return g_hud.seek_delta; }
 
 void hud_set_audio_label(const char *label) {
@@ -62,6 +71,53 @@ void hud_set_cc_active(bool active) { g_hud.cc_active = active; }
 
 void hud_set_title(const char *title) {
     snprintf(g_hud.title, sizeof(g_hud.title), "%s", title ? title : "");
+}
+
+void hud_set_live(bool live) {
+    g_hud.live = live;
+    g_hud.live_epoch++;
+}
+
+void hud_set_live_programme(const char *title, const char *times, int permille) {
+    char t[sizeof g_hud.live_title], tm[sizeof g_hud.live_times];
+    snprintf(t,  sizeof t,  "%s", title ? title : "");
+    snprintf(tm, sizeof tm, "%s", times ? times : "");
+    if (strcmp(t, g_hud.live_title) == 0 && strcmp(tm, g_hud.live_times) == 0 &&
+        permille == g_hud.live_permille) return;
+    memcpy(g_hud.live_title, t, sizeof t);
+    memcpy(g_hud.live_times, tm, sizeof tm);
+    g_hud.live_permille = permille;
+    g_hud.live_epoch++;
+}
+
+void hud_set_banner(const char *line1, const char *line2, u64 until_us) {
+    snprintf(g_hud.banner,     sizeof g_hud.banner,     "%s", line1 ? line1 : "");
+    snprintf(g_hud.banner_sub, sizeof g_hud.banner_sub, "%s", line2 ? line2 : "");
+    g_hud.banner_until_us = until_us;
+    g_hud.live_epoch++;
+    hud_show();
+}
+
+void hud_hide(void) {
+    g_hud.visible      = false;
+    g_hud.focus        = -1;
+    g_hud.menu_visible = false;
+    g_hud.vol_active   = false;
+}
+
+void hud_set_picture_banner(const char *line1, const char *line2) {
+    snprintf(g_hud.banner,     sizeof g_hud.banner,     "%s", line1 ? line1 : "");
+    snprintf(g_hud.banner_sub, sizeof g_hud.banner_sub, "%s", line2 ? line2 : "");
+    g_hud.banner_until_us = ~0ULL;
+    g_hud.banner_solo     = true;
+    g_hud.live_epoch++;
+}
+
+void hud_clear_picture_banner(void) {
+    g_hud.banner[0] = g_hud.banner_sub[0] = '\0';
+    g_hud.banner_until_us = 0;
+    g_hud.banner_solo     = false;
+    g_hud.live_epoch++;
 }
 
 void hud_open_menu(const char *title, const char *const *items,
@@ -103,7 +159,22 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     if (BTN_PRESSED(stop))     return HUD_ACTION_STOP;
     if (BTN_PRESSED(audio))    return HUD_ACTION_AUDIO_TRACK;
     if (BTN_PRESSED(subtitle)) return HUD_ACTION_SUBTITLE;
-    {
+    // R1 asks for the chapter list (the player decides whether there is one).
+    if (!g_hud.live && !g_hud.vol_active && !g_hud.menu_visible && BTN_PRESSED(r1)) {
+        hud_show();
+        return HUD_ACTION_CHAPTERS;
+    }
+    // A live channel has nothing to seek in.  Up/Down change channel with
+    // the bar hidden or shown (nothing else uses them unless the volume
+    // slider or a menu is open); the remote's NEXT/PREV change it too.
+    if (g_hud.live) {
+        if (BTN_PRESSED(next)) return HUD_ACTION_CHANNEL_NEXT;
+        if (BTN_PRESSED(prev)) return HUD_ACTION_CHANNEL_PREV;
+        if (!g_hud.vol_active && !g_hud.menu_visible) {
+            if (BTN_PRESSED(up))   return HUD_ACTION_CHANNEL_NEXT;
+            if (BTN_PRESSED(down)) return HUD_ACTION_CHANNEL_PREV;
+        }
+    } else {
         const bool scan = btn_nav_repeat(btn_cur.ffwd || btn_cur.rew, NAV_media);
         const bool skip = BTN_PRESSED(next) || BTN_PRESSED(prev);
         if (scan || skip) {
@@ -113,20 +184,48 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
             return HUD_ACTION_SEEK;
         }
     }
-    if (BTN_PRESSED(info)) {
+    // The remote's INFO key and a click of either stick toggle the stats
+    // overlay, bar up or not; the overlay is its own layer, so the bar stays
+    // as it is.
+    if (BTN_PRESSED(info) || BTN_PRESSED(l3) || BTN_PRESSED(r3)) {
 #if ENABLE_PLAYER_STATS
         statsovl_set_enabled(!statsovl_enabled());
 #endif
-        hud_show();
         return HUD_ACTION_NONE;
     }
 
-    // Any button activity wakes the HUD.
+    // D-pad left/right with the bar away skip 10 s back / ahead.  The bar
+    // comes up to show where it landed; until the next other button, further
+    // presses keep skipping instead of moving the focus cursor, so a run of
+    // taps is a run of skips.
+    static bool s_skip_reveal = false;
+    if (!g_hud.visible) s_skip_reveal = false;
+    else if (BTN_PRESSED(cross) || BTN_PRESSED(circle) || BTN_PRESSED(square) ||
+             BTN_PRESSED(triangle) || BTN_PRESSED(up) || BTN_PRESSED(down) ||
+             BTN_PRESSED(l1) || BTN_PRESSED(r1) || l2_pressed || r2_pressed)
+        s_skip_reveal = false;
+    if (!g_hud.live && (!g_hud.visible || s_skip_reveal) &&
+        (BTN_PRESSED(left) || BTN_PRESSED(right))) {
+        g_hud.seek_delta = BTN_PRESSED(left) ? -s_incr_vals[0] : s_incr_vals[0];
+        s_skip_reveal = true;
+        hud_show();
+        return HUD_ACTION_SEEK;
+    }
+
+    // Any button press wakes the HUD, and a held one keeps it up.  A hold must
+    // not WAKE it: Square puts the bar away, and the finger is still down on
+    // the next frame, which used to bring it straight back.
     bool was_hidden = !g_hud.visible;
-    if (btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
+    const bool pressed_any =
+        BTN_PRESSED(cross) || BTN_PRESSED(circle) || BTN_PRESSED(square) ||
+        BTN_PRESSED(triangle) || BTN_PRESSED(l1) || BTN_PRESSED(r1) ||
+        BTN_PRESSED(up) || BTN_PRESSED(down) || BTN_PRESSED(left) ||
+        BTN_PRESSED(right) || l2_pressed || r2_pressed;
+    const bool held_any =
+        btn_cur.cross || btn_cur.circle || btn_cur.square || btn_cur.triangle ||
         btn_cur.l1 || btn_cur.r1 || btn_cur.l2 || btn_cur.r2 ||
-        l2_pressed || r2_pressed ||
-        btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right) {
+        btn_cur.up || btn_cur.down || btn_cur.left || btn_cur.right;
+    if (pressed_any || (held_any && !was_hidden)) {
         hud_show();
         // First button while the bar was hidden just reveals it, with the
         // play/pause control focused by default.
@@ -145,9 +244,12 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
 
     // Volume slider modal: while open, up/down change the level and X/O close
     // it (d-pad left/right are swallowed so focus stays on the speaker).
+    // With Dolby Digital output nothing is mixed here (the receiver decodes
+    // and owns the volume), so up/down change nothing; the drawn panel says so.
     if (g_hud.vol_active) {
-        if (BTN_REPEAT(up))        audio_set_volume(audio_get_volume() + VOL_STEP);
-        else if (BTN_REPEAT(down)) audio_set_volume(audio_get_volume() - VOL_STEP);
+        const bool receiver_owns = audio_passthrough_active();
+        if (BTN_REPEAT(up)   && !receiver_owns) audio_set_volume(audio_get_volume() + VOL_STEP);
+        else if (BTN_REPEAT(down) && !receiver_owns) audio_set_volume(audio_get_volume() - VOL_STEP);
         else if (BTN_PRESSED(cross) || BTN_PRESSED(circle)) g_hud.vol_active = false;
         return HUD_ACTION_NONE;
     }
@@ -202,6 +304,8 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
             if (g_hud.focus < 0)                   g_hud.focus = FOCUS_PP;
             else if (g_hud.focus < FOCUS_COUNT - 1) g_hud.focus++;
             if (g_spine_on && g_hud.focus == FOCUS_FF)  g_hud.focus = FOCUS_AUDIO;
+            // The old bar has no picture-shape chip to land on.
+            if (!g_spine_on && g_hud.focus == FOCUS_ASPECT) g_hud.focus = FOCUS_CC;
             return HUD_ACTION_NONE;
         }
     }
@@ -217,11 +321,14 @@ HudAction hud_handle_input(bool l2_pressed, bool r2_pressed, bool paused) {
     // X (cross) activates the focused control.
     if (BTN_PRESSED(cross)) {
         switch (g_hud.focus) {
-        case FOCUS_REW:    g_hud.seek_delta = -s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
-        case FOCUS_FF:     g_hud.seek_delta = +s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
+        case FOCUS_REW:    if (g_hud.live) return HUD_ACTION_NONE;
+                           g_hud.seek_delta = -s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
+        case FOCUS_FF:     if (g_hud.live) return HUD_ACTION_NONE;
+                           g_hud.seek_delta = +s_incr_vals[g_hud.incr_idx]; return HUD_ACTION_SEEK;
         case FOCUS_AUDIO:  return HUD_ACTION_AUDIO_TRACK;
         case FOCUS_VOLUME: g_hud.vol_active = true; return HUD_ACTION_NONE;
         case FOCUS_CC:     return HUD_ACTION_SUBTITLE;
+        case FOCUS_ASPECT: return HUD_ACTION_ASPECT;
         case FOCUS_PP:
         default:          return HUD_ACTION_TOGGLE_PAUSE;
         }

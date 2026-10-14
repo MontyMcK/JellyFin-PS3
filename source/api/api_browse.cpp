@@ -1,5 +1,6 @@
 // Legacy text-UI library browser and search screens, plus show_main_menu.
 
+#include "i18n.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -31,7 +32,7 @@ static int show_list(JFItem *arr, int count, const char *title,
 
         drawHeader();
         drawTextf(40, 65, "%.72s", title);
-        if (count == 0) drawText(40, 87, "(no items)");
+        if (count == 0) drawText(40, 87, TR("(no items)"));
 
         int y = 87;
         for (int i = top; i < top+JF_PAGE && i < count; i++) {
@@ -66,7 +67,7 @@ static void browse_level(const char *parent_id, const char *title, int depth) {
     while (running) {
         if (need_fetch) {
             drawHeader();
-            drawTextf(40, 100, "Loading %.60s...", title);
+            drawTextf(40, 100, TR("Loading %.60s..."), title);
             flip();
 
             char url[512];
@@ -85,8 +86,8 @@ static void browse_level(const char *parent_id, const char *title, int depth) {
                 total_count = json_get_int(responseBuffer, "TotalRecordCount", start_index + count);
             } else {
                 drawHeader();
-                drawTextf(40, 100, "Error loading items: %d", status);
-                drawText(40, 130, "O: back");
+                drawTextf(40, 100, TR("Error loading items: %d"), status);
+                drawText(40, 130, TR("O: back"));
                 flip();
                 init_btns();
                 while (running) {
@@ -125,8 +126,8 @@ static void browse_level(const char *parent_id, const char *title, int depth) {
 void show_library_browser(void) {
     if (!g_userid[0]) {
         drawHeader();
-        drawText(40, 100, "No user ID - please log out and log in again.");
-        drawText(40, 130, "O: back");
+        drawText(40, 100, TR("No user ID - please log out and log in again."));
+        drawText(40, 130, TR("O: back"));
         flip();
         init_btns();
         while (running) {
@@ -145,7 +146,7 @@ void show_search(void) {
     if (!query[0]) return;
 
     drawHeader();
-    drawTextf(40, 100, "Searching: %.60s", query);
+    drawTextf(40, 100, TR("Searching: %.60s"), query);
     flip();
 
     char encoded[192];
@@ -164,8 +165,8 @@ void show_search(void) {
         count = parse_jf_items(responseBuffer, items, JF_MAX);
     } else {
         drawHeader();
-        drawTextf(40, 100, "Search failed: %d", status);
-        drawText(40, 130, "O: back");
+        drawTextf(40, 100, TR("Search failed: %d"), status);
+        drawText(40, 130, TR("O: back"));
         flip();
         init_btns();
         while (running) {

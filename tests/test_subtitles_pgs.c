@@ -139,6 +139,30 @@ int main(void) {
     ok = pgs_decode_epoch(buf, n, idx.epoch[1].pcs_offset, rgba, 8, &bmp3);
     check(!ok, "decode: hide epoch has nothing to decode");
 
+    // ---- the index of a stream that grows: pieces added one display set at a time give the same index as the whole
+    {
+        PgsIndex whole, grown;
+        const int total = pgs_build_index(buf, n, &whole);
+        grown.n = 0;
+        uint32_t scanned = 0;
+        // feed the buffer in uneven pieces, each cut where a segment ends or in the middle of one
+        uint32_t fed = 0;
+        const uint32_t cuts[] = { 5, 13, 40, 60, 100, 200, 300, 1000000 };
+        for (unsigned k = 0; k < sizeof cuts / sizeof cuts[0]; k++) {
+            fed = cuts[k] < (uint32_t)n ? cuts[k] : (uint32_t)n;
+            scanned = pgs_index_extend(buf, (int)fed, scanned, &grown);
+            if (fed == (uint32_t)n) break;
+        }
+        check(grown.n == total && total == whole.n, "extend: pieces add up to the whole index");
+        bool same = grown.n == whole.n;
+        for (int i = 0; same && i < whole.n; i++)
+            if (grown.epoch[i].start_ms != whole.epoch[i].start_ms || grown.epoch[i].pcs_offset != whole.epoch[i].pcs_offset ||
+                grown.epoch[i].has_object != whole.epoch[i].has_object) same = false;
+        check(same && scanned == (uint32_t)n, "extend: the same epochs, and the scan reached the end");
+        check(pgs_index_extend(buf, n, scanned, &grown) == scanned && grown.n == total, "extend: scanning again from the end adds nothing");
+        check(pgs_index_extend(NULL, 0, 7, &grown) == 7, "extend: an empty buffer leaves the position alone");
+    }
+
     puts(failures == 0 ? "pgs subtitle decoder: synthetic ok"
                        : "pgs subtitle decoder: FAILURES");
     return failures ? 1 : 0;

@@ -6,6 +6,7 @@ Every font compiled into this app, why it is here, and under what licence.
 |---|---|---|---|
 | Open Sans (Regular, Bold) | fallback only, and the default subtitle face | Apache 2.0 | upstream |
 | Noto Sans Bold | optional subtitle face | SIL OFL 1.1 | [OFL-NotoSans.txt](OFL-NotoSans.txt) |
+| Noto Sans JP Regular | kana and kanji: the last link of every face chain (Japanese interface, Japanese titles and subtitles) | SIL OFL 1.1 | [OFL-NotoSansJP.txt](OFL-NotoSansJP.txt) |
 | Roboto Condensed Bold | optional subtitle face | Apache 2.0 | [Apache-2.0-RobotoCondensed.txt](Apache-2.0-RobotoCondensed.txt) |
 | Tabler Icons | UI glyphs | MIT | upstream |
 | Material Icons | UI glyphs | Apache 2.0 | upstream |
@@ -99,3 +100,18 @@ pyftsubset NotoSans-Bold.ttf --output-file=NotoSans-Bold-subset.ttf \
 then convert to a C array the way `notosans_bold.h` was made. The music note
 `U+266A`, which lyric subtitles sometimes use, is absent from both upstream
 faces and so cannot be subset in.
+
+## Noto Sans JP is a subset, and the last link of every chain
+
+ is Noto Sans JP Regular (the notofonts/noto-cjk
+, sha256
+) cut down
+to 3,719 characters: every character the interface catalog uses, the kana, the
+CJK punctuation and full-width forms, and the 2,965 kanji of JIS X 0208 level 1
+(what a Japanese title or name is written in nearly always). 685 KB instead of
+4.4 MB. It carries no layout tables and no hinting.
+
+Regenerate with 3719 characters requested (needs
+); it reads the characters the catalog needs from
+, so it must be re-run when a translation brings in a
+character the subset lacks.  fails when it does.

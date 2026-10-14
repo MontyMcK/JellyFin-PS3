@@ -450,11 +450,25 @@ static bool measure_fps(int *num, int *den) {
         const u64 d = v[i] - v[i - 1];
         if (d > 0 && (step == 0 || d < step)) step = d;
     }
+    // The step must be the NORMAL gap, not one odd pair: most of the sorted gaps
+    // have to sit on it (a splice or a stray duplicate would otherwise win the
+    // minimum and mislabel the stream).
+    {
+        int on = 0;
+        for (int i = 1; i < n; i++) {
+            const u64 d = v[i] - v[i - 1];
+            if (d + 2 >= step && d <= step + 2) on++;
+        }
+        if (on * 10 < (n - 1) * 6) return false;
+    }
     if (step >= 3749 && step <= 3751) { *num = 24;    *den = 1;    return true; }
     if (step >= 3752 && step <= 3755) { *num = 24000; *den = 1001; return true; }
     if (step >= 3599 && step <= 3601) { *num = 25;    *den = 1;    return true; }
     if (step >= 3002 && step <= 3004) { *num = 30000; *den = 1001; return true; }
     if (step >= 2999 && step <= 3001) { *num = 30;    *den = 1;    return true; }
+    if (step >= 1799 && step <= 1801) { *num = 50;    *den = 1;    return true; }
+    if (step >= 1500 && step <= 1503) { *num = 60000; *den = 1001; return true; }
+    if (step >= 1499 && step <= 1500) { *num = 60;    *den = 1;    return true; }
     return false;
 }
 
@@ -521,10 +535,10 @@ static s64 dur_from_frc(int frc) {
         case 8: return 16667;   /* 60 fps     */
         default:
             // Same fallback as fps_from_frc(): the server rate beats a
-            // hardcoded 25 fps guess when VDEC reports no code.
+            // hardcoded guess when VDEC reports no code (30 fps, matching fps_from_frc).
             if (g_source_fps_milli > 1000)
                 return (s64)(1000000000LL / g_source_fps_milli);
-            return 40000;
+            return 33333;   // 30 fps: what fps_from_frc() defaults to
     }
 }
 
@@ -632,10 +646,12 @@ bool vdec_pull_frame(void) {
         s_push_count++;
 
         if (s_push_count % 300 == 0) {
+            u32 ro = 0, late = 0;
+            jbuf_order_stats(&ro, &late);
             char buf[128];
             snprintf(buf, sizeof(buf),
-                "pts_stats: pushes=%d nonmono=%d dur=%lldus",
-                s_push_count, s_nonmono_count,
+                "pts_stats: pushes=%d nonmono=%d reordered=%u late=%u dur=%lldus",
+                s_push_count, s_nonmono_count, ro, late,
                 (long long)dur_us);
             plog(buf);
         }
@@ -653,8 +669,19 @@ bool vdec_pull_frame(void) {
             const bool fam24 = (fps_num == 24000 && fps_den == 1001) || (fps_num == 24 && fps_den == 1);
             const bool fam30 = (fps_num == 30000 && fps_den == 1001) || (fps_num == 30 && fps_den == 1);
             int mn = 0, md = 1;
-            if ((fam24 || fam30) && measure_fps(&mn, &md) &&
-                ((fam24 && (mn == 24 || mn == 24000)) || (fam30 && (mn == 30 || mn == 30000))) &&
+            const bool have = measure_fps(&mn, &md);
+            // The stream's own timestamps also overrule VDEC when they disagree
+            // by more than 1%: a 720p transcode whose PTS stepped 33.4 ms (29.97)
+            // came back from VDEC as frc=1 (23.976), so frames were paced at
+            // 41.7 ms against the sound, the A/V logic dropped bursts of frames,
+            // and on a 24p TV the output was switched to 24 Hz for 30 fps video
+            // (player_log 2026-10-06).
+            const bool far = have && fps_num && md &&
+                ((long long)mn * fps_den * 100 > (long long)fps_num * md * 101 ||
+                 (long long)mn * fps_den * 100 < (long long)fps_num * md * 99);
+            if (have && (far ||
+                ((fam24 || fam30) &&
+                 ((fam24 && (mn == 24 || mn == 24000)) || (fam30 && (mn == 30 || mn == 30000))))) &&
                 (mn != fps_num || md != fps_den)) {
                 char b[112];
                 snprintf(b, sizeof b, "fps_detect: VDEC said %d/%d, the timestamps say %d/%d -- using them",

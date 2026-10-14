@@ -30,6 +30,10 @@ static void expect_truehd(const char *label, bool want) {
     check("is_truehd", label, track_label_is_truehd(label), want);
 }
 
+static void expect_ac3(const char *label, bool want) {
+    check("is_ac3", label, track_label_is_ac3(label), want);
+}
+
 static void expect_hd(const char *label, bool want) {
     check("is_hd_audio", label, track_label_is_hd_audio(label), want);
 }
@@ -79,6 +83,26 @@ int main(void) {
     expect_hd("English - EAC3 - 5.1", false);
     expect_hd("English - AAC - 2.0", false);
 
+    /* Plain Dolby Digital: the one codec the Dolby Digital audio output may
+     * pass through untouched.  Dolby Digital Plus is E-AC-3 and must not. */
+    expect_ac3("Dolby Digital 5.1", true);
+    expect_ac3("English - Dolby Digital - 5.1 - Default", true);
+    expect_ac3("English - AC3 - 5.1", true);
+    expect_ac3("English - AC-3 - 5.1", true);
+    expect_ac3("ac3", true);
+    expect_ac3("E-AC-3", false);
+    expect_ac3("English - E-AC-3 - 5.1", false);
+    expect_ac3("English - EAC3 - 5.1 - Default", false);
+    expect_ac3("Dolby Digital Plus", false);
+    expect_ac3("English - Dolby Digital Plus - 7.1", false);
+    expect_ac3("English - DD+ Atmos - 5.1", false);
+    expect_ac3("English - Dolby Digital+ - 5.1", false);
+    expect_ac3("English - TrueHD - 7.1", false);
+    expect_ac3("English - DTS-HD MA - 5.1", false);
+    expect_ac3("English - AAC - 2.0", false);
+    expect_ac3("", false);
+    expect_ac3(NULL, false);
+
     /* Word-boundary cases: "dts" inside a longer word is not a codec.
      * Track names carry film and studio names, so this matters. */
     expect("Bandts Live - AAC - 2.0", false);
@@ -89,6 +113,6 @@ int main(void) {
         printf("test_track_codec: %d FAILURES\n", g_failures);
         return 1;
     }
-    printf("test_track_codec: DTS and TrueHD track detection correct\n");
+    printf("test_track_codec: DTS, TrueHD and Dolby Digital track detection correct\n");
     return 0;
 }

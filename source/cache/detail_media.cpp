@@ -8,6 +8,7 @@
 // clash with the shared implementation.
 
 #define STB_IMAGE_STATIC
+#include "img_arena.h"
 #define STB_IMAGE_IMPLEMENTATION
 #ifdef __GNUC__
 #pragma GCC diagnostic push
@@ -71,8 +72,10 @@ bool detail_media_load(const char *item_id, const char *image_type,
         return false;
     }
 
-    int dw, dh, ch;
-    unsigned char *px = stbi_load_from_memory(buf, bytes, &dw, &dh, &ch, 4);
+    int dw = 0, dh = 0, ch;
+    unsigned char *px = NULL;
+    if (stbi_info_from_memory(buf, bytes, &dw, &dh, &ch) && img_dims_ok(dw, dh))
+        px = stbi_load_from_memory(buf, bytes, &dw, &dh, &ch, 4);
     free(buf);
     if (!px) {
         char m[96];

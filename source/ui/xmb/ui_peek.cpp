@@ -246,7 +246,7 @@ void peek_draw_over(void) {
             const int pad = UIS_W(32);
             const int tx = (int)to.x + pad, tw = (int)to.w - 2 * pad;
             int ty = (int)to.y + UIS_H(26);
-            xmb_draw_eyebrow(tx, ty, "Settings", depth_mix_q(bg, XMB_ACCENT_ALT, t));
+            xmb_draw_eyebrow(tx, ty, TR("Settings"), depth_mix_q(bg, XMB_ACCENT_ALT, t));
             ty += UIS_H(22);
             {
                 char tl[96];
@@ -265,7 +265,7 @@ void peek_draw_over(void) {
         }
         if (peek_active() && f.lift > 0.5f) {
             Hint h[1];
-            h[0].glyph = 'T'; h[0].label = "Close";
+            h[0].glyph = 'T'; h[0].label = TR("Close");
             draw_hints_bar(h, 1);
         }
         ui_text_gpu_flush();
@@ -328,7 +328,7 @@ void peek_draw_over(void) {
         // Left column under the poster: the cast.
         int cy = py_ + ph + UIS_H(18);
         if (have && fx.n_cast > 0) {
-            xmb_draw_eyebrow(px_, cy, "Cast", depth_mix_q(bg, XMB_ACCENT_ALT, t));
+            xmb_draw_eyebrow(px_, cy, TR("Cast"), depth_mix_q(bg, XMB_ACCENT_ALT, t));
             cy += UIS_H(20);
             for (int i = 0; i < fx.n_cast; i++) {
                 char nm[64];
@@ -387,14 +387,14 @@ void peek_draw_over(void) {
                 drawTTF((u32)tx, (u32)(ty + i * lh), s_lines[i], spx,
                         depth_mix_q(bg, XMB_TEXT, t * 0.92f));
         } else {
-            drawTTF((u32)tx, (u32)ty, have ? "No synopsis." : "Loading...", spx,
+            drawTTF((u32)tx, (u32)ty, have ? TR("No synopsis.") : TR("Loading..."), spx,
                     depth_mix_q(bg, XMB_TEXT_FAINT, t));
         }
     }
     if (peek_active() && f.lift > 0.5f) {
         Hint h[2];
-        h[0].glyph = 'X'; h[0].label = "Details";
-        h[1].glyph = 'T'; h[1].label = "Close";
+        h[0].glyph = 'X'; h[0].label = TR("Details");
+        h[1].glyph = 'T'; h[1].label = TR("Close");
         draw_hints_bar(h, 2);
     }
     ui_text_gpu_flush();

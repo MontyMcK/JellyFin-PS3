@@ -26,7 +26,10 @@
 #include "trickplay.h"
 #include "rsxutil.h"
 #include "plog.h"
+#include "timing.h"   // timing_get_us(): the channel banner expires
 #include "audio.h"   // audio_get_volume() for the volume slider
+#include "audio_bitstream.h"   // audio_passthrough_active(): the receiver owns the volume
+#include "../core/player_picture.h"   // picture_get(): the picture-shape chip
 
 // -------------------------------------------------------
 // Overlay buffers + compose-on-change state
@@ -49,7 +52,10 @@ struct OvlKey {
     s32  focus, incr_idx;
     s32  menu_sel, menu_cur, menu_n;
     s32  vol_pct;
-    u8   paused, cc, menu_vis, title_on, vol_active, scrubbing;
+    s32  aspect;                       // Fit / Fill / Stretch (picture_size.h)
+    s32  live_permille;
+    u32  live_epoch;
+    u8   paused, cc, menu_vis, title_on, vol_active, scrubbing, live, banner_on, solo;
     char audio[64];
 };
 static OvlKey s_ovl_key;
@@ -165,7 +171,7 @@ static void draw_pp_symbol(int cx, int cy, bool paused, u32 color) {
 }
 
 // Speaker/volume glyph drawn with CPU primitives (the embedded Tabler font is a
-// 20-glyph subset with no volume icon).  A filled box + cone with two sound-wave
+// 21-glyph subset with no volume icon).  A filled box + cone with two sound-wave
 // arcs, centred at (cx, cy) inside a box of height h.
 #define SPK_PUT(X,Y) do { int _x=(X),_y=(Y); \
     if (_x>=0 && (u32)_x<tw && _y>=0 && (u32)_y<th) cpu_draw_row((u32)_y)[_x]=color; } while (0)
@@ -440,7 +446,14 @@ static void hud_body_v2(u64 elapsed_us, bool paused, bool scrubbing) {
                  (u32)w_cc, 2, HUD_ACCENT);
 
     // ---- Volume slider (vertical, above the speaker) while adjusting ----
-    if (g_hud.vol_active) {
+    if (g_hud.vol_active && audio_passthrough_active()) {
+        // Nothing is mixed here: the receiver decodes and owns the level.
+        const char *msg = "Volume is set on your soundbar or receiver";
+        const int mw = ttf_text_width(msg, ROW_TEXT_PX) + 28;
+        const int mx = spk_x + w_spk / 2 - mw + 24, my = strip_y - 12 - 38;
+        ovl_dim((u32)mx, (u32)my, (u32)mw, 34, 205);
+        drawTTF((u32)(mx + 14), (u32)(my + 8), msg, ROW_TEXT_PX, HUD_FOCUSED);
+    } else if (g_hud.vol_active) {
         int vol       = audio_get_volume();          // 0..100
         int spk_cx    = spk_x + w_spk / 2;
         int track_x   = spk_cx - VOL_TRACK_W / 2;
@@ -480,8 +493,9 @@ static void hud_compose(u64 elapsed_us, bool paused, bool scrubbing) {
 
     cpu_rt_begin(s_ovl_stage, s_ovl_w, s_ovl_h);
 
-    if (g_spine_on) hud_body_v3(elapsed_us, paused, scrubbing);
-    else            hud_body_v2(elapsed_us, paused, scrubbing);
+    if (g_hud.banner_solo)  v3_draw_banner();       // the bar itself stays away
+    else if (g_spine_on)    hud_body_v3(elapsed_us, paused, scrubbing);
+    else                    hud_body_v2(elapsed_us, paused, scrubbing);
 
     cpu_rt_end();
 
@@ -515,7 +529,7 @@ static void hud_compose(u64 elapsed_us, bool paused, bool scrubbing) {
 // -------------------------------------------------------
 
 void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
-    if (!g_hud.visible) return;
+    if (!g_hud.visible && !g_hud.banner_solo) return;
     if (!s_ovl_stage || !s_ovl_tex) return;   // alloc failed: no HUD
 
     OvlKey key;
@@ -534,7 +548,13 @@ void hud_draw(u64 elapsed_us, bool paused, bool scrubbing) {
     key.title_on     = (paused && g_hud.title[0]) ? 1 : 0;
     key.vol_active   = g_hud.vol_active ? 1 : 0;
     key.vol_pct      = audio_get_volume();
+    key.aspect       = picture_get().aspect;
     key.scrubbing    = scrubbing ? 1 : 0;
+    key.live         = g_hud.live ? 1 : 0;
+    key.live_permille = g_hud.live_permille;
+    key.live_epoch   = g_hud.live_epoch;
+    key.solo         = g_hud.banner_solo ? 1 : 0;
+    key.banner_on    = (g_hud.banner[0] && timing_get_us() < g_hud.banner_until_us) ? 1 : 0;
     snprintf(key.audio, sizeof(key.audio), "%s", g_hud.audio_label);
 
     if (!s_ovl_key_valid || memcmp(&key, &s_ovl_key, sizeof(key)) != 0) {

@@ -16,19 +16,28 @@
 #include "plog.h"
 
 static void post_playstate(const char *endpoint, const char *item_id,
-                           const char *session_id, u64 pos_ticks, bool paused) {
+                           const char *session_id, u64 pos_ticks, bool paused,
+                           const char *live_stream_id) {
     if (!g_server[0] || !g_token[0] || !item_id || !item_id[0]) return;
 
     char url[512];
     snprintf(url, sizeof(url), "%s%s", g_server, endpoint);
 
-    char body[512];
+    // A live channel has no position to resume and nothing to seek in; the
+    // server ties its report to the opened stream by LiveStreamId.
+    const bool live = live_stream_id && live_stream_id[0];
+    char live_field[128] = "";
+    if (live)
+        snprintf(live_field, sizeof live_field, ",\"LiveStreamId\":\"%.100s\"", live_stream_id);
+
+    char body[640];
     snprintf(body, sizeof(body),
         "{\"ItemId\":\"%s\",\"PlaySessionId\":\"%s\","
         "\"PositionTicks\":%llu,\"IsPaused\":%s,"
-        "\"PlayMethod\":\"Transcode\",\"CanSeek\":true}",
+        "\"PlayMethod\":\"Transcode\",\"CanSeek\":%s%s}",
         item_id, session_id ? session_id : "",
-        (unsigned long long)pos_ticks, paused ? "true" : "false");
+        (unsigned long long)(live ? 0ULL : pos_ticks), paused ? "true" : "false",
+        live ? "false" : "true", live_field);
 
     char resp[256];
     int status = http_request(HTTP_POST, url, body, g_token, resp, sizeof(resp));
@@ -56,20 +65,24 @@ static void post_playstate(const char *endpoint, const char *item_id,
 }
 
 void jellyfin_report_playing(const char *item_id, const char *session_id,
-                             unsigned long long pos_ticks) {
-    post_playstate("/Sessions/Playing", item_id, session_id, pos_ticks, false);
+                             unsigned long long pos_ticks,
+                             const char *live_stream_id) {
+    post_playstate("/Sessions/Playing", item_id, session_id, pos_ticks, false,
+                   live_stream_id);
 }
 
 void jellyfin_report_progress(const char *item_id, const char *session_id,
-                              unsigned long long pos_ticks, bool paused) {
+                              unsigned long long pos_ticks, bool paused,
+                              const char *live_stream_id) {
     post_playstate("/Sessions/Playing/Progress", item_id, session_id,
-                   pos_ticks, paused);
+                   pos_ticks, paused, live_stream_id);
 }
 
 void jellyfin_report_stopped(const char *item_id, const char *session_id,
-                             unsigned long long pos_ticks) {
+                             unsigned long long pos_ticks,
+                             const char *live_stream_id) {
     post_playstate("/Sessions/Playing/Stopped", item_id, session_id,
-                   pos_ticks, false);
+                   pos_ticks, false, live_stream_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +143,7 @@ static void report_thread(void *arg) {
         sysMutexUnlock(s_rep_mtx);
 
         if (have)
-            post_playstate("/Sessions/Playing/Progress", item, sess, ticks, paused);
+            post_playstate("/Sessions/Playing/Progress", item, sess, ticks, paused, NULL);
         else
             usleep(50000);          // 50 ms; nothing is waiting on this
     }
@@ -175,7 +188,7 @@ void jellyfin_report_progress_async(const char *item_id, const char *session_id,
 
     if (s_rep_started != 1) {
         post_playstate("/Sessions/Playing/Progress", item_id, session_id,
-                       pos_ticks, paused);
+                       pos_ticks, paused, NULL);
         return;
     }
 

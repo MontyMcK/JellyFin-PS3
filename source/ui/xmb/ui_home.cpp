@@ -17,6 +17,10 @@
 #include "jellyfin_api.h"
 #include "music_screen.h"
 #include "plog.h"
+#include "timing.h"
+#include "player.h"       // show_player_offline
+#include "dl_manager.h"
+#include "dl_library.h"
 
 // -------------------------------------------------------
 // Model
@@ -35,7 +39,16 @@ typedef struct {
     bool        loaded;
 } HomeRow;
 
-enum { HR_CONTINUE, HR_NEXTUP, HR_MOVIES, HR_SHOWS, HR_MUSIC, HOME_ROWS_N };
+// Favourites and Downloaded appear only when they have something to show.
+enum { HR_CONTINUE, HR_NEXTUP, HR_FAVOURITES, HR_DOWNLOADED, HR_MOVIES, HR_SHOWS,
+       HR_MUSIC, HOME_ROWS_N };
+
+// Rows that go stale when something is played or starred: refetched.
+static bool row_dynamic(int r)  { return r == HR_CONTINUE || r == HR_NEXTUP || r == HR_FAVOURITES; }
+// Rows that are not shown while empty.
+static bool row_optional(int r) { return r == HR_FAVOURITES || r == HR_DOWNLOADED; }
+// Rows read from the offline library on this console, not asked of the server.
+static bool row_local(int r)    { return r == HR_DOWNLOADED; }
 
 static HomeRow s_rows[HOME_ROWS_N];
 
@@ -100,10 +113,12 @@ static int row_card_w(HomeRowKind k) {
 static int row_band_h(HomeRowKind k) {
     return HOME_HEADER_H + row_card_h(k) + HOME_LABEL_H + HOME_ROW_GAP;
 }
+// An optional row with nothing in it is not there at all (no band, no focus).
+static bool row_hidden(int r) { return row_optional(r) && s_rows[r].count == 0; }
 // Absolute top of row r (as if s_vscroll == 0).
 static int row_abs_top(int r) {
     int y = view_top();
-    for (int i = 0; i < r; i++) y += row_band_h(s_rows[i].kind);
+    for (int i = 0; i < r; i++) if (!row_hidden(i)) y += row_band_h(s_rows[i].kind);
     return y;
 }
 static int row_visible_cols(HomeRowKind k) {
@@ -171,11 +186,13 @@ static void home_init_once(void) {
     if (s_inited) return;
     s_inited = true;
     memset(s_rows, 0, sizeof(s_rows));
-    s_rows[HR_CONTINUE].title = "Continue Watching";        s_rows[HR_CONTINUE].kind = HROW_LANDSCAPE;
-    s_rows[HR_NEXTUP].title   = "Next Up";                  s_rows[HR_NEXTUP].kind   = HROW_LANDSCAPE;
-    s_rows[HR_MOVIES].title   = "Recently Added in Movies"; s_rows[HR_MOVIES].kind   = HROW_PORTRAIT;
-    s_rows[HR_SHOWS].title    = "Recently Added in Shows";  s_rows[HR_SHOWS].kind    = HROW_PORTRAIT;
-    s_rows[HR_MUSIC].title    = "Recently Added in Music"; s_rows[HR_MUSIC].kind    = HROW_SQUARE;
+    s_rows[HR_CONTINUE].title = TRN("Continue Watching");        s_rows[HR_CONTINUE].kind = HROW_LANDSCAPE;
+    s_rows[HR_NEXTUP].title   = TRN("Next Up");                  s_rows[HR_NEXTUP].kind   = HROW_LANDSCAPE;
+    s_rows[HR_FAVOURITES].title = TRN("Favourites");             s_rows[HR_FAVOURITES].kind = HROW_PORTRAIT;
+    s_rows[HR_DOWNLOADED].title = TRN("Downloaded");             s_rows[HR_DOWNLOADED].kind = HROW_PORTRAIT;
+    s_rows[HR_MOVIES].title   = TRN("Recently Added in Movies"); s_rows[HR_MOVIES].kind   = HROW_PORTRAIT;
+    s_rows[HR_SHOWS].title    = TRN("Recently Added in Shows");  s_rows[HR_SHOWS].kind    = HROW_PORTRAIT;
+    s_rows[HR_MUSIC].title    = TRN("Recently Added in Music"); s_rows[HR_MUSIC].kind    = HROW_SQUARE;
 }
 
 static void home_each_extra(int i, const char *o, int n, void *ctx) {
@@ -196,6 +213,7 @@ static void home_stage_dynamic_reset(void);
 static void home_mark_dynamic_stale(void) {
     s_rows[HR_CONTINUE].loaded = false; s_rows[HR_CONTINUE].scroll = 0;
     s_rows[HR_NEXTUP].loaded   = false; s_rows[HR_NEXTUP].scroll   = 0;
+    s_rows[HR_FAVOURITES].loaded = false;     // keeps its place: a star toggled
     s_seen_gen = g_play_gen;
     home_stage_dynamic_reset();
 }
@@ -214,6 +232,14 @@ static bool home_row_url(int r, char *url, size_t cap) {
         snprintf(url, cap,
             "%s/Shows/NextUp?userId=%s&Limit=%d&Fields=%s",
             g_server, g_userid, HOME_ROW_MAX, fields);
+    } else if (r == HR_FAVOURITES) {
+        snprintf(url, cap,
+            "%s/Users/%s/Items?Filters=IsFavorite&Recursive=true"
+            "&IncludeItemTypes=Movie,Series,Episode&SortBy=SortName&Limit=%d"
+            "&Fields=%s,PrimaryImageAspectRatio",
+            g_server, g_userid, HOME_ROW_MAX, fields);
+    } else if (r == HR_DOWNLOADED) {
+        return false;        // read from the offline library (home_step_local)
     } else if (r == HR_MUSIC) {
         // Home samples the FIRST music library; the others are still reachable
         // as their own tabs.
@@ -325,7 +351,7 @@ static void home_worker_collect(void) {
     if (s_hw_state != 2) return;
     __sync_synchronize();
     const int r = s_hw_row;
-    const bool dynamic = r == HR_CONTINUE || r == HR_NEXTUP;
+    const bool dynamic = r >= 0 && r < HOME_ROWS_N && row_dynamic(r);
     if (r >= 0 && r < HOME_ROWS_N && !(dynamic && s_hw_gen != g_play_gen)) {
         HomeRow *row = &s_rows[r];
         const int n = s_hw_count < 0 ? 0 : (s_hw_count > HOME_ROW_MAX ? HOME_ROW_MAX : s_hw_count);
@@ -343,13 +369,98 @@ static void home_worker_collect(void) {
     s_hw_state = 0;
 }
 
+// --- the Downloaded row: the offline library, read from this console's HDD ----------
+//
+// Not asked of the server, so it works with the server gone.  It is rebuilt
+// when the set of finished downloads changes, a few entries a frame (each is
+// a small file read), and published whole so the row never shows half a list.
+// Its cards are the downloads' own posters under the "offp:" key; an item's
+// id carries that prefix and X plays it offline.
+static char      s_dl_ids[DL_MAX_ITEMS][DL_ID_MAX];
+static int       s_dl_n = 0, s_dl_at = 0;
+static bool      s_dl_building = false;
+static XMBItem   s_dl_items[HOME_ROW_MAX];
+static HomeExtra s_dl_extra[HOME_ROW_MAX];
+static int       s_dl_count = 0;
+static unsigned  s_dl_sig = 0, s_dl_pending_sig = 0;
+static u64       s_dl_next_poll = 0;
+
+static unsigned dl_signature(char (*ids)[DL_ID_MAX], int n) {
+    unsigned h = 2166136261u;
+    for (int i = 0; i < n; i++)
+        for (const char *p = ids[i]; *p; p++) h = (h ^ (unsigned char)*p) * 16777619u;
+    return h ^ (unsigned)n;
+}
+
+static void home_step_local(void) {
+    HomeRow *row = &s_rows[HR_DOWNLOADED];
+    if (!s_dl_building) {
+        const u64 now = timing_get_us();
+        if (now < s_dl_next_poll) return;
+        s_dl_next_poll = now + 500000ULL;
+        static char ids[DL_MAX_ITEMS][DL_ID_MAX];
+        const int n = dl_library_ids(ids, DL_MAX_ITEMS);
+        const unsigned sig = dl_signature(ids, n);
+        if (row->loaded && sig == s_dl_sig) return;
+        // Newest first: the library lists oldest first.
+        s_dl_n = 0;
+        for (int i = n - 1; i >= 0 && s_dl_n < HOME_ROW_MAX; i--)
+            snprintf(s_dl_ids[s_dl_n++], DL_ID_MAX, "%s", ids[i]);
+        s_dl_at = 0;
+        s_dl_count = 0;
+        s_dl_pending_sig = sig;
+        memset(s_dl_extra, 0, sizeof s_dl_extra);
+        s_dl_building = true;
+    }
+    for (int k = 0; k < 4 && s_dl_at < s_dl_n; k++, s_dl_at++) {
+        DlLibraryEntry e;
+        if (strlen(s_dl_ids[s_dl_at]) > 56 || !dl_library_get(s_dl_ids[s_dl_at], &e)) continue;
+        XMBItem *it = &s_dl_items[s_dl_count];
+        HomeExtra *x = &s_dl_extra[s_dl_count];
+        memset(it, 0, sizeof *it);
+        snprintf(it->id, sizeof it->id, "offp:%s", e.meta.id);
+        snprintf(it->name, sizeof it->name, "%s", e.meta.title);
+        snprintf(it->type, sizeof it->type, "%s", e.meta.type[0] ? e.meta.type : "Movie");
+        if (e.meta.year > 0) snprintf(it->year_str, sizeof it->year_str, "%d", e.meta.year);
+        if (e.meta.runtime_secs >= 60) {
+            const unsigned m = e.meta.runtime_secs / 60;
+            if (m >= 60) snprintf(it->duration_str, sizeof it->duration_str, TR("%uh %02um"), m / 60, m % 60);
+            else         snprintf(it->duration_str, sizeof it->duration_str, TR("%u min"), m);
+        }
+        if (e.meta.series[0]) snprintf(x->series_name, sizeof x->series_name, "%s", e.meta.series);
+        x->season  = (u8)(e.meta.season  > 0 && e.meta.season  < 256 ? e.meta.season  : 0);
+        x->episode = (u8)(e.meta.episode > 0 && e.meta.episode < 256 ? e.meta.episode : 0);
+        s_dl_count++;
+    }
+    if (s_dl_at >= s_dl_n) {
+        memcpy(row->items, s_dl_items, (size_t)s_dl_count * sizeof(XMBItem));
+        memcpy(s_extra[HR_DOWNLOADED], s_dl_extra, sizeof s_extra[HR_DOWNLOADED]);
+        row->count  = s_dl_count;
+        row->loaded = true;
+        if (row->scroll > row->count) row->scroll = 0;
+        s_dl_sig = s_dl_pending_sig;
+        s_dl_building = false;
+    }
+}
+
+// X on a Downloaded card plays it from the HDD.  False for any other item.
+static bool home_play_downloaded(const XMBItem *it) {
+    if (strncmp(it->id, "offp:", 5) != 0) return false;
+    static char id[DL_ID_MAX];
+    snprintf(id, sizeof id, "%s", it->id + 5);
+    show_player_offline(id, 0);
+    init_btns();
+    return true;
+}
+
 // Once per frame (render thread): publish what has landed, then ask for the
 // next unloaded row.  Never blocks.
 static void home_step_load(void) {
+    home_step_local();
     if (!home_worker_up()) {
         // No worker: the old way, one blocking row a frame.
         for (int r = 0; r < HOME_ROWS_N; r++) {
-            if (s_rows[r].kind == HROW_STUB) continue;
+            if (s_rows[r].kind == HROW_STUB || row_local(r)) continue;
             if (!s_rows[r].loaded) { home_fetch_row(r); return; }
         }
         return;
@@ -357,7 +468,7 @@ static void home_step_load(void) {
     home_worker_collect();
     if (s_hw_state != 0) return;              // one in flight
     for (int r = 0; r < HOME_ROWS_N; r++) {
-        if (s_rows[r].kind == HROW_STUB || s_rows[r].loaded) continue;
+        if (s_rows[r].kind == HROW_STUB || s_rows[r].loaded || row_local(r)) continue;
         if (!home_row_url(r, s_hw_url, sizeof s_hw_url)) continue;
         s_hw_row = r;
         s_hw_gen = g_play_gen;
@@ -372,7 +483,7 @@ static void home_step_load(void) {
 void xmb_home_prefetch(void) {
     home_init_once();
     for (int r = 0; r < HOME_ROWS_N; r++)
-        if (s_rows[r].kind != HROW_STUB && !s_rows[r].loaded)
+        if (s_rows[r].kind != HROW_STUB && !row_local(r) && !s_rows[r].loaded)
             home_fetch_row(r);
 }
 
@@ -391,6 +502,7 @@ void xmb_home_on_enter(void) {
     // Continue Watching + Next Up change after every playback — refetch them.
     s_rows[HR_CONTINUE].loaded = false; s_rows[HR_CONTINUE].scroll = 0;
     s_rows[HR_NEXTUP].loaded   = false; s_rows[HR_NEXTUP].scroll   = 0;
+    s_rows[HR_FAVOURITES].loaded = false;
 }
 
 // -------------------------------------------------------
@@ -450,6 +562,7 @@ static bool row_on_screen(int r, int *out_vy, int *out_card_y) {
     int card_y = vy + HOME_HEADER_H;
     if (out_vy) *out_vy = vy;
     if (out_card_y) *out_card_y = card_y;
+    if (row_hidden(r)) return false;
     int ch = row_card_h(s_rows[r].kind);
     return !(card_y + ch < view_top() || vy > view_bot());
 }
@@ -607,7 +720,7 @@ void xmb_home_text_phase(void) {
         // Row header, with a dim item count when the row overflows the screen
         // (replaces the old horizontal scrollbar as the "there's more" cue).
         // v1.0: row titles are eyebrows -- Microgramma, uppercase, 0.18em.
-        int hw = xmb_draw_eyebrow(x0, vy + UIS_H(4), row->title,
+        int hw = xmb_draw_eyebrow(x0, vy + UIS_H(4), tr(row->title),
                                   row_focused ? XMB_TEXT : XMB_TEXT_FAINT);
         if (row->kind != HROW_STUB && row->count > row_visible_cols(row->kind)) {
             char cnt[8];
@@ -617,7 +730,7 @@ void xmb_home_text_phase(void) {
         }
 
         if (row->kind == HROW_STUB) {
-            const char *msg = "Coming soon";
+            const char *msg = TR("Coming soon");
             int tw = ttf_text_width(msg, UIS_TF(16));
             drawTTF((u32)(x0 + (cw - tw) / 2),
                     (u32)(card_y + ch / 2 - UIS_H(8)), msg, UIS_TF(16), XMB_TEXT_FAINT);
@@ -625,8 +738,7 @@ void xmb_home_text_phase(void) {
         }
 
         if (row->count == 0) {
-            // drawTTF is Latin-1, so plain "..." (no UTF-8 ellipsis).
-            const char *msg = row->loaded ? "Nothing here yet" : "Loading...";
+            const char *msg = row->loaded ? TR("Nothing here yet") : TR("Loading...");
             drawTTF((u32)x0, (u32)(card_y + ch / 2 - UIS_H(8)), msg, UIS_TF(15), XMB_TEXT_FAINT);
             continue;
         }
@@ -693,6 +805,7 @@ static void home_activate(void) {
     HomeRow *row = &s_rows[s_focus_row];
     if (row->kind == HROW_STUB || row->count == 0 || s_focus_col >= row->count) return;
     XMBItem *it = &row->items[s_focus_col];
+    if (home_play_downloaded(it)) return;
 
     // A show opens the existing TV Series -> Seasons -> Episodes sub-screen.
     // Keyed off the ITEM TYPE, not the row: a Series turns up in Continue
@@ -713,7 +826,7 @@ static void home_activate(void) {
     // Continue Watching resumes; everything else plays from the start.
     // Episodes get the NEXT prompt / auto-advance no matter which row
     // they came from.
-    u32 resume = (s_focus_row == HR_CONTINUE) ? it->resume_secs : 0;
+    u32 resume = (s_focus_row == HR_CONTINUE) ? xmb_resume_for(it->id, it->resume_secs) : 0;
     if (strcmp(it->type, "Episode") == 0)
         xmb_play_episode_with_next(it, resume);
     else
@@ -730,8 +843,16 @@ bool xmb_handle_input_home(void) {
     if (BTN_PRESSED(l1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, -1)); return false; }
     if (BTN_PRESSED(r1)) { xmb_switch_tab(xmb_next_enabled(g_active_tab, +1)); return false; }
 
-    if (BTN_REPEAT(up)   && s_focus_row > 0)              { s_focus_row--; clamp_col(); ensure_row_visible(); }
-    if (BTN_REPEAT(down) && s_focus_row < HOME_ROWS_N - 1) { s_focus_row++; clamp_col(); ensure_row_visible(); }
+    if (BTN_REPEAT(up)) {
+        int r = s_focus_row - 1;
+        while (r >= 0 && row_hidden(r)) r--;
+        if (r >= 0) { s_focus_row = r; clamp_col(); ensure_row_visible(); }
+    }
+    if (BTN_REPEAT(down)) {
+        int r = s_focus_row + 1;
+        while (r < HOME_ROWS_N && row_hidden(r)) r++;
+        if (r < HOME_ROWS_N) { s_focus_row = r; clamp_col(); ensure_row_visible(); }
+    }
 
     HomeRow *row = &s_rows[s_focus_row];
     if (BTN_REPEAT(right) && row->kind != HROW_STUB && s_focus_col + 1 < row->count) { s_focus_col++; ensure_col_visible(); }
@@ -740,6 +861,7 @@ bool xmb_handle_input_home(void) {
     if (BTN_PRESSED(cross)) home_activate();
     if (BTN_PRESSED(triangle) && row->kind != HROW_STUB && s_focus_col < row->count) {
         XMBItem *it = &row->items[s_focus_col];
+        if (strncmp(it->id, "offp:", 5) == 0) return false;     // a download: X plays it
         // Triangle on a show browses its seasons rather than opening the
         // version overlay, which for a Series could only ever say "Play".
         // Pick the episode first; Triangle THERE gives the version picker.

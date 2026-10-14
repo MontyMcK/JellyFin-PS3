@@ -2,6 +2,7 @@
 #include <ppu-types.h>
 #include <io/pad.h>
 #include "rsxutil.h"
+#include "i18n.h"
 
 #define FONT_SCALE   2
 #define CHAR_SIZE    (8 * FONT_SCALE)
@@ -12,6 +13,7 @@ typedef struct {
     u8 cross, circle, square, triangle;
     u8 start, select;
     u8 l1, r1, l2, r2;
+    u8 l3, r3;              // stick clicks (pad only)
     // Media keys, from the Blu-ray remote and keyboards (see ui_input.cpp).
     // No pad sets these, and they never borrow a pad button: START already
     // means stop in the player.
@@ -41,6 +43,7 @@ typedef struct {
 
 // Defined in main.cpp; every input loop reads this.
 extern u32 running;
+extern volatile u32 g_sys_overlay;   // system overlay up (main.cpp)
 
 // Defined in ui.cpp
 extern ButtonState btn_cur;
@@ -187,7 +190,39 @@ void xmb_prepare(void);
 // Legacy on-screen keyboard (used by login flow).
 // Returns 1 = confirmed, -1 = cancelled.
 // -------------------------------------------------------
-int  get_input(char *out, int max_len, const char *prompt, bool is_password);
+// keep_text: start with what `out` already holds (it must be a valid string)
+// instead of an empty field.
+int  get_input(char *out, int max_len, const char *prompt, bool is_password, bool keep_text = false);
+
+// -------------------------------------------------------
+// Offline downloads (xmb/ui_downloads.cpp, Stage 5)
+// -------------------------------------------------------
+// Full-screen overlays that own input until Circle.  Settings opens both;
+// main.cpp offers the Offline library when sign-in fails.
+void xmb_show_downloads(void);
+void xmb_show_offline(void);
+// Two-option confirm, the safe option first and selected.  True = action.
+bool xmb_dl_confirm(const char *title, const char *line, const char *safe,
+                    const char *action);
+// A one-option notice in the same style, for a refusal the user can only read.
+void xmb_dl_notice(const char *title, const char *line);
+// Whole-season download (xmb/ui_season.cpp): the sheet Triangle opens on a
+// season, the progress line beside the breadcrumb, and the stop at exit.
+void xmb_season_download_sheet(const XMBItem *season);
+void xmb_season_toast_draw(void);
+void xmb_season_stop(void);
+// The Live TV list refreshes on a worker thread (xmb/ui_livetv.cpp); at exit it
+// is told to stop and joined.
+void xmb_livetv_stop(void);
+// The Media screen (drives, then folders and files; xmb/ui_media.cpp) as a screen of its own: the
+// sign-in failure screen's way to what needs no server.  Returns when the user backs out.
+void xmb_show_media(void);
+// If there are downloads to play, ask whether to open them.  True when the
+// Offline library was opened (the caller then retries sign-in as before).
+bool xmb_offer_offline_after_login_failure(void);
+// The saved server is not answering: offer to enter its address.  True when
+// the address changed (the caller retries at once).
+bool xmb_server_unreachable_prompt(void);
 
 // One-time setup: upload font bitmap, configure RSX blend.
 void ui_init(void);

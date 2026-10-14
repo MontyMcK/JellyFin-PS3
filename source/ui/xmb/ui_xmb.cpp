@@ -8,6 +8,8 @@
 #include <sysutil/sysutil.h>
 
 #include "ui_internal.h"
+#include "settings_model.h"   // settings_count()
+#include "dl_manager.h"       // dl_manager_ready(): the season hint
 #include "ui_wave.h"
 #include "ui_sfx.h"
 #include "ui_card_gpu.h"
@@ -33,6 +35,8 @@ static void xmb_reset_state(void) {
     g_jumpbar_active = false;
     g_jumpbar_sel    = 1;
     g_settings_sel     = 0;
+    g_settings_cat     = -1;
+    g_settings_catsel  = 0;
     g_settings_confirm = false;
     memset(g_search_buf, 0, sizeof(g_search_buf));
     g_search_results_count = 0;
@@ -106,7 +110,7 @@ static void slog_menu_tick(void) {
     int         sel   = -1, total = 0, depth = 0;
 
     if (tab == XMB_TAB_SETTINGS) {
-        sel = g_settings_sel; total = XMB_SETTINGS_COUNT;
+        sel = g_settings_sel; total = settings_count();
     } else if (tab == XMB_TAB_SEARCH) {
         sel = g_search_focus_results ? 1 : 0; total = g_search_results_count;
     } else {
@@ -212,6 +216,10 @@ static void xmb_draw_gpu_phase(int tab) {
         depth_lib_gpu(tab);          // the L1 column, or its swing into the grid
     } else if (tab == XMB_TAB_HOME) {
         xmb_home_gpu_phase();
+    } else if (xmb_kind(tab) == TABKIND_LIVETV) {
+        xmb_livetv_gpu();
+    } else if (xmb_kind(tab) == TABKIND_LOCAL) {
+        // nothing on the GPU: the list is panels and text
     } else if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_SETTINGS) {
         GridGeom gg; const XMBItem *items;
         int count, sel, scroll, y0, a_start, a_total; bool more;
@@ -247,6 +255,10 @@ static void xmb_draw_cpu_phase(int tab) {
         xmb_cpu_draw_search_results();
     } else if (tab == XMB_TAB_SETTINGS) {
         xmb_cpu_draw_settings();
+    } else if (xmb_kind(tab) == TABKIND_LIVETV) {
+        xmb_cpu_draw_livetv();
+    } else if (xmb_kind(tab) == TABKIND_LOCAL) {
+        xmb_cpu_draw_media();
     } else if (tab == XMB_TAB_HOME) {
         xmb_home_cpu_phase();
     } else {
@@ -274,6 +286,10 @@ static void xmb_draw_text_phase(int tab) {
         xmb_rsx_draw_osk();
     } else if (tab == XMB_TAB_SETTINGS) {
         xmb_draw_settings();
+    } else if (xmb_kind(tab) == TABKIND_LIVETV) {
+        xmb_draw_livetv();
+    } else if (xmb_kind(tab) == TABKIND_LOCAL) {
+        xmb_draw_media();
     } else if (tab == XMB_TAB_HOME) {
         xmb_home_text_phase();
     } else {
@@ -291,19 +307,20 @@ static void xmb_draw_text_phase(int tab) {
                            strcmp(g_music_sub_items[0].type, "Audio") == 0);
             xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
                                 g_music_parent_name,
-                                tracks ? "Tracks" : "Albums", NULL);
+                                tracks ? TR("Tracks") : TR("Albums"), NULL);
         }
         if (g_tv_depth > 0) {
             if (g_tv_depth == 1)
                 xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
-                                    g_tv_series_name, "Seasons", NULL);
+                                    g_tv_series_name, TR("Seasons"), NULL);
             else
                 xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
                                     g_tv_series_name, g_tv_season_name,
-                                    "Episodes");
+                                    TR("Episodes"));
+            xmb_season_toast_draw();
         } else if (g_col_depth > 0) {
             xmb_draw_breadcrumb(XMB_ITEM_PAD, XMB_CONTENT_Y + UIS_H(2),
-                                g_col_name, "Movies", NULL);
+                                g_col_name, TR("Movies"), NULL);
         }
 
         GridGeom gg; const XMBItem *items;
@@ -317,8 +334,8 @@ static void xmb_draw_text_phase(int tab) {
                 bool loaded = sub || g_items_loaded[tab];
                 if (loaded)
                     xmb_draw_empty_state(tab,
-                            tab == XMB_TAB_RESUME ? "Nothing in progress"
-                                                  : "No items in this library");
+                            tab == XMB_TAB_RESUME ? TR("Nothing in progress")
+                                                  : TR("No items in this library"));
             } else {
                 const bool m = grid_motion_begin(&gg, scroll, y0, false);
                 xmb_grid_text(&gg, items, count, sel, scroll, y0, more,
@@ -433,59 +450,76 @@ static void xmb_draw_hints(int tab) {
     // entered with Down or X.  Inside a tab, the Home and library hints gain
     // O Back -- the way out to the base layer.
     if (spine_at_base()) {
-        static const Hint h[] = {{'E',"Nav"},{'X',"Open"}};
+        static const Hint h[] = {{'E',TRN("Nav")},{'X',TRN("Open")}};
         draw_hints_vis(h, 2);
         return;
     }
     const bool spine_back = g_spine_on;
 
-    if (tab == XMB_TAB_SETTINGS) {
+    if (xmb_kind(tab) == TABKIND_LIVETV) {
+        xmb_livetv_hints();
+    } else if (xmb_kind(tab) == TABKIND_LOCAL) {
+        xmb_media_hints();
+    } else if (tab == XMB_TAB_SETTINGS) {
         if (g_settings_confirm) {
-            static const Hint h[] = {{'X',"Confirm"},{'C',"Cancel"}};
+            static const Hint h[] = {{'X',TRN("Confirm")},{'C',TRN("Cancel")}};
             draw_hints_vis(h, 2);
         } else {
-            static const Hint h[] = {{'X',"Select"},{'T',"Details"}};
-            draw_hints_vis(h, 2);
+            if (g_settings_cat < 0) {
+                static const Hint h[] = {{'X',TRN("Open")},{'C',TRN("Back")}};
+                draw_hints_vis(h, g_spine_on ? 2 : 1);
+            } else {
+                // L2 and R2 pair into one "Category" hint (an empty label pairs a
+                // hint with the next).
+                static const Hint h[] = {{'X',TRN("Select")},{'C',TRN("Back")},{'L',""},{'R',TRN("Category")}};
+                draw_hints_vis(h, 4);
+            }
         }
     } else if (tab == XMB_TAB_SEARCH) {
         if (g_search_focus_results) {
-            static const Hint h[] = {{'X',"Open"},{'T',"Details"},{'S',"Delete"},{'C',"Back"}};
+            static const Hint h[] = {{'X',TRN("Open")},{'T',TRN("Details")},{'S',TRN("Delete")},{'C',TRN("Back")}};
             draw_hints_bar(h, 4);
         } else {
-            static const Hint h[] = {{'X',"Type"},{'S',"Delete"},{'C',"Clear"}};
+            static const Hint h[] = {{'X',TRN("Type")},{'S',TRN("Delete")},{'C',TRN("Clear")}};
             draw_hints_bar(h, 3);
         }
     } else if (xmb_kind(tab) == TABKIND_MUSIC && g_music_header) {
-        static const Hint h[] = {{'D',"Switch"},{'X',"Select"}};
+        static const Hint h[] = {{'D',TRN("Switch")},{'X',TRN("Select")}};
         draw_hints_vis(h, 2);
     } else if (g_music_depth > 0 && xmb_kind(tab) == TABKIND_MUSIC) {
-        static const Hint h[] = {{'X',"Select"},{'C',"Back"}};
+        static const Hint h[] = {{'X',TRN("Select")},{'C',TRN("Back")}};
         draw_hints_vis(h, 2);
+    } else if (g_tv_depth == 1 && !in_col_sub) {
+        // Seasons: Triangle queues the whole season, when downloads work.
+        static const Hint h[] = {{'X',TRN("Select")},{'T',TRN("Download season")},{'C',TRN("Back")}};
+        static const Hint hx[] = {{'X',TRN("Select")},{'C',TRN("Back")}};
+        if (dl_manager_ready()) draw_hints_vis(h, 3);
+        else                    draw_hints_vis(hx, 2);
     } else if (in_tv_sub || in_col_sub) {
-        static const Hint h[] = {{'X',"Select"},{'T',"Details"},{'C',"Back"}};
+        static const Hint h[] = {{'X',TRN("Select")},{'T',TRN("Details")},{'C',TRN("Back")}};
         draw_hints_vis(h, 3);
     } else if (g_jumpbar_active) {
-        static const Hint h[] = {{'X',"Jump"},{'C',"Cancel"}};
+        static const Hint h[] = {{'X',TRN("Jump")},{'C',TRN("Cancel")}};
         draw_hints_vis(h, 2);
     } else if (tab == XMB_TAB_HOME && spine_back) {
         // The canvas's L2 bar: the d-pad walks the queue and the categories,
         // X opens detail, O goes back up to the base layer.
-        static const Hint h[] = {{'E',"Nav"},{'X',"Open"},{'T',"Details"},{'C',"Back"}};
+        static const Hint h[] = {{'E',TRN("Nav")},{'X',TRN("Open")},{'T',TRN("Details")},{'C',TRN("Back")}};
         draw_hints_vis(h, 4);
     } else if (tab == XMB_TAB_HOME) {
         // The L1/R1 cluster leads, per handoff section 3.1.  Label is "Tab"
         // and not the document's "Page" because L1/R1 switch TABS on this
         // build (ui_nav.cpp / ui_home.cpp) -- paging is Phase 4, and a hint
         // must describe what the button does today.
-        static const Hint h[] = {{'l',""},{'r',"Tab"},
-                                 {'X',"Open"},{'T',"Details"},{'C',"Back"}};
+        static const Hint h[] = {{'l',""},{'r',TRN("Tab")},
+                                 {'X',TRN("Open")},{'T',TRN("Details")},{'C',TRN("Back")}};
         draw_hints_vis(h, spine_back ? 5 : 4);
     } else {
-        static const Hint h[] = {{'l',""},{'r',"Tab"},
-                                 {'E',"Nav"},{'X',"Select"},{'T',"Details"},
-                                 {'C',"Back"}};
-        static const Hint hm[] = {{'l',""},{'r',"Tab"},
-                                  {'E',"Nav"},{'X',"Select"},{'C',"Back"}};
+        static const Hint h[] = {{'l',""},{'r',TRN("Tab")},
+                                 {'E',TRN("Nav")},{'X',TRN("Select")},{'T',TRN("Details")},
+                                 {'C',TRN("Back")}};
+        static const Hint hm[] = {{'l',""},{'r',TRN("Tab")},
+                                  {'E',TRN("Nav")},{'X',TRN("Select")},{'C',TRN("Back")}};
         if (xmb_kind(tab) == TABKIND_MUSIC) draw_hints_vis(hm, spine_back ? 5 : 4);
         else                                draw_hints_vis(h, spine_back ? 6 : 5);
     }
@@ -500,6 +534,9 @@ void ui_run_xmb(void) {
     // Already done behind the boot animation on a cold boot (xmb_prepare).
     if (!xmb_take_prepared()) xmb_detect_tabs();
     crash_log("13.3 detect_tabs done");
+    // No server answered, here or at a new address: say so once the menu is
+    // up, rather than leaving an empty bar to explain itself.
+    bool server_prompt = !xmb_have_server_tabs() && xmb_server_unreachable() && !g_auth_expired;
 
     if (!g_tabs[g_active_tab].enabled) {
         for (int t = 0; t < XMB_TAB_COUNT; t++) {
@@ -545,35 +582,49 @@ void ui_run_xmb(void) {
         // and no TV for the rest of the session, which reads as a broken app
         // rather than a slow network.  Keep trying quietly instead.
         //
-        // ONE attempt per wake-up, never the full retry set: this runs on the
-        // render thread, and a failed request costs its timeout.  The interval
+        // ONE attempt per wake-up, never the full retry set, and the request
+        // runs on a worker: a failed one costs its connect timeout, which on
+        // this thread froze the menu for ~5 s each time.  The interval
         // doubles from 5s to a 60s ceiling so a genuinely absent server costs
         // almost nothing, while the usual case -- network arriving a few
         // seconds late -- recovers on the first or second try.
         if (!g_auth_expired) {
             static u64 s_lib_next_us = 0;
             static u64 s_lib_gap_us  = 5000000ULL;
-            bool have_lib = false;
-            for (int t = XMB_TAB_LIB0; t < XMB_TAB_COUNT; t++)
-                if (g_tabs[t].enabled) { have_lib = true; break; }
-            if (have_lib) {
+            if (server_prompt && !boot_anim_active() && !xmb_update_popup_active()) {
+                server_prompt = false;
+                if (xmb_server_unreachable_prompt()) {   // a new address: try it now
+                    s_lib_gap_us  = 5000000ULL;
+                    s_lib_next_us = 1;
+                }
+            }
+            const int got = xmb_detect_tabs_poll();
+            if (got >= 0) {
+                if (got == 1 && xmb_have_server_tabs()) {
+                    plog("xmb: libraries recovered");
+                    if (!g_tabs[g_active_tab].enabled) {
+                        for (int t = 0; t < XMB_TAB_COUNT; t++)
+                            if (g_tabs[t].enabled) { g_active_tab = t; break; }
+                    }
+                }
+                if (s_lib_gap_us < 60000000ULL) s_lib_gap_us *= 2;
+                s_lib_next_us = timing_get_us() + s_lib_gap_us;
+            }
+            if (xmb_have_server_tabs()) {
                 s_lib_next_us = 0;
                 s_lib_gap_us  = 5000000ULL;
             } else {
                 u64 now = timing_get_us();
                 if (s_lib_next_us == 0) {
                     s_lib_next_us = now + s_lib_gap_us;
-                } else if (now >= s_lib_next_us) {
+                } else if (now >= s_lib_next_us && !server_prompt) {
                     plog("xmb: library bar empty - retrying detect_tabs");
-                    if (xmb_detect_tabs_once()) {
-                        plog("xmb: libraries recovered");
-                        if (!g_tabs[g_active_tab].enabled) {
-                            for (int t = 0; t < XMB_TAB_COUNT; t++)
-                                if (g_tabs[t].enabled) { g_active_tab = t; break; }
-                        }
+                    if (xmb_detect_tabs_start()) {
+                        s_lib_next_us = ~0ULL;   // re-armed when the reply lands
+                    } else {
+                        if (s_lib_gap_us < 60000000ULL) s_lib_gap_us *= 2;
+                        s_lib_next_us = now + s_lib_gap_us;
                     }
-                    if (s_lib_gap_us < 60000000ULL) s_lib_gap_us *= 2;
-                    s_lib_next_us = timing_get_us() + s_lib_gap_us;
                 }
             }
         }
@@ -589,7 +640,8 @@ void ui_run_xmb(void) {
 
         int tab = g_active_tab;
         if (tab != XMB_TAB_SEARCH && tab != XMB_TAB_SETTINGS
-            && tab != XMB_TAB_HOME)
+            && tab != XMB_TAB_HOME && xmb_kind(tab) != TABKIND_LIVETV
+            && xmb_kind(tab) != TABKIND_LOCAL)
             if (!g_items_loaded[tab]) {
                 if (first_iter) crash_log("13.7 fetch_tab_items");
                 xmb_fetch_tab_items(tab);

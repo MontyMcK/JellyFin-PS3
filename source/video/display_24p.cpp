@@ -27,6 +27,7 @@
 #include <sysutil/sysutil.h>
 #include <rsx/gcm_sys.h>
 
+#include "i18n.h"
 #include "display_24p.h"
 #include "display_mode.h"
 #include "display_diag.h"
@@ -362,11 +363,17 @@ bool d24_session_begin(const d24_ui *ui)
 		s_tv_fp = h;
 	}
 	const dm_film film = dm_classify_film(fnum, fden);
+	// 25fps content (PAL-rate) wants a 50Hz output -- an exact 2:2 -- the way
+	// film wants 24Hz; the machinery below is the same, only the target differs.
+	const bool f25 = film == DM_FILM_25;
+	const char *hz = f25 ? "50Hz" : "24Hz";
 	const dm_decision d = dm_decide(
 		film, dm_fps_confident(src), w, h,
 		S.orig.displayMode.resolution, S.orig.displayMode.refreshRates,
 		S.orig.displayMode.scanMode == VIDEO_SCANMODE_PROGRESSIVE,
-		dm_display_24p_support(modes, n, DM_RES_1080), d24_enabled());
+		f25 ? dm_display_rate_support(modes, n, DM_RES_1080, DM_RATE_50)
+		    : dm_display_24p_support(modes, n, DM_RES_1080),
+		d24_enabled());
 	if (!d.attempt) return false;         // display_diag already said why
 
 	int confirmed = conf_get(s_tv_fp);
@@ -384,16 +391,22 @@ bool d24_session_begin(const d24_ui *ui)
 
 	// Candidate bits: advertised for 1080, known-right ones first, known-wrong
 	// ones never.  Which of 0x10/0x20 is 23.976 is learned, not assumed.
-	const dm_clock want = film == DM_FILM_23976 ? DM_CLK_23976 : DM_CLK_24;
+	const dm_clock want = f25 ? DM_CLK_50
+	                    : film == DM_FILM_23976 ? DM_CLK_23976 : DM_CLK_24;
 	u16 cand[2];
 	int nc = 0;
-	const u16 bits[2] = { DM_RATE_24FAM_A, DM_RATE_24FAM_B };
-	for (int pass = 0; pass < 2; pass++)
-		for (int i = 0; i < 2; i++) {
-			if (!(adv1080 & bits[i])) continue;
-			const dm_clock k = map_get(bits[i]);
-			if (pass == 0 ? k == want : k == DM_CLK_UNKNOWN) cand[nc++] = bits[i];
-		}
+	if (f25) {
+		// 50Hz is a public, named bit: no learning pass, but still measured.
+		if (adv1080 & DM_RATE_50) cand[nc++] = DM_RATE_50;
+	} else {
+		const u16 bits[2] = { DM_RATE_24FAM_A, DM_RATE_24FAM_B };
+		for (int pass = 0; pass < 2; pass++)
+			for (int i = 0; i < 2; i++) {
+				if (!(adv1080 & bits[i])) continue;
+				const dm_clock k = map_get(bits[i]);
+				if (pass == 0 ? k == want : k == DM_CLK_UNKNOWN) cand[nc++] = bits[i];
+			}
+	}
 	if (nc == 0) {
 		plog("24p: RESULT mode_switch=not_attempted (no advertised 24Hz bit is "
 		     "known-good for this content's clock)");
@@ -424,11 +437,14 @@ bool d24_session_begin(const d24_ui *ui)
 
 	// Draw + flip + wait while the ORIGINAL mode is up.  After this nothing
 	// touches the GPU until the switch is verified.
+	// 50Hz wording is English only for now; the 24Hz strings are translated.
 	if (confirmed != 1)
-		ui->draw_prompt("Testing 1080p 24Hz output on this TV (one time only).",
-		                "When the picture returns, press X if you can read this. O or 15 s = no.");
+		ui->draw_prompt(f25 ? "Testing 1080p 50Hz output on this TV (one time only)."
+		                    : TR("Testing 1080p 24Hz output on this TV (one time only)."),
+		                TR("When the picture returns, press X if you can read this. O or 15 s = no."));
 	else
-		ui->draw_prompt("Switching the TV to 1080p 24Hz for this film...", "");
+		ui->draw_prompt(f25 ? "Switching the TV to 1080p 50Hz for this video..."
+		                    : TR("Switching the TV to 1080p 24Hz for this film..."), "");
 	rsxSync();
 
 	// Baseline at the ORIGINAL rate.  Proves the measurement itself on this
@@ -470,7 +486,8 @@ bool d24_session_begin(const d24_ui *ui)
 	}
 	if (!S.active || got != want) {
 		phase(ui, "mode_switch_failed");
-		if (S.active) revert("no 24Hz bit measured at the content's clock");
+		if (S.active) revert(f25 ? "50Hz not measured at the content's clock"
+		                         : "no 24Hz bit measured at the content's clock");
 		snprintf(b, sizeof(b), "24p: RESULT mode_switch=failure resulting_refresh=0x%02x "
 		         "presentation=unchanged", (unsigned)S.orig.displayMode.refreshRates);
 		plog(b);
@@ -493,9 +510,12 @@ bool d24_session_begin(const d24_ui *ui)
 	// bounded: a flip that does not land means the head is not presenting, and
 	// that is a revert, never a hang.
 	rsx_rebind_display();
+	char hzl[24];
+	snprintf(hzl, sizeof(hzl), "1080p %s", hz);
 	if (!ui->draw_prompt(confirmed != 1
-	                     ? "The TV is now at 1080p 24Hz. Press X if you can read this."
-	                     : "1080p 24Hz", confirmed != 1 ? "O or 15 s = no, go back." : "")) {
+	                     ? (f25 ? "The TV is now at 1080p 50Hz. Press X if you can read this."
+	                            : TR("The TV is now at 1080p 24Hz. Press X if you can read this."))
+	                     : hzl, confirmed != 1 ? TR("O or 15 s = no, go back.") : "")) {
 		phase(ui, "prompt_flip_timeout");
 		revert("flip did not complete in the new mode");
 		plog("24p: RESULT mode_switch=failure (flip timed out after the switch)");
@@ -523,9 +543,10 @@ bool d24_session_begin(const d24_ui *ui)
 			{
 				char l2[80];
 				const u64 left = (until - timing_get_us()) / 1000000ULL + 1;
-				snprintf(l2, sizeof(l2), "Press X if you can read this.  O = no.  Going back in %llu s",
+				snprintf(l2, sizeof(l2), TR("Press X if you can read this.  O = no.  Going back in %llu s"),
 				         (unsigned long long)left);
-				ui->draw_prompt("The TV is now at 1080p 24Hz.", l2);
+				ui->draw_prompt(f25 ? "The TV is now at 1080p 50Hz."
+				                    : TR("The TV is now at 1080p 24Hz."), l2);
 			}
 			if (timing_get_us() >= next_hb) {
 				char ph[48];

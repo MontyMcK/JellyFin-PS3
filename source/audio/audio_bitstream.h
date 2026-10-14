@@ -35,6 +35,17 @@ extern "C" {
 // answer is yes it is what should ship: it ends on the coding type the wire
 // actually carries instead of one the hardware has already refused.
 #define BITSTREAM_LPCM_KICK 5
+// PASSTHROUGH: the receiver decodes, not us.  The video player opens a
+// 2-channel port, asks the output for coding type 0xff (bitstream) and, only
+// if audioOutGetState then reports a non-LPCM wire, sends each AC-3 frame
+// untouched as an IEC 61937 burst (iec61937.c).  Research value only: that
+// state is not authoritative, so this mode can back off on a chain that is
+// carrying Dolby Digital.
+#define BITSTREAM_PASSTHROUGH 6
+// The same, but the bursts are always sent.  This is what the Dolby Digital
+// audio output choice uses.  A receiver that does not detect IEC 61937 inside
+// PCM plays the bursts as loud digital noise.
+#define BITSTREAM_PASSTHROUGH_FORCE 7
 
 int  bitstream_mode(void);
 
@@ -61,6 +72,14 @@ void audio_bitstream_reassert(const char *why);
 void audio_bitstream_recover(void);
 
 bool audio_bitstream_engaged(void);
+
+// Passthrough (the Dolby Digital audio output choice, or modes 6/7).  wanted()
+// is the setting; the video player calls request(true) before audio_open() so
+// begin() may engage it, and active() says whether AC-3 frames should be
+// packed instead of decoded.
+bool audio_passthrough_wanted(void);
+void audio_passthrough_request(bool on);
+bool audio_passthrough_active(void);
 
 // NOT a user setting.  It was briefly a Settings row called "5.1 Routing",
 // and that was the wrong call: it is a workaround for a console quirk with an

@@ -1,0 +1,24 @@
+{
+  "High": {"ja": "高", "pt-BR": "Alta", "de": "Hoch", "fr": "Élevée", "es": "Alta"},
+  "Very High": {"ja": "非常に高い", "pt-BR": "Muito alta", "de": "Sehr hoch", "fr": "Très élevée", "es": "Muy alta"},
+  "Original": {"ja": "オリジナル", "pt-BR": "Original", "de": "Original", "fr": "Original", "es": "Original"},
+
+  "Sports": {"ja": "スポーツ", "pt-BR": "Esportes", "de": "Sport", "fr": "Sports", "es": "Deportes"},
+  "Networks": {"ja": "ネットワーク", "pt-BR": "Canais", "de": "Sender", "fr": "Chaînes", "es": "Canales"},
+  "Motorsport": {"ja": "モータースポーツ", "pt-BR": "Automobilismo", "de": "Motorsport", "fr": "Sport automobile", "es": "Automovilismo"},
+  "Combat": {"ja": "格闘技", "pt-BR": "Lutas", "de": "Kampfsport", "fr": "Sports de combat", "es": "Deportes de combate"},
+  "Regional teams": {"ja": "地域チーム", "pt-BR": "Times regionais", "de": "Regionale Teams", "fr": "Équipes régionales", "es": "Equipos regionales"},
+  "International": {"ja": "海外", "pt-BR": "Internacional", "de": "International", "fr": "International", "es": "Internacional"},
+  "News": {"ja": "ニュース", "pt-BR": "Notícias", "de": "Nachrichten", "fr": "Actualités", "es": "Noticias"},
+  "Entertainment": {"ja": "エンタメ", "pt-BR": "Entretenimento", "de": "Unterhaltung", "fr": "Divertissement", "es": "Entretenimiento"},
+  "Kids": {"ja": "キッズ", "pt-BR": "Infantil", "de": "Kinder", "fr": "Enfants", "es": "Infantil"},
+  "Canadian": {"ja": "カナダ", "pt-BR": "Canadá", "de": "Kanada", "fr": "Canada", "es": "Canadá"},
+  "Latino": {"ja": "ラテン", "pt-BR": "Latino", "de": "Lateinamerika", "fr": "Amérique latine", "es": "Latino"},
+  "Local (US)": {"ja": "米国ローカル", "pt-BR": "Locais (EUA)", "de": "Lokal (USA)", "fr": "Locales (É.-U.)", "es": "Locales (EE. UU.)"},
+  "Other": {"ja": "その他", "pt-BR": "Outros", "de": "Sonstige", "fr": "Autres", "es": "Otros"},
+
+  "Search channels": {"ja": "チャンネルを検索", "pt-BR": "Buscar canais", "de": "Sender suchen", "fr": "Rechercher une chaîne", "es": "Buscar canales"},
+  "No channels found": {"ja": "該当するチャンネルがありません", "pt-BR": "Nenhum canal encontrado", "de": "Keine Sender gefunden", "fr": "Aucune chaîne trouvée", "es": "No se encontraron canales"},
+  "Search: %s  (%d found)  -  O to go back": {"ja": "検索: %s（%d件）  -  Oで戻る", "pt-BR": "Busca: %s  (%d encontrados)  -  O para voltar", "de": "Suche: %s  (%d gefunden)  -  O: zurück", "fr": "Recherche : %s  (%d trouvées)  -  O : retour", "es": "Búsqueda: %s  (%d encontrados)  -  O para volver"},
+  "Category": {"ja": "カテゴリ", "pt-BR": "Categoria", "de": "Kategorie", "fr": "Catégorie", "es": "Categoría"}
+}

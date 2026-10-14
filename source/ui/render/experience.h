@@ -12,6 +12,7 @@
 #ifndef JF_EXPERIENCE_H
 #define JF_EXPERIENCE_H
 
+#include "i18n.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -51,7 +52,7 @@ static inline void vpick_name(const char *label, int idx, char *out, size_t cap)
     if (!cap) return;
     while (label && (*label == ' ' || *label == '\t')) label++;
     if (label && label[0]) snprintf(out, cap, "%s", label);
-    else                   snprintf(out, cap, "Version %d", idx + 1);
+    else                   snprintf(out, cap, TR("Version %d"), idx + 1);
 }
 
 // "English - DTS-HD MA - 5.1 - Default" -> "English \xC2\xB7 DTS-HD MA \xC2\xB7 5.1".

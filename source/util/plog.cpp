@@ -110,7 +110,9 @@ void plog_stop(void) {
 // (which is wiped on boot).  See jf_paths.h.
 #define PLOG_SETTINGS_NAME "jellyfin_settings.txt"
 
-static bool s_plog_enabled = false;   // off by default
+// On by default, so a log exists when a problem is reported.  plog=0 in the
+// settings file (Settings > Debug Logging) turns it off.
+static bool s_plog_enabled = true;
 
 bool plog_enabled(void) { return s_plog_enabled; }
 
@@ -123,7 +125,7 @@ static void plog_save_setting(void) {
 }
 
 void plog_load_setting(void) {
-    s_plog_enabled = false;
+    s_plog_enabled = true;
     FILE *f = fopen(jf_data_path(PLOG_SETTINGS_NAME), "r");
     if (f) {
         char line[64];

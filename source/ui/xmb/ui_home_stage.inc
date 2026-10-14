@@ -48,7 +48,9 @@ static bool           s_q_fresh = true;
 // Which rows are worth landing on: loading (it may fill) or not empty.
 static void q_visit(unsigned char v[HOME_ROWS_N]) {
     for (int r = 0; r < HOME_ROWS_N; r++)
-        v[r] = s_rows[r].kind != HROW_STUB && (!s_rows[r].loaded || s_rows[r].count > 0);
+        v[r] = s_rows[r].kind != HROW_STUB &&
+               (row_optional(r) ? s_rows[r].count > 0
+                                : (!s_rows[r].loaded || s_rows[r].count > 0));
 }
 
 static void q_clamp_cols(void) {
@@ -182,7 +184,7 @@ typedef struct {
 
 static void q_facts_layout(int r, float dy, float alpha, float e, QFacts *f) {
     const int c = s_row_col[r];
-    f->tech = s_rows[r].count > 0 && facts_wanted(s_rows[r].items[c].type);
+    f->tech = s_rows[r].count > 0 && !row_local(r) && facts_wanted(s_rows[r].items[c].type);
     const depth_facts L = depth_facts_layout(q_shape(r), f->tech, e, dy);
     f->x       = depth_sx(L.x);
     f->y_eye   = depth_sy(L.y_eye);
@@ -292,7 +294,7 @@ void xmb_home_stage_cpu(void) {
         st.i0 = col - 1;
         st.i1 = col + (focus ? DEPTH_KMAX + 1 : 2) + 1;
         depth_stage_request(&st);
-        if (focus && facts_wanted(row->items[col].type) &&
+        if (focus && !row_local(r) && facts_wanted(row->items[col].type) &&
             fabsf(s_qpos[r].value - (float)col) < 0.35f)
             facts_request(row->items[col].id);
     }
@@ -385,17 +387,17 @@ static void q_facts_text(int r, float dy, float alpha, float e) {
     // rest is the focused item's and waits for it to settle.
     const float ea = alpha * lvl;
     if (ea > 0.02f) {
-        const int adv = xmb_draw_eyebrow(f.x, f.y_eye, row->title,
+        const int adv = xmb_draw_eyebrow(f.x, f.y_eye, tr(row->title),
                                          depth_mix_q(XMB_BG, XMB_ACCENT_ALT, ea));
         if (row->count > 0) {
-            snprintf(line, sizeof line, "%d of %d", s_row_col[r] + 1, row->count);
+            snprintf(line, sizeof line, TR("%d of %d"), s_row_col[r] + 1, row->count);
             drawTTF_face((u32)(f.x + adv + UIS_W(12)), (u32)f.y_eye, line, UIS_TF(11.0f),
                          depth_mix_q(XMB_BG, XMB_TEXT_FAINT, ea), UI_FACE_SPEC);
         }
     }
     if (row->count <= 0) {
         if (ea > 0.02f)
-            drawTTF_face((u32)f.x, (u32)f.y_title, row->loaded ? "Nothing here yet" : "Loading...",
+            drawTTF_face((u32)f.x, (u32)f.y_title, row->loaded ? TR("Nothing here yet") : TR("Loading..."),
                          UIS_TF(36.0f), depth_mix_q(XMB_BG, XMB_TEXT_DIM, ea), UI_FACE_DISPLAY);
         return;
     }
@@ -416,7 +418,7 @@ static void q_facts_text(int r, float dy, float alpha, float e) {
         const float ta = f.a * spine_clampf((float)age / 250000.0f, 0.0f, 1.0f);
         const float lpx = UIS_TF(9.0f), vpx = UIS_TF(11.0f), trk = lpx * 0.1f;
         const u32 lc = depth_mix_q(XMB_BG, XMB_TEXT_FAINT, ta), vc = depth_mix_q(XMB_BG, XMB_TEXT_DIM, ta);
-        const char *lab[3] = { "CONTAINER", "VIDEO", "SUBTITLES" };
+        const char *lab[3] = { TR("CONTAINER"), TR("VIDEO"), TR("SUBTITLES") };
         const char *val[3] = { fx.container[0] ? fx.container : "-",
                                fx.video[0] ? fx.video : "-", fx.subs };
         int x = f.x;
@@ -428,7 +430,7 @@ static void q_facts_text(int r, float dy, float alpha, float e) {
             x += (lw > vw ? lw : vw) + UIS_W(40);
         }
         if (fx.audio[0]) {
-            drawTTF_tracked((u32)f.x, (u32)f.y_alab, "AUDIO", lpx, lc, UI_FACE_SPEC, trk);
+            drawTTF_tracked((u32)f.x, (u32)f.y_alab, TR("AUDIO"), lpx, lc, UI_FACE_SPEC, trk);
             const int ty = f.y_chip + (f.chip_h - (int)vpx) / 2 - UIS_H(1);
             drawTTF_face((u32)(f.x + UIS_W(10)), (u32)ty, fx.audio, vpx,
                          depth_mix_q(XMB_BG, fx.lossless ? XMB_ACCENT_ALT : XMB_TEXT_DIM, ta),
@@ -447,9 +449,9 @@ static void q_facts_text(int r, float dy, float alpha, float e) {
         char el[16];
         q_hms(el, sizeof el, it->resume_secs);
         const u32 left = rt - it->resume_secs;
-        if (left >= 3600) snprintf(line, sizeof line, "%s WATCHED \xC2\xB7 %uH %02uM LEFT",
+        if (left >= 3600) snprintf(line, sizeof line, TR("%s WATCHED \xC2\xB7 %uH %02uM LEFT"),
                                    el, left / 3600, (left / 60) % 60);
-        else              snprintf(line, sizeof line, "%s WATCHED \xC2\xB7 %uM LEFT",
+        else              snprintf(line, sizeof line, TR("%s WATCHED \xC2\xB7 %uM LEFT"),
                                    el, left / 60 > 0 ? left / 60 : 1);
         drawTTF_face((u32)f.x, (u32)f.y_watch, line, UIS_TF(11.0f),
                      depth_mix_q(XMB_BG, XMB_TEXT_FAINT, f.a), UI_FACE_SPEC);
@@ -474,10 +476,10 @@ static void q_column_text(const QFrame &q) {
     char pos[24] = "";
     if (row->count > 0) snprintf(pos, sizeof pos, "%d/%d", s_row_col[r] + 1, row->count);
     const char *title = row->count > 0 ? q_title(r, s_row_col[r])
-                      : row->loaded ? "Nothing here yet" : "Loading...";
+                      : row->loaded ? TR("Nothing here yet") : TR("Loading...");
     const QMetaCtx m = { r, row->count > 0 ? s_row_col[r] : -1 };
     depth_l1_label_draw(q_shape(r), q.anchor_x, a,
-                        row->count > 0 ? row->title : "Home", pos, title,
+                        row->count > 0 ? tr(row->title) : TR("Home"), pos, title,
                         q_label_meta, &m);
 }
 
@@ -548,6 +550,7 @@ bool xmb_home_open_focused(void) {
     const int c = g_spine_on ? s_row_col[s_focus_row] : s_focus_col;
     if (row->count <= 0 || c < 0 || c >= row->count) return false;
     const XMBItem *it = &row->items[c];
+    if (home_play_downloaded(it)) return true;
     if (strcmp(it->type, "Series") == 0) {
         spine_set_level(SPINE_L2);          // its seasons live inside the TV tab
         if (xmb_open_series(it)) init_btns();
@@ -572,6 +575,7 @@ bool xmb_home_peek_focused(void) {
     const int c = g_spine_on ? s_row_col[s_focus_row] : s_focus_col;
     if (row->count <= 0 || c < 0 || c >= row->count) return false;
     const XMBItem *it = &row->items[c];
+    if (strncmp(it->id, "offp:", 5) == 0) return false;     // a download has no page to peek
     if (strcmp(it->type, "MusicAlbum") == 0) return xmb_home_open_focused();
     peek_open_item(it, 0, 0, home_peek_open);   // the stage notes the image
     return true;
